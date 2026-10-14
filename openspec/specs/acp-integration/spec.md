@@ -505,57 +505,6 @@ The system SHALL switch OpenCode to its YOLO agent via ACP `setSessionMode()` ra
 
 ---
 
-### Requirement: SandboxManager Environment Filtering
-
-The `SandboxManager` SHALL filter agent subprocess environment variables, when `filterEnv` is enabled, to the base allowlist plus the selected agent type's supported credential set plus configured `agent.sandbox.allowedEnvVars` entries, and SHALL deny every never-pass name from all three sources.
-
-#### Scenario: Base allowlist is closed
-- **WHEN** the base allowlist is read
-- **THEN** it SHALL contain only `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `LC_ALL`, `DENO_DIR`, `DENO_NO_UPDATE_CHECK`, `SKILL_API_PORT`, `SESSION_ID`, `SKILL_JWT_DIR`, `SKILL_SHARED_PROCESS`, `AGENT_WORKSPACE`, `TMPDIR`, `XDG_DATA_HOME`, `AGENT_BROWSER_EXECUTABLE_PATH`, and the egress-proxy variables `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `http_proxy`, `https_proxy`, `no_proxy`
-- **AND** no other name SHALL be admitted by the base set
-
-#### Scenario: Never-pass categories are enumerated
-- **WHEN** the never-pass rule set is read
-- **THEN** it SHALL deny platform tokens (`DISCORD_TOKEN`, `MISSKEY_TOKEN`), dashboard credentials (`DASHBOARD_PASSPHRASE`), the raw Skill API server secret (`AGENT_SKILL_API_SECRET`), provider credentials outside the agent's supported set (including `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN`, and git-backup credentials), and profile/XDG state selectors that could redirect an agent's scoped state (`XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `OMP_PROFILE`, `PI_PROFILE`, `PI_CODING_AGENT_DIR`)
-- **AND** neither the implicit base set nor an operator-configured `agent.sandbox.allowedEnvVars` entry SHALL admit any of them
-
-#### Scenario: Filtered environment
-- **GIVEN** `sandbox.filterEnv` is `true`
-- **WHEN** `buildSpawnOptions()` constructs the subprocess environment
-- **THEN** it SHALL include only base allowed vars plus agent-type-specific vars plus any configured `allowedEnvVars` entries that are not never-pass variables
-
-#### Scenario: Unfiltered environment
-- **GIVEN** `sandbox.filterEnv` is `false`
-- **WHEN** `buildSpawnOptions()` constructs the subprocess environment
-- **THEN** it SHALL pass the agent configuration environment variables without additional sandbox filtering
-
-#### Scenario: Agent-specific environment variables
-- **GIVEN** agent type `"opencode"`
-- **WHEN** environment is filtered
-- **THEN** it SHALL additionally allow `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY`
-
-#### Scenario: OMP agent-specific environment variables
-- **GIVEN** agent type `"omp"` and a base environment containing every credential the deployment holds
-- **WHEN** environment is filtered
-- **THEN** it SHALL additionally allow only `GEMINI_API_KEY` and `OPENROUTER_API_KEY`
-- **AND** it SHALL NOT pass `OPENCODE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`
-
-#### Scenario: Platform and dashboard secrets never reach any agent subprocess
-- **GIVEN** `sandbox.filterEnv` is `true`, agent type `omp` or `opencode`, and the base environment contains `DISCORD_TOKEN`, `MISSKEY_TOKEN`, `DASHBOARD_PASSPHRASE`, and `AGENT_SKILL_API_SECRET`
-- **WHEN** `buildSpawnOptions()` constructs the subprocess environment
-- **THEN** none of those four variables SHALL be present in the result
-
-#### Scenario: Allowed env vars cannot widen credentials or selectors
-- **GIVEN** `sandbox.allowedEnvVars` is configured with `OPENCODE_API_KEY`, `XDG_CONFIG_HOME`, and a benign name `MY_TOOL_FLAG`
-- **WHEN** environment is filtered for agent type `omp`
-- **THEN** the filtered environment SHALL contain `MY_TOOL_FLAG` but SHALL NOT contain `OPENCODE_API_KEY` or `XDG_CONFIG_HOME`
-- **AND** one bounded warning SHALL record each excluded name
-
-#### Scenario: Profile and XDG selectors are not inherited
-- **GIVEN** the deployment environment sets `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `OMP_PROFILE`, `PI_PROFILE`, or `PI_CODING_AGENT_DIR`
-- **WHEN** any agent subprocess environment is filtered
-- **THEN** none of those variables SHALL appear in the result
-
 ### Requirement: SandboxManager Network Isolation
 
 The `SandboxManager` SHALL mediate the agent subprocess's network egress so the default posture never grants the agent unmediated access to host-private networks, supporting two egress-control modes: full network-namespace isolation via the userns-first `unshare --user --map-root --net`, and the default validating-proxy mode. When neither a validating egress path nor an explicit operator opt-in to unrestricted egress is configured, the agent SHALL fail closed.
@@ -966,192 +915,6 @@ In shared-process mode, `AgentConnector`'s mutable connection-level state (cache
 - **WHEN** the in-flight session completes, is cancelled, or requires recovery
 - **THEN** the lease SHALL be released only after cleanup (session removal from the pool's active set), and the queued session SHALL acquire it next
 
-### Requirement: Pinned OMP Compatibility Evidence
-
-The integration compatibility report SHALL declare, for each required boundary and relevant subcase, a supported, incompatible or unresolved status backed by exact pinned release/source revision, source mechanism reachability and deterministic fixture evidence.
-
-#### Scenario: Complete supported contract is consumable
-- **WHEN** all seven boundaries and subcases have matching pinned source evidence for supported official-executable or trusted-extension entry points
-- **THEN** the compatibility assessment SHALL report a permitted source-contract verdict with the exact mechanisms and evidence limits
-- **AND** it SHALL leave real-runtime verification unverified pending user observations
-
-#### Scenario: Missing evidence blocks application
-- **WHEN** a boundary is absent, unresolved, incompatible, uses a different pin, or claims support solely through an SDK-internal method or mock-defined API
-- **THEN** the assessment SHALL return a blocked verdict naming the boundary, reason and evidence still required
-- **AND** dependent implementation SHALL NOT proceed through a fallback, fork, pin change or silent scope reduction
-
-#### Scenario: Disproved design requires user decision
-- **WHEN** pinned source disproves a selected approved mechanism
-- **THEN** the report SHALL record the concrete incompatibility and its counterexample
-- **AND** downstream application SHALL remain blocked until an explicit user-approved decision and corresponding source-backed contract revision resolve the conflict
-
-#### Scenario: Hypothetical positive fixtures do not certify native support
-- **WHEN** a positive structural/admission fixture uses explicitly hypothetical test-only mechanisms because the actual pinned ledger is blocked
-- **THEN** the check SHALL exercise the real contract validator while labeling its input and result synthetic and keeping them separate from source evidence
-- **AND** the actual compatibility verdict SHALL remain blocked; complete named blocked fixtures SHALL satisfy P0 acceptance without requiring a passing real pinned ledger or an unsupported native decoder
-
-#### Scenario: All seven boundaries are covered
-- **WHEN** the compatibility report is produced for pre-import discovery exclusion, authenticated policy readiness, authoritative approval-record reset, complete destructive intent, restricted-only LSP in both agents, native transport adaptation and critical-skill ownership
-- **THEN** each required boundary and its relevant subcases SHALL receive their own declared status and evidence set
-
-#### Scenario: Per-boundary evidence is complete
-- **WHEN** a boundary declares a status
-- **THEN** the report SHALL state the exact release/source revision, source mechanism reachability, limitations, downstream owner, deterministic fixture evidence and user-owned runtime verification for that boundary and its subcases
-
-#### Scenario: Pinned versions remain fixed
-- **WHEN** the report pins the official OMP release
-- **THEN** OMP SHALL remain `v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`, OpenCode packaging SHALL remain `1.18.21`, and ACP SDK SHALL remain `0.14.1` with client terminal capability false
-
-#### Scenario: Unresolved mechanism blocks application
-- **WHEN** any mechanism stays unsupported or unresolved
-- **THEN** the report SHALL block downstream application
-- **AND** passing mocks SHALL NOT manufacture native support
-
-### Requirement: OMP Pre-Import Discovery Compatibility Contract
-
-The compatibility contract SHALL distinguish exact trusted-extension loading from independent executable custom-tool, plugin, factory, configured-root and dependency discovery. Supported exclusion SHALL occur before unowned module top-level code or factory execution, on initial creation and recovery, and SHALL account for canonical paths, symlinks and workspace-owned dependencies. A post-import lifecycle/tool-name filter SHALL NOT establish this boundary.
-
-#### Scenario: Unowned executable path is excluded before import
-- **WHEN** a discovery fixture supplies an unowned custom tool, plugin entry, configured module or dependency escape
-- **THEN** the contract validator SHALL reject eligibility before the fixture importer or factory is invoked
-- **AND** the ledger SHALL independently identify the native pre-import mechanism or report a blocker
-
-#### Scenario: Extension discovery flag is incomplete
-- **WHEN** evidence disables ambient extensions but independent custom-tool or plugin imports remain reachable
-- **THEN** the assessment SHALL reject a supported complete-exclusion claim
-- **AND** it SHALL preserve the source path showing the unguarded discovery route
-
-### Requirement: OMP Policy Readiness Compatibility Contract
-
-The readiness contract SHALL require an authenticated control result bound to the current process instance, ACP session identity, restricted mode, fresh challenge, policy revision and registry epoch.
-
-#### Scenario: Current authenticated identity is accepted
-- **WHEN** a source-backed control-channel fixture supplies a verified result matching all current readiness values after complete initialization
-- **THEN** the contract validator SHALL accept readiness only for that matching process and session
-- **AND** the fixture result SHALL be labeled adapter evidence rather than native runtime enforcement
-
-#### Scenario: Stale or forged readiness is rejected
-- **WHEN** readiness is asserted through chat, unverifiable authentication provenance, a stale challenge/process/session/registry epoch, or a failed or timed-out initialization
-- **THEN** the contract validator SHALL reject readiness
-- **AND** it SHALL require fresh establishment after new/load/recovery or registry transition without authorizing a prompt fixture
-
-#### Scenario: No supported channel is established
-- **WHEN** source inspection cannot establish authenticated channel reachability or exact ACP identity binding
-- **THEN** the boundary SHALL remain blocked even if a mock handshake succeeds
-
-#### Scenario: Channel and credential provenance is required
-- **WHEN** the contract evaluates readiness support
-- **THEN** it SHALL require a supported control channel, trusted credential origin and native-to-ACP identity mapping independent of chat or workspace assertions
-- **AND** it SHALL NOT reuse raw platform or Skill API server secrets
-
-#### Scenario: Initial or restarted state is unready
-- **WHEN** the process is in an initial, new, load, restart or registry-transition state
-- **THEN** readiness SHALL remain unready until all current prerequisites are satisfied
-- **AND** a successful session creation or lifecycle completion alone SHALL NOT certify readiness
-
-### Requirement: OMP Authoritative Record Compatibility Contract
-
-The record contract SHALL evaluate effective full approval records using the pinned loader's actual lower-layer, CLI-overlay aggregation, runtime and environment precedence.
-
-#### Scenario: Aggregated reset counterexample is retained
-- **GIVEN** lower records contain an unknown-tool grant and reset plus mode CLI files supply null followed by a read mapping
-- **WHEN** the source-faithful fixture aggregates CLI overlays before merging lower layers
-- **THEN** it SHALL expose the surviving lower-only entry and classify that selected reset recipe as incompatible
-- **AND** it SHALL NOT remodel the overlays as separate merge barriers merely to make the fixture pass
-
-#### Scenario: Both modes require full authority
-- **WHEN** a restricted fixture retains a lower grant or a YOLO fixture retains project prompt/deny entries
-- **THEN** the contract validator SHALL reject authoritative-mode composition with the specific residual entries
-
-#### Scenario: Restricted and YOLO modes keep no residue
-- **WHEN** restricted or YOLO mode records are composed
-- **THEN** they SHALL NOT retain unintended lower-layer grants, prompts or denials
-
-#### Scenario: Default fallbacks are not authority
-- **WHEN** evaluation encounters empty mappings, unknown setting keys or invalid values falling back to defaults
-- **THEN** they SHALL NOT be treated as authority
-
-#### Scenario: Null-reset requires preserved reset semantics
-- **WHEN** a null-reset is followed by a mode mapping
-- **THEN** certification SHALL occur only if source actually preserves reset semantics across the full merge sequence
-
-### Requirement: OMP Complete Destructive Intent Compatibility Contract
-
-The destructive contract SHALL carry trustworthy native operation input, parser/edit-syntax provenance, every operation and target, and a binding to the input that will execute. All deletion targets, move sources and destinations and patch mutation targets SHALL be represented. Native titles or an incomplete permission-location list SHALL NOT authorize a larger operation. Unknown syntax, missing endpoints, incomplete targets and input mismatch SHALL fail closed.
-
-#### Scenario: Complete native-shaped operation is consumable
-- **WHEN** a supported native-shaped delete, move or multi-operation patch fixture is completely decoded and bound to execution input
-- **THEN** the contract output SHALL enumerate every target including every move endpoint for common policy consumers
-
-#### Scenario: Later destructive target cannot be omitted
-- **GIVEN** a native-shaped patch first targets an allowed location and later deletes or moves outside the boundary
-- **WHEN** an established supported format/parser completely decodes the fixture for contract evaluation
-- **THEN** it SHALL expose the later target and report denial with no mutation attempt
-- **AND** first-operation-only native permission locations SHALL NOT be accepted as proof of completeness
-
-#### Scenario: Missing supported decoder is a complete blocked outcome
-- **WHEN** the bounded source audit cannot establish supported complete decoding for a native-shaped destructive fixture
-- **THEN** the contract SHALL report the named incomplete/incompatible mechanism and authorize zero mutation attempts
-- **AND** that blocked fixture SHALL satisfy P0 acceptance without implementing a speculative parser, while downstream normalization/application remains blocked
-
-#### Scenario: Incomplete or mismatched operation is rejected
-- **WHEN** a fixture contains a title-only request, missing move destination, unparseable patch or raw-input/execution mismatch
-- **THEN** the contract validator SHALL return an incomplete/denied result without authorizing a side effect
-
-### Requirement: Restricted-Only LSP Compatibility Contract
-
-The LSP contract SHALL identify supported mode-scoped suppression of both explicit LSP tools and implicit server startup, including read/edit/write side effects, warmup and lazy cold-start, for OMP and OpenCode restricted execution. Native YOLO SHALL retain its native LSP/tool posture without additional restricted denials. A global OpenCode disable affecting YOLO SHALL NOT be an acceptable restricted-only mechanism.
-
-#### Scenario: Separate native mode evidence is complete
-- **WHEN** mode fixtures contain source-backed restricted explicit/implicit suppression and unchanged native YOLO behavior for each pinned agent
-- **THEN** the contract validator SHALL accept the mode scope without introducing a YOLO LSP clamp
-
-#### Scenario: Partial or global disable is incompatible
-- **WHEN** the candidate hides only the LSP tool, leaves implicit startup reachable, or disables OpenCode YOLO through a global setting
-- **THEN** the assessment SHALL reject compatibility and name the uncovered startup path or YOLO scope violation
-
-### Requirement: OMP Native Transport Compatibility Contract
-
-The transport contract SHALL identify supported adaptation reachability for native URL-read text/binary paths, web search, including redirects and secondary scraper/provider requests.
-
-#### Scenario: Partial native transport override is rejected
-- **WHEN** source-backed route fixtures cover enrichment fetches but binary, alternate-page, redirect or search routes bypass the controlled transport
-- **THEN** the assessment SHALL report incomplete adaptation rather than a supported full-transport verdict
-
-#### Scenario: Enforcing adapter decision preserves useful results
-- **WHEN** established-route fixtures receive public text/binary/search results and enforcing-egress redirect or secondary requests to private targets
-- **THEN** the adapter contract checks SHALL return the permitted public result with attribution while rejecting prohibited hops before their mocked dispatch
-- **AND** proxy routing SHALL be explicit and provider failure SHALL remain a failure without fabricated results or unguarded retries
-
-#### Scenario: Explicit unrestricted egress is not redefined
-- **WHEN** the operator selects the existing unrestricted-egress posture
-- **THEN** the fixture expectation SHALL follow that selected posture rather than impose a newly invented YOLO-only network denial
-
-#### Scenario: Enforcing egress validates every hop
-- **WHEN** enforcing egress is configured
-- **THEN** every relevant hop SHALL be validated through existing egress rules and the explicitly controlled proxy or transport
-- **AND** failures SHALL produce honest errors with no unguarded retry
-
-#### Scenario: Selected egress postures stay distinct
-- **WHEN** explicit unrestricted egress or approved provider routing is selected
-- **THEN** it SHALL remain distinct from arbitrary tool targets
-
-#### Scenario: Proxy presence is not coverage
-- **WHEN** proxy environment variables are present or only a partial native fetch override exists
-- **THEN** the contract SHALL NOT accept them as proof of complete native coverage
-
-### Requirement: OMP Critical Skill Ownership Compatibility Contract
-
-The critical-skill contract SHALL map critical identifiers to canonical deployment-owned instruction paths and read-only roots, with authoritative source/collision and current-session resource-generation evidence. Workspace/project same-name content and escaping symlinks SHALL NOT become authoritative. Owned skills SHALL remain discoverable and readable; globally disabling skills SHALL NOT satisfy ownership.
-
-#### Scenario: Owned skill wins safely
-- **WHEN** a fixture presents an owned critical skill and same-name workspace/project candidates
-- **THEN** the contract output SHALL retain the canonical owned instruction path or report a blocker if native selection cannot enforce that ownership
-
-#### Scenario: Escaping or stale skill source is rejected
-- **WHEN** a critical-skill fixture resolves outside the owned root or uses another session's resource generation after new/load/refresh
-- **THEN** the contract validator SHALL reject ownership without authorizing reads or replacing the critical skill by name alone
-
 ### Requirement: Stable-First Canonical Model Selection
 
 When the session's latest cached configuration options advertise an option with `category: "model"`, setting the session model SHALL select that stable option and send the agent's canonical advertised value through the stable config-option mechanism. When no such option is advertised, the existing unstable model-setting mechanism SHALL be used unchanged.
@@ -1401,60 +1164,6 @@ The helpers SHALL classify a target's physical membership with equal-or-separato
 - **WHEN** contained links are recorded as canonical observations for a candidate role
 - **THEN** their raw spelling SHALL NOT be reopened as proof of safe access
 
-### Requirement: Fail-Closed ACP Root Observation and Evidence Limits
-
-All context/root/target helpers SHALL return either one complete successful observation or one finite specific failure, and SHALL NOT return a partial successful grant, an empty root or a lexical fallback.
-
-#### Scenario: Canonicalization error fails closed
-- **WHEN** an applicable root or target metadata operation raises an error other than confirmed absence permitted by new-file semantics
-- **THEN** the helper SHALL return a named failure with no successful target or lexical authorization fallback
-- **AND** it SHALL perform no protected read-content or mutation operation
-
-#### Scenario: Replacement does not become a race-proof claim
-- **WHEN** a deterministic test changes a root, ancestor or final target between metadata observations
-- **THEN** detectable inconsistency SHALL produce path-changed failure or the newly observed containment decision
-- **AND** successful prechecks SHALL remain operation-scoped observations requiring the dependent secure access layer to preserve containment through actual IO
-
-#### Scenario: Native YOLO keeps broad containment observations
-- **GIVEN** a target physically inside the user workspace or shared Agent workspace, including another state file already inside that broad workspace
-- **WHEN** a native YOLO consumer requests physical membership
-- **THEN** the helpers SHALL expose its broad role without imposing restricted staging-only, extension, LSP, command or tool clamps
-- **AND** external escapes SHALL remain ineligible; no claim SHALL be made about native execution paths that do not use ACP callbacks
-
-#### Scenario: Passing helper tests does not clear compatibility blockers
-- **WHEN** temporary-filesystem or synthetic contract fixtures pass while the actual P0 source verdict remains incompatible or unresolved
-- **THEN** the helper evidence SHALL remain local decision evidence only
-- **AND** downstream application SHALL remain blocked under the predecessor compatibility contract without manufactured native support
-
-#### Scenario: Failures carry one distinguished category
-- **WHEN** an observation fails
-- **THEN** the helper SHALL distinguish the category among invalid context/path/token, invalid/unavailable/overlapping root, outside-root/link escape, dangling/looping link, missing object, wrong type, canonicalization failure, changed path and trusted identity mismatch
-
-#### Scenario: Observations are scoped and not reusable
-- **WHEN** a successful observation is returned
-- **THEN** it SHALL be scoped to the exact session/context generation
-- **AND** it SHALL NOT be treated as a reusable permission or race-proof access guarantee
-
-#### Scenario: Secure access remains a separate dependent change
-- **WHEN** a successful observation is consumed by its caller
-- **THEN** secure access through the actual operation and client sink adoption SHALL remain separate dependent changes
-
-#### Scenario: Tests use real helper logic without native claims
-- **WHEN** observation and failure behavior is tested
-- **THEN** tests SHALL use real helper logic with temporary filesystems or deterministic metadata mocks only
-- **AND** they SHALL NOT claim native OMP enforcement
-- **AND** unsupported predecessor source boundaries SHALL remain blockers regardless of helper mocks
-
-### Requirement: Scoped Agent State Selectors Are Not Granted By Configuration Acceptance
-
-Passing `XDG_DATA_HOME` in the base allowlist SHALL be understood as the existing OpenCode tool-output scoping mechanism (the factory always sets the value it passes), not as an approval for an OMP process to inherit deployment state selectors. Scoped OMP process state (`PI_CODING_AGENT_DIR` under the selected process's `TMPDIR/omp-agent`, mode-distinct state roots) SHALL be established by the owned-settings and spawn changes, and no requirement in this delta SHALL be read as deciding it.
-
-#### Scenario: Inherited selector is not an OMP state grant
-- **GIVEN** agent type `omp` and a filtered environment that carries `XDG_DATA_HOME` from the factory-set value
-- **WHEN** a reviewer or downstream change evaluates whether OMP scoped state is established
-- **THEN** the presence of the variable SHALL NOT be treated as scoped OMP state
-- **AND** the scoped-state requirement SHALL remain owned by the owned-settings and spawn changes
-
 ### Requirement: Secure ACP Canonical Observation Consumption
 
 Protected filesystem access SHALL consume the requesting session's current canonical root and target observations and one explicitly selected applicable root role, requiring exact session/context generation, valid canonical root-relative components and usable exact filesystem identities; access through a trusted-skills root SHALL be read-only.
@@ -1647,258 +1356,6 @@ Acceptance SHALL exercise the actual access primitives with real canonical-obser
 - **THEN** documentation SHALL identify unsupported traversal/platform cases, missing-parent behavior, system-libc/FFI authority and descriptor/partial-IO limits
 - **AND** existing callbacks SHALL NOT be described as hardened before the dependent sink cutover
 
-### Requirement: Mode-Separated Owned OMP Settings Content
-
-The system SHALL provide, as pure data and assembly code, deployment-owned OMP settings content for exactly two modes — restricted and native-yolo — each mode's composition SHALL resolve to complete owned settings documents plus owned provider-model and system-prompt assets, and the content SHALL contain no subprocess launch, pool, tool-policy-record, LSP-implementation, or packaging logic.
-
-#### Scenario: Both mode compositions assemble deterministically
-
-- **WHEN** the composition is requested for `restricted` and for `native-yolo`
-- **THEN** each SHALL return its complete owned overlay document, ordered overlay paths with the mode document last, owned provider-model asset content, the system-prompt asset mapping, and the supported provider environment key set
-- **AND** repeated assembly SHALL produce identical content without reading workspace state
-
-#### Scenario: Workspace layer cannot loosen the pins
-
-- **WHEN** a fixture presents a workspace/project `.omp/config.yml` or a populated global config as hostile lower layers
-- **THEN** the composition SHALL record the source-backed neutralization responsibilities (deployment-owned launch cwd preventing project-layer discovery, empty deployment-owned global agent directory, authored overlay paths outside agent-writable roots) as spawn/packaging contracts
-- **AND** it SHALL record that the generated skill-root declaration is prepended rather than appended, so a writable declaration can never out-rank the authored mode document's pins, that its declared value is validated against the daemon's resolved root before launch, that this one declaration path is exempt from the authored-overlay placement rule while remaining subject to the unchanged metadata checks (link, regular-file, canonical parent and accepted identity, which reveal a post-spawn rewrite), and that the pre-request preflight remains metadata-only
-- **AND** no requirement in this delta SHALL claim ordering alone removes keys present only in lower layers
-
-#### Scenario: Overlay ordering and environment posture are spawn-change contracts
-
-- **WHEN** a mode composition is produced
-- **THEN** it SHALL include ordered `--config` overlay paths with the generated skill-root declaration first and the mode document last among deployment overlays
-- **AND** it SHALL record, as consumer contracts for the spawn change, the deployment-owned `PI_CODING_AGENT_DIR` under the selected process state root, the deployment-owned variable conveying the declared skill root to the extension, the declaration's own directory and spawn-time rewrite with one live process per mode-scoped state root, no `OMP_PROFILE`/`PI_PROFILE`/`PI_CONFIG_FILES` inheritance, and the deployment-owned launch working directory
-
-#### Scenario: The declared skill directory follows the resolved root
-
-- **GIVEN** the deployment resolved one absolute skill root
-- **WHEN** either mode's generated skill-root declaration is produced at spawn time
-- **THEN** the declaration document SHALL contain exactly one key, the skill custom-directory array holding that resolved root, and nothing else
-- **AND** the authored mode document passed after it SHALL carry the skills-enablement and source-toggle pins and SHALL declare no skill directory, so the composed fold takes the directory from the declaration and every other pin from that document
-- **AND** the declaration SHALL be validated against that same resolved root, and no other resolved overlay SHALL be required to declare a skill directory
-
-### Requirement: Source-Backed Security Schema Key Validation
-
-Every security-relevant key the owned overlays may set SHALL be a setting registered at pinned official OMP `v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`, and assembly validation SHALL reject any key absent from that pinned schema and any value outside the registered type or enum; unknown keys or invalid values that would fall back to native schema defaults SHALL NOT be treated as protection.
-
-#### Scenario: Unregistered key or invalid value is rejected at assembly
-- **WHEN** a fixture overlay document contains an invented key, a case-mismatched enum value, or a key valid in another OMP release but unregistered at the pinned revision
-- **THEN** assembly validation SHALL fail naming the key and the pinned-revision reason
-- **AND** it SHALL NOT emit a document that relies on native default fallback for a security-relevant field
-
-#### Scenario: Restricted pins are present with registered values
-- **WHEN** the restricted overlay document is parsed
-- **THEN** it SHALL select an explicit registered non-YOLO approval mode, carry the LSP-disabled pin, disable startup update checking and marketplace auto-update, pin the update channel, and contain a complete provider-disable array
-- **AND** it SHALL NOT contain per-tool approval policy records
-
-#### Scenario: Out-of-scope policy keys stay with their owning changes
-- **WHEN** owned settings content defines security-policy keys
-- **THEN** it SHALL NOT define per-tool approval-policy records, tool-inventory enablement, or MCP/project-disabling policy
-- **AND** those keys SHALL remain owned by the restricted tool-policy and transport changes
-
-### Requirement: Authoritative Record Reset Remains an Unresolved Application Gate
-
-Owned settings SHALL retain the pinned reset mechanism's unresolved/incompatible evidence and faithfully model CLI-overlay aggregation deep-merged over lower layers. Its application disposition SHALL separately record decision 3 as `DECIDED (2026-10-09)`, selecting owned-only settings-discovery-path control with restricted default-deny as the second boundary. The native reset verdict SHALL NOT alone block that decided control, and no fixture SHALL certify the reset recipe or relabel its verdict.
-
-#### Scenario: Surviving lower records are the expected test result
-- **GIVEN** a lower layer with an unknown-tool grant and read denial, a null reset and a mode overlay supplying a read mapping
-- **WHEN** the faithful pinned merge model aggregates the overlays and merges over the lower layer
-- **THEN** the lower-only grant SHALL survive and configured null SHALL retain the recorded unset semantics
-- **AND** tests SHALL NOT reorder layers or present the reset as record clearance
-
-#### Scenario: Gate blocks security consumption, not data generation
-- **WHEN** actual session setup verifies the owned-only discovery-source plan
-- **THEN** the decision-3 deployment disposition SHALL permit that setup without requiring a supported native reset verdict or another user decision
-- **AND** native reset evidence SHALL remain unchanged and restricted execution-time default-deny SHALL remain the second boundary
-
-#### Scenario: Survivability consequence and gate boundary are documented
-- **WHEN** documentation and tests describe the merge consequence
-- **THEN** lower-layer grant, prompt and deny survivability SHALL remain recorded, with restricted runtime default-deny as the second boundary
-- **AND** application SHALL depend on verified decision-3 settings-source control without requiring a native supported-reset verdict
-
-#### Scenario: No reset certification and no layer reordering
-- **WHEN** fixtures, mocks or tests exercise the reset recipe
-- **THEN** no content or evidence SHALL certify the recipe as a working settings-layer reset
-- **AND** tests SHALL NOT reorder merge layers to produce record clearance
-
-#### Scenario: Passing mocks do not clear the native gate
-- **WHEN** source-control unit/mock tests pass
-- **THEN** native reset incompatibility and unresolved evidence SHALL remain recorded
-- **AND** actual native precedence/reload behavior SHALL remain user-owned and unverified
-
-### Requirement: OMP Provider and Application Identity Translation
-
-The owned provider assets SHALL express Gemini exclusively as the pinned provider id `google` credentialed by `GEMINI_API_KEY` and OpenRouter credentialed by `OPENROUTER_API_KEY`, SHALL carry the `X-Title: AIr-Friends` application header through the pinned custom-provider header mechanism, and SHALL record any pinned built-in identity header the supported mechanism cannot override as an explicit compatibility item naming its source symbols.
-
-#### Scenario: Provider credentials and ids match the pinned scheme
-- **WHEN** the owned provider asset content and environment posture are inspected
-- **THEN** Gemini SHALL appear only as provider `google` with `GEMINI_API_KEY`, OpenRouter only with `OPENROUTER_API_KEY`
-- **AND** no additional provider credential, profile selector, or platform secret SHALL be required or passed
-
-#### Scenario: Application title preserved and referer divergence recorded
-- **WHEN** the OpenRouter header translation is assembled against pinned header-application order
-- **THEN** the owned `X-Title: AIr-Friends` value SHALL survive on OpenRouter requests
-- **AND** the documentation SHALL record that the pinned built-in `HTTP-Referer` identity cannot be overridden through the supported content path, naming the source symbols, instead of claiming preservation
-
-#### Scenario: No model identifier is baked into owned assets
-- **WHEN** every owned overlay and provider asset is scanned for model identifiers
-- **THEN** no OpenCode-format or fixed model id SHALL be present
-- **AND** a requested model missing from the advertised agent catalog SHALL remain an explicit selection error owned by the session-config change
-
-#### Scenario: Non-preserved identity is recorded, not invented or faked
-- **WHEN** the translation encounters a built-in identity header the supported content mechanism cannot override
-- **THEN** it SHALL record the exact non-preserved identity element and its source symbols as an explicit compatibility item
-- **AND** it SHALL NOT invent a setting or fake preservation through mocks
-
-### Requirement: Compaction, Update Posture, and Prompt Mapping Decisions
-
-The owned content SHALL keep automatic conversation compaction enabled using the pinned native strategy and SHALL document the native pruning/summarization behavioral difference from the existing OpenCode compaction configuration instead of asserting equivalence or inventing an unavailable native field.
-
-#### Scenario: Compaction stays enabled with documented native differences
-- **WHEN** the shared deployment content is parsed and the mapping documentation is read
-- **THEN** automatic compaction SHALL be enabled in both mode documents
-- **AND** the documentation SHALL describe the native strategy's actual methods/triggers and state that the existing prune-style control has no native equivalent, without emitting any invented compaction key
-
-#### Scenario: Update posture disables automatic surfaces honestly
-- **WHEN** the update-posture keys are parsed
-- **THEN** startup update checking and marketplace auto-update SHALL be disabled and the update channel pinned
-- **AND** the documentation SHALL state that the explicit operator update command remains available and that version changes occur only through deliberate image updates
-
-#### Scenario: Prompt override mapping asserts mechanism, not runtime effect
-- **WHEN** the prompt mapping is assembled
-- **THEN** it SHALL name the supported custom-prompt route, the owned file location under the deployment-owned agent directory, and the explicit-path contract for the spawn change
-- **AND** neither the mapping nor any test SHALL claim the override is applied at runtime before the compatibility checklist item is user-verified
-
-#### Scenario: No invented whole-updater kill switch
-- **WHEN** the update posture is reviewed
-- **THEN** the schema-supported automatic update surfaces SHALL be disabled and the documentation SHALL state that binary version changes remain deliberate deployment actions
-- **AND** no key or documentation SHALL invent a nonexistent whole-updater kill switch
-
-#### Scenario: Exact prompt path maps to the custom-prompt mechanism
-- **WHEN** the system-prompt mapping is assembled
-- **THEN** it SHALL route `/app/prompts/system_prompt_override.md` to the pinned supported custom-prompt mechanism, the owned agent-directory discovered file with the explicit launch-path contract for the spawn change
-- **AND** it SHALL record that runtime application and behavioral adequacy under generated native surfaces remain user-verified compatibility items
-
-#### Scenario: Legacy per-file payload prompt mounts need no translation
-- **WHEN** the mapping documentation covers the existing pipeline's prompt mounts
-- **THEN** per-file payload prompt mounts consumed by the existing pipeline SHALL be documented as requiring no agent-settings translation
-
-### Requirement: Restricted and YOLO Overlay Non-Contamination
-
-Restricted-only pins SHALL appear exclusively in the restricted composition. The native-yolo composition SHALL select the pinned native YOLO approval mode and SHALL contain no per-tool approval records, approval-record resets or provider-disable clamp. Both compositions SHALL carry the shared deployment pin `lsp.enabled: false` required by decision 5, without imposing the restricted capability set on native YOLO.
-
-#### Scenario: YOLO document carries no restricted clamp
-- **WHEN** the deployment-owned native-yolo overlay and emitted settings composition are parsed and validated
-- **THEN** both SHALL select native YOLO approval and require boolean `lsp.enabled: false`
-- **AND** neither SHALL contain per-tool approval content, approval null-reset or a restricted provider-disable clamp
-
-#### Scenario: Restricted document retains its pins
-- **WHEN** the restricted overlay and composition are validated
-- **THEN** their existing restricted pin set SHALL remain present
-- **AND** the shared deployment LSP pin SHALL have the same false value as native-yolo
-
-#### Scenario: Missing or invalid disable is rejected
-- **WHEN** either mode document omits the LSP disable, enables it, supplies a non-boolean value or introduces an unregistered LSP key
-- **THEN** owned-settings validation SHALL reject the document
-
-#### Scenario: Factory and OpenCode carriers remain separately owned
-- **GIVEN** disable-restricted-agent-lsp has landed before this follow-up
-- **WHEN** the final carrier interface is inspected through repository tests
-- **THEN** its factory flags SHALL disable LSP for both OMP launch modes and its OpenCode maps SHALL deny LSP per agent for build and yolo without a global clamp
-- **AND** this follow-up SHALL own the native-YOLO asset/composition pin without modifying those flags/maps or asserting native implicit server suppression
-
-### Requirement: Mode-Scoped OMP Spawn Resolution
-
-The agent factory SHALL resolve an OMP spawn mode from the effective permission mode available at spawn (`yolo` false => restricted, true => native-yolo) and SHALL build the launch from the owned-settings composition for exactly that mode. OMP mode selection SHALL occur only at spawn: the ACP session-mode override for agent type `omp` SHALL remain `null` for both YOLO and non-YOLO states.
-
-#### Scenario: Mode resolves once at spawn
-- **GIVEN** agent type `omp` and the effective permission mode supplied to the factory
-- **WHEN** the base agent configuration is built
-- **THEN** exactly one owned-settings mode composition SHALL be consumed for the assembled launch
-- **AND** the assembled arguments SHALL carry no mode-selection mutation that could later change the process posture
-
-#### Scenario: Session-mode override stays null for OMP
-- **WHEN** `getSessionModeOverride("omp", true)` and `getSessionModeOverride("omp", false)` are evaluated
-- **THEN** both SHALL return `null`
-- **AND** `getSessionModeOverride("opencode", true)` SHALL continue to return the existing OpenCode YOLO override value
-
-#### Scenario: Native YOLO stays per-mode, never process-wide
-- **WHEN** a native-yolo OMP process would also serve restricted sessions
-- **THEN** the factory SHALL NOT apply native YOLO as a process-wide toggle on that process
-- **AND** the OpenCode session-mode switching behavior SHALL remain unchanged
-
-### Requirement: Restricted OMP Launch Argument Assembly
-
-For restricted mode the factory SHALL produce command `omp` with subcommand `acp`, the `--no-extensions` flag, the ordered owned `--config` overlay arguments (shared content first, restricted mode document last, owned provider-model overlay included), the exact `--trusted-extension` argument with the contracted owned module path, and the `--system-prompt` argument with the owned prompt path.
-
-#### Scenario: Restricted arguments are complete and flag-clean
-- **WHEN** the factory assembles a restricted `omp` launch
-- **THEN** the arguments SHALL contain `acp`, `--no-extensions`, the restricted composition's ordered `--config` files with the restricted mode document last, one `--trusted-extension` argument with the contracted module path, and one `--system-prompt` argument with the owned prompt path
-- **AND** no yolo/auto-approve flag SHALL appear in the arguments
-
-#### Scenario: Approval mode is consumed, not re-derived
-- **WHEN** the restricted composition pins the native non-YOLO approval mode
-- **THEN** the factory SHALL pass the overlay file carrying that pin without re-deriving, overriding, or duplicating the approval mode anywhere else in the launch
-
-#### Scenario: Approval mode is sourced from the restricted pin only
-- **WHEN** the restricted launch is assembled
-- **THEN** the non-YOLO native approval mode SHALL be carried solely by the restricted composition's pin
-- **AND** the factory SHALL NOT pass any yolo or auto-approve flag, or rely on an implicit native default
-
-### Requirement: Native-YOLO OMP Launch Assembly Without Restricted Clamps
-
-For native-yolo mode the factory SHALL produce a separate `omp acp` launch whose configuration comes exclusively from the native-yolo composition (its own overlay files plus the shared provider-model and system-prompt assets), in native YOLO without restricted tool clamps. The assembled native-yolo `--config` file set SHALL be disjoint from the restricted overlay file set.
-
-#### Scenario: YOLO launch carries only its own composition
-- **WHEN** the factory assembles a native-yolo `omp` launch
-- **THEN** every `--config` argument SHALL resolve to a file of the native-yolo composition or the shared owned assets
-- **AND** no restricted mode document path SHALL appear
-
-#### Scenario: Mode argument sets cannot intersect
-- **WHEN** both mode launches are assembled from the same composition module
-- **THEN** an assembly-time check SHALL reject any mode overlay file path appearing in both launches
-- **AND** the check SHALL fail the spawn rather than silently merge the sets
-
-#### Scenario: No restricted content is inherited
-- **WHEN** the native-yolo launch is assembled
-- **THEN** the launch SHALL NOT load, reference, or inherit any restricted overlay content, restricted approval records, provider-disable content, or restricted-scoped LSP policy (the shared decision-5 `lsp.enabled: false` deployment disable is exempt)
-- **AND** no native-yolo `--config` file SHALL be a restricted mode document
-
-### Requirement: Mode-Distinct OMP Process State Ownership
-
-For OMP launches the factory SHALL set `PI_CODING_AGENT_DIR` under the selected process's `TMPDIR/omp-agent` with a mode-distinct final segment, SHALL give restricted and native-yolo processes distinct process temporary roots and distinct neutral launch working directories, and SHALL keep mode distinctness independent of pool-key composition. The launch working directory SHALL be a deployment-derived neutral directory, never a user workspace.
-
-#### Scenario: State roots are mode-distinct under identical inputs
-- **WHEN** restricted and native-yolo launches are assembled for the same pool key or the same per-spawn workspace
-- **THEN** `PI_CODING_AGENT_DIR`, the process temporary root, and the launch working directory SHALL each differ by mode segment
-- **AND** neither mode's `PI_CODING_AGENT_DIR` SHALL fall inside the other's
-
-#### Scenario: No profile or XDG selector inheritance
-- **GIVEN** the deployment environment defines `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_FILES`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, or `XDG_CACHE_HOME`
-- **WHEN** an OMP launch environment is assembled and filtered
-- **THEN** none of those variables SHALL be set by the factory or reach the subprocess through the base environment or the sandbox filter
-
-#### Scenario: OMP XDG data home is process-scoped, OpenCode behavior preserved
-- **WHEN** the factory sets `XDG_DATA_HOME` for an OMP launch
-- **THEN** the value SHALL be under the mode-scoped OMP process state area, never the shared home-rooted default data directory
-- **AND** OpenCode launches SHALL continue to receive the existing per-session or per-pool `XDG_DATA_HOME` values unchanged
-
-#### Scenario: Per-spawn process never reuses a state root across modes
-- **WHEN** a per-spawn OMP process is launched for one mode and the same spawn identity is reused for the other mode
-- **THEN** the second launch SHALL NOT reuse the first mode's state root
-- **AND** each launch SHALL receive its own fresh, mode-distinct state root
-
-#### Scenario: Pool-key reuse cannot collapse mode distinctness
-- **WHEN** a caller reuses the same pool key across restricted and native-yolo launches
-- **THEN** mode distinctness SHALL NOT depend on pool-key composition
-- **AND** the two launches SHALL still receive distinct temporary roots, state roots, and working directories
-
-#### Scenario: Neutral working directory yields empty native discovery
-- **WHEN** an OMP launch runs from its deployment-derived neutral launch working directory
-- **THEN** native project discovery from the working directory's `.omp/` layer SHALL be empty by construction
-- **AND** the working directory SHALL never be a user workspace, while per-session ACP working directories SHALL continue to carry user workspace paths
-
 ### Requirement: Canonical Payload Staging Independent of OMP Process State
 
 Partitioning OMP process temporary/state roots SHALL NOT move, alias, or condition the canonical Skill API payload staging location. The session staging directory derived from the session workspace SHALL remain the payload-containment authority for OMP spawns exactly as for OpenCode spawns, and no OMP mode-scoped temporary root SHALL participate in payload path resolution or Skill API containment decisions.
@@ -1908,50 +1365,6 @@ Partitioning OMP process temporary/state roots SHALL NOT move, alias, or conditi
 - **THEN** the canonical staging location derived from the workspace SHALL be identical for both modes
 - **AND** neither launch's `TMPDIR`/`PI_CODING_AGENT_DIR` SHALL alter the staging path the permission gate and Skill API resolve
 
-### Requirement: Immutable Trusted-Extension Path Wiring With Fail-Closed Launch
-
-The factory SHALL reference the owned trusted extension solely through one exported path selector pointing at a deployment-owned, agent-non-writable root, passing that exact path as `--trusted-extension` with no workspace-derived, configuration-derived, or search-based component. If the contracted module path is absent at spawn, the factory SHALL fail the OMP launch and SHALL NOT fall back to an extensionless launch, an unguarded process, or a different agent type.
-
-#### Scenario: Exactly the contracted path is passed
-- **WHEN** either OMP mode launch is assembled
-- **THEN** `--trusted-extension` SHALL carry the exported contracted path verbatim
-- **AND** no argument or environment variable SHALL be able to redirect it
-
-#### Scenario: Absent module fails closed
-- **GIVEN** the contracted trusted-module path does not exist in the environment
-- **WHEN** an OMP launch is assembled or spawned
-- **THEN** the OMP spawn SHALL fail with an explicit error naming the missing trusted module
-- **AND** no `omp` process configuration lacking the trusted-extension argument SHALL be returned
-
-#### Scenario: Factory performs no trust decision on module content
-- **WHEN** the exported trusted-extension path is passed to an OMP launch
-- **THEN** the factory SHALL NOT inspect or make a trust decision on the module's content
-- **AND** the module's pre-import exclusion logic, readiness, and packaged checksum SHALL be handled by other changes
-
-### Requirement: OMP Environment and Egress Pass-Through Without New Rules
-
-OMP permission mode SHALL NOT alter egress posture. Both OMP modes SHALL receive the same existing proxy/sandbox decisions with no YOLO-only network rule. OMP child settings-discovery selectors SHALL be sanitized mandatorily even when general environment filtering is disabled, and only deployment-owned HOME and agent-directory assignments plus exact owned overlays SHALL establish its settings sources. OpenCode environment behavior and session/pool markers SHALL remain unchanged.
-
-#### Scenario: Filtered OMP environment carries only approved categories
-- **GIVEN** inherited HOME/XDG/profile/config/agent-directory selectors, setting-source overrides and operator passthrough attempts
-- **WHEN** an OMP child environment is assembled with filterEnv enabled or disabled
-- **THEN** inherited discovery selectors SHALL be absent or replaced with their exact deployment-owned values, with HOME explicitly assigned to avoid native homedir fallback
-- **AND** allowedEnvVars SHALL NOT reintroduce excluded settings sources
-
-#### Scenario: Approved category environment assembly passes through the existing pipeline
-- **WHEN** an accepted OMP launch enters the sandbox pipeline
-- **THEN** existing approved credential, mode-state namespace, shared-process marker and per-spawn session-ID semantics SHALL remain intact
-- **AND** canonical payload staging SHALL remain independent of owned HOME and process state
-
-#### Scenario: Egress posture is mode-independent
-- **WHEN** restricted and native-yolo OMP launches use the same sandbox configuration
-- **THEN** proxy variables, confinement and network isolation or explicit unrestricted egress decisions SHALL remain identical across modes
-- **AND** no additional network denial or exemption SHALL be introduced
-
-#### Scenario: OpenCode discovery environment is unchanged
-- **WHEN** OpenCode launch/environment decisions are compared with the landed original batch baseline
-- **THEN** its HOME, XDG_DATA_HOME, filtering and mode-switching behavior SHALL remain unchanged
-
 ### Requirement: OpenCode Launch Non-Regression
 
 Introducing the OMP launch branch SHALL NOT change the OpenCode launch: command, arguments, environment assembly (including per-session and per-pool `XDG_DATA_HOME`, `TMPDIR`, session/pool markers, credential set, and browser detection), the OpenCode YOLO session-mode switching route, and the sandbox pass-through outcome SHALL remain behaviorally identical, protected by consumer-visible tests.
@@ -1960,257 +1373,6 @@ Introducing the OMP launch branch SHALL NOT change the OpenCode launch: command,
 - **WHEN** OpenCode restricted and YOLO launches are assembled before and after this change
 - **THEN** the assembled command, arguments, environment, and working-directory decisions SHALL be identical
 - **AND** the OpenCode YOLO route SHALL continue to rely on the session-mode override rather than launch arguments
-
-### Requirement: Trusted-Module Pre-Import Discovery Exclusion Bootstrap
-
-The integration SHALL combine the frozen trusted-module bootstrap decision with fresh metadata-only deployment observations before OMP spawn and native session new/load/recovery or repository-triggered rediscovery. Those observations SHALL cover authoritative workspace and reachable custom-tool/plugin/configured-module/dependency roots before unowned code can import. Native surface verdicts SHALL remain unchanged; decision 1 SHALL be consumed as a separate deployment-control disposition.
-
-#### Scenario: Unowned candidate is excluded without import
-- **GIVEN** an authoritative session workspace contains a loader-recognized custom-tool module or plugin entry point, including a linked package entry
-- **WHEN** setup preflight inspects pinned discovery sources
-- **THEN** it SHALL reject before invoking any native spawn/session/importer operation
-- **AND** no candidate module SHALL be imported to inspect metadata, name or factory
-
-#### Scenario: Importable module does not need executable permission bits
-- **GIVEN** a custom-tool/plugin entry is importable at the pin but has no POSIX execute bit
-- **WHEN** workspace preflight evaluates that entry
-- **THEN** it SHALL still reject the executable discovery source
-
-#### Scenario: Clean deployment admits without supported-mechanism relabeling
-- **GIVEN** authoritative discovery roots contain no executable custom tools or plugin entries and owned identity/environment checks succeed
-- **WHEN** decision-1 deployment admission is evaluated
-- **THEN** the repository SHALL permit setup under the DECIDED disposition
-- **AND** native custom-tool/plugin surfaces SHALL still report `no-supported-mechanism`, with no complete native exclusion support claim
-
-#### Scenario: Ordinary workspace source does not imply custom-tool discovery
-- **GIVEN** ordinary source/scripts or owned skill scripts are outside pinned executable discovery sources
-- **WHEN** workspace preflight evaluates the deployment
-- **THEN** those files SHALL NOT alone cause executable-source rejection
-
-#### Scenario: Roots and observations cannot be omitted to permit setup
-- **WHEN** an authoritative workspace/root observation is absent, unreadable, linked, replaced or has an unknown importable-entry shape
-- **THEN** preflight SHALL reject without a lexical fallback or synthetic empty inventory
-
-#### Scenario: Lifecycle changes receive fresh preflight
-- **WHEN** a pooled/per-spawn session is created, loaded, recovered or explicitly refreshed in either mode with a new workspace or resource generation
-- **THEN** a fresh deployment check SHALL precede the native protected request
-- **AND** the frozen bootstrap's immutable identity/verdict data SHALL remain unchanged without reusing stale or foreign-session admission
-
-#### Scenario: Production extension is image-owned only
-- **WHEN** production OMP launch/setup resolves its trusted extension
-- **THEN** it SHALL accept only the exact packaged image-owned module/closure path with ambient discovery disabled
-- **AND** workspace/HOME/cache copies or development fallback SHALL NOT become trusted
-
-#### Scenario: No import or host guard acts as an import boundary
-- **WHEN** the pre-import disposition is documented or tested
-- **THEN** extension flags SHALL NOT be generalized to independent custom tools/plugins
-- **AND** host guards, preloaded paths, post-import tool-name filters and lifecycle callbacks SHALL NOT be described as supported native import barriers
-
-#### Scenario: Extension flag is not claimed as complete exclusion
-- **GIVEN** ambient extensions are disabled and the exact owned module is selected
-- **WHEN** custom-tool/plugin routes are assessed at the pin
-- **THEN** their native status SHALL remain `no-supported-mechanism`
-- **AND** deployment-control admission SHALL NOT become a supported native complete-exclusion verdict
-
-#### Scenario: Decision is frozen per process
-- **WHEN** native registry or project-layer state changes after module load
-- **THEN** immutable load-time identity and verdict data SHALL remain frozen and re-consulted
-- **AND** fresh session/workspace deployment observations SHALL be checked before each native protected request
-
-#### Scenario: Every pinned surface carries its mechanism and status
-- **WHEN** the frozen bootstrap decision is produced
-- **THEN** all audited discovery surfaces SHALL retain their pinned source route and `supported`, `candidate-to-verify` or `no-supported-mechanism` status
-- **AND** applied deployment mechanisms SHALL be recorded separately without changing the status
-
-#### Scenario: Extension-disability is not generalized to other discovery
-- **WHEN** custom-tool/plugin surfaces are assessed with ambient extensions disabled
-- **THEN** extension-disability SHALL NOT be generalized into a native guard for those independent routes
-
-### Requirement: Fail-Closed Session Setup When Exclusion Cannot Be Established
-
-When deployment preflight, executable workspace discovery, owned identity, link escapes, environment consistency or session freshness fail, setup SHALL reject restricted and native-yolo OMP spawn, new/load/recovery and repo-triggered refresh before the protected native operation, bounded fail-closed rejection as fallback. Native `no-supported-mechanism` alone SHALL NOT undo decision 1's deployment disposition, nor extension lifecycle failure establish authenticated client-observable readiness.
-
-#### Scenario: Session creation fails visibly
-- **GIVEN** preflight cannot establish the selected deployment controls
-- **WHEN** session creation or load/recovery is attempted
-- **THEN** the repository SHALL reject before sending the native request and registering guarded session state
-- **AND** the bounded error SHALL name the failing surface/reason using existing verdict vocabulary without credentials or file content
-
-#### Scenario: No silent downgrade path exists
-- **WHEN** deployment observation or trusted identity validation fails
-- **THEN** the integration SHALL NOT retry through an unguarded/extensionless launch or substitute another agent
-
-#### Scenario: Recovery fails closed identically
-- **WHEN** recovery cannot establish deployment controls or carries stale current-selection evidence
-- **THEN** it SHALL reject with the same bounded named-surface error before native load/resumption
-- **AND** a previously accepted guard claim SHALL NOT bypass the fresh check
-
-#### Scenario: Failure message is bounded and credential-free
-- **WHEN** session setup or recovery rejects a deployment preflight failure
-- **THEN** its bounded error SHALL name the failing surface/status or deployment-control reason
-- **AND** credentials and file contents SHALL be absent
-
-#### Scenario: No degraded session shape is produced
-- **WHEN** client/factory preflight cannot establish required deployment controls
-- **THEN** setup SHALL NOT produce partially guarded registered state or an extensionless/unguarded/different-agent fallback
-
-#### Scenario: Extension-load residual risk remains accepted and visible
-- **GIVEN** client preflight succeeded but the synchronous restricted handler fails to install in the native runtime
-- **WHEN** the fallback posture is documented or represented by mocks
-- **THEN** native non-YOLO approval plus ACP client policy SHALL remain the accepted ACP-mediated boundary with client denials fail-closed
-- **AND** missing restricted capabilities, runner.emit logging without startup failure, absence of readiness signal and incomplete default-deny/callback equivalence SHALL remain explicit
-
-#### Scenario: Deployment controls do not add restricted YOLO tool policy
-- **WHEN** native-yolo spawn, new/load/recovery or repository-triggered refresh finds an executable custom-tool/plugin source or cannot establish deployment ownership
-- **THEN** it SHALL reject before the protected native operation under the same deployment source/ownership checks
-- **AND** no restricted capability set or readiness handshake SHALL be added
-
-### Requirement: Exact Owned-Module Trust Scope
-
-Only the exact selected generated module artifact at its deployment-declared canonical root, together with its pinned permitted dependency closure, SHALL be trusted. Module trust SHALL consume physical deployment-root and loaded-artifact evidence independent of mutable process state and session filesystem authority. Canonical source files SHALL remain build inputs, not alternative load entries.
-
-#### Scenario: Identical module outside the owned root is untrusted
-- **GIVEN** a workspace, home, or package-cache path holds a copy of the owned module content
-- **WHEN** the ownership decision is evaluated
-- **THEN** the copy SHALL be excluded with an untrusted-location reason
-- **AND** no trusted-extension argument, read exception, or skill authority SHALL be granted to it
-
-#### Scenario: Critical-name match alone confers nothing
-- **GIVEN** a discovered candidate is named after a critical skill or critical tool
-- **WHEN** trust and critical-name resolution are evaluated
-- **THEN** the candidate SHALL remain untrusted and SHALL NOT resolve the critical name
-- **AND** the decision SHALL record name-only trust as rejected
-
-#### Scenario: Escaping link out of the owned root is untrusted
-- **GIVEN** a symlink or linked package inside the owned root resolves outside its canonical identity
-- **WHEN** the ownership decision is evaluated
-- **THEN** the candidate SHALL be untrusted with the canonical symlink-escape or identity-mismatch reason
-- **AND** ordinary skills and workspace content outside the owned root SHALL remain unaffected otherwise
-
-#### Scenario: Owned-root trust reuses canonical root identity
-- **GIVEN** an owned-root path is evaluated for trust
-- **WHEN** the ownership decision is computed
-- **THEN** trust SHALL reuse the canonical filesystem-root identity decisions
-- **AND** SHALL NOT apply a second canonicalizer or a lexical prefix test
-
-#### Scenario: Escape is untrusted despite a readable destination
-- **GIVEN** a symlink or linked package inside the owned root leaves the owned canonical root
-- **WHEN** the ownership decision is evaluated
-- **THEN** the linked module SHALL be untrusted even when its destination is otherwise readable
-
-#### Scenario: Permission mode is not part of owned-module identity
-- **WHEN** owned-module identity is evaluated
-- **THEN** identity SHALL NOT depend on permission mode
-
-#### Scenario: Installed artifact is independent of launch state root
-- **GIVEN** the declared image generated artifact is physically owned and unchanged
-- **WHEN** a restricted per-spawn or pooled process observes it from its own distinct mutable state cwd
-- **THEN** module ownership SHALL identify that exact artifact without requiring it under the process state root
-- **AND** the state root SHALL gain no deployment-module authority
-
-#### Scenario: Development generated artifact follows the same contract
-- **WHEN** the declared generated development artifact has valid build-owned source identity and physical root/file identities
-- **THEN** the exact generated artifact SHALL satisfy module ownership using that declaration
-- **AND** a raw source file or arbitrary module-parent directory SHALL NOT satisfy it
-
-#### Scenario: Development source ownership is not image immutability
-- **WHEN** the real declared development artifact is developer-owned rather than root-owned
-- **THEN** its exact build declaration and anchored physical identities SHALL govern source ownership without a new read-only mount prerequisite
-- **AND** later substitution or metadata movement SHALL deny rather than silently reanchor
-
-#### Scenario: Accepted module identity changes
-- **WHEN** the declared root, loaded artifact, link-free component identity or replacement fingerprint changes after acceptance
-- **THEN** module admission SHALL deny with a bounded ownership reason
-- **AND** a fresh observation SHALL NOT silently replace the accepted trusted anchor
-
-### Requirement: Canonical Critical-Skill Ownership Across New, Load, and Refresh
-
-Critical skill identifiers SHALL resolve only to exact canonical instruction paths under the root declared by deployment-owned settings, carrying read-only source/root identity, collision decision and current-session resource generation. Workspace-owned discovery SHALL be excluded before critical-name selection. Name-only critical-skill resolution SHALL remain denied, skills SHALL stay globally enabled and ordinary owned skills SHALL remain usable.
-
-#### Scenario: Owned skill wins over same-name workspace content
-
-- **GIVEN** an owned critical instruction and workspace/project candidates sharing its name or content, including provider/custom/managed candidates and aliases
-- **WHEN** critical resolution evaluates its candidate set
-- **THEN** it SHALL exclude workspace candidates before precedence/collision logic
-- **AND** only the exact settings-declared canonical owned instruction SHALL supply authority
-
-#### Scenario: Name-only request never supplies canonical authority
-
-- **WHEN** a critical reference carries only a name or native alias without exact canonical source/root and current session/generation evidence
-- **THEN** resolution SHALL deny it without workspace fallback
-
-#### Scenario: Missing or escaping owned instruction rejects
-
-- **WHEN** a declared critical instruction is missing, linked outside its declared root, replaced or has a mismatched source identity
-- **THEN** resolution SHALL reject without trusting a same-name alternative or disabling all skills
-
-#### Scenario: Ownership survives load and refresh transitions
-
-- **GIVEN** a session is created, loaded/recovered and its active resources refreshed
-- **WHEN** critical resolution follows each event
-- **THEN** it SHALL consume the same owned-settings declaration and current authoritative session/resource generation
-- **AND** stale or foreign-session native snapshots SHALL be rejected
-
-#### Scenario: Skills remain enabled while critical resolution is pinned
-
-- **WHEN** non-critical skills under declared deployment-owned roots are discovered or their instruction files read
-- **THEN** they SHALL remain usable under existing trusted-read and staging contracts
-- **AND** no global skill disablement, payload staging move or new restricted native-YOLO tool policy SHALL be involved
-
-#### Scenario: Escaping link cannot satisfy a critical identifier
-
-- **GIVEN** a candidate is reachable through a link escaping its settings-declared owned root
-- **WHEN** critical resolution evaluates the candidate
-- **THEN** it SHALL NOT satisfy the critical identifier
-
-#### Scenario: Agent-writable ordinary skill is admitted by identity
-
-- **GIVEN** the settings-declared shared root is writable by the runtime agent user and contains an ordinary (non-critical) skill
-- **WHEN** its instruction is resolved
-- **THEN** admission SHALL be decided by canonical path, containment and current-generation identity alone
-- **AND** a workspace candidate, an escaping link, a replaced identity or a stale generation SHALL still deny
-
-#### Scenario: Pinned critical layout keeps its ownership requirement
-
-- **GIVEN** a candidate instruction whose relative path matches a pinned critical identifier's `SKILL.md` layout inside an agent-writable tree
-- **WHEN** critical resolution evaluates it
-- **THEN** it SHALL NOT supply critical authority, because critical minting consults the root's observed read-only determination — its ownership and mode observation — instead of assuming it, while ordinary skill admission does not
-- **AND** a same-name candidate in a workspace SHALL NOT be substituted, and the denial SHALL be recorded rather than silently minting the identifier
-
-#### Scenario: Native canonical-selection evidence is unchanged
-
-- **WHEN** root declaration and selection unit/mock tests pass
-- **THEN** decision 7 SHALL remain a DECIDED deployment disposition with the pinned name-only incompatibility and unresolved selection verdict unchanged
-- **AND** real native skill resource selection on new/load/refresh SHALL remain user-owned and unverified
-
-### Requirement: Discovery And Critical-Selection Compatibility Gates Remain Blocking
-
-The two named discovery/critical-selection records SHALL preserve their native unresolved status and pinned verdicts verbatim. Their application dispositions SHALL separately record decisions 1 and 7 as `DECIDED (2026-10-09)`, selecting deployment-owned executable exclusion/startup checks and owned-settings canonical skill roots. Native incompatibility alone SHALL no longer block these decided controls; failed deployment controls SHALL remain fail-closed and no mock SHALL clear a native gate.
-
-#### Scenario: Gate verdicts are recorded verbatim
-- **WHEN** the two gate records are inspected
-- **THEN** pre-import exclusion SHALL retain "extension flags alone incompatible and the supported full mechanism unresolved"
-- **AND** critical-skill selection SHALL retain "name-only trust incompatible and canonical selection unresolved"
-
-#### Scenario: Gate resolution requires a user decision
-- **WHEN** gate dispositions are consumed after the recorded user decisions
-- **THEN** they SHALL identify the decision number and DECIDED date with selected deployment controls and runtime-unverified limits
-- **AND** they SHALL NOT require another user decision or a supported native mechanism as an unconditional application prerequisite
-
-#### Scenario: Passing mocks cannot clear a gate
-- **WHEN** repository exclusion/ownership tests pass
-- **THEN** gate native status and verdicts SHALL remain unresolved/unchanged
-- **AND** synthetic positive fixtures SHALL NOT be cited as native enforcement evidence
-
-#### Scenario: Operative boundary while gated
-- **WHEN** selected deployment controls fail or restricted execution is assessed
-- **THEN** failed controls SHALL invoke the existing fail-closed boundary, while installed restricted runtime default-deny and filesystem authorization SHALL remain separate operative boundaries
-- **AND** the accepted handler-installation fallback risk SHALL NOT be rewritten as authenticated readiness or equivalent full default-deny
-
-#### Scenario: Automated evidence validates decision logic only
-- **WHEN** automated unit/mock evidence is offered for these controls
-- **THEN** it SHALL certify repository observation/admission/denial decisions only
-- **AND** native pre-import enforcement and canonical resource selection SHALL remain user-owned and unverified
 
 ### Requirement: Per-Spawn OMP Mode Distinctness And Shared-Process Skill Identity Invariants
 
@@ -2409,43 +1571,6 @@ Each filesystem-sink denial SHALL record exactly one bounded, machine-readable r
 - **THEN** recorded fields SHALL remain sanitized and length-bounded
 - **AND** the callback error SHALL be a static message exposing no file content, secret, or unbounded agent- or platform-supplied text
 
-### Requirement: Complete Destructive Operation Normalization
-
-The permission gate SHALL normalize every destructive-shaped request (ACP `delete`/`move` tool kinds, native delete/move titles, and multi-operation patch shapes) into an ordered, complete operation set before any authorization decision, using the P0 destructive-intent contract's trustworthy operation input, parser/edit-syntax provenance, and binding to the input that will execute.
-
-#### Scenario: Complete native-shaped delete and move decode every target
-- **GIVEN** a restricted session and a supported-parser delete fixture with several targets and a complete move fixture
-- **WHEN** the permission gate normalizes each request
-- **THEN** it SHALL enumerate every delete target and both endpoints of the move as separately decisioned targets bound to the executing input
-- **AND** it SHALL make no authorization decision from the request title alone
-
-#### Scenario: First-target-only location list cannot authorize a larger patch
-- **GIVEN** a destructive patch fixture whose permission-location list carries only the first operation while the raw input contains a later delete or move
-- **WHEN** the gate normalizes the request
-- **THEN** it SHALL reject the request as an incomplete intent rather than approving the decoded-superset operation set
-- **AND** it SHALL attempt zero mutations
-
-#### Scenario: Incomplete or unparseable intent fails closed
-- **GIVEN** a fixture with a missing move destination, an unknown/incompatible edit syntax, unparseable patch content, or a raw-input/execution binding mismatch
-- **WHEN** the gate normalizes the request
-- **THEN** it SHALL return one bounded incomplete/intent failure with a named reason
-- **AND** no target SHALL be authorized, no content IO or mutation SHALL be attempted, and the request SHALL NOT fall through to generic unknown-tool handling as though unclassified
-
-#### Scenario: Location list disagreement is a mismatch, not a narrowing
-- **GIVEN** a destructive request whose location list names a target absent from the decoded operations, or whose decoded operations name a target absent from the list
-- **WHEN** the gate compares the two
-- **THEN** it SHALL reject with the bounded intent-mismatch/incomplete reason
-- **AND** it SHALL NOT approve the intersection of the two sets
-#### Scenario: Title, location list or first operation cannot stand in for the decoded set
-- **GIVEN** a destructive-shaped request whose title, permission-location list, or first operation is narrower than its decoded operation set
-- **WHEN** the gate decides authorization
-- **THEN** the title, the permission-location list, or the first operation SHALL NEVER stand in for the decoded set; an arbitrary title string SHALL NOT be approved as a destructive permission request
-
-#### Scenario: Normalization is a pure, parser-bounded decision
-- **WHEN** the permission gate normalizes a destructive request
-- **THEN** normalization SHALL be a pure decision that creates, modifies, deletes or moves nothing
-- **AND** it SHALL NOT implement a speculative native edit syntax beyond the supported parsers established by the P0 destructive-intent contract
-
 ### Requirement: All-Target Destructive Authorization Under The Common Policy
 
 For a normalized destructive request, the gate SHALL authorize each target through the same session-scoped filesystem decision used by the ordinary write sink — with no parallel destructive rule — and SHALL approve only when every target is authorized, so a single unauthorized target SHALL deny the whole request.
@@ -2496,35 +1621,6 @@ For a normalized destructive request, the gate SHALL authorize each target throu
 #### Scenario: Ordinary write rules decide destructive targets without extra YOLO clamps
 - **WHEN** an existing restricted staging/shared-write rule or a native YOLO broad-containment rule decides a destructive target
 - **THEN** it SHALL decide the target exactly as it decides an ordinary write, with no additional restricted clamp applied to YOLO
-
-### Requirement: Shared Client And Extension Destructive Decision Surface
-
-The destructive normalization and all-target decision logic SHALL be one reusable module consumed by the ACP permission gate and, when its owner wires the handler, by the deployment-owned OMP restricted-tool adapter, so the extension path and the client path evaluate the identical operation set and completeness verdict.
-
-#### Scenario: Both surfaces agree on one fixture
-- **GIVEN** the client permission gate and a mock extension-side adapter invoking the same shared module on one destructive fixture
-- **WHEN** both evaluate it
-- **THEN** they SHALL return the same completeness verdict, the same enumerated target set and the same bounded outcome reason
-
-#### Scenario: Extension-side incompleteness cannot be reconciled by the client
-- **GIVEN** an adapter fixture reporting fewer operations than the bound execution input contains
-- **WHEN** either surface evaluates it
-- **THEN** both SHALL report the incomplete-intent denial and authorize zero mutation attempts
-- **AND** no surface SHALL widen the decoded set from titles or presentation text
-
-#### Scenario: Shared module performs no IO
-- **WHEN** the shared normalization and decision logic is exercised across its fixtures
-- **THEN** it SHALL consult only the observations and context supplied by its consumer
-- **AND** it SHALL create, modify, delete or move nothing itself
-#### Scenario: Neither surface keeps a private duplicate of decision logic
-- **WHEN** the ACP permission gate or the OMP restricted-tool adapter evaluates a destructive request
-- **THEN** neither surface SHALL maintain a private duplicate of the target-completeness rules, the reason vocabulary, or the authorization table
-
-#### Scenario: Incomplete native location list never authorizes a larger patch
-- **GIVEN** a client-side destructive request whose native location list names fewer operations than the bound input contains
-- **WHEN** either surface evaluates it
-- **THEN** the incomplete native location list SHALL NOT authorize a larger patch on either surface
-- **AND** both surfaces SHALL report the incomplete-intent denial
 
 ### Requirement: Canonical Generic-Command Path Argument Decision
 
@@ -2678,470 +1774,6 @@ Existing reconnect-capable OMP runners SHALL pass their own cwd, MCP definitions
 - **WHEN** per-spawn crash does not match an existing recovery trigger
 - **THEN** existing fail-fast behavior SHALL remain and no new retry trigger SHALL be introduced.
 
-### Requirement: Restricted Tool-Inventory Default-Deny Decision
-
-The integration SHALL provide a pure restricted-mode tool decision from tool name, recorded live provenance and decoded input shape. Allow outcomes SHALL name the operation's completing authority rather than authorize execution. Approved local native read/search SHALL use native approval and ambient OS permissions, not asserted ACP filesystem confinement. Every absent table entry SHALL default to deny with a bounded machine-readable reason.
-
-#### Scenario: Unknown tool defaults to deny
-- **GIVEN** a restricted OMP session invoking a tool with no inventory table row
-- **WHEN** the decision is evaluated for any provenance or input shape
-- **THEN** the decision SHALL be deny with the bounded inventory reason
-- **AND** no allow path SHALL exist for that name regardless of recorded origin
-
-#### Scenario: OMP-only execution surfaces are denied
-- **WHEN** eval, task/subagent, computer, browser, async, launch, debug, AST-mutation, LSP or LSP-referenced config, SSH, an internal device URI scheme, or a configuration write is presented to the restricted decision
-- **THEN** each SHALL deny with its bounded inventory reason
-- **AND** the table row SHALL cite the approved capability matrix rather than a handoff tool list
-
-#### Scenario: Gated allows delegate completion
-- **WHEN** ordinary local read/list/glob/grep/search/find, bash or ordinary write/edit is presented with compliant provenance and decoded input shape
-- **THEN** the decision SHALL report its gated or sink-routed outcome naming the native-local or predecessor completing authority
-- **AND** the decision module SHALL NOT execute paths, command arguments or record content
-
-#### Scenario: Network parity capabilities gated on pending adapters
-- **WHEN** web fetch/URL-read or web search is presented before its completing adapter is available
-- **THEN** the decision SHALL report a distinct allow-gated-pending-adapter outcome, never a plain allow and never a parity denial
-- **AND** a test SHALL distinguish that outcome from completed adapter admission
-
-#### Scenario: Decision modules are restricted-only
-- **GIVEN** a native-YOLO OMP session and an OpenCode session in either permission mode
-- **WHEN** their flows are exercised
-- **THEN** no restricted tool decision SHALL be consulted for them and no decision denial SHALL be possible
-- **AND** OpenCode behavior SHALL remain unchanged
-
-#### Scenario: Allow-row gating inherits session, policy, and sink boundaries
-- **GIVEN** an allow row for ordinary local read/list/glob/grep/search/find, bash or ordinary write/edit
-- **WHEN** the declared completing authority executes the operation
-- **THEN** authenticated local native read/search SHALL follow native activation/approval and the process's ambient OS permissions under the user's accepted native posture
-- **AND** that native IO SHALL NOT be claimed confined to daemon session/shared/trusted-skills roots or protected by ACP read denial
-- **AND** bash SHALL retain the common command policy and active native permission path
-- **AND** ordinary local write/edit SHALL run under the pinned native approval path and the process's ambient OS permissions, with the restricted ACP sink retained as the route the pinned bridge applies where it routes the call, todo state in-session and no new pre-dispatch route gate
-
-#### Scenario: Non-table capabilities route to completing decisions
-- **WHEN** delete, move or multi-file patch is presented with compliant provenance
-- **THEN** the row SHALL route to the shared complete destructive decision rather than gain a filesystem bypass
-- **AND** operator client-owned MCP tools SHALL remain gated by provenance admission
-
-#### Scenario: Inventory omission lands structurally in default-deny
-- **GIVEN** a tool absent from the inventory table
-- **WHEN** the decision is evaluated for any provenance or input shape
-- **THEN** the omission SHALL land in default-deny structurally rather than by audit completeness
-- **AND** denial SHALL carry one bounded machine-readable reason
-
-#### Scenario: Surface covers the complete inventory, not handoff lists
-- **GIVEN** the pinned OMP tool inventory and implicit side-effect surfaces
-- **WHEN** the decision surface is constructed
-- **THEN** it SHALL cover that complete inventory, not only historical handoff names
-- **AND** nonexistent native list/search names SHALL NOT be synthesized as new tools
-
-### Requirement: Live-Provenance Admission Decision
-
-The restricted decision SHALL admit allow-table tools only from authenticated native-builtin origin, exact canonical owned-extension origin, or operator client-owned MCP origin. Every admission SHALL use an authoritative live registry observation at the current epoch and resource generation. SDK/RPC-host, workspace and unknown origins SHALL NOT gain builtin trust. A name match alone SHALL be insufficient; stale observations SHALL deny pending re-observation.
-
-#### Scenario: Same name from wrong origin denies
-- **GIVEN** a workspace- or host-origin tool carrying the name of an allowed inventory entry
-- **WHEN** the provenance decision is evaluated
-- **THEN** the decision SHALL deny with the bounded provenance reason
-- **AND** the same name recorded from the owned extension origin SHALL admit provenance only
-
-#### Scenario: Post-start operator MCP refresh admitted
-- **GIVEN** an operator MCP tool registered or refreshed after process startup with client MCP ownership and a current-epoch registry observation
-- **WHEN** the provenance decision is evaluated
-- **THEN** the decision SHALL admit the tool gated by client ownership
-- **AND** no human elicitation or interactive approval SHALL be required for the admission decision
-
-#### Scenario: Stale registry observation re-observes
-- **GIVEN** a tool whose recorded provenance predates the current registry epoch
-- **WHEN** the provenance decision is evaluated
-- **THEN** the decision SHALL deny admission pending a fresh observation rather than admit on the stale record
-
-#### Scenario: Registry-refresh plumbing owned by the enforcement-wiring change
-- **GIVEN** an operator MCP tool whose provenance and freshness hold for the live-origin check
-- **WHEN** the live-origin check is satisfied by requiring the fresh provenance observation
-- **THEN** the registry-refresh plumbing that feeds that observation SHALL be owned by the enforcement-wiring change, not this decision
-
-#### Scenario: Genuine native builtin reaches its authority
-- **WHEN** the live runtime registry uniquely identifies an authentic allow-table native builtin at the current epoch and generation
-- **THEN** provenance SHALL admit native-builtin origin without relabelling it as owned extension or host
-- **AND** execution SHALL still follow its operation's declared completing authority
-
-#### Scenario: SDK injection is not a builtin
-- **WHEN** an SDK/RPC-host tool uses the name or claimed builtin identity of an allowed tool
-- **THEN** provenance SHALL deny its host origin
-- **AND** absent, ambiguous or inconsistent authoritative metadata SHALL also deny
-
-#### Scenario: Foreign replacement loses native authority
-- **GIVEN** a previously authentic builtin is replaced by a same-name extension or SDK registration
-- **WHEN** the next call is observed
-- **THEN** the current origin SHALL replace the old observation
-- **AND** cached builtin metadata SHALL NOT authorize the replacement
-
-### Requirement: Alternate-Execution-Entrypoint Blocking Decision
-
-For every capability with an allowed ordinary-tool route, the restricted decision SHALL deny that capability when reached through any different route — an internal device URI scheme, a configuration-write device, a debug device, an AST-mutation device, an SSH device, or an LSP-adjacent mutation route — keying the block on the capability-and-route pair from the decoded input shape, not the tool name alone, and SHALL deny with a bounded reason naming the capability and route pair.
-
-#### Scenario: Allowed capability denied via internal scheme
-- **GIVEN** an execution capability whose ordinary tool is allow-gated
-- **WHEN** the same capability is presented through an internal device URI scheme route
-- **THEN** the decision SHALL deny with the alternate-route reason naming the capability and route
-
-#### Scenario: Config-write posture flip denied while writes are sink-routed
-- **GIVEN** ordinary write/edit routed to the filesystem sinks
-- **WHEN** an input shape classified as a configuration write targets approval posture or security-relevant settings
-- **THEN** the decision SHALL deny the config-device route regardless of the write route's outcome
-
-#### Scenario: Route block survives tool rename
-- **WHEN** an alternate-route denial is presented under a different tool name carrying the same capability-and-route pair
-- **THEN** the decision SHALL deny with the same capability-and-route pair reason
-
-#### Scenario: Gate or sink status does not excuse an alternate route
-- **GIVEN** a capability whose ordinary tool is allow-gated or sink-routed
-- **WHEN** the capability is reached through a different route
-- **THEN** the decision SHALL deny regardless of the ordinary route's gated or sink-routed status
-
-#### Scenario: Hidden and device routes are fixture cases of the blocking
-- **GIVEN** read or write otherwise allowed, or bash separately gated
-- **WHEN** a hidden mutation, debug, or device route is reached, or execution proceeds through an internal scheme while bash is separately gated
-- **THEN** each SHALL be a fixture case of this blocking, denied with the capability-and-route reason
-
-### Requirement: Exact-Key Approval-Record Interpretation With No Inherited Grants
-
-The restricted decision SHALL interpret native approval records by exact registered tool key only — never wildcard, prefix, or emulated default-deny — and SHALL treat every surviving lower-layer record as non-authoritative: a surviving `allow` record SHALL never yield an execution-time grant, a surviving `prompt` record SHALL never convert a restricted deny into generic elicitation.
-
-#### Scenario: Surviving lower-layer grant does not grant
-- **GIVEN** an effective approval map containing a lower-layer `allow` record that survived the folded overlay merge for a tool the restricted decision denies
-- **WHEN** the record interpretation is evaluated
-- **THEN** the decision SHALL deny and name the surviving-record reason
-- **AND** no code path SHALL convert a record-layer `allow` into execution-time admission
-
-#### Scenario: Surviving prompt record does not elicit
-- **GIVEN** a lower-layer `prompt` record surviving for a tool the restricted decision denies
-- **WHEN** the decision is evaluated
-- **THEN** the outcome SHALL remain deny with its bounded reason
-- **AND** no generic elicitation, form, or interactive approval SHALL be requested
-
-#### Scenario: Exact-key lookup only
-- **WHEN** an approval record exists only under a key that is not the exact registered tool key of the presented call
-- **THEN** the interpretation SHALL find no record and the default-deny decision SHALL stand
-- **AND** no wildcard or prefix match SHALL be consulted
-
-#### Scenario: Surviving-record behavior modeled without relying on record reset
-- **GIVEN** folded overlays letting lower-layer grant, prompt, and deny records persist into an OMP process, with the authoritative record reset recorded as incompatible at the pin
-- **WHEN** the record interpretation is evaluated
-- **THEN** it SHALL model the surviving-record behavior faithfully and consume the owned-settings change's record-authority verdict without softening it
-- **AND** it SHALL NOT assert or depend on a working settings-layer record reset anywhere
-
-#### Scenario: Surviving records are inputs only; default-deny is operative
-- **GIVEN** a restricted execution-time decision with surviving lower-layer records
-- **WHEN** the record interpretation is evaluated
-- **THEN** surviving records SHALL be reported as inputs only
-- **AND** the restricted execution-time default-deny SHALL remain the operative boundary
-
-### Requirement: Destructive-Intent Decision Consumed From The Shared Conformance Table
-
-The restricted decision SHALL expose a destructive-intent decision that, given a decoded complete destructive intent in the compatibility contract's shape, returns the shared destructive module's all-target verdict verbatim — normalization, per-target authorization, and completeness verdict delegated, with no second normalizer, no re-derived target logic, and zero side effect on the deny path.
-
-#### Scenario: Conformance fixtures replay identically
-- **WHEN** each shared destructive conformance fixture is replayed through the restricted destructive decision
-- **THEN** the returned verdict SHALL equal the shared table's verdict for that fixture
-- **AND** the module SHALL contain no independent path-authorization logic
-
-#### Scenario: Incomplete intent fails closed with zero side effect
-- **GIVEN** a destructive-shaped input whose decoded target set is incomplete or unparseable
-- **WHEN** the restricted destructive decision is evaluated
-- **THEN** the shared fail-closed reason SHALL be returned with zero mutation attempted
-
-#### Scenario: Fixture families replay through the entry
-- **WHEN** complete multi-target authorization, first-target-allowed-with-later-escape denial, incomplete-intent fail-closed, and binding-mismatch rejection fixtures are replayed through the restricted destructive decision
-- **THEN** each SHALL return the shared table's verdict for that fixture
-
-#### Scenario: No speculative decoder when native decoding is unavailable
-- **GIVEN** the compatibility contract records complete native decoding as unavailable
-- **WHEN** a destructive intent is presented to the restricted destructive decision
-- **THEN** the honest outcome SHALL be the shared module's fail-closed reason
-- **AND** no speculative decoder SHALL be introduced in this entry
-
-### Requirement: MCP Admission Decision With Honest Mechanism Tiers
-
-The restricted decision SHALL admit client-owned operator MCP tools purely on ownership plus registry freshness plus alternate-route screening, and SHALL export the mechanism status of the MCP admission basis as named data tiered from the pinned compatibility ledger: with no MCP boundary row present, the native-side MCP admission mechanism basis SHALL be labeled as needing a mechanism audit, candidate identity paths labeled candidate-to-verify, and no element labeled supported.
-
-#### Scenario: Ledger gap is labeled, never inflated
-- **WHEN** the MCP admission mechanism status is exported or inspected
-- **THEN** it SHALL record the absence of an MCP boundary row in the pinned ledger
-- **AND** no fixture, test pass, or local suite SHALL relabel the basis as supported
-
-#### Scenario: Client-owned MCP tool admitted by decision
-- **GIVEN** an operator MCP tool with client ownership, current-epoch observation, and no alternate-route surface
-- **WHEN** the MCP admission decision is evaluated
-- **THEN** the decision SHALL admit gated by client ownership without any human interaction
-
-#### Scenario: Export cites the ledger gap for downstream consumers
-- **GIVEN** the MCP admission mechanism status exported as named data tiered from the pinned compatibility ledger
-- **WHEN** the ledger contains no MCP boundary row
-- **THEN** the exported status table SHALL cite the ledger gap explicitly so downstream wiring and combined-regression consumers inherit the label
-- **AND** the admission decision SHALL require no generic human elicitation
-
-### Requirement: Restricted Tool Decision Verdicts Retain Decided Dispositions
-
-The restricted tool decision modules SHALL preserve the inherited authoritative record-reset incompatible-as-stated and complete destructive-intent unresolved verdicts verbatim, independently from their DECIDED user dispositions. Settings-discovery-path control SHALL replace reset reliance, and the complete ACP-mediated destructive path SHALL remain the boundary with incomplete native shapes denied. No readiness gate or further pending decision SHALL be required.
-
-#### Scenario: Passing decision tests cannot clear the gates
-- **WHEN** every decision-table, provenance, record-interpretation, and destructive-consumption test passes
-- **THEN** the exported gate SHALL still report record-reset incompatible and destructive-intent unresolved with pinned verdict text and their DECIDED dispositions
-- **AND** no synthetic allow-fixture SHALL be citable as native support
-
-#### Scenario: Decided dispositions do not assert native support
-- **WHEN** an implementer proposes to treat the record reset or destructive decoding as solved
-- **THEN** the DECIDED deployment dispositions SHALL govern application while the native verdicts remain unchanged; any new native-support claim SHALL require source-backed evidence
-- **AND** these specifications SHALL NOT be rewritten to claim support in advance of that decision
-
-#### Scenario: Unit and mock evidence validates decision logic only
-- **GIVEN** automated unit and mock evidence for these decision modules
-- **WHEN** the restricted decision logic is validated — deny-when-unlisted, deny-on-wrong-provenance, deny-on-alternate-route, deny-despite-surviving-grant, and destructive verdicts via the shared table
-- **THEN** the evidence SHALL NOT demonstrate that the official binary enforces, resets records, or decodes complete destructive intent
-
-### Requirement: Trusted-Extension Tool-Call Enforcement Wiring
-
-The AIr-owned trusted extension SHALL attach the restricted `tool_call` enforcement handler body to the handler slot registered synchronously during trusted-module loading; that body SHALL decide every restricted tool call solely by composing the restricted tool decision modules — inventory allow/default-deny, live-provenance admit/deny, alternate-route blocking, destructive-intent consumption, and advisory approval-record interpretation — with no decision logic of its own.
-
-#### Scenario: Denied-tool fixture reaches the fail-closed block
-- **GIVEN** a restricted handler fixture presenting a tool the inventory decision denies
-- **WHEN** the handler body is consulted for that call
-- **THEN** the call SHALL be blocked with the bounded inventory reason
-- **AND** the underlying tool operation SHALL NOT proceed
-
-#### Scenario: Wrong-origin same-name call blocked live
-- **GIVEN** a call whose tool name is on the allow table but whose CURRENT recorded origin is host, workspace, or unowned discovery
-- **WHEN** the handler body composes the provenance decision for that call
-- **THEN** the call SHALL be blocked with the bounded provenance reason
-- **AND** the same name recorded from an owning origin SHALL proceed to its completing authority
-
-#### Scenario: Alternate-route pair blocked beneath an allowed ordinary route
-- **GIVEN** a capability whose ordinary tool route would reach an allow-gated or sink-routed outcome
-- **WHEN** the same capability-and-route pair is presented through an internal device scheme, configuration device, debug, AST, SSH, or LSP-adjacent route
-- **THEN** the handler SHALL block the call with the bounded alternate-route reason naming the pair
-
-#### Scenario: Advisory record never short-circuits a denial
-- **GIVEN** an effective approval map containing a surviving lower-layer `allow` record for a tool the inventory or provenance decision denies
-- **WHEN** the handler composition runs for that call
-- **THEN** the denial SHALL stand and the record SHALL appear only as an advisory input in the decision trace
-- **AND** no composition ordering SHALL consult records before inventory, provenance, and alternate-route decisions
-
-#### Scenario: Wiring changes land in decision tables
-- **GIVEN** a behavior change requiring new decision logic, call ordering, freshness rules, or error-vocabulary entries
-- **WHEN** the wiring is implemented
-- **THEN** the change SHALL be made in the decision tables, which along with call ordering, freshness rules, and error vocabulary are the only wiring-owned data
-- **AND** the handler body SHALL acquire no decision logic of its own
-
-#### Scenario: Composition cannot be short-circuited
-- **GIVEN** a call carrying an advisory approval record, a pending-adapter outcome, or a completion-delegation marker
-- **WHEN** the handler body composes the steps in order
-- **THEN** no such record, outcome, or marker SHALL short-circuit an inventory, provenance, or alternate-route denial
-
-#### Scenario: Allowed outcomes name the completing authority
-- **GIVEN** an allow-gated, sink-routed, or admitted-MCP outcome
-- **WHEN** the handler body completes the decision
-- **THEN** it SHALL name the completing predecessor authority
-- **AND** the handler itself SHALL NOT assert authorization
-
-### Requirement: Per-Call Consultation With Live Origin Observation
-
-The enforcement handler SHALL be consulted on EVERY restricted tool call, including tools that first appear mid-session through dynamic registration or recovery re-discovery, and SHALL read, fresh on each call, the tool's current recorded origin, the current registry epoch, and the current resource generation; no decision, origin record, or registry snapshot SHALL be memoized across calls or trusted from startup.
-
-#### Scenario: Mid-session tool is in scope automatically
-- **GIVEN** a tool registered after trusted-module load
-- **WHEN** its first restricted call arrives
-- **THEN** the handler SHALL consult the decisions against the live registry state of that call
-- **AND** no startup-time filter or snapshot SHALL be consulted
-
-#### Scenario: Provenance consumed live, not cached
-- **GIVEN** a test fixture whose recorded origin for a tool changes between two otherwise identical calls
-- **WHEN** both calls are handled
-- **THEN** the two decisions SHALL differ consistently with the current observation
-- **AND** any implementation that cached the first decision SHALL fail this scenario
-
-#### Scenario: Stale epoch re-observes instead of admitting
-- **GIVEN** a call whose recorded origin observation predates the current registry epoch
-- **WHEN** the handler composes the provenance decision
-- **THEN** the call SHALL be blocked with the bounded stale-observation reason
-- **AND** admission SHALL be possible only on a fresh observation
-
-#### Scenario: Handler failure fails closed
-- **GIVEN** a handler composition that throws or exceeds its execution bound
-- **WHEN** the call is dispatched
-- **THEN** the tool call SHALL be blocked fail-closed
-- **AND** no code path SHALL continue the call after the failure
-
-#### Scenario: Stale resource generation denies until refreshed
-- **GIVEN** a call whose current resource generation is stale relative to the live tool-metadata observation
-- **WHEN** the handler composes the decision
-- **THEN** the call SHALL be denied with the re-observe denial rather than admitted
-
-### Requirement: Bounded Fail-Closed Enforcement Errors
-
-A blocked restricted call SHALL surface to the client as a fail-closed tool-call error carrying exactly one bounded machine-readable code from the finite union of the decision-module reason vocabulary and the wiring-level codes for seam blocks, stale observations, and pending-adapter blocks.
-
-#### Scenario: Error shape is bounded and non-secret
-- **WHEN** any block fixture's error is inspected
-- **THEN** its fields SHALL all originate from the finite code/enumeration set
-- **AND** no fixture error SHALL carry payload text, path content, secret material, or model-generated content
-
-#### Scenario: Block is not an elicitation
-- **GIVEN** a restricted call blocked by inventory, provenance, alternate-route, destructive, seam, or stale-observation reasons
-- **WHEN** the block is surfaced
-- **THEN** no permission request, form elicitation, or human-interaction surface SHALL be invoked
-- **AND** the run SHALL observe an ordinary bounded failed-tool-call error
-
-#### Scenario: Pending adapter blocks rather than silently allowing
-- **GIVEN** a network-parity capability whose completing adapter has not landed
-- **WHEN** the handler composes the inventory decision reporting the distinct pending-adapter outcome
-- **THEN** the call SHALL be blocked with the bounded pending-adapter reason
-- **AND** no unadapted native transport SHALL be reachable through that call
-
-#### Scenario: Error names only enumerated fields
-- **GIVEN** a blocked restricted call
-- **WHEN** its fail-closed error is surfaced
-- **THEN** the error SHALL name at most the capability identifier, route surface, origin category, and stale element, all from static enumerations
-- **AND** the error SHALL NOT contain file or argument payloads, model or chat content, credentials, tokens, secrets, or raw tool output
-
-#### Scenario: No retry-prompt echo of blocks
-- **GIVEN** a restricted call blocked by any enforcement reason
-- **WHEN** the failure is surfaced to the run
-- **THEN** the block SHALL NOT be echoed into the retry prompt rejection buffer
-
-### Requirement: Post-Start MCP Registry Refresh Re-Admission
-
-When operator or client-owned MCP tools register or refresh AFTER startup, the wiring SHALL advance the registry epoch from the live tool-metadata observation, re-invoke the MCP admission decision for the fresh epoch, and decide each call from current data, with no generic human-elicitation or form UI anywhere in the path.
-
-#### Scenario: Refreshed owned MCP tool re-admitted on fresh epoch
-- **GIVEN** an operator MCP tool registered or refreshed after startup with client ownership and a current-epoch observation
-- **WHEN** a restricted call to that tool is handled
-- **THEN** the admission decision SHALL be re-invoked for the current epoch and the call SHALL proceed to its completing authority
-- **AND** no human interaction SHALL occur in the admission path
-
-#### Scenario: Refreshed untrusted tool stays denied
-- **GIVEN** a post-start registration or refresh whose recorded origin is not client MCP ownership or which presents an alternate-route surface
-- **WHEN** the refresh path and subsequent calls are handled
-- **THEN** the tool SHALL remain denied with the bounded provenance or alternate-route reason
-- **AND** the refresh event itself SHALL NOT grant or soften anything
-
-#### Scenario: Refresh carries no one-shot acknowledgement
-- **GIVEN** a refreshed MCP tool admitted on one call
-- **WHEN** its origin observation or the epoch later goes stale
-- **THEN** subsequent calls SHALL deny on staleness without honoring any earlier refresh-time admission
-
-#### Scenario: Refresh freshness uses the registry epoch only
-- **GIVEN** a registry refresh that advances the epoch during a session flow
-- **WHEN** the next restricted tool call is evaluated
-- **THEN** the current registry epoch SHALL be observed afresh and a stale observation SHALL deny
-- **AND** no readiness signal, reset, channel or handshake SHALL be consumed
-
-#### Scenario: Unowned-discovery refresh stays denied
-- **GIVEN** a post-start MCP registration or refresh recorded under unowned discovery
-- **WHEN** a restricted call to that tool is handled
-- **THEN** the tool SHALL remain denied with its bounded reason
-
-### Requirement: Restricted-Only Enforcement Registration
-
-The enforcement handler SHALL be attached only in the restricted trusted-extension process, gated on the module's own restricted-mode launch identity, and the exemption SHALL be structural at the registration site — not a mode check inside the decision path.
-
-#### Scenario: YOLO process registers no handler
-- **GIVEN** a native-YOLO OMP process fixture built from the shared bootstrap's YOLO branch
-- **WHEN** trusted-module loading completes
-- **THEN** no restricted tool-call handler SHALL be registered
-- **AND** no restricted decision, denial, or record load SHALL be reachable in that process
-
-#### Scenario: OpenCode has no extension handler
-- **GIVEN** an OpenCode session flow in either permission mode
-- **WHEN** its flows are exercised
-- **THEN** no OMP extension or enforcement handler SHALL be loaded
-- **AND** behavior SHALL be unchanged from before this requirement
-
-#### Scenario: Non-restricted identity fails closed at the entry
-- **GIVEN** a handler entry invoked with an observed process identity that is not the restricted one
-- **WHEN** the entry runs
-- **THEN** it SHALL fail closed rather than dispatch any composition
-
-### Requirement: Fail-Closed Behavior At Unresolved Inherited Seams
-
-The wiring SHALL export a named enforcement-wiring gate enumerating every inherited unresolved seam with its source verdict reproduced verbatim and its DECIDED user disposition, together with the handler's fail-closed behavior at each seam.
-
-#### Scenario: Seam fixtures fail closed carrying markers
-- **WHEN** a fixture exercises each unresolved seam — record survival, destructive undecodability, pending adapter
-- **THEN** the call SHALL be blocked fail-closed with its bounded code and the named seam marker
-- **AND** no seam fixture SHALL produce an allow or grant contrary to policy
-
-#### Scenario: Passing wiring tests cannot clear the gates
-- **WHEN** every wiring, refresh, error-shape, and exemption test passes
-- **THEN** the exported gate SHALL still report each inherited verdict verbatim with its DECIDED disposition where recorded
-- **AND** no synthetic allow-fixture SHALL be citable as native support for any seam
-
-#### Scenario: Gate resolution requires the source decision
-- **WHEN** an implementer proposes to treat any listed seam as resolved
-- **THEN** the recorded user dispositions SHALL govern application without changing the inherited verdict; only source-backed evidence may support a new native-mechanism claim
-- **AND** these specifications SHALL NOT be rewritten to claim support in advance
-
-#### Scenario: The gate enumerates every inherited seam's verdict
-- **GIVEN** the inherited unresolved seams — MCP admission mechanism basis needing a mechanism audit with no boundary row in the pinned compatibility ledger, authoritative approval-record reset incompatible, complete destructive-intent decoding unresolved, network-parity adapters pending, and discovery-side gates consumed as shipped
-- **WHEN** the named enforcement-wiring gate is read
-- **THEN** each seam SHALL appear with its source verdict reproduced verbatim and its DECIDED user disposition
-
-#### Scenario: No manufactured status completes a fixture or flow
-- **GIVEN** any fixture or flow requiring an allow, grant, decoding, or mechanism status
-- **WHEN** it runs against the wiring
-- **THEN** the wiring SHALL NOT manufacture a passing admission, grant, decoding, or mechanism status to complete it
-- **AND** allow-path fixtures SHALL be labeled synthetic, and no fixture or passing test SHALL relabel a status or clear a gate
-
-#### Scenario: Docs state the absence-of-handler residual risk
-- **GIVEN** the unresolved seams still standing
-- **WHEN** documentation describes the wiring's runtime limits
-- **THEN** it SHALL state that no readiness handshake is required and, when handler installation fails, the pinned non-YOLO native approval mode plus client ACP policy remain the ACP-mediated boundary, with fail-closed client policy denials
-- **AND** the wiring's evidence SHALL be described as covering wiring decisions only
-
-### Requirement: Enforcement Wiring Evidence Limited To Wiring Decisions
-
-Automated unit and mock evidence SHALL validate the wiring decisions and shapes only — denied fixtures reaching fail-closed bounded errors, provenance consumed live rather than cached, refresh re-admission and rejection on epoch, restricted-only registration with YOLO and OpenCode exemption, seam fail-closed markers, and composition ordering.
-
-#### Scenario: No native-enforcement claim in fixtures
-- **WHEN** the wiring suites are reviewed and run
-- **THEN** no assertion SHALL claim the native binary dispatched, honored, or enforced anything
-- **AND** user-facing documentation SHALL keep the runtime checklist items explicitly unverified
-
-#### Scenario: Predecessor suites prove read-only consumption
-- **GIVEN** the decision-module, sink-policy, destructive-policy and discovery suites
-- **WHEN** they run unchanged alongside this change
-- **THEN** they SHALL pass without modification
-- **AND** the wiring SHALL have imported their modules without editing them
-
-#### Scenario: No fixture asserts native enforcement
-- **GIVEN** the wiring unit and mock suites
-- **WHEN** they assert, imply, or describe what the official OMP binary does
-- **THEN** they SHALL NOT claim the binary invokes the enforcement handler, honors a block, enforces an inventory decision, performs an approval-record reset, decodes destructive intent, or otherwise enforces any boundary
-
-#### Scenario: Real invocation stays user-owned runtime verification
-- **WHEN** real handler invocation and block enforcement by the official OMP binary are considered
-- **THEN** they SHALL remain user-owned runtime verification marked unverified until observed
-
-#### Scenario: Lifecycle errors do not prove handler installation
-- **GIVEN** an extension that fails to load
-- **WHEN** pinned `runner.emit` logs a lifecycle-hook error without failing startup
-- **THEN** the session may lack the restricted capability set and no client-observable readiness assertion SHALL be made
-- **AND** the native approval/client ACP fallback SHALL NOT be described as equivalent execution-time default-deny or proof of native callback coverage
-
-### Requirement: OMP Both Modes Carry The LSP Disable
-
-OMP restricted and native-YOLO sessions SHALL both carry `--no-lsp` in their factory launch arguments. Restricted mode SHALL retain the existing `lsp.enabled: false` overlay pin. Row 17 SHALL land before row 25, which exclusively owns the native-YOLO overlay LSP pin and settings content/composition/validator cutover. No restricted tool policy SHALL be copied into YOLO.
-
-#### Scenario: Restricted flag and settings pin compose
-- **WHEN** a restricted OMP launch is assembled
-- **THEN** --no-lsp SHALL appear exactly once and the ordered owned overlays SHALL retain the restricted lsp.enabled false pin
-- **AND** native implicit-startup suppression SHALL remain unverified until user observation
-
-#### Scenario: Native-YOLO carries its own disable
-- **WHEN** a native-YOLO OMP launch and mode overlay are assembled
-- **THEN** its launch arguments SHALL carry --no-lsp exactly once, independently of the later row-25 settings pin
-- **AND** its native approval posture and mode-isolated state SHALL remain unchanged with no restricted handler or approval-record load
-
 ### Requirement: OpenCode Both Agents Explicitly Deny The LSP Tool
 
 `agent-config/opencode.json` SHALL explicitly deny the lsp tool per agent for BOTH build and yolo. No top-level global LSP clamp SHALL be introduced; all unrelated permission entries SHALL retain the predecessor posture.
@@ -3157,497 +1789,6 @@ OMP restricted and native-YOLO sessions SHALL both carry `--no-lsp` in their fac
 - **WHEN** LSP denials are applied
 - **THEN** unrelated predecessor build and yolo permissions SHALL remain unchanged
 - **AND** later regression baselines SHALL use the config as landed after both rows rather than pre-batch yolo bytes
-
-### Requirement: LSP Implicit Startup Coverage Retains Pinned Evidence Limits
-
-The change SHALL audit pinned OMP v18.6.1 and OpenCode 1.18.21 implicit server startup and cold-start routes separately from explicit tool denial. Recorded incompatible/unresolved verdicts SHALL remain unchanged by DECIDED deployment dispositions or passing mocks. Incomplete coverage SHALL be named without claiming complete native suppression or inventing a global clamp, restricted YOLO handler or version bump.
-
-#### Scenario: Consultable restricted residual route denies
-- **GIVEN** a source-cited residual startup route reachable through a restricted tool call
-- **WHEN** its LSP-adjacent decision is consulted
-- **THEN** an additive default-deny row SHALL block it through existing restricted enforcement
-- **AND** shipped inventory rows and handler semantics SHALL remain unchanged
-
-#### Scenario: Native-internal or YOLO residual remains explicit
-- **GIVEN** a startup route outside restricted handler coverage
-- **WHEN** the source audit records coverage
-- **THEN** the exact uncovered route and symbols SHALL be recorded
-- **AND** no artifact SHALL claim the restricted handler prevents that route or native suppression is complete
-
-#### Scenario: OpenCode explicit denial is not implicit-startup evidence
-- **WHEN** build and yolo explicit lsp denial tests pass
-- **THEN** they SHALL establish permission-map wiring only
-- **AND** the pinned implicit-scoping incompatibility and automatic-startup coverage limits SHALL remain recorded
-- **AND** OpenCode 1.18.21 SHALL remain pinned
-
-### Requirement: Both-Agent LSP Evidence And Documentation Boundary
-
-Documentation, CHANGELOG and handoff SHALL state decision 5's OMP restricted+YOLO and OpenCode build+yolo posture, separating source claims, unit/mock wiring evidence and user-owned native observations. Native implicit-startup suppression in all four agent/mode combinations SHALL remain unverified until observed.
-
-#### Scenario: Wiring suite has no native claim
-- **WHEN** config, launch and conditional-decision fixtures pass
-- **THEN** evidence SHALL cover both OMP disable carriers, both OpenCode per-agent denies, no global clamp and preservation of unrelated permissions only
-- **AND** no test SHALL certify native language-server suppression
-
-#### Scenario: Permission docs and checklist match the decision
-- **WHEN** permission docs, changelog and runtime checklist are written
-- **THEN** both agents and both modes SHALL be named with their selected carriers and recorded coverage limits
-- **AND** all native implicit-startup observations SHALL be explicitly unverified
-
-### Requirement: Controlled URL-Fetch Transport Adapter Decision Core
-
-The restricted OMP deployment SHALL provide a URL-fetch transport adapter decision core that, for every model-supplied URL read and scraper-derived secondary URL, decides `allow-direct`, `allow-via-proxy`, or `block` from the URL, the consumed egress posture, and an injectable DNS/transport boundary, reusing the existing SSRF rule set as the single classifier. The core SHALL NOT re-implement, fork, or soften that rule set.
-
-#### Scenario: Public target admitted under either posture
-- **GIVEN** a mocked DNS answer containing only public addresses for an `https` model-supplied URL
-- **WHEN** the adapter decision core is consulted under the enforcing posture and again under the operator unrestricted-egress posture
-- **THEN** both decisions SHALL permit the request
-- **AND** the enforcing decision SHALL name the validating-proxy route
-
-#### Scenario: Private and metadata targets blocked under enforcing posture
-- **GIVEN** mocked DNS answers for loopback, RFC1918, link-local, unique-local, unspecified, multicast, and cloud-metadata addresses
-- **WHEN** each is presented as a model-supplied URL read target under the enforcing posture
-- **THEN** each decision SHALL be a block naming the rejected address class
-- **AND** no transport request SHALL be issued for any of them
-
-#### Scenario: Non-http scheme rejected at the decision
-- **GIVEN** a URL read input with an internal or custom scheme (for example an internal device scheme)
-- **WHEN** the adapter decision core is consulted
-- **THEN** the decision SHALL be a block and the input SHALL NOT be proxied by the adapter
-
-#### Scenario: Shared classifier details stay the single rule set
-- **GIVEN** URL read inputs exercising scheme, resolution, and address-class rules
-- **WHEN** the decision core classifies them under either posture
-- **THEN** the scheme SHALL be restricted to `http`/`https`, the host SHALL resolve to a public address, and loopback, private (RFC1918), link-local, unique-local, unspecified, multicast, reserved, and cloud-metadata addresses SHALL be rejected
-- **AND** the decision SHALL come only from the shared SSRF rule set
-
-#### Scenario: HTTP_PROXY presence is non-enforcement
-- **GIVEN** an environment where `HTTP_PROXY` is present
-- **WHEN** the decision core classifies a URL read target
-- **THEN** the decision SHALL treat `HTTP_PROXY` presence as non-enforcement
-- **AND** the verdict SHALL be identical to one reached without `HTTP_PROXY`
-
-### Requirement: Manual Per-Hop Redirect and Secondary-URL Re-Validation
-
-The adapter SHALL treat every redirect hop and every scraper secondary URL as a fresh decision input: redirect responses SHALL be handled manually (never by automatic native hop following), and each hop target SHALL be re-validated through the same SSRF rules before the next request is issued, with the chain bounded by the existing five-hop maximum.
-
-#### Scenario: Public-to-private redirect blocked at the hop
-- **GIVEN** a synthetic redirect chain whose first hop is public and whose `Location` resolves, via mocked DNS, to a loopback address
-- **WHEN** the adapter processes the chain
-- **THEN** the request to the private hop SHALL NOT be issued
-- **AND** the decision SHALL be a block naming the redirect-hop re-validation
-
-#### Scenario: Six-hop chain blocked at the bound
-- **GIVEN** a synthetic chain of six public redirect hops
-- **WHEN** the adapter processes the chain
-- **THEN** the decision SHALL be a block with the hop-limit reason after at most five followed hops
-
-#### Scenario: Scraper secondary URL validated like the initial URL
-- **GIVEN** a text fetch whose response advertises a secondary URL (for example a markdown or feed alternate) resolving to a private address under the enforcing posture
-- **WHEN** the adapter decides the secondary request
-- **THEN** the secondary request SHALL be blocked under the same rules as a model-supplied URL
-
-#### Scenario: Hop to a restricted address class blocked at that hop
-- **GIVEN** a redirect hop or scraper secondary URL whose target resolves to a link-local, unique-local, or metadata address after an initially public hop
-- **WHEN** the adapter re-validates the hop
-- **THEN** the decision SHALL be a block at that hop
-- **AND** no request SHALL be issued to the restricted target
-
-### Requirement: Egress-Policy-Selected Proxy Routing with Operator Posture Preserved
-
-When the consumed egress configuration enables `egressProxy` and disables `unrestrictedEgress`, every adapter-allowed URL-read hop SHALL be routed through the running AIr validating egress proxy endpoint in addition to the adapter's own validation, with configuration values consumed unchanged.
-
-#### Scenario: Enforcing posture selects the proxy route
-- **GIVEN** the enforcing egress posture and a public validated target
-- **WHEN** the adapter produces its transport plan
-- **THEN** the plan SHALL route through the running validating-proxy endpoint
-- **AND** the adapter SHALL still have performed its own SSRF validation for that hop
-
-#### Scenario: Unrestricted posture adds no new denial
-- **GIVEN** an operator-selected unrestricted-egress posture
-- **WHEN** public targets (text or binary, within the hop bound) are fetched
-- **THEN** the adapter SHALL allow them without proxy routing
-- **AND** only the shared rule set (private/metadata targets, hop bound) may still block
-
-#### Scenario: YOLO-only network denial is not introduced
-- **WHEN** the adapter composes denials under the unrestricted-egress posture
-- **THEN** the adapter SHALL introduce no additional denial beyond the shared SSRF rule set
-- **AND** the adapter SHALL introduce no YOLO-only network denial
-
-#### Scenario: Best-effort environment routing stays documented
-- **WHEN** best-effort environment routing is relied on under the unrestricted-egress posture
-- **THEN** it SHALL remain documented as not kernel-guaranteed
-
-### Requirement: Text and Binary Fetch Paths with Credential-Free Decision Records
-
-The adapter SHALL expose distinct text and binary decision/transport paths mirroring the native URL-read shapes: a bounded text route for page and markdown bodies, and a binary route carrying content-length pre-check, streaming size cap, and content-disposition/extension hints.
-
-#### Scenario: Binary route preserves native-shaped limits
-- **GIVEN** a mocked binary response with a declared content length above the configured maximum
-- **WHEN** the adapter's binary route processes it
-- **THEN** the fetch SHALL be refused with the size-limit reason before the full body is read
-- **AND** a within-limit binary SHALL return bytes plus disposition/extension hints
-
-#### Scenario: Decision records carry no credentials or payload
-- **GIVEN** any allow or deny fixture whose URL includes userinfo and a query string and whose response includes header values
-- **WHEN** the resulting decision records and adapter log lines are inspected
-- **THEN** neither SHALL contain the userinfo, query string, headers, credentials, or payload bytes
-
-#### Scenario: Records carry only the enumerated decision fields
-- **GIVEN** any adapter decision record or log line
-- **WHEN** its contents are inspected
-- **THEN** it SHALL contain at most the target host, hop index, decision, and reason code
-
-### Requirement: Source-Cited Supported-Route Enumeration with Honest Blocked Residuals
-
-The change SHALL enumerate, as machine-readable route data with pinned-source citations, which native URL-read routes are interceptable by supported mechanisms versus the recorded bypasses, marking the `read` URL-branch routes (text, binary, secondary hops, and their materialization consumers) as completed via the trusted extension's controlled replacement of the `read` tool, and keeping every route the replacement does not cover blocked under the enforcing posture.
-
-#### Scenario: Completed routes are exactly the replaced read URL branch
-- **WHEN** the route table is read
-- **THEN** `completed-by-adapter` SHALL cover the controlled `read` URL-branch text, binary, and secondary-hop routes and their materialization consumers, plus controlled search-provider routes exactly when their backend contract holds
-- **AND** every search-provider route without a supported backend or controlled replacement SHALL carry a bounded blocked disposition
-
-#### Scenario: Recorded bypass is not relabeled by mocks
-- **GIVEN** the pinned-source record that the primary page load and binary fetch follow redirects automatically via global fetch
-- **WHEN** this change's tests pass
-- **THEN** the route table SHALL still mark those native functions' direct-use routes as blocked for any caller outside the replacement
-- **AND** no mock result SHALL be cited as clearing that record or proving the native binary invokes the replacement
-
-#### Scenario: Uncovered route keeps failing closed
-- **GIVEN** a URL-reading call presented through a route absent from the completed set
-- **WHEN** enforcement composes the decision under the enforcing posture
-- **THEN** the call SHALL be blocked with the pending-adapter reason
-- **AND** no unadapted native transport SHALL be reachable through it
-
-#### Scenario: Replacement preserves non-URL delegation
-- **GIVEN** the trusted extension's controlled replacement of the `read` tool overlaying the registry for the same tool name
-- **WHEN** a non-URL input is routed to the tool
-- **THEN** the input SHALL be delegated to the captured native implementation
-- **AND** the replacement SHALL be the supported registration mechanism completing the URL branch
-
-#### Scenario: Partial fetch-override seam recorded as not selected
-- **GIVEN** the partial native fetch-override seam with enrichment-only reach
-- **WHEN** the route data is compiled
-- **THEN** the seam SHALL be recorded as existing but not selected
-- **AND** its enrichment-only reach SHALL be cited
-
-### Requirement: Pending-Adapter Seam Completion Is Additive and Route-Scoped
-
-The restricted tool-inventory seam for network parity capabilities SHALL be updated additively: the web-fetch/URL-read row gains a completing-adapter marker naming this change and its completed-route table, while the web-search row retains its separate backend-gated completion contract. The completion marker SHALL be distinguishable from a plain allow, and completing a route SHALL change no table shape, composition order, or error vocabulary owned by the enforcement wiring.
-
-#### Scenario: Only the URL-read row completes
-- **WHEN** the updated seam data is inspected
-- **THEN** the URL-read row SHALL name the completing adapter and route table
-- **AND** the web-search row SHALL retain its separate backend-gated completion contract
-- **AND** a test SHALL assert the completing marker remains distinguishable from allow
-
-#### Scenario: URL completion is consumed after provenance admission
-- **GIVEN** a registered owned URL-read replacement and a completed controlled route
-- **WHEN** restricted enforcement evaluates that URL call
-- **THEN** it SHALL name the controlled replacement as the completing boundary and permit that replacement to execute
-- **AND** it SHALL NOT block solely because the inventory verdict is network-adapter-gated
-
-#### Scenario: A completion marker cannot admit another route
-- **WHEN** a call uses foreign provenance, an unregistered replacement, or an uncovered native URL route
-- **THEN** the marker SHALL NOT authorize execution and no network request SHALL be dispatched
-
-### Requirement: Trusted Loopback and Provider Routing Remain Distinct from Model Fetch Targets
-
-The adapter's target decision SHALL apply only to model-supplied or fetch-derived URLs. Trusted deployment transport facts — the Skill API loopback endpoint, operator-configured provider endpoints, and the validating-proxy endpoint itself — SHALL NOT participate in, widen, or bypass the model-target decision, and the presence of a trusted loopback call SHALL never authorize a model fetch to an arbitrary loopback or private target.
-
-#### Scenario: Trusted loopback existence does not authorize model loopback fetch
-- **GIVEN** an enforcing-posture deployment whose agent process legitimately reaches the Skill API over loopback
-- **WHEN** a model-supplied URL read targets a loopback or private address
-- **THEN** the adapter decision SHALL be a block
-- **AND** the Skill API path SHALL remain reachable through its existing, separate transport
-
-### Requirement: URL-Fetch Adapter Acceptance Is Deterministic Mock-Only
-
-All adapter acceptance SHALL run against a mocked fetch transport, mocked DNS resolution, and synthetic redirect chains with zero network contact, certifying allow/deny decisions, proxy-route selection under both egress postures, per-hop re-validation, the hop bound, text/binary behavior, credential-free records, and route-table verdicts.
-
-#### Scenario: Whole suite runs without network access
-- **WHEN** the adapter test suites execute
-- **THEN** every request SHALL be served by the mocked transport and every host resolution by the mocked resolver
-- **AND** no test SHALL contact an external address or require a credential
-
-#### Scenario: Native use stays user-owned
-- **WHEN** the implementation handoff is assembled
-- **THEN** the checklist SHALL carry the observation of real URL-read traffic through the adapter/proxy, including binary/text fetches, redirects, and private-target failures, marked unverified until user-observed
-
-#### Scenario: No mock certifies native hook coverage
-- **WHEN** the mocked acceptance suites pass
-- **THEN** no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record
-
-### Requirement: Controlled Web-Search Transport Routing Through the URL-Fetch Decision Core
-
-The restricted OMP deployment SHALL route every adapter-served web-search provider request and every provider result-enrichment subrequest through the same controlled transport decision core, single SSRF rule set, and manual per-hop redirect revalidation with the existing hop bound established for URL reads, and SHALL treat environment proxy presence as non-enforcement exactly as the URL-read adapter does.
-
-#### Scenario: Provider endpoint request follows the consumed egress posture
-- **GIVEN** a mocked provider endpoint whose host resolves, via mocked DNS, to public addresses only
-- **WHEN** the search adapter plans the request under the enforcing posture and again under the operator unrestricted-egress posture
-- **THEN** both decisions SHALL permit the request
-- **AND** the enforcing decision SHALL name the validating-proxy route while the unrestricted decision SHALL add no new denial beyond the shared rule set
-
-#### Scenario: Private-target provider or enrichment request blocked
-- **GIVEN** mocked DNS answers placing a provider endpoint or an enrichment-redirect target in loopback, RFC1918, link-local, unique-local, or cloud-metadata space under the enforcing posture
-- **WHEN** the search adapter decides that hop
-- **THEN** the decision SHALL be a block naming the rejected address class
-- **AND** no transport request SHALL be issued for it
-
-#### Scenario: No unguarded native retry outside the controlled path
-- **GIVEN** a mocked provider response that the native transport would retry with automatic backoff
-- **WHEN** the restricted adapter serves the same request
-- **THEN** every issued attempt SHALL carry a prior controlled-transport decision
-- **AND** the test fixture SHALL show no request issued without one
- 
-#### Scenario: Rule set is never reimplemented or softened
-- **GIVEN** the controlled decision core and SSRF rule set established for URL reads
-- **WHEN** the web-search adapter schedules provider or enrichment hops
-- **THEN** the adapter SHALL NOT re-implement, fork, soften, or bypass that rule set
-
-### Requirement: Web-Search Backend Tiering Restricted to the Supported Credential Set
-
-The change SHALL enumerate every pinned web-search provider surface as machine-readable route data with pinned-source citations, tiered `supported`, `candidate-to-verify`, or `no-supported-mechanism` against the supported credential set (the Gemini and OpenRouter provider credentials passed by the agent-configuration change); only the Gemini and OpenRouter grounded backends reachable with those credentials SHALL be selected as supported.
-
-#### Scenario: Supported tiering is credential-set-keyed with citations
-- **WHEN** the search route table is read
-- **THEN** exactly the grounded backends reachable through the two supported provider credentials SHALL carry the supported tier with source citations
-- **AND** every backend needing a credential outside that set SHALL carry the no-supported-mechanism tier with a user-decision marker
-- **AND** keyless scraping engines SHALL be marked candidate-to-verify and not selected
-
-#### Scenario: No unrelated secret is ever required or configured
-- **GIVEN** a deployment whose only search-relevant credentials are the two supported provider keys
-- **WHEN** the adapter selects a backend
-- **THEN** the selection SHALL come from the supported tier only
-- **AND** no test, fixture, documentation page, or configuration surface introduced by this change SHALL require a credential outside the supported set
- 
-#### Scenario: No unrelated vendor secret is accepted
-- **GIVEN** an operator attempting to configure an unrelated vendor secret or a general search-provider surface
-- **WHEN** the web-search adapter is asked to adopt that configuration
-- **THEN** the adapter SHALL NOT require, recommend, or accept the unrelated secret
-- **AND** this change SHALL add no general search-provider configuration surface
-
-### Requirement: Web-Search Native Interface, Citation, and Error Honesty
-
-The completed web-search route SHALL preserve the agent's native search-tool interface — query parameter shape unchanged, result envelope with formatted output carrying titled, URL-attributed, cited excerpts matching the native formatter's structure, and the native empty-result-versus-error distinction — and SHALL surface provider authentication, rate-limit, HTTP, malformed-response, and no-sources failures as honest tool errors in the native failure-message shape.
-
-#### Scenario: Grounded success keeps native citation layout
-- **GIVEN** a mocked supported-provider response containing an answer with sources and citations
-- **WHEN** the adapter renders the tool result
-- **THEN** the output SHALL contain the native sources and citations sections with per-item title, URL, and excerpt attribution
-- **AND** the result envelope SHALL match the native `{content, details.response}` shape
-
-#### Scenario: Provider auth and rate failures are honest tool errors
-- **GIVEN** mocked provider responses simulating an authentication rejection and a rate-limit rejection
-- **WHEN** each is served to the restricted adapter
-- **THEN** the tool result SHALL be an error in the native provider-failure message shape naming the provider
-- **AND** no result content SHALL be fabricated and no agent switch or silent different-backend fallback SHALL occur
-
-#### Scenario: Empty result stays distinct from error
-- **GIVEN** a mocked provider response with a renderable answer but zero sources and no citations
-- **WHEN** the adapter processes it
-- **THEN** the outcome SHALL be the honest native no-sources failure, not a fabricated success
-- **AND** a separately mocked genuinely empty candidate chain SHALL produce the native no-configured-search-model-shaped message distinct from provider errors
-
-#### Scenario: Search decision records carry no credentials
-- **GIVEN** a completed-search fixture whose request headers carry a provider key and whose enrichment URL carries a query string
-- **WHEN** the resulting decision records and adapter log lines are inspected
-- **THEN** neither SHALL contain the credential, header, userinfo, query string, or payload bytes
- 
-#### Scenario: HTTP and malformed responses fail honestly
-- **GIVEN** mocked provider responses with an HTTP transport failure and a malformed response body
-- **WHEN** each is served to the restricted adapter
-- **THEN** each SHALL surface as an honest tool error in the native failure-message shape
-- **AND** neither SHALL fabricate result content or switch agents
-
-#### Scenario: Decision records carry the minimal allowed fields
-- **WHEN** decision records and adapter log lines are produced for a completed search
-- **THEN** each SHALL carry at most host, hop index, decision, and reason code
-
-### Requirement: Credential-Absent Web Search Fails Closed With a Documented Capability Gap
-
-When neither supported backend's credential exists for the restricted process, the web-search route SHALL remain blocked with the pending-adapter outcome and a user-decision marker rather than inventing a mechanism, selecting a scraping engine, or requesting a new secret; the capability gap SHALL be documented, and the block SHALL be observable without any network request.
-
-#### Scenario: No supported credential yields a fail-closed block
-- **GIVEN** a restricted-process fixture whose credential inputs contain neither supported provider key
-- **WHEN** the web-search decision is consulted
-- **THEN** the result SHALL be the blocked pending-adapter decision with the user-decision marker
-- **AND** no mocked transport SHALL record any issued request
-
-### Requirement: Web-Search Seam Completion Is Additive, Route-Scoped, and Backend-Gated
-
-The restricted tool-inventory seam SHALL be updated additively and backend-gated: the web-search row gains a completing-adapter marker, active exactly where a supported-tier backend exists under the supported credential set and a controlled-transport contract is satisfied, while every credential-absent or unsupported-backend state retains the distinct pending-adapter outcome; the completion marker SHALL remain distinguishable from a plain allow.
-
-#### Scenario: Only the web-search row completes where its contract holds
-- **WHEN** the updated seam data is inspected with a supported credential present
-- **THEN** the web-search row SHALL name the completing adapter and the search route table
-- **AND** credential-absent and unsupported-backend states SHALL still report the pending-adapter outcome
-- **AND** a test SHALL assert the completing marker remains distinguishable from allow
-
-#### Scenario: Credential-absent keeps the seam pending
-- **WHEN** the same seam data is evaluated with no supported search credential
-- **THEN** the web-search outcome SHALL be the pending-adapter block, not an allow
-
-#### Scenario: Route tables agree
-- **WHEN** both the search route table and the URL-fetch route registry are read
-- **THEN** the URL-read completed routes SHALL be unchanged by this change
-- **AND** the search-provider subrequest route SHALL never be recorded pending by one table while the other claims adapter completion for the same satisfied contract
-
-#### Scenario: Completion never alters enforcement-owned wiring
-- **WHEN** the completing-adapter seam update is applied
-- **THEN** the update SHALL complete no table shape, composition order, or error vocabulary owned by the enforcement wiring
-- **AND** the URL-read route set completed by the URL-fetch transport change SHALL retain the same authorization behavior
-
-#### Scenario: Supported search completion reaches controlled execution
-- **GIVEN** an owned registered search replacement, a supported configured backend, and a completed controlled route
-- **WHEN** the native restricted callback evaluates a search call
-- **THEN** it SHALL permit only the controlled replacement to complete execution
-- **AND** the result SHALL preserve attribution and the current egress posture
-
-#### Scenario: Absent backend cannot be bypassed by unrestricted egress
-- **GIVEN** no supported configured search backend and explicit unrestricted egress
-- **WHEN** the native restricted callback evaluates a search call
-- **THEN** it SHALL return a bounded capability error with zero endpoint requests
-- **AND** it SHALL NOT retry through native transport or fabricate results
-
-#### Scenario: A private secondary hop remains rejected
-- **GIVEN** enforcing egress and an admitted controlled search call
-- **WHEN** a redirect or secondary request targets a prohibited private address
-- **THEN** the existing transport SHALL reject that hop before dispatch
-- **AND** admission SHALL NOT override per-hop authorization
-
-### Requirement: Native YOLO Web Search Keeps Native Behavior
-
-The web-search replacement SHALL register and apply in restricted sessions only; a native-YOLO OMP session SHALL execute the captured native `web_search` tool with no adapter clamp, no added denial, and no routing change introduced by this change, preserving the approved native-YOLO posture and the existing deployment egress configuration semantics.
-
-#### Scenario: YOLO delegates to the captured native tool
-- **GIVEN** a native-YOLO fixture invoking `web_search`
-- **WHEN** the trusted-extension replacement handles the call
-- **THEN** the call SHALL delegate verbatim to the captured native tool
-- **AND** no restricted-mode decision SHALL appear in the delegation path
-
-### Requirement: Web-Search Adapter Acceptance Is Deterministic Mock-Only
-
-All web-search adapter acceptance SHALL run deterministically against mocked provider endpoints, mocked DNS resolution, and synthetic redirect/enrichment chains with zero network contact and no live or paid search; native-side behavior — the compiled agent actually invoking the replacement and adapter — SHALL remain on the user-owned runtime verification checklist.
-
-#### Scenario: Whole suite runs without network access or paid providers
-- **WHEN** the web-search adapter test suites execute
-- **THEN** every provider request SHALL be served by the mocked transport and every host resolution by the mocked resolver
-- **AND** no test SHALL contact an external address, require a real credential, or incur provider cost
-
-#### Scenario: Native search-tool use stays user-owned
-- **WHEN** the implementation handoff is assembled
-- **THEN** the checklist SHALL carry the observation of real web-search traffic through the adapter/proxy — including enrichment redirects and private-target failures — marked unverified until user-observed
- 
-#### Scenario: Mock suite certifies the restricted-decision surface
-- **WHEN** the mock-only acceptance suite executes
-- **THEN** the suite SHALL certify backend-selection and credential-scope decisions, allow/deny/routing outcomes under both egress postures, enrichment-subrequest revalidation, error-shape honesty, interface/citation layout stability, the credential-absent fail-closed path, and the route-table and seam-data verdicts
-- **AND** no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record
-
-### Requirement: Combined Mock-ACP Lifecycle Integration Suite
-
-The combined mock-ACP lifecycle integration suite SHALL drive the real `AgentConnector`, `AgentProcessPool`, and `SessionOrchestrator` wiring through mock ACP subprocess and in-process connection fixtures, covering happy path, crash recovery, cross-mode rejection, registry-refresh re-admission, lease serialization, LSP posture, and OpenCode flows. Every scenario SHALL exercise at least two shipped components and SHALL NOT restate a predecessor single-component unit assertion.
-
-#### Scenario: Crash recovery restores config and ownership in one flow
-- **GIVEN** a restricted OMP session established through real pool acquisition with a recorded ownership context
-- **WHEN** the mock subprocess dies mid-prompt and recovery reconnects and loads the session
-- **THEN** recovery SHALL re-enter the same mode's pool entry, verify ownership, restore the config-options cache from the load response, and reapply the session's model through the shipped stable-first code path
-- **AND** the re-issued prompt SHALL execute with the recovered session's own gate context
-
-#### Scenario: Cross-mode load is rejected in both directions without collateral effects
-- **GIVEN** a live native-YOLO-owned session and a restricted recovery context (and the mirror pairing)
-- **WHEN** either context attempts to load the opposite-mode-owned session
-- **THEN** recovery SHALL report the ownership violation before any teardown
-- **AND** the opposite mode's live process, lease, and sibling sessions SHALL be unaffected
-
-#### Scenario: Registry-refresh re-admission composes through the shipped decision modules
-- **GIVEN** a restricted composition fixture whose live tool-metadata observation gains or replaces an operator MCP tool after startup
-- **WHEN** the registry epoch advances
-- **THEN** provenance SHALL be re-observed on the fresh epoch, and admission or denial SHALL be produced by the shipped decision modules through the shipped wiring
-- **AND** a denied call SHALL surface the bounded fail-closed error shape with no stale-epoch grant honored
-
-#### Scenario: Dual-mode coexistence still serializes on the global lease
-- **GIVEN** a restricted and a native-YOLO OMP session concurrently live in one channel under separate mode-keyed pool entries
-- **WHEN** both request execution
-- **THEN** at most one session SHALL hold the execution lease at any instant across both entries
-
-#### Scenario: OpenCode regression flows remain byte-identical
-- **GIVEN** an OpenCode session driving initialize/new/prompt/cancel/load and pool reuse through the same harness
-- **WHEN** pool keys, spawn environment, and command strings are captured
-- **THEN** they SHALL byte-match the current shipped OpenCode values
-- **AND** no readiness verification or OMP trusted extension SHALL be involved, and the baseline SHALL retain build+yolo per-agent explicit lsp denies after numbered rows 15 and 17
-
-#### Scenario: Happy path completes through real pool wiring
-- **GIVEN** mock ACP subprocess and scripted in-process connection fixtures for a restricted session
-- **WHEN** the suite drives initialize, new, prompt, cancel, and load through the combined harness
-- **THEN** each step SHALL complete through the real `AgentConnector`, `AgentProcessPool`, and `SessionOrchestrator` wiring
-- **AND** the scenario SHALL exercise at least two shipped components together
-
-#### Scenario: LSP disablement posture survives crash-respawn and same-mode load
-- **GIVEN** an OMP session in either restricted or native-YOLO mode with its selected LSP disable carrier
-- **WHEN** the mock subprocess crashes, respawns, or the session is re-loaded in the same mode
-- **THEN** the selected mode's LSP disable carrier SHALL be preserved across crash-respawn and same-mode load
-- **AND** native-YOLO SHALL carry its LSP disable without loading restricted tool policy, and no fixture SHALL certify implicit startup suppression
-
-### Requirement: Fail-Closed Honest Posture Assertions in the Lifecycle Suite
-
-Every unresolved inherited seam exercised by the combined lifecycle suite SHALL be asserted on its deny or blocked outcome, and every allow-path fixture SHALL be carried as a labeled synthetic positive verified by a runtime suite guard. No test name, comment, or assertion SHALL claim or imply that the native OMP binary invokes a handler, honors a denial, rejects a cross-mode load, emits readiness, or suppresses a language server.
-
-#### Scenario: Absent-handler sessions retain the native approval and ACP client boundary
-- **GIVEN** a restricted OMP session whose extension handler is not installed
-- **WHEN** an unauthorized ACP-mediated operation is requested through the real client policy
-- **THEN** the operation SHALL fail closed with the client policy's bounded denial and zero side effects
-- **AND** the pinned non-YOLO native approval launch posture SHALL remain unchanged with no readiness handshake, fallback spawn or mode promotion
-
-#### Scenario: Synthetic allow fixtures are registered and labeled
-- **GIVEN** any scenario in which a restricted call or prompt is allowed
-- **WHEN** the suite-level fixture ledger is inspected at runtime
-- **THEN** the enabling fixture SHALL be present as a labeled synthetic positive
-- **AND** no result SHALL be presented as evidence of native emission or enforcement
-
-#### Scenario: Undecodable destructive intent fails closed end to end
-- **GIVEN** a restricted composition fixture presenting an incomplete or undecodable destructive intent through the shipped wiring
-- **WHEN** the handler decision is evaluated
-- **THEN** the shared fail-closed verdict SHALL be returned
-- **AND** no filesystem side effect or grant SHALL occur
-
-#### Scenario: MCP admission basis appears at honest audit status
-- **GIVEN** a restricted composition fixture exercising the MCP admission basis
-- **WHEN** its admission basis is asserted by the lifecycle suite
-- **THEN** the basis SHALL appear at its `needs-mechanism-audit` / `candidate-to-verify` status
-- **AND** it SHALL not be presented as an allow-path claim
-
-#### Scenario: Surviving lower-layer approval records never grant
-- **GIVEN** lower-layer approval records surviving in a restricted flow
-- **WHEN** the suite inspects them while asserting a deny or blocked outcome
-- **THEN** surviving lower-layer approval records SHALL never produce a grant
-- **AND** the denied or blocked outcome SHALL be the sole asserted result
-
-#### Scenario: No test wording claims native OMP behavior
-- **GIVEN** the combined suite's test names, comments, and assertions
-- **WHEN** they are reviewed for posture honesty
-- **THEN** none SHALL claim or imply that the native OMP binary invokes a handler, honors a denial, rejects a cross-mode load, emits readiness, or suppresses a language server
-
-### Requirement: Shared OMP Mock Session Builder Contract
-
-The suite SHALL extract a shared mock-session builder exposing scenario composition for permission mode, recorded ownership context, config-option catalog shape, handler availability (default absent with non-YOLO native approval and ACP client fallback), registry epoch with live tool-observation fixtures, and destructive-input shape, with every synthetic positive wrapped in a labeled carrier and no default allow path.
-
-#### Scenario: Default composition is fail-closed
-- **WHEN** the builder is invoked without an explicit synthetic installed-handler or trusted-provenance override
-- **THEN** the composed fixture SHALL carry an absent handler and untrusted-default tool observations, with ACP client denials still fail-closed
-- **AND** any scenario allowing execution SHALL have explicitly supplied a labeled synthetic positive
-
-#### Scenario: Follow-up suite consumes the builder without modification
-- **GIVEN** the follow-up per-spawn/pool skill-handoff regression imports the builder
-- **WHEN** it composes pooled OMP sessions
-- **THEN** it SHALL add any needed fields additively in its own change
-- **AND** the existing builder behavior for lifecycle scenarios SHALL remain unchanged
-
-#### Scenario: Composition surface covers every scenario dimension
-- **GIVEN** a scenario composing a mock OMP session through the shared builder
-- **WHEN** it configures permission mode, recorded ownership context, config-option catalog shape (flat, grouped, catalog-miss, absent), handler availability, registry epoch with live tool-observation fixtures, or destructive-input shape
-- **THEN** the builder SHALL expose each dimension's scenario composition
-- **AND** handler availability SHALL default to absent without any readiness assertion; client policy denials and untrusted handler observations SHALL fail closed
 
 ### Requirement: Lifecycle Suite Determinism and Execution Boundaries
 
@@ -3669,171 +1810,6 @@ The combined lifecycle suite SHALL be deterministic: timer-driven paths SHALL us
 - **WHEN** the suite runs
 - **THEN** it SHALL require no network access to external hosts, no real agent, and no official `omp` executable
 - **AND** no provider or paid credential SHALL be used, and the suite SHALL run under the existing integration task and coverage gates without silently invoking live-agent acceptance
-
-### Requirement: Non-Duplication and Justified Deletion Rule for the Lifecycle Suite
-
-The combined suite SHALL NOT duplicate single-component unit assertions already shipped by predecessor rows' suites. A redundant unit case MAY be deleted only when the combined suite fully supersedes its observable outcome, and each deletion SHALL be individually justified in the commit message naming the superseding scenario. Absent a true redundancy, deleting nothing is a conforming outcome; the rule SHALL NOT be satisfied by weakening or modifying existing unit assertions.
-
-#### Scenario: Deletion requires a named superseding scenario
-- **WHEN** a predecessor unit test case is deleted alongside this suite
-- **THEN** the deletion commit SHALL name the case and the combined scenario whose real-code flow asserts the same observable outcome
-- **AND** no unit assertion SHALL be weakened, only removed under this rule or left intact
-
-#### Scenario: Missing handler is an accepted residual risk
-- **GIVEN** pinned runner.emit logs extension lifecycle-hook errors without failing startup
-- **WHEN** an extension fails to load
-- **THEN** the session may run without the restricted capability set and no client-observable readiness assertion SHALL be made
-- **AND** native non-YOLO approval plus client ACP policy SHALL NOT be claimed equivalent to installed-handler default-deny or proof of native callback coverage
-
-### Requirement: Deployment-Owned OMP Skill Root Settings
-
-Owned OMP settings SHALL declare the single deployment-resolved absolute skill root through pinned registered settings, exclude ambient/workspace sources where supported and keep skills globally enabled. Only that declared root SHALL supply critical-skill authority. Invalid or unowned declarations SHALL be rejected. Native verdicts and user-owned runtime acceptance SHALL remain unchanged.
-
-#### Scenario: Both modes declare the same owned skill roots
-
-- **WHEN** actual owned restricted/native-yolo overlays, the generated declarations and the composed settings are validated
-- **THEN** the composed settings SHALL resolve to the same single resolved root with skills enabled and the registered source-toggle posture
-- **AND** each generated declaration SHALL declare exactly that root, while each authored mode document SHALL carry the skills enablement and the seven foreign-source toggles and SHALL declare no skill directory of its own
-- **AND** native-yolo SHALL retain native approval, LSP disabled and absence of restricted tool policy
-
-#### Scenario: Invalid or ambient declarations fail closed
-
-- **WHEN** a root declaration required in the generated declaration is missing/empty, relative, tilde-based, workspace-owned, linked, extra-host-root, mismatched with the daemon's resolved root, or expressed by an unregistered/default-falling-back key, or an authored mode document declares a skill directory of its own
-- **THEN** owned-settings validation or canonical ownership observation SHALL reject it
-
-#### Scenario: Overlay arrays replace without inheriting hostile roots
-
-- **WHEN** owned source-root settings are assembled in the final mode overlay
-- **THEN** the complete owned root array SHALL use pinned replacement semantics
-- **AND** no inherited HOME/XDG/project source or lower custom root SHALL supply critical-skill authority
-
-### Requirement: Dedicated Public Code Search Is Outside OpenCode Parity
-
-The integration SHALL preserve local text search, public URL reading, and general web search as the pinned OpenCode parity target. It SHALL NOT require or advertise a dedicated public-code-search adapter, credential gap, or completion slot. Unlisted dedicated search tools SHALL remain default-denied in restricted mode.
-
-#### Scenario: Dedicated search is not an admission prerequisite
-- **WHEN** restricted session capabilities are evaluated without a dedicated public-code-search adapter
-- **THEN** URL read and web search SHALL be evaluated under their own retained contracts
-- **AND** an unlisted dedicated search invocation SHALL be denied without executing a backend
-
-### Requirement: Controlled Replacements Have Native Parameter Contracts
-
-Each registered controlled read or web-search replacement SHALL supply the pinned native runtime's mandatory parameter schema and execute contract. Accepted inputs SHALL agree with its parser. Invalid native input SHALL be rejected before transport dispatch. Ordinary non-network read inputs SHALL retain same-tool native delegation without a second filesystem implementation.
-
-#### Scenario: Native registration can consume the definition
-- **WHEN** a native-compatible consumer registers the read and web-search replacements and submits valid inputs
-- **THEN** their schemas SHALL be accepted and their executors SHALL receive the declared input shapes
-- **AND** malformed paths or queries SHALL be rejected before any transport request
-
-#### Scenario: Local read retains native semantics
-- **WHEN** an authorized ordinary local read reaches the replacement
-- **THEN** the same-tool native delegate SHALL execute once and its result SHALL be preserved
-- **AND** a missing delegate SHALL yield an explicit error, not an unguarded local read
-
-### Requirement: Controlled Read Results Use Native Content Representations
-
-Controlled results SHALL use native content arrays and honest result/error metadata. Text SHALL remain text, supported images SHALL use the native encoded-image representation, and other binary data SHALL retain an explicit native-compatible binary representation with its MIME and retrieved data. Arbitrary binary bytes SHALL NOT be labelled as an image. Attribution and cancellation/error semantics SHALL be preserved.
-
-#### Scenario: Supported image and non-image binary remain distinct
-- **WHEN** controlled read retrieves an image fixture and a non-image binary fixture
-- **THEN** the native consumer SHALL receive a valid encoded image only for the supported image
-- **AND** the non-image result SHALL retain its MIME and exact retrieved data without an image content label
-
-#### Scenario: Text and failure are not fabricated successes
-- **WHEN** controlled read retrieves attributed text or encounters a transport failure
-- **THEN** the native consumer SHALL receive the attributed text or the explicit native error respectively
-- **AND** failure SHALL NOT produce empty successful content, invented attribution, or native fallback traffic
-
-### Requirement: Controlled Transport DNS Runs in the Native Runtime
-
-Controlled URL-read and web-search DNS SHALL execute through a resolver available in the pinned native runtime. It SHALL retain literal-IP handling, collect available IPv4/IPv6 answers, and fail closed on an empty or unresolvable address set. Every resulting request, redirect, and secondary hop SHALL use the existing shared SSRF classifier and selected egress posture. A missing Deno global SHALL NOT disable otherwise supported public-host resolution.
-
-#### Scenario: One address family has no records
-- **WHEN** a public hostname has valid answers in one family and a no-record response in the other
-- **THEN** its available answers SHALL reach the existing address-policy decision
-- **AND** the no-record response SHALL NOT discard the valid family
-
-#### Scenario: Empty or private resolution remains denied
-- **WHEN** resolution yields no usable addresses or prohibited private addresses under enforcing egress
-- **THEN** the existing transport SHALL deny before endpoint dispatch
-- **AND** no unvalidated DNS fallback SHALL execute
-
-#### Scenario: Native URL read and search share resolution policy
-- **WHEN** the two controlled tools resolve fixture hosts without a Deno runtime global
-- **THEN** both SHALL use the supported resolver and the same existing address-policy decisions
-- **AND** neither SHALL fabricate an empty successful result on resolution failure
-
-### Requirement: Restricted Enforcement Registers Through the Native Extension Contract
-
-The restricted extension SHALL install its tool-call handler and controlled replacement tools through the pinned native extension API during factory evaluation. Native runtime callbacks SHALL execute the existing enforcement decisions before tool execution. Returning a factory value or attaching a private handler slot SHALL NOT substitute for native registration. Native-YOLO sessions SHALL remain outside this registration.
-
-#### Scenario: Native callback reaches the enforcing boundary
-- **WHEN** the default factory is evaluated with the pinned API contract and a restricted native tool-call event is delivered
-- **THEN** the registered callback SHALL evaluate the existing inventory and completing policy before execution
-- **AND** a denied call SHALL produce the native bounded block response with zero dispatch
-
-#### Scenario: Native YOLO remains independent
-- **WHEN** the factory observes native-YOLO mode
-- **THEN** it SHALL NOT register the restricted enforcement or controlled replacement tools
-- **AND** the existing both-mode LSP decision SHALL remain unchanged
-
-### Requirement: Native Events Use Trusted Session and Origin Context
-
-Each native call SHALL obtain fresh tool origin metadata and the trusted context required by its operation. Owned replacements SHALL use independent physical deployment-module evidence, not invented session filesystem authority. Session-bound operations SHALL require acquired session context. Missing, ambiguous, foreign, stale or unrepresentable required evidence SHALL deny; model input SHALL NOT provide origin, ownership, approval or adapter completion.
-
-#### Scenario: Registry changes after the first call
-- **GIVEN** an initially owned tool is replaced by a foreign same-name registration
-- **WHEN** the next native call is evaluated
-- **THEN** the new source observation SHALL be used and the call SHALL be denied
-- **AND** a cached startup origin SHALL NOT authorize it
-
-#### Scenario: Model input cannot forge admission
-- **WHEN** input supplies an owned-origin claim, shared-write permission, or adapter-complete flag absent from trusted context
-- **THEN** those claims SHALL NOT grant authority
-- **AND** missing required trusted context SHALL produce a bounded denial
-
-#### Scenario: All execution targets are decoded
-- **WHEN** a native destructive or command call contains an incomplete or escaping target set
-- **THEN** its real decoded inputs SHALL reach the shared completing policy
-- **AND** the operation SHALL be denied before any target is mutated
-
-#### Scenario: Valid owned replacement retains its identity
-- **WHEN** fresh native metadata identifies a replacement under the declared canonical owned extension root
-- **THEN** its actual owned-extension origin SHALL reach provenance admission
-- **AND** admission SHALL still require the operation's separate completing boundary
-
-#### Scenario: Controlled network needs no invented session roots
-- **GIVEN** the default factory has valid physical module evidence but no session filesystem context
-- **WHEN** an owned controlled URL read or web search is invoked
-- **THEN** provenance SHALL use that module evidence and reach its separate network/backend admission
-- **AND** no ACP id, skill-session id, canonical target or shared-write grant SHALL be fabricated
-
-#### Scenario: Missing destructive context stays closed
-- **GIVEN** the module identity is valid but acquired destructive-session context is missing or incomplete
-- **WHEN** a destructive call is evaluated
-- **THEN** module admission SHALL NOT grant destructive authority and the operation SHALL deny before mutation
-
-### Requirement: Owned Skill URIs Remain Readable Through Native Read
-
-The registered read replacement SHALL expose the pinned native skill-reading capability. A skill URI SHALL resolve only against the declared canonical deployment-owned skill source and pass current canonical identity, generation and read-target checks before same-tool native delegation. Foreign, shadowed, traversing, stale, or unresolvable skills and other unsupported URI schemes SHALL remain denied. Network completion SHALL NOT grant skill authority.
-
-#### Scenario: Declared owned skill is readable
-
-- **WHEN** a current skill URI resolves to an instruction file under the canonical owned source
-- **THEN** the read replacement SHALL admit the authorized target and delegate once to native skill reading
-- **AND** the native instruction result SHALL be preserved without network dispatch
-
-#### Scenario: Skill name alone cannot authorize a shadow
-
-- **WHEN** a same-name skill comes from a foreign root, a replaced identity, or a stale generation
-- **THEN** it SHALL be denied before native delegation
-- **AND** name matching or network-adapter completion SHALL NOT override the denial
-
-#### Scenario: Traversal and other devices remain blocked
-
-- **WHEN** a skill URI escapes its owned source or an unsupported device URI is read
-- **THEN** it SHALL be denied with a bounded reason
-- **AND** no generic URI pass-through or fallback root SHALL be used
 
 ### Requirement: Root-Exact Script Entrypoint Approval
 
@@ -3884,123 +1860,6 @@ Restricted script approval SHALL require the invocation entrypoint to match an e
 - **WHEN** a client or connector is prepared without the mandatory selected-agent root/inventory input
 - **THEN** preparation SHALL fail explicitly
 - **AND** it SHALL NOT scan the process cwd or HOME to repair the missing input
-
-### Requirement: Native Local Read and Search Remain Usable Under Supported Approval
-
-Authentic local native read and built-in search SHALL remain usable under the supported owned settings and native approval posture. Activation, ignore/hidden rules, cwd and output controls SHALL NOT be described as filesystem ACLs. The current runtime pin SHALL remain unchanged when latest official-source investigation supplies no required boundary fix.
-
-#### Scenario: Local builtin search is available
-- **WHEN** restricted owned settings are composed
-- **THEN** native grep/glob SHALL remain enabled and read-tier calls SHALL retain supported approval without human elicitation
-- **AND** find SHALL preserve its existing model-dependent auto activation without new judge/model/backend configuration
-
-#### Scenario: Accepted ambient readability remains explicit
-- **WHEN** native local read/search can access a path allowed by process OS permissions but outside daemon session roots
-- **THEN** documentation and decision traces SHALL identify native-local IO, not claim protected ACP root confinement
-- **AND** client callback protected-read guarantees SHALL remain scoped to callbacks that actually execute
-
-#### Scenario: Newest official version lacks the seam fix
-- **WHEN** source inspection of official v18.10.3 finds native direct IO and ACP-denial disk fallback still present
-- **THEN** the decision record SHALL distinguish that investigated version from deployment v18.6.1
-- **AND** no automatic runtime pin bump, fork or custom IO broker SHALL be introduced
-
-### Requirement: Native Local Admission Does Not Admit Remote or Device Search Routes
-
-Every native read/search root constituent SHALL be screened for alternate, remote and internal-device routes before local admission. A valid local constituent SHALL NOT authorize a mixed unsafe root list. URL reads SHALL remain owned-adapter operations; native fetch materialization SHALL be disabled as defense in depth without disabling controlled adapter transport.
-
-#### Scenario: All roots in a native search request are screened
-- **WHEN** a local search contains multiple path/glob roots or selectors with any HTTP(S), SSH, internal/xd/device or alternate-execution target
-- **THEN** the whole call SHALL deny before native scanning or materialization
-- **AND** checking only its first root SHALL NOT suffice
-
-#### Scenario: Ordinary local path and pattern are not shell execution
-- **WHEN** native grep/glob/available-find receives a valid local path/root list and literal search pattern
-- **THEN** the native local operation SHALL remain usable
-- **AND** pattern text alone SHALL NOT be confused with a path URI or shell command
-
-#### Scenario: Controlled URL adapter remains available
-- **WHEN** restricted settings disable native fetch materialization and a genuine owned read adapter receives an authorized HTTP(S) URL
-- **THEN** its existing controlled per-hop transport SHALL remain available
-- **AND** native grep URL materialization or native read transport fallback SHALL remain blocked
-
-#### Scenario: Mutation authority remains unchanged
-- **WHEN** authentic native bash, ordinary write/edit or destructive input is evaluated
-- **THEN** the common-command authority, the pinned native approval path and the complete-destructive fail-closed decision SHALL remain in force
-- **AND** ordinary write/edit SHALL run under that native approval and the process's ambient OS permissions without a pre-dispatch sink-route evidence gate
-- **AND** uncertain targets, device/config writes or alternate bypass shapes SHALL remain fail-closed
-
-### Requirement: Authorized Ambient Native Mutation
-
-Ordinary local native write/edit SHALL run under the pinned native approval path and the process's ambient OS permissions, with no pre-dispatch sink-route evidence gate. Where the pinned bridge routes a call, the ACP sink decision and denial propagation stay in force; absolute native sandbox/plan targets and an unavailable client bridge do not reach it and SHALL be documented as the authorized residual risk. Destructive mutation SHALL keep the shared complete fail-closed decision.
-
-#### Scenario: Ordinary native write and edit are authorized ambient mutation
-- **WHEN** an ordinary local native write/edit is evaluated under the pinned native approval path
-- **THEN** it SHALL execute under the process's ambient OS permissions exactly as the accepted native local read/search posture does, with the ACP sink retained for the calls the pinned bridge actually routes
-- **AND** the artifacts SHALL record the user's explicit authorization of the ambient native mutation risk without a fabricated sink guarantee or a still-pending prerequisite
-
-#### Scenario: Absolute sandbox and plan targets take the authorized ambient path
-- **WHEN** an ordinary-looking absolute path resolves to a native session sandbox/plan exemption, or the native client bridge/capability is unavailable
-- **THEN** the pinned native dispatch path SHALL execute the write/edit under the user's authorized ambient native posture instead of denying it behind a pre-dispatch route gate
-- **AND** documentation and decision traces SHALL record that this path does not reach the ACP sink rather than claiming sink protection for it
-
-### Requirement: Native Registry Observation Uses the Supported Runtime Surface
-
-Native enforcement SHALL obtain live configured-tool metadata from the pinned extension API's supported direct registry method after runtime initialization. It SHALL NOT depend on an undeclared nested context API, evaluate unavailable action methods during load or treat model-provided source metadata as authority.
-
-#### Scenario: Factory registers before runtime actions are available
-- **WHEN** the factory loads before runtime action methods can be called
-- **THEN** handlers and replacements SHALL register without reading the live roster
-- **AND** later calls SHALL obtain the initialized direct runtime roster
-
-#### Scenario: Runtime roster cannot be observed
-- **WHEN** the direct registry method is absent, throws or returns ambiguous invoked-name metadata
-- **THEN** restricted dispatch SHALL deny with a bounded observation reason
-- **AND** model claims or startup-name caches SHALL NOT substitute
-
-#### Scenario: Unrestricted registration remains empty
-- **WHEN** the factory observes native-YOLO
-- **THEN** it SHALL register no restricted handler or controlled replacement
-- **AND** OpenCode, both-agent/both-mode LSP, sandbox/egress and cancelled readiness SHALL remain unchanged
-
-### Requirement: Owned Replacement Admission Preserves Separate Completion
-
-Genuine owned replacement admission SHALL precede and retain the existing operation-specific controlled transport, search backend or trusted instruction-root policy. Module ownership SHALL NOT imply adapter completion, credential availability, skill ownership or filesystem authority. Denied completion SHALL NOT use native network or untrusted source fallback.
-
-#### Scenario: Owned URL read reaches per-hop controlled transport
-
-- **WHEN** a physically owned current-generation URL-read replacement is called for an authorized HTTP(S) destination
-- **THEN** it SHALL reach the existing classified per-hop controlled transport
-- **AND** denied addresses, redirects and alternate/device schemes SHALL remain denied without native fallback
-
-#### Scenario: Owned search reaches the existing configured backend
-
-- **WHEN** a physically owned current-generation web_search replacement is invoked
-- **THEN** it SHALL reach existing backend selection and credential/host admission
-- **AND** absent credentials or denied completion SHALL NOT fall back to a native provider
-
-#### Scenario: Owned skill URI reaches its independent exact-root check
-
-- **WHEN** a physically owned read replacement receives an owned skill instruction URI
-- **THEN** the deployment-resolved skill root and the current skill identity SHALL be checked separately from module ownership
-- **AND** only successful skill authorization SHALL delegate the original URI unchanged
-
-#### Scenario: Development module ownership does not add skill URI authority
-
-- **WHEN** an owned development module receives a skill URI outside the deployment-resolved skill root
-- **THEN** skill authorization SHALL deny with no workspace or development fallback root
-- **AND** native script-root selection for delivered prompts SHALL NOT expand that URI grant
-
-#### Scenario: Module observation missing or stale
-
-- **WHEN** physical module metadata is missing, violates its declared image/development ownership posture, is linked, outside the declaration or stale at the current epoch/generation
-- **THEN** owned replacement admission SHALL deny before transport, backend execution or skill delegation
-- **AND** no source-name or process-state-root fallback SHALL admit it
-
-#### Scenario: Owned local read uses the accepted native posture
-
-- **WHEN** the physically owned read replacement receives an ordinary screened local path
-- **THEN** it SHALL delegate unchanged through the supported captured native reader under native approval and ambient OS permissions
-- **AND** it SHALL NOT invent daemon session-root evidence or claim protected descriptor confinement
 
 ### Requirement: Skill Auto-Approve List Construction Over the Single Resolved Root
 
@@ -4149,3 +2008,271 @@ The skills-root helper SHALL consume the existing shared deployment skill-root o
 - **WHEN** an owned skill instruction inside it is observed
 - **THEN** ownership SHALL be decided by canonical identity, link-free components, realpath containment and current-generation evidence alone
 - **AND** a linked component, an escaping target, a replaced identity or a stale generation SHALL still deny
+
+### Requirement: Shared ACP Canonical Observation And Evidence Scope
+
+Shared context/root/target helpers SHALL return one complete observation or one specific failure, never a partial grant, empty root or lexical fallback. Observations SHALL remain operation- and shared-context-generation-scoped and SHALL not imply native OMP enforcement on paths that do not consume ACP callbacks.
+
+#### Scenario: Canonicalization failure
+- **WHEN** metadata observation fails other than confirmed absence permitted by existing new-file semantics
+- **THEN** the helper SHALL return a distinguished failure, no lexical grant and no protected content IO or mutation.
+
+#### Scenario: Detectable replacement
+- **WHEN** deterministic metadata observations detect a changed root, ancestor or final target
+- **THEN** the existing path-changed failure or newly observed containment decision SHALL apply, and the actual secure access consumer SHALL preserve containment through IO.
+
+#### Scenario: Broad YOLO observation
+- **WHEN** a YOLO consumer observes a target physically inside its broad user/shared Agent workspace
+- **THEN** it SHALL retain the broad role without restricted staging, command, extension or tool clamps; external escapes SHALL remain ineligible.
+
+#### Scenario: Distinguished shared failure categories
+- **WHEN** an observation fails
+- **THEN** invalid context/path/token, invalid/unavailable/overlapping root, outside-root/link escape, dangling/looping link, missing object, wrong type, canonicalization failure, changed path and shared trusted-root identity mismatch SHALL remain distinguished.
+
+#### Scenario: Observation lifetime
+- **WHEN** successful helper metadata is consumed
+- **THEN** it SHALL remain scoped to the exact shared session/context generation and SHALL not become a reusable permission or race-proof guarantee.
+
+#### Scenario: Consumer evidence limits
+- **WHEN** real helper logic with temporary filesystems or deterministic metadata mocks passes
+- **THEN** that evidence SHALL certify only the exercised helper/access behavior, not native parser/tool/proxy enforcement; real native claims SHALL require separately exercised native consumers.
+
+### Requirement: Native OMP Assets And Data Reachability Under Shared Confinement
+
+Configured filesystem confinement SHALL retain the existing shared mount mechanism and expose the selected authored OMP files read-only and selected native mode data child read-write. It SHALL not grant the parent deployment/pool/HOME tree or sibling data roots; the shared read-only skill mount and overlap refusal SHALL remain.
+
+#### Scenario: Confined native model and data
+- **WHEN** OMP starts with filesystemConfinement enabled
+- **THEN** native OMP SHALL consume the selected authored model/config assets and persist/load its own selected XDG data inside the confined view.
+
+#### Scenario: Selected roots only
+- **WHEN** the confined process attempts to read a sibling mode/pool marker or mutate the skill root
+- **THEN** filesystem access SHALL fail and the shared mount policy SHALL not be widened by the additional OMP runtime inputs.
+
+#### Scenario: OpenCode mounts unchanged
+- **WHEN** OpenCode is spawned with the same sandbox configuration
+- **THEN** its existing runtime mounts and observable access outcomes SHALL remain unchanged.
+
+### Requirement: Shared Agent Environment Filtering With Native OMP Discovery
+
+When environment filtering is enabled, agent processes SHALL retain the existing base allowlist, supported credential sets and operator allowed variables, with platform/dashboard/raw Skill API secrets denied. OpenCode SHALL preserve its existing selector denials. OMP SHALL use shared filtering without a separate settings-discovery sanitization or selector-identity gate.
+
+#### Scenario: Supported credentials and shared secrets
+- **WHEN** either agent is launched with filtered environment and deployment credentials
+- **THEN** its existing supported credential set SHALL be retained and platform, dashboard and raw Skill API secrets SHALL remain excluded.
+
+#### Scenario: OpenCode selectors unchanged
+- **WHEN** OpenCode launch filtering receives an operator allowance for a selector previously denied
+- **THEN** its existing exclusion and warning outcome SHALL remain unchanged.
+
+#### Scenario: Ordinary OMP operator environment
+- **WHEN** OMP uses shared filtering or unfiltered configuration
+- **THEN** the existing operator allowance/filter choice SHALL apply without an additional OMP discovery-source consistency prerequisite.
+
+### Requirement: Parser-Bounded Shared Destructive Operation Normalization
+
+The shared permission gate SHALL decode destructive operation inputs into complete ordered targets and bind them to the input represented for execution before restricted authorization. Titles and location lists SHALL not supply missing operations. Supported single delete/move shapes SHALL use the existing shared decoder; unsupported native edit/patch syntax SHALL retain its current denial.
+
+#### Scenario: Complete targets and execution binding
+- **WHEN** a supported destructive request is decoded with complete matching locations
+- **THEN** every deletion target and both move endpoints SHALL receive the existing shared all-target decision, using the same bound input.
+
+#### Scenario: Partial or inconsistent locations
+- **WHEN** a destructive request omits an endpoint or its location list differs from decoded targets
+- **THEN** it SHALL retain the bounded incomplete/binding denial and authorize no partial target subset.
+
+#### Scenario: Unsupported or malformed syntax
+- **WHEN** a native edit/patch uses unsupported syntax or its input cannot be decoded or bound
+- **THEN** the existing named destructive denial SHALL apply with no mutation and no fallback into generic unknown-tool approval.
+
+#### Scenario: Pure normalization
+- **WHEN** destructive normalization runs
+- **THEN** it SHALL perform no content IO or mutation and SHALL not infer operation targets from titles or a first displayed operation.
+
+### Requirement: Shared Native-Shaped OMP Mock Session Composition
+
+Lifecycle and skill-handoff suites SHALL share the existing mock ACP session builder for permission mode, native-shaped configuration catalogs, scripted connection/subprocess behavior and destructive request fixtures. Mock evidence SHALL be identified as mock evidence without mandatory governance-origin, epoch or synthetic-approval records.
+
+#### Scenario: Shared consumers
+- **WHEN** lifecycle and handoff scenarios create mock ACP sessions
+- **THEN** they SHALL exercise the same shipped factory/connector/pool consumers while selecting their own session context and scripted catalog behavior.
+
+#### Scenario: Catalog and permission outcomes
+- **WHEN** flat, grouped, absent or missing-model catalogs and destructive permission inputs are supplied
+- **THEN** actual consumer selection, restore and authorization outcomes SHALL be tested without fabricated governance readiness claims.
+
+### Requirement: Authored Native OMP Provider Configuration And Identity
+
+Authored native model configuration SHALL retain Gemini provider `google` with `GEMINI_API_KEY` and OpenRouter with `OPENROUTER_API_KEY`, using supported native provider headers for `X-Title: AIr-Friends`. Native non-overridable identity headers SHALL be documented from pinned source. Model selection SHALL remain catalog-based without a project-generated provider blacklist.
+
+#### Scenario: Native provider configuration is consumed
+- **WHEN** a configured OMP session loads its authored native model file
+- **THEN** supported credentials and native provider header configuration SHALL reach the selected native provider mechanism.
+
+#### Scenario: Catalog miss
+- **WHEN** a requested model is missing from an advertised native catalog
+- **THEN** the existing explicit session-scoped selection error SHALL remain without an invented model ID.
+
+#### Scenario: Native identity limitations
+- **WHEN** documentation describes a built-in identity header that native configuration cannot override
+- **THEN** it SHALL name the pinned source mechanism and SHALL not claim preservation from configuration inspection or mocks.
+
+### Requirement: Authored Native OMP Compaction Update And Prompt Behavior
+
+Authored mode settings SHALL preserve enabled native conversation compaction and the current supported update-posture settings. The system SHALL retain the explicit native custom-prompt route and existing operator prompt mounts. Native compaction differences and unexercised prompt effects SHALL be documented without invented schema keys or runtime-equivalence claims.
+
+#### Scenario: Native compaction and updates
+- **WHEN** either mode consumes its authored settings
+- **THEN** current native compaction, disabled automatic update checks/marketplace updates and stable update channel SHALL remain configured without a schema mirror.
+
+#### Scenario: Prompt override
+- **WHEN** OMP starts with the existing explicit system-prompt asset or operator-mounted prompt
+- **THEN** the native custom-prompt route SHALL consume that selected path and existing per-file payload prompt mounts SHALL remain untranslated.
+
+#### Scenario: Evidence limits
+- **WHEN** compaction or prompt behavior is documented
+- **THEN** actual native strategy differences and unexercised runtime behavior SHALL be distinguished from source/configuration observations.
+
+### Requirement: Native OMP Approval Mode Selection At Process Launch
+
+OMP SHALL select restricted or native-YOLO policy at process launch from the existing effective permission mode. OMP SHALL retain separate processes and no ACP session-mode override; OpenCode SHALL retain its per-session mode switching.
+
+#### Scenario: Native mode selection
+- **WHEN** restricted and YOLO OMP sessions are acquired
+- **THEN** each SHALL launch with its authored native mode settings and the existing mode-separated pool key.
+
+#### Scenario: Protocol distinction
+- **WHEN** OMP and OpenCode session overrides are requested
+- **THEN** OMP SHALL return no approval-mode session override and OpenCode’s existing YOLO override SHALL remain.
+
+### Requirement: Restricted Native OMP ACP Launch
+
+Restricted OMP SHALL launch ACP with its authored mode configuration, the required native-loadable capability extension and the existing system-prompt asset. The launch SHALL delegate configuration parsing to native OMP.
+
+#### Scenario: Restricted launch
+- **WHEN** a restricted OMP session starts
+- **THEN** native OMP SHALL consume the authored restricted YAML and attach the capability handler; missing required bundle SHALL report the existing build remedy.
+
+#### Scenario: Native settings error
+- **WHEN** an authored configuration is invalid
+- **THEN** the native parser/startup error SHALL flow through the existing session error reporting.
+
+### Requirement: Permissive Native OMP ACP Launch With Explicit LSP Denial
+
+Native-YOLO OMP SHALL launch a separate ACP process with authored native YOLO approval and explicit LSP tool denial, without the restricted capability extension.
+
+#### Scenario: Native permissive session
+- **WHEN** OMP YOLO starts
+- **THEN** known and unmatched non-LSP tools SHALL retain native permissive policy while the explicit LSP tool policy remains deny.
+
+### Requirement: Native OMP Mode Data And Session Staging Separation
+
+OMP SHALL retain distinct native session/database data directories for its separate approval-mode processes. Process cwd SHALL follow the existing caller/session working directory, and config HOME SHALL remain the normal inherited deployment HOME.
+
+#### Scenario: Native data separation
+- **WHEN** OMP restricted and YOLO start under one conversation/pool key
+- **THEN** their native persisted data SHALL use distinct selected mode data roots without isolated HOME or neutral-cwd proof.
+
+#### Scenario: Staging identity
+- **WHEN** a skill payload is created for a session
+- **THEN** its location SHALL remain session cwd/tmp/Skill API ID, independent of native process data directories.
+
+### Requirement: Native OMP Generated Extension Asset Selection
+
+Restricted OMP SHALL load the selected generated development or installed native-loadable extension asset. Missing required development output SHALL report the existing bundle build remedy. File ownership or replacement evidence SHALL not be an integration authorization prerequisite.
+
+#### Scenario: Generated artifact usable
+- **WHEN** the shipped bundle exists in the selected deployment location
+- **THEN** native loading SHALL use that generated ESM asset without a runtime import map.
+
+#### Scenario: Missing required output
+- **WHEN** restricted launch cannot find its generated asset
+- **THEN** startup SHALL fail with the asset path and build remedy rather than use raw source as a load fallback.
+
+### Requirement: Native OMP Shared Environment And Egress Behavior
+
+Both OMP modes SHALL retain the existing shared sandbox/environment filtering, provider credentials, proxy decisions and session/pool markers. Mode selection SHALL not introduce new egress rules or OMP settings-source identity requirements. OpenCode behavior SHALL remain unchanged.
+
+#### Scenario: Shared egress settings
+- **WHEN** OMP starts in either mode under the same sandbox configuration
+- **THEN** the existing proxy/sandbox decision SHALL remain identical and credentials SHALL follow shared filtering.
+
+#### Scenario: Pooled skill identity
+- **WHEN** a shared OMP process starts
+- **THEN** it SHALL retain the shared marker and JWT directory without a frozen session ID; the current-session pointer SHALL remain session-scoped.
+
+### Requirement: Native OMP Local Read And Search Behavior
+
+OMP native read and local search SHALL remain usable under native approval policy. Native activation, ignore/hidden controls, cwd and output settings SHALL retain their upstream behavior and SHALL not be described as callback filesystem authorization.
+
+#### Scenario: Native local capabilities
+- **WHEN** restricted read/grep/glob calls are dispatched
+- **THEN** they SHALL use native tools and native allow policy; find SHALL retain model-dependent auto activation without adding a judge.
+
+#### Scenario: Actual external read route
+- **WHEN** native read/search reaches a path outside daemon session roots
+- **THEN** acceptance SHALL record the native operation and any actual ACP request/result; protected callback guarantees SHALL apply only to callbacks that execute.
+
+### Requirement: Native OMP Capability Admission Before Tool Dispatch
+
+Restricted OMP’s capability handler SHALL be attached through the official pre-dispatch extension tool-call API and SHALL block unmatched calls before dispatch. Native YOLO SHALL retain its separately selected native policy.
+
+#### Scenario: Known capability dispatch
+- **WHEN** restricted native tool_call names a mapped ability
+- **THEN** the handler SHALL continue to native dispatch without repeating native or ACP authorization.
+
+#### Scenario: Unmatched capability
+- **WHEN** restricted native tool_call names an unmatched tool
+- **THEN** the call SHALL be blocked before execution with a bounded unknown-tool reason.
+
+#### Scenario: Ordinary file write
+- **WHEN** a native ordinary write reaches the advertised ACP write callback
+- **THEN** the existing shared callback policy SHALL decide it and a rejected write SHALL cause no unauthorized file change.
+
+### Requirement: Consumer ACP Lifecycle And Mode Recovery Regression Suite
+
+The combined lifecycle suite SHALL drive real connector, pool and orchestrator consumers with mock ACP transport, covering normal lifecycle, shared recovery, mode coexistence/lease serialization, callback denial and unchanged OpenCode flows. Evidence SHALL remain distinguished from real-native and image acceptance.
+
+#### Scenario: Lifecycle and restore
+- **WHEN** the fixture drives initialize/new/prompt/cancel/load
+- **THEN** the shipped consumers SHALL restore model/reasoning/context in existing order and rejected callback writes SHALL have no side effects.
+
+#### Scenario: Mode coexistence
+- **WHEN** restricted and YOLO OMP sessions use the same conversation key
+- **THEN** separate native-mode processes SHALL serialize under one lease and preserve their own contexts.
+
+#### Scenario: OpenCode flows
+- **WHEN** OpenCode exercises selection/start/reuse/recovery
+- **THEN** existing observable launch, permission and optional-context outcomes SHALL remain unchanged.
+
+### Requirement: Handwritten Native OMP Configuration Consumption
+
+OMP SHALL directly consume hand-written native YAML. Application startup and code/image builds SHALL not generate, serialize, template or rewrite OMP configuration. Deployment SHALL manually configure native skill discovery and the shared skill root; native configuration errors SHALL use native reporting.
+
+#### Scenario: No production configuration writes
+- **WHEN** OMP startup or extension/image build is observed after deployment provisioning
+- **THEN** no write/replacement operation SHALL target authored OMP mode/model YAML; build installation SHALL only copy tracked authored bytes.
+
+#### Scenario: Native model file
+- **WHEN** the deployment installs its authored models file at the native agent config path
+- **THEN** native OMP SHALL consume that file directly with its supported provider schema, independently of OpenCode JSON.
+
+#### Scenario: Custom skill deployment
+- **WHEN** a deployment selects a custom shared skill-script root
+- **THEN** the deployer SHALL author that same discovery root in native OMP YAML; no interpolation or equality-rejection service SHALL be required.
+
+### Requirement: OMP Native Capability Policy Parity
+
+Restricted OMP SHALL permit native abilities corresponding to OpenCode read/search/todo/skill/network/modify/execute policies and deny unmatched tools. Both modes SHALL explicitly deny the LSP tool using native approval settings. Native URL/search result differences SHALL remain upstream-owned.
+
+#### Scenario: Restricted mapped abilities
+- **WHEN** a native read, grep, glob, find when active, todo, web_search, edit/write, delete/move or bash call occurs
+- **THEN** it SHALL continue through its native approval/ACP path without origin/epoch or a second command/filesystem policy.
+
+#### Scenario: Explicit LSP denial
+- **WHEN** either native OMP mode invokes the LSP tool
+- **THEN** native exact-name approval SHALL deny the tool; acceptance SHALL make no implicit-server startup claim.
+
+#### Scenario: Native network and skills
+- **WHEN** a native URL read, web search or skill URI read occurs
+- **THEN** it SHALL use the original native implementation without project-owned transport/backend/schema or skill-URI metadata replacement.

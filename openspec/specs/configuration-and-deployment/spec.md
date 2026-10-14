@@ -802,20 +802,6 @@ Current OMP documentation SHALL distinguish the 35 archived baseline changes fro
 - **THEN** they SHALL record the user's explicit authorization of the ambient native mutation risk and SHALL NOT retain an application-blocked mutation status or a pending mutation-route prerequisite
 - **AND** they SHALL NOT claim ACP-sink protection for absolute native session-sandbox/plan targets or an unavailable client bridge, and SHALL NOT reopen the accepted local read/search decision
 
-### Requirement: OMP Launch Documentation Names the Generated Deployment Artifact
-
-Current launch, discovery and packaging documentation SHALL identify the canonical TypeScript tree as build input and the selected generated JavaScript bundle as the sole loaded artifact. It SHALL distinguish deployment module/root ownership from mutable process state and session roots. Obsolete copied source closure and raw-source launch instructions SHALL be removed, not retained as alternatives.
-
-#### Scenario: Development and image launch paths agree
-- **WHEN** development or image launch documentation shows the trusted-extension argument
-- **THEN** development SHALL name the resolved generated `build/omp-extension/index.js` and image SHALL name `/opt/air/omp/extension/index.js`
-- **AND** neither SHALL instruct launching the raw canonical `.ts` source
-
-#### Scenario: Dependency closure description follows packaging
-- **WHEN** the extension packaging closure is documented
-- **THEN** it SHALL describe the generated locked artifact and explicit supported native-host facade with manifest coverage
-- **AND** it SHALL NOT claim a copied `_daemon` import tree or mutable state root supplies deployment ownership
-
 ### Requirement: OMP Boundary Documentation Preserves Evidence Limits
 
 Current OMP boundary documentation SHALL separate source/mock findings, user observations and unverified official-runtime behavior. It SHALL reflect DECIDED deployment dispositions beside unchanged unresolved native verdict strings, retain accepted extension-load residual risk and avoid hard handler-readiness guarantees. Substantive owners SHALL update their behavior docs before final consolidation.
@@ -1012,3 +998,19 @@ Bootstrap SHALL declare the deployment-resolved skill root to OpenCode by writin
 - **WHEN** the declaration is written
 - **THEN** it SHALL grant discovery and file-read visibility only
 - **AND** it SHALL NOT add a second skill root, a script grant, or any authority that the root-exact inventory and the approval gate do not already establish from the same resolved root
+
+### Requirement: Current Native OMP Artifact And Configuration Documentation
+
+Current launch and packaging documentation SHALL identify canonical TypeScript as build input and the selected generated ESM bundle as the native load artifact. Native configuration paths and mutable mode data SHALL be distinguished without physical module ownership, deployment declarations or internal manifest prerequisites.
+
+#### Scenario: Development and image entry
+- **WHEN** docs describe the restricted extension argument
+- **THEN** they SHALL name generated build/omp-extension/index.js or installed /opt/air/omp/extension/index.js, with no raw-source load fallback.
+
+#### Scenario: Actual build closure
+- **WHEN** docs describe the current extension build
+- **THEN** they SHALL describe frozen native ESM output and actual required dependencies, without obsolete façade, ownership declaration or manifest-coverage requirements.
+
+#### Scenario: Native configuration location
+- **WHEN** docs describe the model file and mode settings
+- **THEN** they SHALL name inherited native HOME model provisioning and explicit authored mode YAML; no model-config-path flag SHALL be invented.

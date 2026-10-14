@@ -124,49 +124,6 @@ The resolution from each contracted development-tree path (the trusted-extension
 - **THEN** launch SHALL fail with the build remedy rather than import a raw Deno-only tree
 - **AND** no alternative extension-root convention SHALL be selected
 
-### Requirement: Owned Extension Has a Locked Native-Loadable Closure
-
-The installed and development extension entries SHALL have a reproducible dependency closure consumable by the pinned native runtime without a Deno import map, ambient packages, or runtime downloads. Only documented native builtins and pinned host-provided compatibility imports SHALL remain external. Canonical source SHALL be single-owned, locked dependencies SHALL be checked, and every installed output SHALL be manifested.
-
-#### Scenario: Unresolved dependency fails packaging
-- **WHEN** an emitted extension dependency still requires JSR, a Deno import-map alias, or an unapproved bare package
-- **THEN** packaging SHALL fail before installation
-- **AND** a sidecar import map SHALL NOT satisfy native-loadability
-
-#### Scenario: Same reproducible closure in development and image
-- **WHEN** development launch and image installation consume the built extension
-- **THEN** both SHALL use the same generated artifact contract derived from canonical sources and locked dependencies
-- **AND** no new JavaScript runtime SHALL be installed to support it
-
-#### Scenario: Successor changes recut the bundle and digests
-- **WHEN** a successor changes source or dependencies installed into the owned extension
-- **THEN** it SHALL rebuild the closure and recut every affected owned digest in the same change
-- **AND** independently edited mirror content SHALL NOT be accepted
-
-### Requirement: Generated OMP Bundle Carries Its Owned Deployment Declaration
-
-The generated native-loadable OMP bundle SHALL carry a build-owned declaration of its exact contracted development artifact and fixed image artifact for physical ownership admission. The declaration SHALL originate from trusted canonical build inputs, not process cwd, model input or an arbitrary loaded-module parent. It SHALL add no public runtime configuration field, credential or environment override.
-
-#### Scenario: Contracted development artifact is declared
-- **WHEN** the existing locked bundling workflow emits the development artifact
-- **THEN** its declaration SHALL identify the canonical checkout's generated `build/omp-extension/index.js` artifact
-- **AND** an arbitrary source-tree copy, output root or moved artifact SHALL NOT acquire authority from its own location
-
-#### Scenario: Same artifact can use the fixed image face
-- **WHEN** the generated artifact is installed at `/opt/air/omp/extension/index.js`
-- **THEN** physical ownership SHALL consume the fixed image declaration independently of mutable launch state
-- **AND** the existing locked dependency/host-facade audit and installed manifest coverage SHALL remain active
-
-#### Scenario: Moved development checkout rebuilds rather than overriding identity
-- **WHEN** the development deployment path changes
-- **THEN** the artifact SHALL be rebuilt from that checkout's canonical trusted build inputs
-- **AND** runtime configuration, process cwd or moduleURL-parent inference SHALL NOT override the embedded declaration
-
-#### Scenario: Build declaration is not a filesystem grant
-- **WHEN** the module declaration passes physical ownership checks
-- **THEN** it SHALL confer only module origin evidence
-- **AND** it SHALL NOT manufacture session ids, filesystem canonical targets, destructive approvals or readiness assertions
-
 ### Requirement: Single Packaged Skill Tree For Every Agent Type
 
 The container image SHALL install exactly one skill tree — the authored repository `skills/` content — at the personal skill root that every agent type resolves, and SHALL NOT install a second skill tree under any other path. No owned skill root, staged catalog filter or bundled-catalog packaging rule SHALL remain. The owned OMP artifact tree, its digest manifest scope and the pinned agent versions SHALL remain unchanged.
@@ -191,3 +148,15 @@ The container image SHALL install exactly one skill tree — the authored reposi
 - **THEN** the owned OMP artifact tree under its own root and the SHA-256 digest manifest covering exactly the extension tree, settings overlays and prompt artifact SHALL remain unchanged
 - **AND** no skill byte SHALL enter that manifest's digest set
 - **AND** the generated extension bundle contract and the pinned agent versions SHALL remain unchanged
+
+### Requirement: Native OMP Single ESM Code Artifact
+
+The OMP extension SHALL be built from the canonical source and frozen dependencies as a single ESM artifact consumable by the pinned native runtime without an import map or runtime dependency downloads. Build-time loadability checks SHALL reflect the dependencies actually required by the thin capability handler.
+
+#### Scenario: Native load
+- **WHEN** the generated development or installed ESM artifact is loaded by the pinned executable
+- **THEN** the official factory SHALL attach the usable restricted capability handler without importing unavailable aliases/packages.
+
+#### Scenario: Authored config independent of bundling
+- **WHEN** the extension is bundled
+- **THEN** the build SHALL create code output only and SHALL not synthesize or rewrite OMP YAML.
