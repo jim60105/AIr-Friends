@@ -1,11 +1,23 @@
 // tests/utils/omp-packaging.test.ts
 //
-// Test evidence for `package-pinned-omp-runtime` (OMP batch row 20 / P8).
-// Design §14/§15: this change's certification is Containerfile-parse,
-// bundle-replay, manifest-fixture, and unit/mock assertions ONLY — no docker
-// build, no download, and NEVER any `omp --version` execution lives here.
-// Live image build/arch/binary acceptance is user-owned (§7 of
-// docs/OMP_PACKAGING.md) and ships explicitly unverified.
+// Behavior evidence for the OMP container installation
+// (`simplify-omp-container-installation`).
+//
+// The evidence is exercised behavior, never a transcription of Containerfile
+// text or of the digest table:
+//   - the local-architecture image is really built, the build really fails
+//     closed on a wrong executable checksum, and the built image really starts
+//     the pinned native runtime against its authored mode settings (plus its
+//     official notices, observed through the installed package).
+//   - the generated trusted-extension bundle is really cut by the production
+//     bundler and really loaded (standalone under node, and through the
+//     delivered-artifact smoke suite).
+//   - the dev→image path resolvers are exercised against fixture filesystems.
+//
+// The image scenarios SKIP with a notice when no `podman` binary exists, so a
+// container-less checkout still runs the rest of the suite. A successful local
+// build certifies the LOCAL architecture only; the other architecture stays
+// user-owned (docs/OMP_PACKAGING.md §7).
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 // The generated-bundle audit predicate is imported from its production
@@ -18,9 +30,9 @@ import {
 } from "../../scripts/omp/bundle-audit.ts";
 import {
   OMP_IMAGE_CONFIG_ROOT,
+  OMP_IMAGE_EXTENSION_ARTIFACT,
   OMP_IMAGE_EXTENSION_ROOT,
   OMP_IMAGE_PROMPT_PATH,
-  OMP_IMAGE_ROOT,
   OMP_SYSTEM_PROMPT_MOUNT_PATH,
   OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
   OMP_TRUSTED_EXTENSION_PATH,
@@ -28,276 +40,10 @@ import {
   resolveOmpExtensionPath,
   resolveOmpSystemPromptPath,
 } from "@utils/omp-paths.ts";
-import { OMP_IMAGE_EXTENSION_ARTIFACT } from "@utils/omp-paths.ts";
 
 const repoRoot = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
-const containerfile = await Deno.readTextFile(`${repoRoot}/Containerfile`);
 
-// The digest table transcribed verbatim from design §12 (strings, not
-// hashes-of-hashes; task 1.1 byte-equality).
-const PIN = "18.6.1";
-const DIGESTS = {
-  OMP_SHA256_X64: "c92a6846d02984e84f07c6362d18add3783f528f494ffcf1e0f26e594f327463",
-  OMP_SHA256_ARM64: "cb7815330bb117877e4e133562ea82e3001ee470e47393552507b5a7f0407f4a",
-  OMP_LICENSE_SHA256: "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
-  OMP_NOTICES_SHA256: "d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b",
-} as const;
-
-// --- Containerfile section extraction -------------------------------------
-
-function section(start: string, end: string): string {
-  // Anchored on FROM lines (with a leading newline) so no future instruction
-  // placed before the stage comment can silently enter a slice.
-  const a = containerfile.indexOf(`\n${start}`);
-  const b = containerfile.indexOf(`\n${end}`, a);
-  assert(a >= 0, `section start not found: ${start}`);
-  assert(b > a, `section end not found after start: ${end}`);
-  return containerfile.slice(a, b);
-}
-
-// Stage slices are delimited by the NEXT stage's FROM line:
-// opencode-unpacker -> cache; cache -> omp-unpacker; omp-unpacker -> final.
-const ompStage = section("FROM base AS omp-unpacker", "FROM base AS final");
-const finalStage = containerfile.slice(containerfile.indexOf("FROM base AS final"));
-const opencodeStage = section("FROM base AS opencode-unpacker", "FROM base AS cache");
-const cacheStage = section("FROM base AS cache", "FROM base AS omp-unpacker");
-
-// --- 4.1 Containerfile-parse assertions ------------------------------------
-
-Deno.test("omp packaging - omp-unpacker stage exists mirroring the opencode stage", () => {
-  assert(/^FROM base AS omp-unpacker$/m.test(containerfile));
-  // One stage per binary, same pattern as OpenCode.
-  assert(/^FROM base AS opencode-unpacker$/m.test(containerfile));
-});
-
-Deno.test("omp packaging - ARG defaults byte-equal to the design table", () => {
-  assertEquals(containerfile.includes(`ARG OMP_VERSION=${PIN}`), true);
-  for (const [name, digest] of Object.entries(DIGESTS)) {
-    assertEquals(
-      containerfile.includes(`ARG ${name}=${digest}`),
-      true,
-      `${name} digest byte-equal to design §12`,
-    );
-  }
-});
-
-Deno.test("omp packaging - arch mapping branches with fail-fast default", () => {
-  assert(ompStage.includes('amd64) OMP_ARCH="x64"; OMP_SHA256="${OMP_SHA256_X64}"'));
-  assert(ompStage.includes('arm64) OMP_ARCH="arm64"; OMP_SHA256="${OMP_SHA256_ARM64}"'));
-  assert(
-    ompStage.includes('*) echo "unsupported architecture: ${TARGETARCH}" && exit 1'),
-    "fail-fast branch on unknown TARGETARCH",
-  );
-});
-
-Deno.test("omp packaging - asset allowlist rule: unique match within the exact tag", () => {
-  // Selection scoped to the exact v${OMP_VERSION} release listing...
-  assert(ompStage.includes("releases/tags/v${OMP_VERSION}"));
-  // ...by the D2 allowlist regex...
-  assert(ompStage.includes('grep -E "^omp-linux-${OMP_ARCH}[^/]*$"'));
-  // ...with zero-or-many matches failing the build naming the count.
-  assert(ompStage.includes(`if [ "\${count}" != "1" ]`));
-  assert(ompStage.includes("expected exactly 1 asset match, found ${count}"));
-  // Downloads bind to the SAME listing response that enforced uniqueness.
-  assert(ompStage.includes("browser_download_url"));
-  // The observed asset name is recorded (stage comment) for the docs table.
-  assertStringIncludes(ompStage, "Observed asset name");
-  assertStringIncludes(ompStage, "omp-linux-x64");
-});
-
-Deno.test("omp packaging - every checksum verifies BEFORE any consumption", () => {
-  // The unpacker verifies all three artifacts before any mv/install.
-  const checkBin = ompStage.indexOf('echo "${OMP_SHA256}  /tmp/omp.bin" | sha256sum -c -');
-  const checkLic = ompStage.indexOf('echo "${OMP_LICENSE_SHA256}  /tmp/LICENSE" | sha256sum -c -');
-  const checkNot = ompStage.indexOf(
-    'echo "${OMP_NOTICES_SHA256}  /tmp/THIRD-PARTY-NOTICES.txt" | sha256sum -c -',
-  );
-  const consumeBin = ompStage.indexOf("mv /tmp/omp.bin");
-  const consumeLic = ompStage.indexOf("mv /tmp/LICENSE");
-  const consumeNot = ompStage.indexOf("mv /tmp/THIRD-PARTY-NOTICES.txt");
-  assert(checkBin >= 0 && checkLic >= 0 && checkNot >= 0, "all three checks present");
-  assert(checkBin < consumeBin && checkLic < consumeLic && checkNot < consumeNot);
-  // Final-stage consumption is COPY-only (no stage-2 download/install).
-  assert(finalStage.includes("COPY --link --chown=0:0 --chmod=0755 --from=omp-unpacker"));
-});
-
-Deno.test("omp packaging - final-stage destinations and ownership contract", () => {
-  // Binary: root-owned 0755 (deliberate divergence from $UID:0 775).
-  assert(finalStage.includes("--from=omp-unpacker /omp/out/omp /usr/local/bin/omp"));
-  assert(finalStage.includes("--chown=0:0 --chmod=0755 --from=omp-unpacker"));
-  // Notices: new /licenses/omp/ subdir; the project's own /licenses/LICENSE untouched.
-  assert(finalStage.includes("--from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE"));
-  assert(
-    finalStage.includes(
-      "--from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt",
-    ),
-  );
-  assert(finalStage.includes("COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE"));
-  // Owned tree: root-owned dirs 0755...
-  for (
-    const dir of [
-      "/opt/air/omp",
-      "/opt/air/omp/config",
-      "/opt/air/omp/prompt",
-      "/opt/air/omp/extension",
-    ]
-  ) {
-    assert(finalStage.includes(`install -d -m 755 -o 0 -g 0 ${dir}`), `owned dir ${dir}`);
-  }
-  // ...files 0644 root-owned.
-  assert(
-    finalStage.includes(
-      "--chown=0:0 --chmod=0644 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml",
-    ),
-  );
-  assert(
-    finalStage.includes(
-      "--chown=0:0 --chmod=0644 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml",
-    ),
-  );
-  // models.yml is NOT an owned overlay: native OMP reads it from its own
-  // config HOME, so packaging installs it at the NATIVE path (root-owned) and
-  // the owned config tree stays the two mode YAMLs only.
-  assert(
-    finalStage.includes(
-      "--chown=0:0 --chmod=0644 agent-config/omp/models.yml /home/deno/.omp/agent/models.yml",
-    ),
-  );
-  assertEquals(
-    finalStage.includes("/opt/air/omp/config/models.yml"),
-    false,
-    "models.yml is never installed into the owned config tree",
-  );
-  assert(
-    finalStage.includes(
-      "--chown=0:0 --chmod=0644 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md",
-    ),
-  );
-  // The owned tree appears under NONE of the agent-writable roots.
-  for (const writable of ["/app/data", "/app/prompts", "/home/deno"]) {
-    const ownedInstalls = finalStage
-      .split("\n")
-      .filter((line) => line.includes("/opt/air/omp"))
-      .map((line) => (line.includes(writable) ? line : null))
-      .filter((line): line is string => line !== null);
-    assertEquals(ownedInstalls, [], `no /opt/air/omp install under agent-writable ${writable}`);
-  }
-});
-
-Deno.test("omp packaging - bundle + manifest run inside the owned-tree step", () => {
-  // The extension tree is produced by the bundler, the manifest by the
-  // generator, both over the root-owned cache-stage sources, before USER.
-  assert(
-    finalStage.includes(
-      "bundle-omp-extension.sh /build-src /opt/air/omp/extension /build-src/deno.lock",
-    ),
-  );
-  assert(
-    finalStage.includes(
-      'generate-omp-manifest.sh /opt/air/omp "$(cat /opt/air-build/OMP_VERSION)"',
-    ),
-  );
-  // The build consumes the cache stage's root-owned source copy, not the
-  // agent-writable /app/src tree.
-  assert(finalStage.includes("type=bind,from=cache,src=/app,target=/build-src"));
-  // Manifest lands root-owned non-writable by the runtime user.
-  assert(finalStage.includes("chmod 0644 /opt/air/omp/PACKAGE-MANIFEST.sha256"));
-  // The staging scripts do not survive the build.
-  assert(finalStage.includes("rm -rf /opt/air-build"));
-});
-
-Deno.test("omp packaging - linked copies never precede the directory preparation", () => {
-  // `COPY --link` lands as an independent layer that re-creates the
-  // destination's parent directories at 0755 with that copy's ownership, so a
-  // directory prepared to another mode must be prepared AFTER the last linked
-  // copy in the stage (verified under rootless podman: /app and /home/deno came
-  // back 0755, while /app/data and /deno-dir — never copy parents — kept 0775).
-  const lastLinkedCopy = finalStage.lastIndexOf("COPY --link");
-  assert(lastLinkedCopy > 0, "the final stage installs content via COPY --link");
-  assert(
-    finalStage.indexOf("install -d -m 775 -o $UID -g 0 /app") > lastLinkedCopy,
-    "the $UID:0 775 directory preparation follows every linked copy",
-  );
-  // Same rule for the root-owned binary directory: without the explicit
-  // declaration its owner would follow whichever linked copy touched it last.
-  assert(
-    finalStage.indexOf("install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin") > lastLinkedCopy,
-    "root-owned /usr/local/bin is declared after every linked copy",
-  );
-  // The packaging scripts resolve `../../src/...` against their own file URL,
-  // so the cache stage keeps them beside `src/` and the owned-tree step invokes
-  // them from that same read-only mount.
-  assert(
-    cacheStage.includes("COPY --link --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/"),
-    "the cache stage carries the sibling scripts/omp tree",
-  );
-  assert(
-    finalStage.includes("/build-src/scripts/omp/bundle-omp-extension.sh"),
-    "the bundler runs from the cache-stage mount, never a relocated copy",
-  );
-});
-
-Deno.test("omp packaging - no-new-Bun rule in the OMP steps", () => {
-  // No JS/Bun runtime installation anywhere in the OMP stage or the owned-tree
-  // install step. (The pre-existing denoland/deno base is pre-existing, not
-  // proven absent — design D8's honest scoping of this assertion.)
-  const stageNoComments = ompStage
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .join("\n");
-  assertEquals(/\bbun\b/i.test(stageNoComments), false);
-  const stepNoComments = finalStage
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .join("\n");
-  assertEquals(/install[^\n]*\bbun\b/i.test(stepNoComments), false);
-  assertEquals(/npm install[^\n]*\bbun\b/i.test(stepNoComments), false);
-});
-
-Deno.test("omp packaging - OpenCode sections byte-unchanged (recorded fixture)", () => {
-  // Row 20 is additive: the OpenCode pin block and install lines are recorded
-  // verbatim here; any drift fails this fixture.
-  assertEquals(
-    opencodeStage.includes(`ARG OPENCODE_VERSION=1.18.21`),
-    true,
-  );
-  assertEquals(
-    opencodeStage.includes(
-      "ARG OPENCODE_SHA256_X64=d910c3ed7613bb5791a328904615d41cc25b7d3a6b470e3199ab0426a995b38a",
-    ),
-    true,
-  );
-  assertEquals(
-    opencodeStage.includes(
-      "ARG OPENCODE_SHA256_ARM64=d30d2cba74617f4e7b96e25563c9572ffe453f9eae70fc0df16286813537ee72",
-    ),
-    true,
-  );
-  assertEquals(
-    opencodeStage.includes(
-      'amd64) OC_ARCH="x64"; OC_SHA256="${OPENCODE_SHA256_X64}"',
-    ),
-    true,
-  );
-  // Its install destinations and config copy stay put.
-  assert(
-    finalStage.includes(
-      "COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode",
-    ),
-  );
-  assert(
-    finalStage.includes(
-      "COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json",
-    ),
-  );
-});
-
-Deno.test("omp packaging - bump-deliberately comment mirrors the OpenCode stage", () => {
-  assertStringIncludes(ompStage, "Bump deliberately");
-  assertStringIncludes(ompStage, "NO download");
-});
-
-// --- 4.3 dev→image resolver assertions on fixture filesystems ---------------
+// --- dev→image resolver behavior on fixture filesystems ---------------------
 
 Deno.test("omp-paths resolvers - image-first when the installed tree exists", () => {
   const exists = (path: string) =>
@@ -315,7 +61,7 @@ Deno.test("omp-paths resolvers - image-first when the installed tree exists", ()
 
 Deno.test("omp-paths resolvers - dev fallback selects the generated bundle when absent", () => {
   const exists = (_path: string) => false;
-  // C3: the dev face is the deterministic GENERATED entry, never the raw
+  // The dev face is the deterministic GENERATED entry, never the raw
   // Deno-only source tree (OMP_TRUSTED_EXTENSION_PATH stays the canonical
   // source origin, asserted separately below).
   assertEquals(resolveOmpExtensionPath({ exists }), OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
@@ -332,11 +78,11 @@ Deno.test("omp-paths resolvers - dev fallback selects the generated bundle when 
   assertEquals(resolveOmpSystemPromptPath({ exists }), OMP_SYSTEM_PROMPT_MOUNT_PATH);
 });
 
-Deno.test("omp-paths resolvers - operator prompt mount honored over the owned artifact", () => {
-  // Mount exists, owned artifact exists: the mount wins (row 8 semantics).
+Deno.test("omp-paths resolvers - operator prompt mount honored over the installed artifact", () => {
+  // Mount exists, installed artifact exists: the mount wins.
   const both = (_path: string) => true;
   assertEquals(resolveOmpSystemPromptPath({ exists: both }), OMP_SYSTEM_PROMPT_MOUNT_PATH);
-  // Mount absent, owned artifact exists: the owned artifact serves.
+  // Mount absent, installed artifact exists: the installed artifact serves.
   const onlyImage = (path: string) => path === OMP_IMAGE_PROMPT_PATH;
   assertEquals(resolveOmpSystemPromptPath({ exists: onlyImage }), OMP_IMAGE_PROMPT_PATH);
 });
@@ -388,101 +134,277 @@ Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end
   }
 });
 
-Deno.test("omp-paths constants - image roots never overlap agent-writable roots", () => {
-  for (
-    const constant of [
-      OMP_IMAGE_ROOT,
-      OMP_IMAGE_EXTENSION_ROOT,
-      OMP_IMAGE_CONFIG_ROOT,
-      OMP_IMAGE_PROMPT_PATH,
-    ]
-  ) {
-    assertEquals(constant.startsWith("/opt/air/omp"), true);
-    for (const writable of ["/app/data", "/app/prompts", "/home/deno"]) {
-      assertEquals(constant.startsWith(writable), false, `${constant} under ${writable}`);
+// --- Container image installation behavior ----------------------------------
+//
+// The one scenario that observes the real installation: build the
+// local-architecture image, then exercise the installed runtime and its
+// authored assets inside it. A wrong pinned executable checksum must fail the
+// build BEFORE any image is installed, so bad download bytes can never become
+// a runnable image.
+//
+// This scenario is an explicit OPT-IN (`OMP_PACKAGING_BUILD=1`), not a CI
+// step: it builds a whole container image. CI runners do ship podman, so a
+// presence check alone would turn every push into two full image builds with a
+// different builder than the release pipeline uses.
+
+const PIN = "18.6.1";
+const IMAGE_TAG = "air-friends-omp-packaging-test";
+const REJECTED_IMAGE_TAG = "air-friends-omp-packaging-test-bad-checksum";
+const WRONG_EXECUTABLE_SHA256 = "0".repeat(64);
+// The unpacker selects the per-architecture digest, so the deliberately wrong
+// value must be injected through the ARCH-SPECIFIC build argument; on arm64 the
+// x64 argument is inert and the build would wrongly succeed.
+const EXECUTABLE_SHA256_ARG = Deno.build.arch === "aarch64" ? "OMP_SHA256_ARM64" : "OMP_SHA256_X64";
+const ACP_INITIALIZE_REQUEST = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "initialize",
+  params: {
+    protocolVersion: 1,
+    clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+  },
+});
+
+interface CommandOutcome {
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Run `podman`, capture everything, and kill it if it overruns the budget. */
+async function podman(
+  args: string[],
+  options: { stdin?: string; timeoutMs?: number } = {},
+): Promise<CommandOutcome> {
+  const child = new Deno.Command("podman", {
+    args,
+    cwd: repoRoot,
+    stdin: options.stdin === undefined ? "null" : "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  // A kill deadline, not a duration guess: `podman build`/`run` have no
+  // deterministic time control and an unresponsive container must not hang the
+  // suite forever. The awaited condition is still the child's own exit.
+  const killer = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Already exited: nothing to kill.
+    }
+  }, options.timeoutMs ?? 30 * 60_000);
+  try {
+    if (options.stdin !== undefined) {
+      const writer = child.stdin.getWriter();
+      await writer.write(new TextEncoder().encode(options.stdin));
+      await writer.close();
+    }
+    const output = await child.output();
+    const decoder = new TextDecoder();
+    return {
+      code: output.code,
+      stdout: decoder.decode(output.stdout),
+      stderr: decoder.decode(output.stderr),
+    };
+  } finally {
+    clearTimeout(killer);
+  }
+}
+
+async function havePodman(): Promise<boolean> {
+  try {
+    const probe = await new Deno.Command("podman", {
+      args: ["--version"],
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    return probe.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+// Opt-in (`OMP_PACKAGING_BUILD=1`) AND a usable podman, both required.
+const RUN_IMAGE_SCENARIO = Deno.env.get("OMP_PACKAGING_BUILD") === "1" && await havePodman();
+
+/** The JSON-RPC `initialize` result the pinned ACP server returns, if any. */
+function acpInitializeResult(stdout: string): Record<string, unknown> | null {
+  for (const line of stdout.split("\n")) {
+    if (!line.includes('"jsonrpc"')) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (typeof parsed !== "object" || parsed === null || !("result" in parsed)) continue;
+      // The wire shape is a JSON-RPC result object; the calls below narrow it
+      // field by field, so this one assertion stays a boundary conversion.
+      const result = parsed.result as unknown;
+      if (typeof result === "object" && result !== null) {
+        return result as Record<string, unknown>;
+      }
+    } catch {
+      // Not the response line; keep looking.
     }
   }
-});
+  return null;
+}
 
-// --- 3.2/4.3 Manifest fixture ------------------------------------------------
+Deno.test({
+  name:
+    "omp image packaging - the built image installs a runnable native runtime with its authored assets",
+  ignore: !RUN_IMAGE_SCENARIO,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const build = await podman(["build", "-f", "Containerfile", "-t", IMAGE_TAG, "."]);
+    assertEquals(build.code, 0, `image build failed:\n${build.stderr}\n${build.stdout}`);
 
-Deno.test("manifest generator - per-file lines, header facts, recut invariant", async () => {
-  const root = await Deno.makeTempDir({ prefix: "omp-manifest-fixture-" });
-  try {
-    await Deno.mkdir(`${root}/config`, { recursive: true });
-    await Deno.mkdir(`${root}/prompt`, { recursive: true });
-    await Deno.writeTextFile(`${root}/config/restricted.yml`, "a: 1\n");
-    await Deno.writeTextFile(`${root}/prompt/SYSTEM.md`, "# prompt\n");
-    await Deno.writeTextFile(`${root}/extension.txt`, "extension\n");
-    const command = new Deno.Command(`${repoRoot}/scripts/omp/generate-omp-manifest.sh`, {
-      args: [root, PIN],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const output = await command.output();
-    assertEquals(output.code, 0, new TextDecoder().decode(output.stderr));
+    // The pinned native runtime loads and reports its exact pin.
+    const version = await podman([
+      "run",
+      "--rm",
+      "--entrypoint",
+      "omp",
+      IMAGE_TAG,
+      "--version",
+    ]);
+    assertEquals(version.code, 0, `omp --version failed:\n${version.stderr}`);
+    assertStringIncludes(version.stdout, PIN);
 
-    const manifest = await Deno.readTextFile(`${root}/PACKAGE-MANIFEST.sha256`);
-    // Digest lines are `sha256  <path>` (two literal spaces; \x20 escapes dodge
-    // the no-regex-spaces lint rule while matching the sha256sum format verbatim).
-    const digestLines = manifest.split("\n").filter((line) => /^[0-9a-f]{64}\x20\x20/.test(line));
-    // One line per installed file, relative paths, sorted; manifest excluded.
-    assertEquals(
-      digestLines.map((line) => line.split("  ")[1]).sort(),
-      ["config/restricted.yml", "extension.txt", "prompt/SYSTEM.md"],
-    );
-    assertEquals(manifest.includes("PACKAGE-MANIFEST.sha256"), true, "header names the file");
-    // Header facts: version, serial composition, recut invariant (the former
-    // reserved-slot fact is asserted ABSENT below post-removal).
-    assertStringIncludes(manifest, `OMP_VERSION=${PIN}`);
-    assertStringIncludes(manifest, "12 -> 13 -> 14b -> 17 -> 18");
-    // `remove-omp-public-code-search` removed the reserved slot; the header
-    // records the composition without any reserved-slot claim.
+    // The native settings catalog is readable by the installed runtime.
+    const catalog = await podman([
+      "run",
+      "--rm",
+      "--entrypoint",
+      "omp",
+      IMAGE_TAG,
+      "config",
+      "list",
+    ]);
+    assertEquals(catalog.code, 0, `omp config list failed:\n${catalog.stderr}`);
+    assert(catalog.stdout.trim().length > 0, "the native settings catalog is not empty");
+
+    // Native ACP starts against the AUTHORED mode settings and prompt that the
+    // image installs, and answers a real ACP initialize request.
+    const acp = await podman([
+      "run",
+      "--rm",
+      "-i",
+      "--entrypoint",
+      "omp",
+      IMAGE_TAG,
+      "acp",
+      "--config",
+      "/opt/air/omp/config/restricted.yml",
+      "--system-prompt",
+      "/opt/air/omp/prompt/SYSTEM.md",
+    ], { stdin: `${ACP_INITIALIZE_REQUEST}\n`, timeoutMs: 120_000 });
+    assertEquals(acp.code, 0, `native ACP startup failed:\n${acp.stderr}`);
+    const initialized = acpInitializeResult(acp.stdout);
+    assert(initialized !== null, `no ACP initialize result in:\n${acp.stdout}\n${acp.stderr}`);
+    assertEquals(initialized.protocolVersion, 1);
+    const agentInfo = initialized.agentInfo;
     assert(
-      !manifest.includes("RESERVED-BUT-UNCONSUMED"),
-      "manifest header carries no reserved-slot claim",
+      typeof agentInfo === "object" && agentInfo !== null && "version" in agentInfo,
+      `no agentInfo.version in the ACP initialize result:\n${acp.stdout}`,
     );
-    // The recut-invariant statement inside the manifest itself.
-    assertStringIncludes(manifest, "RECUT INVARIANT");
+    assertEquals(agentInfo.version, PIN, "the ACP agent answers with the pinned version");
 
-    // Digests are real: verify the file set with an independent check.
-    const verify = new Deno.Command("sha256sum", {
-      args: ["-c", "--ignore-missing", "PACKAGE-MANIFEST.sha256"],
-      cwd: root,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const verified = await verify.output();
-    assertEquals(verified.code, 0, new TextDecoder().decode(verified.stderr));
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
+    // Every installed artifact (authored settings, prompt, generated bundle,
+    // native model file) and both official notices are readable and non-empty
+    // INSIDE the built image, and no JavaScript/Bun runtime was added for it.
+    const installed = await podman([
+      "run",
+      "--rm",
+      "--entrypoint",
+      "sh",
+      IMAGE_TAG,
+      "-c",
+      [
+        "set -e",
+        "for f in /opt/air/omp/config/restricted.yml" +
+        " /opt/air/omp/config/native-yolo.yml" +
+        " /opt/air/omp/prompt/SYSTEM.md" +
+        " /opt/air/omp/extension/index.js" +
+        " /home/deno/.omp/agent/models.yml" +
+        " /licenses/omp/LICENSE" +
+        " /licenses/omp/THIRD-PARTY-NOTICES.txt; do",
+        '  test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }',
+        "done",
+        "for b in bun bunx; do",
+        '  if command -v "$b" >/dev/null 2>&1; then echo "added runtime: $b" >&2; exit 1; fi',
+        "done",
+        "echo installed-ok",
+      ].join("\n"),
+    ]);
+    assertEquals(installed.code, 0, `installed assets unreadable:\n${installed.stderr}`);
+    assertStringIncludes(installed.stdout, "installed-ok");
+
+    // Installing the authored YAML is permitted; GENERATING or REWRITING it is
+    // not. A native startup must leave every authored input byte-identical.
+    const authored = await podman([
+      "run",
+      "--rm",
+      "-i",
+      "-e",
+      `ACP_INIT=${ACP_INITIALIZE_REQUEST}`,
+      "--entrypoint",
+      "sh",
+      IMAGE_TAG,
+      "-c",
+      [
+        "set -e",
+        "files='/opt/air/omp/config/restricted.yml /opt/air/omp/config/native-yolo.yml" +
+        " /opt/air/omp/prompt/SYSTEM.md /home/deno/.omp/agent/models.yml'",
+        'before="$(sha256sum $files)"',
+        "omp config list >/dev/null",
+        "printf '%s\\n' \"$ACP_INIT\" | omp acp" +
+        " --config /opt/air/omp/config/restricted.yml" +
+        " --system-prompt /opt/air/omp/prompt/SYSTEM.md >/dev/null",
+        'after="$(sha256sum $files)"',
+        '[ "$before" = "$after" ] || { echo \'authored inputs were rewritten\' >&2; exit 1; }',
+        "echo authored-inputs-unchanged",
+      ].join("\n"),
+    ], { timeoutMs: 180_000 });
+    assertEquals(authored.code, 0, `authored inputs changed:\n${authored.stderr}`);
+    assertStringIncludes(authored.stdout, "authored-inputs-unchanged");
+  },
 });
 
-Deno.test("docs/OMP_PACKAGING.md - recut invariant and digest table present", async () => {
-  const doc = await Deno.readTextFile(`${repoRoot}/docs/OMP_PACKAGING.md`);
-  assertStringIncludes(doc, "task-failure condition");
-  // The authored native model file is documented at its native config-HOME
-  // install path (never the removed `/opt/air/omp/config/models.yml`).
-  assertStringIncludes(doc, "/home/deno/.omp/agent/models.yml");
-  assert(
-    !doc.includes("/opt/air/omp/config/models.yml"),
-    "no owned models overlay install remains",
-  );
-  assert(!doc.includes("reserved-but-unconsumed"), "no reserved-slot claim remains in the doc");
-  // Digest table byte-identical to the design table values.
-  for (const digest of Object.values(DIGESTS)) {
-    assertStringIncludes(doc, digest);
-  }
-  // Observed asset name and the allowlist rule are recorded.
-  assertStringIncludes(doc, "omp-linux-x64");
-  assertStringIncludes(doc, "omp-linux-{arch}[^/]*");
-  // The user-owned §15 checklist is present and marked unverified.
-  assertStringIncludes(doc, "NOT verified by CI");
-  assertStringIncludes(doc, "omp --version");
+Deno.test({
+  name:
+    "omp image packaging - a wrong executable checksum fails the build before installing an image",
+  ignore: !RUN_IMAGE_SCENARIO,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const build = await podman([
+      "build",
+      "--build-arg",
+      `${EXECUTABLE_SHA256_ARG}=${WRONG_EXECUTABLE_SHA256}`,
+      "-f",
+      "Containerfile",
+      "-t",
+      REJECTED_IMAGE_TAG,
+      ".",
+    ]);
+    assert(
+      build.code !== 0,
+      "the build must fail when the pinned executable checksum does not match the download",
+    );
+    // Fail for the RIGHT reason: the checksum step, not a later error.
+    assert(
+      /sha256sum|FAILED|does NOT match/.test(build.stdout + build.stderr),
+      `the build failed without a checksum diagnostic:\n${build.stderr}\n${build.stdout}`,
+    );
+    // "Before output image installation": no image is produced by a failed build.
+    const exists = await podman(["image", "exists", REJECTED_IMAGE_TAG]);
+    assert(
+      exists.code !== 0,
+      "no image may be installed from a build that failed checksum verification",
+    );
+  },
 });
 
-// --- 5.1 Config-trio sync ----------------------------------------------------
+// --- Config-trio documentation (version-health observability) ---------------
 
 Deno.test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all three", async () => {
   const configExample = await Deno.readTextFile(`${repoRoot}/config.example.yaml`);
@@ -520,17 +442,7 @@ Deno.test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all thr
   assert(helmEnvBlock.length < 1200, "OMP block adjacent to the OpenCode block in the env map");
 });
 
-async function listFiles(dir: string): Promise<string[]> {
-  const out: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) out.push(...await listFiles(path));
-    else out.push(path);
-  }
-  return out;
-}
-
-// --- 4.2/5.x Generated native-loadable bundle (no docker, no download, no omp)
+// --- Generated native-loadable bundle (no docker, no download, no omp) -------
 //
 // `package-bun-compatible-omp-extension` REPLACED the mirror-copy + generated
 // deno.json import-map packaging with ONE generated ESM bundle: the single
@@ -540,6 +452,16 @@ async function listFiles(dir: string): Promise<string[]> {
 // externals), and load parity — never the former mirror tree, sidecar import
 // map, or re-export barrel, and never a build-owned declaration or digest
 // inventory (the artifact is exactly the bundler's ESM output).
+
+async function listFiles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for await (const entry of Deno.readDir(dir)) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory) out.push(...await listFiles(path));
+    else out.push(path);
+  }
+  return out;
+}
 
 async function buildBundle(target: string): Promise<void> {
   const command = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {

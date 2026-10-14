@@ -11,6 +11,13 @@
 
 Never run bare `deno test`; use the tasks above so permission flags match CI.
 
+The packaging suite's local-architecture image scenario
+(`tests/utils/omp-packaging.test.ts`) is an explicit opt-in: it runs ONLY with
+`OMP_PACKAGING_BUILD=1` on a host with a usable `podman` (`ignore:` otherwise,
+like the other subprocess-backed tests), because it builds the real image and
+starts the installed native runtime. No CI run therefore pays for a container
+build, and every other scenario under `tests/` stays mock/unit evidence.
+
 ## Mock harness inventory (`tests/mocks/`)
 
 - **`mock-acp-agent.ts`** — scripted ACP agent spoken over stdio JSON-RPC
