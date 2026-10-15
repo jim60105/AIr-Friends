@@ -1,34 +1,35 @@
 # Web 儀表板
 
-AIr-Friends 內建全功能輕量級 Web 管理儀表板（Dashboard），讓維運人員透過瀏覽器即可掌握系統運作狀態。
+AIr-Friends 內建輕量級 Web 管理儀表板（Dashboard），維運人員可透過瀏覽器掌握系統運作狀態。
 
 ---
 
 ## 存取與組態設定
 
-儀表板伺服器實作於 `src/dashboard/`，預設組態如下：
+儀表板伺服器實作於 `src/dashboard/`，預設組態如下。
 
 ```yaml
 dashboard:
   enabled: true
   port: 8090
-  bindAddress: "127.0.0.1"        # 預設僅綁定本機 Loopback，確保安全
-  passphrase: "${DASHBOARD_PASS}" # 登入通行密碼 (長度至少須 16 字元)
-  behindHttpsProxy: true          # 若前端有反向代理且終止 HTTPS，設為 true
-  trustedProxies:                 # 信任的反向代理 IP 清單
-    - "127.0.0.1"
+  host: "127.0.0.1"               # 預設僅綁定本機 Loopback
+  passphrase: "${DASHBOARD_PASS}" # 登入通行密碼，啟用時長度至少 16 字元
+  behindHttpsProxy: false         # 在 HTTPS 反向代理後方時設為 true，Cookie 會加上 Secure
+  trustedProxies: []              # 信任 X-Forwarded-For 的代理位址清單
 ```
 
-> **安全警示**：儀表板密碼長度強制要求至少 16 字元以上。在正式生產環境中，切勿將 `bindAddress` 直接暴露於公開網路，建議搭配 Nginx / Caddy 進行反向代理與憑證防護。
+> **安全提醒**。儀表板啟用時，密碼長度須至少 16 字元，且 `host` 預設只綁定環回位址。若要對外服務，請透過 Nginx 或 Caddy 反向代理並加上 TLS，不要直接將 `host` 設為 `0.0.0.0` 後暴露於公開網路。
 
 ---
 
-## 儀表板五大功能頁籤 (5 Tabs)
+## 儀表板功能頁籤
 
-登入後，頂部提供 5 個核心功能頁籤：
+登入後，側邊欄提供五個功能頁籤。
 
-1. **Overview（總覽）**：顯示系統執行時間、CPU / 記憶體使用率、當前活躍工作階段數與平台連線狀態。
-2. **Sessions（工作階段）**：即時檢視進行中與近期的 ACP 代理人會話，包含模型呼叫成本與消耗權杖。
-3. **Memories（記憶管理）**：以視覺化方式搜尋與檢視使用者的核心層、工作層記憶，支援手動編輯或清理。
-4. **Channels（頻道與政策）**：檢視各頻道的活躍程度與目前套用的回覆政策清單。
-5. **Logs / Audit（日誌與稽核）**：即時瀏覽系統結構化日誌與對話稽核紀錄。
+1. **Sessions（工作階段）**：檢視進行中工作階段與歷史工作階段，並可展開歷史工作階段的稽核內容。
+2. **Stats（統計）**：顯示工作階段總數、活躍工作階段等彙總指標。
+3. **Workspace（工作區）**：瀏覽 `data/` 下的工作區檔案樹並檢視檔案內容。
+4. **Channel Memory（頻道記憶）**：查看頻道記憶條目，並可停用個別條目。
+5. **Chat（對話）**：在儀表板中直接與機器人對話。
+
+連線層安全上，儀表板僅在使用者位於 `trustedProxies` 允許清單內時才信任 `X-Forwarded-For`，並以設定的通行密碼登入。

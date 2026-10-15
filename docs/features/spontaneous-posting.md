@@ -1,39 +1,47 @@
-# 自發發文機制
+# 自發貼文機制
 
-除了被動等待使用者提及之外，AIr-Friends 支援主動在社群頻道中發布貼文的「自發發文（Spontaneous Posting）」功能。
+除了被動等待使用者提及之外，AIr-Friends 支援主動在社群頻道中發布內容的「自發貼文（Spontaneous Posting）」功能。
 
 ---
 
 ## 觸發條件與週期
 
-自發發文由共用排程器（Scheduler）驅動，其運作邏輯如下：
+自發貼文由共用的背景排程器驅動（`src/core/spontaneous-scheduler.ts`），每個啟用的平台各自擁有獨立的計時器。
 
-1. **週期性計時**：在組態中為特定頻道指定間隔時間（例如每 2 到 4 小時一次）。
-2. **靜音期防護 (Inactivity Threshold)**：若頻道近期已有很多熱烈討論，機器人可設定保持安靜；只有當頻道沉寂達到一定時間時才發動。
-3. **隨機時間抖動 (Jitter)**：為了避免機器人在固定時間點機械式發文，排程系統會自動在每次間隔加入 ±15% 的隨機浮動，營造自然的活躍感。
+1. **隨機間隔**：每次排程會在 `minIntervalMs` 與 `maxIntervalMs` 之間取隨機值，作為下一次發文的間隔，避免固定在相同時間點發文。
+2. **狀態保存**：下一次預定時間會寫入排程狀態儲存，重啟後可接續原定時間。
+3. **避免重疊**：同一平台的前一次自發貼文仍在執行時，該次排程會跳過並改排下一次。
 
 ---
 
 ## 主題生成與脈絡組合
 
-自發貼文的生成不是隨意胡謅，而是具備脈絡依據：
+自發貼文的生成會依據下列脈絡。
 
-- **靈魂提示詞 (Soul Prompt)**：發文內容必須符合角色的世界觀、性格與興趣愛好。
-- **頻道歷史感知**：系統會讀取頻道最近的數則歷史訊息，延續過往話題或分享與之相關的日常感想。
-- **全域筆記靈感**：代理人可以翻閱全域知識庫（`agent-workspace/notes/`）中近期研究的主題作為話題切入點。
+- **角色人設**：發文內容須符合角色的世界觀、性格與興趣。
+- **頻道歷史感知**：以 `contextFetchProbability` 決定是否取用頻道近期訊息作為話題延續。
+- **全域筆記靈感**：代理人可參考全域知識庫 `agent-workspace/notes/` 中近期研究的主題。
 
 ---
 
 ## 組態範例
 
-在 `config.yaml` 中配置 `spontaneousPosting` 區塊：
+自發貼文為各平台層級的設定，並在 `channels` 清單中以 `spontaneousPost: true` 逐頻道啟用。
 
 ```yaml
-spontaneousPosting:
-  enabled: true
-  channels:
-    - id: "discord/channel/112233445566778899"
-      minIntervalMinutes: 120
-      maxIntervalMinutes: 240
-      prompt: "請以你的角色身分，根據當前時間與最近話題，發布一則日常閒聊貼文。"
+platforms:
+  discord:
+    enabled: true
+    spontaneousPost:
+      enabled: true
+      minIntervalMs: 10800000       # 最短間隔 3 小時
+      maxIntervalMs: 43200000       # 最長間隔 12 小時
+      contextFetchProbability: 0.5  # 取用近期訊息的機率
+
+channels:
+  - id: "discord/channel/112233445566778899"
+    enabled: true
+    spontaneousPost: true
 ```
+
+Misskey 亦支援 `platforms.misskey.spontaneousPost`，欄位相同。

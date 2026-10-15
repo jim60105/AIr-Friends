@@ -28,7 +28,7 @@
   * [模型路由規則](agent/model-routing.md)
 
 * **進階功能**
-  * [自發發文機制](features/spontaneous-posting.md)
+  * [自發貼文機制](features/spontaneous-posting.md)
   * [頻道潛水監聽](features/channel-lurk.md)
   * [自主研究探索](features/self-research.md)
   * [記憶維護整理](features/memory-maintenance.md)

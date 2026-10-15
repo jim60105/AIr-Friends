@@ -1,22 +1,41 @@
 # 內建技能目錄
 
-AIr-Friends 內建一組開箱即用的專屬技能（Skills），存放在專案的 `skills/` 目錄中，並以 Deno TypeScript 腳本實作。
+AIr-Friends 內建一組開箱即用的專屬技能（Skills），存放於專案的 `skills/` 目錄，並以 Deno TypeScript 腳本實作。每個技能的腳本位於 `skills/<name>/scripts/<name>.ts`，說明檔為 `skills/<name>/SKILL.md`。
 
 ---
 
 ## 內建技能清單
 
-| 技能名稱 | 腳本路徑 | 功能說明 | 執行權限需求 |
-| :--- | :--- | :--- | :--- |
-| **`memory-save`** | `skills/memory-save/index.ts` | 儲存一則新的長期記憶條目至當前使用者的記憶庫中 | 需提供分類（category）、內容（content）與重要性評分 |
-| **`memory-search`** | `skills/memory-search/index.ts` | 搜尋使用者個人記憶與全域代理人知識庫筆記 | 語彙倒排索引搜尋，支援關鍵字與標籤過濾 |
-| **`reminder-create`** | `skills/reminder-create/index.ts` | 建立一則指定未來時間觸發的定時提醒通知 | 需提供 ISO 時間戳記或相對時間與提醒內文 |
-| **`reply`** | `skills/reply/index.ts` | 將生成的文字訊息發布至當前對話頻道或私訊 | 傳遞最終訊息給社群平台介面 |
-| **`webfetch`** | `skills/webfetch/index.ts` | 抓取外部網頁內容並轉換為簡潔的純文字或 Markdown | 受限模式下需經權限閘道放行或配置網路白名單 |
+| 技能名稱 | 腳本路徑 | 功能說明 |
+| :--- | :--- | :--- |
+| `memory-save` | `skills/memory-save/scripts/memory-save.ts` | 儲存一則長期記憶條目至使用者的記憶庫 |
+| `memory-search` | `skills/memory-search/scripts/memory-search.ts` | 以語彙評分搜尋使用者記憶與全域知識筆記 |
+| `memory-patch` | `skills/memory-patch/scripts/memory-patch.ts` | 更新或刪除既有記憶條目 |
+| `memory-stats` | `skills/memory-stats/scripts/memory-stats.ts` | 查詢記憶庫的統計摘要 |
+| `memory-export` | `skills/memory-export/scripts/memory-export.ts` | 匯出使用者的記憶資料 |
+| `send-reply` | `skills/send-reply/scripts/send-reply.ts` | 將最終回覆發布至當前對話頻道或私訊 |
+| `edit-reply` | `skills/edit-reply/scripts/edit-reply.ts` | 編輯先前送出的回覆訊息 |
+| `get-message` | `skills/get-message/scripts/get-message.ts` | 依訊息 ID 取回單則訊息內容 |
+| `fetch-context` | `skills/fetch-context/scripts/fetch-context.ts` | 取回頻道近期訊息作為對話脈絡 |
+| `react-message` | `skills/react-message/scripts/react-message.ts` | 對訊息加上表情符號回應 |
+| `set-reminder` | `skills/set-reminder/scripts/set-reminder.ts` | 建立指定未來時間觸發的定時提醒 |
+| `cancel-reminder` | `skills/cancel-reminder/scripts/cancel-reminder.ts` | 取消既有提醒 |
+| `list-reminders` | `skills/list-reminders/scripts/list-reminders.ts` | 列出使用者的提醒清單 |
+| `send-file` | `skills/send-file/scripts/send-file.ts` | 傳送檔案至對話頻道 |
+
+提醒相關的三個技能需設定 `reminders.enabled`，`send-file` 需設定 `skills.sendFile.enabled`，否則不會註冊。另有兩個由代理人自行使用的技能，不含獨立腳本。
+
+| 技能名稱 | 說明 |
+| :--- | :--- |
+| `self-research` | 自主研究工作階段的指引，代理人自行執行網路搜尋與瀏覽器工具並撰寫筆記 |
+| `agent-browser` | 瀏覽器自動化操作指引 |
+
+> `webfetch` 並非本專案內建技能。網頁抓取與搜尋由代理人引擎的原生工具（例如 OpenCode 內建工具）或外部技能提供。
 
 ---
 
 ## 執行與通訊架構
 
-1. **子行程執行**：外部代理人（OpenCode / OMP）在工作區中透過 shell 命令（例如 `deno run --allow-net ...`）呼叫技能腳本。
-2. **HTTP 回呼 (Callback)**：技能腳本內部透過本地 HTTP 請求與主程序的 **Skill API 伺服器**（預設監聽於 3000 埠）通訊，驗證工作階段 Session ID 並完成實際的記憶儲存或訊息發布。
+1. **子行程執行**：外部代理人（OpenCode / OMP）在工作區中透過 shell 命令呼叫技能腳本，例如 `.../memory-save/scripts/memory-save.ts --session-id ... --content-file ...`。
+2. **安全酬載傳遞**：自由文字內容不會出現在命令列上，而是由代理人寫入工作階段暫存目錄的酬載檔案，腳本再讀取該檔案。
+3. **HTTP 回呼（Callback）**：技能腳本透過本地 HTTP 請求與主程序的 **Skill API 伺服器**通訊，驗證工作階段 Session ID 後完成記憶儲存或訊息發布。Skill API 伺服器預設監聽 `127.0.0.1:3001`（`skillApi.port`）。

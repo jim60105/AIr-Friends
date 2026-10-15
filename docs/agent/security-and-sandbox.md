@@ -6,7 +6,7 @@
 
 ## 使用者工作區邊界 (Workspace Boundary)
 
-AIr-Friends 嚴格貫徹工作區信任邊界原則：
+AIr-Friends 嚴格貫徹工作區信任邊界原則。
 
 1. **使用者層級隔離路徑**：
    - 每個使用者的獨立工作目錄格式為：`repo/workspaces/{platform}/{userId}/`。
@@ -20,7 +20,7 @@ AIr-Friends 嚴格貫徹工作區信任邊界原則：
 
 ## 限制模式 (Restricted) 與 YOLO 模式
 
-系統支援兩種代理人授權與執行模式：
+系統支援兩種代理人授權與執行模式。
 
 | 模式名稱 | 權限要求與授權機制 | 適用場景 |
 | :--- | :--- | :--- |
@@ -34,7 +34,7 @@ AIr-Friends 嚴格貫徹工作區信任邊界原則：
 
 ## 明確安全保證與限制 (Guarantees & Limitations)
 
-在架構設計上，AIr-Friends 誠實面對邊界限制與防護範疇：
+在架構設計上，AIr-Friends 明確界定防護範疇與其限制。
 
 1. **選擇性作業系統層級沙盒 (Opt-in OS Confinement)**：
    - 搭配 bwrap 建立的掛載隔離為明確選擇性功能（`agent.sandbox.filesystemConfinement: true`），需要主機核心具備未授權使用者命名空間（User Namespace）支援。
@@ -43,8 +43,8 @@ AIr-Friends 嚴格貫徹工作區信任邊界原則：
    - **嚴格失敗原則 (Fail-Closed)**：若設定啟用了檔案系統沙盒隔離，但主機環境缺乏支援（如無法建立 namespace 或 `/usr/local` 符號連結拓樸限制），**系統會直接擲出例外並終止啟動**，絕不暗中降級至未隔離狀態。若需在無沙盒環境執行，必須由維運人員主動將該設定調整為 `false`。
 2. **原生工具與環境權限界限**：
    - ACP 回呼保護主要約束透過 ACP 協定請求的檔案操作；外部代理人二進位檔若透過底層原生 Shell 或內建工具存取未掛載隔離的本機檔案，仍受作業系統行程權限規範。
-3. **網路代理限制 (Proxy Limitations)**：
-   - 設定 `HTTP_PROXY` 僅為輸出傳輸路由，並不等同於防火牆層級的網頁存取阻擋或封包內容防護。
+3. **輸出代理限制（Egress Proxy Limitations）**：
+   - `agent.sandbox.egressProxy` 預設啟用，於輸出端套用 SSRF 規則，阻擋回送位址、私有網段、連結本地與雲端中介資料位址。它不解析或過濾允許目標的封包內容，也不等同於完整的防火牆。
 4. **OMP 原生上游差異 (Accepted Upstream Differences)**：
    - OMP 與 OpenCode 的原生工具解析邏輯存在差異，部分工具名稱與原生載入機制由專案自訂的原生擴充套件（Trusted Extension）進行相容性適配。
 5. **證據邊界分立原則 (Evidence Boundaries)**：
