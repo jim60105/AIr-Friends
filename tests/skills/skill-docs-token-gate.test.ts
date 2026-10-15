@@ -187,7 +187,11 @@ Deno.test("skill docs gate - reaction recipe quotes the adapter values the emoji
         `<e><t><:wave:${DISCORD_EMOJI_ID}></t><r>wave:${DISCORD_EMOJI_ID}</r></e>`,
       );
       assertStringIncludes(rendered, "<e><t>:wave:</t><r>:wave:</r></e>");
-      assertStringIncludes(rendered, "<t><a:wave_anim:");
+      assertStringIncludes(
+        rendered,
+        `<e><t><a:wave_anim:${DISCORD_ANIMATED_EMOJI_ID}></t>` +
+          `<r>wave_anim:${DISCORD_ANIMATED_EMOJI_ID}</r></e>`,
+      );
 
       const doc = Deno.readTextFileSync("skills/react-message/SKILL.md");
       // Every rendered `<r>` value, and only those, are the documented `--emoji` values.
@@ -201,6 +205,14 @@ Deno.test("skill docs gate - reaction recipe quotes the adapter values the emoji
         `<e><t><:wave:${DISCORD_EMOJI_ID}></t><r>wave:${DISCORD_EMOJI_ID}</r></e>`,
       );
       assertStringIncludes(doc, "<e><t>:wave:</t><r>:wave:</r></e>");
+      // The animated claim is quoted from the same animated adapter fixture, so a
+      // wrong animated reaction value (e.g. one carrying the `a` flag) fails here.
+      assertStringIncludes(
+        doc,
+        `<e><t><a:wave_anim:${DISCORD_ANIMATED_EMOJI_ID}></t>` +
+          `<r>wave_anim:${DISCORD_ANIMATED_EMOJI_ID}</r></e>`,
+      );
+      assertStringIncludes(doc, `--emoji "wave_anim:${DISCORD_ANIMATED_EMOJI_ID}"`);
       // Platform-labeled: the Discord value is never presented as grouped with Misskey.
       for (const platform of ["Discord", "Misskey"]) {
         assertStringIncludes(doc, platform);
@@ -281,8 +293,35 @@ Deno.test("skill docs gate - attachment recipe sends an existing nested workspac
 // Tool-neutral cancellation wording (clarify-platform-skill-recipes)
 // ---------------------------------------------------------------------------
 
-/** Every published instruction surface: each bundled skill document and the summary template. */
-const PUBLISHED_DOCS = [...globSync("skills/**/*.md").sort(), "prompts/system_summary.md"];
+/**
+ * Every published instruction surface: bundled skill documents, the bundled
+ * skill scripts the agents execute, and the prompt templates. Directory-only
+ * glob hits are avoided by enumerating file extensions.
+ */
+const PUBLISHED_DOCS = [
+  ...globSync("skills/**/*.md"),
+  ...globSync("skills/*/scripts/*.ts"),
+  ...globSync("skills/*/scripts/*.sh"),
+  ...globSync("skills/*/scripts/*.py"),
+  ...globSync("prompts/*.md"),
+].sort();
+
+/** The published surfaces the change rewrote: every document carrying a timeout rule. */
+const CANCELLATION_DOCS = [
+  "prompts/system_summary.md",
+  "skills/cancel-reminder/SKILL.md",
+  "skills/fetch-context/SKILL.md",
+  "skills/list-reminders/SKILL.md",
+  "skills/memory-export/SKILL.md",
+  "skills/memory-patch/SKILL.md",
+  "skills/memory-save/SKILL.md",
+  "skills/memory-search/SKILL.md",
+  "skills/memory-stats/SKILL.md",
+  "skills/react-message/SKILL.md",
+  "skills/send-file/SKILL.md",
+  "skills/send-reply/SKILL.md",
+  "skills/set-reminder/SKILL.md",
+].sort();
 
 /** The surfaces whose operations never deliver anything and must keep their no-retry rule. */
 const NO_RETRY_DOCS = [
@@ -300,8 +339,8 @@ const NO_RETRY_DOCS = [
 
 Deno.test("skill docs gate - no published instruction prescribes a stale cancellation tool name", () => {
   assert(
-    PUBLISHED_DOCS.length >= 26,
-    `expected all bundled skill documents swept, found ${PUBLISHED_DOCS.length}`,
+    PUBLISHED_DOCS.length >= 60,
+    `expected all published surfaces, found ${PUBLISHED_DOCS.length}`,
   );
 
   const sweptWithCancellationAdvice: string[] = [];
@@ -310,24 +349,33 @@ Deno.test("skill docs gate - no published instruction prescribes a stale cancell
     assertFalse(text.includes("stop_bash"), `${doc} still prescribes stop_bash`);
     // Cancellation advice names no tool (so no speculative alias), and no doc
     // claims that stopping a script proves nothing reached the platform.
-    const hangLines = text.split("\n").filter((line) => line.includes("If it hangs"));
-    if (hangLines.length > 0) sweptWithCancellationAdvice.push(doc);
-    for (const line of hangLines) {
-      assertStringIncludes(line, "running-command controls your agent documents");
-      assertFalse(/`[a-z_]+`/.test(line), `${doc} names a tool in cancellation advice: ${line}`);
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].includes("If it hangs")) continue;
+      sweptWithCancellationAdvice.push(doc);
+      // The whole timeout bullet, continuation lines included, must stay tool-neutral.
+      const bullet = [lines[i]];
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j];
+        if (next.trim() === "" || /^\s*(\d+\.|[-*#])/.test(next)) break;
+        bullet.push(next);
+      }
+      const advice = bullet.join(" ");
+      assertStringIncludes(advice, "running-command controls your agent documents");
+      assertFalse(
+        /`[a-z_]+`/.test(advice),
+        `${doc} names a tool in cancellation advice: ${advice}`,
+      );
     }
     assertFalse(
       /cancel[^.]*proves?[^.]*(nothing|no delivery)/i.test(text),
       `${doc} treats cancellation as proof of non-delivery`,
     );
   }
-  // Enumeration guard: the sweep found the twelve skill documents the change
-  // rewrote plus the summary template — no timeout doc was silently skipped.
-  assertEquals(
-    sweptWithCancellationAdvice.length,
-    13,
-    `swept: ${sweptWithCancellationAdvice.join(", ")}`,
-  );
+  // Enumeration guard: exactly the twelve skill documents the change rewrote
+  // plus the summary template carry cancellation advice — a new or reworded
+  // surface fails here instead of escaping the per-line assertions.
+  assertEquals(sweptWithCancellationAdvice.sort(), CANCELLATION_DOCS);
 
   for (const doc of NO_RETRY_DOCS) {
     assertStringIncludes(

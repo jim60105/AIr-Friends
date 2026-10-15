@@ -53,7 +53,8 @@ examples — substitute the `<r>` value your emoji list actually renders):
 ```
 
 An animated Discord emoji carries the same `name:id` reaction value; only the `<t>` markup
-differs (`<e><t><a:wave:123456789012345678></t><r>wave:123456789012345678</r></e>`).
+differs, e.g. the entry `<e><t><a:wave_anim:223456789012345678></t><r>wave_anim:223456789012345678</r></e>`
+(still passed as `--emoji "wave_anim:223456789012345678"`).
 
 React with a Misskey custom emoji. Its `<r>` value is `:name:`:
 
