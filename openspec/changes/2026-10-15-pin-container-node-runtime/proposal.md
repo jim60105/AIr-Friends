@@ -29,4 +29,4 @@ None.
 - `Containerfile` (`base` stage): the apt package list and the new pinned Node.js tarball step; every later step (`npm install -g agent-browser`, `npx playwright install-*`, and the runtime external-skill installer `src/core/skill-installer.ts`) keeps its command line and now runs the pinned interpreter.
 - Documentation: `CHANGELOG.md`, `docs/extending/external-skills.md`, `docs/getting-started/quickstart.md`, `AGENTS.md`.
 - No code change: `src/core/skill-installer.ts` and its external-install behavior are untouched.
-- **User-owned remaining check**: a full `--target final` image build (only the `base` stage was rebuilt during verification).
+- **Verification performed**: the `base` stage and a full `--target final` image build both succeeded with these edits, and the real `installExternalSkills()` run inside the built image (as `--user 1000:0`) published a configured skill; image-build acceptance inside CI stays operator-owned as before.

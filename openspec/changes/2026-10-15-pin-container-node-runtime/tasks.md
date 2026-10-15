@@ -21,7 +21,9 @@
 - [x] 3.4 Confirm the image's other JavaScript consumer: `npm install -g agent-browser` under the new Node yields `agent-browser 0.39.1` at `/usr/local/bin/agent-browser`, and `npx playwright --version` prints `1.64.1`. Verify: the `engines.node >= 24.0.0` consumer is satisfied by the pinned runtime.
 - [x] 3.5 Run `deno test --allow-read tests/core/bundled-skills.test.ts` → 6 passed. Verify: the Containerfile-parsing test still sees exactly one skill-tree COPY after the edit.
 - [x] 3.6 Run `openspec validate 2026-10-15-pin-container-node-runtime --strict` → valid. Verify: the change's artifacts satisfy the schema.
+- [x] 3.7 Build the full image (`podman build -f Containerfile --target final`) → SUCCESS end to end with the edited `base` stage. Verify: every later stage (`npm install -g agent-browser`, `npx playwright install-deps` / `install`, the OMP extension bundle) still builds with no distribution `nodejs`/`npm` packages present.
+- [x] 3.8 Run the real installer in the built final image as the runtime user (`--user 1000:0`, `deno eval` importing `@core/skill-installer.ts` from `/app`) → logs `Published skill pdf from jim60105/copilot-prompt to /tmp/dest/pdf` and the published tree exists. Verify: the container-startup path that produced the reported failure now publishes a configured skill.
 
 ## Workflow follow-up
 
-- A full `--target final` image build is the operator-owned remaining acceptance check; run it and archive this change once the image ships.
+- A full `--target final` image build was performed locally and succeeded (3.7/3.8); image-build acceptance inside CI stays operator-owned as before. Archive this change once the image ships.

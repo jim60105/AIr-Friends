@@ -49,7 +49,8 @@ No data migration and no operator action. Deploying the rebuilt image replaces t
 - With the pinned Node 24 tarball installed, the identical command → exit 0, materialized `<private HOME>/.agents/skills/pdf` (the path the installer publishes from); it also succeeds as the runtime user (`--user 1000:0`, uid 1000 gid 0).
 - `npm install -g agent-browser` under the new Node → `agent-browser 0.39.1` at `/usr/local/bin/agent-browser`; `npx playwright --version` → `1.64.1`.
 - `deno test --allow-read tests/core/bundled-skills.test.ts` → 6 passed (the test parses the Containerfile; the edit keeps exactly one skill-tree COPY).
-- A full `--target final` image build is the remaining acceptance check and is owned by the operator.
+- `podman build -f Containerfile --target final` → SUCCESS end to end, so every later stage (`npm install -g agent-browser`, `npx playwright install-deps` / `install`, the OMP extension bundle) still builds without the distribution `nodejs`/`npm` packages present.
+- Inside that final image, as the deployment's runtime user (`--user 1000:0`), the REAL `installExternalSkills()` was executed (`deno eval` from `/app`, importing `@core/skill-installer.ts`): it logged `Published skill pdf from jim60105/copilot-prompt to /tmp/dest/pdf` and the published tree (`SKILL.md`, `LICENSE.txt`, `scripts/`) is present. The container-startup path the reported failure came from now publishes a configured skill.
 
 ## Dependencies and Conflicts
 
