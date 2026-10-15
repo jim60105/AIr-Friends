@@ -72,4 +72,4 @@
 
 ## 8. Runtime Smoke Verification
 
-- [ ] 8.1 Serve `docs/` locally via HTTP server (e.g., `python3 -m http.server 3000 --directory docs`) and verify that `index.html` loads, `_sidebar.md` navigation renders all sections, search plugin indexes pages, and code copy operates without browser console errors.
+- [x] 8.1 Serve `docs/` locally via HTTP server (e.g., `python3 -m http.server 3000 --directory docs`) and verify that `index.html` loads, `_sidebar.md` navigation renders all sections, search plugin indexes pages, and code copy operates without browser console errors.
