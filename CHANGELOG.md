@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Two bundled skills: `chinese-traditional-conversion` converts Simplified Chinese text to Traditional Chinese using curated character and Taiwan-terminology tables, and `writing-style-guideline` lints prose against the project style rules with a bundled `lint.sh` checker
+- A `lint.sh` checker for the `chinese-content-writing-guideline` skill that flags full-width punctuation, spacing, and calque violations in zh-TW drafts
+
+### Changed
+- The `chinese-content-writing-guideline` skill now covers only language rules (script, full-width punctuation, spacing, forms of address, no-calque table, Taiwan terminology); general prose style guidance moved to the new `writing-style-guideline` skill
+
 ### Fixed
-
 - External skills configured under `agent.externalSkills` install again. The image now ships the pinned Node.js 24 LTS runtime that the `skills` installer CLI and the bundled `agent-browser` helper require, instead of the distribution's Node 20, which made every configured skill fail at startup with a `fs/promises` import error.
-
 ## [0.33.0] - 2026-10-15
 
 ### Added

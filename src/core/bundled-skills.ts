@@ -26,6 +26,8 @@ export const BUNDLED_SKILLS: readonly string[] = Object.freeze(
     "agent-browser",
     "cancel-reminder",
     "chinese-content-writing-guideline",
+    "chinese-traditional-conversion",
+    "writing-style-guideline",
     "edit-reply",
     "fetch-context",
     "get-message",
