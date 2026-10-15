@@ -22,7 +22,8 @@
  *   precise reason; without it the native legs stay UNEXERCISED rather than
  *   claiming native success, so ordinary CI/developer runs (which have no `omp`,
  *   `bwrap` or `strace`) neither pass a native claim nor go red for a missing
- *   runtime. `docs/OMP_SPAWN.md` §6 records what a given run exercised.
+ *   runtime. `docs/agent/acp-engine.md` documents the native acceptance
+ *   commands a given run exercises.
  * - No paid provider request is made: catalog advertisement and
  *   `session/set_config_option` need no network, and no prompt is ever sent. The
  *   fixture `baseUrl` is a loopback address this file never binds.

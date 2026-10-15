@@ -17,7 +17,7 @@
 // The image scenarios SKIP with a notice when no `podman` binary exists, so a
 // container-less checkout still runs the rest of the suite. A successful local
 // build certifies the LOCAL architecture only; the other architecture stays
-// user-owned (docs/OMP_PACKAGING.md §7).
+// user-owned (docs/agent/acp-engine.md).
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 // The generated-bundle audit predicate is imported from its production

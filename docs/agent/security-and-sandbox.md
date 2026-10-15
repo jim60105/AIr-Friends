@@ -38,6 +38,8 @@ AIr-Friends 嚴格貫徹工作區信任邊界原則：
 
 1. **選擇性作業系統層級沙盒 (Opt-in OS Confinement)**：
    - 搭配 bwrap 建立的掛載隔離為明確選擇性功能（`agent.sandbox.filesystemConfinement: true`），需要主機核心具備未授權使用者命名空間（User Namespace）支援。
+   - **無根容器限制 (Rootless Container Constraints)**：bwrap 必須在新建的命名空間中重新掛載 `/proc`，此動作在雙重巢狀使用者命名空間中必然失敗（例如 Rootless Podman 會出現 `Can't mount proc ... Permission denied`），加掛額外能力亦無法繞過。啟用前請以 `scripts/probe-sandbox-caps.sh` 在實際部署環境中驗證。
+   - **Kubernetes 前置條件**：節點須允許未授權使用者命名空間（`user.max_user_namespaces > 0`，Talos 預設值為 `0`）；Pod 須指定非預設的 `seccompProfile`（containerd 預設 seccomp 設定檔會以 `CAP_SYS_ADMIN` 攔阻 `unshare` 與 `clone(CLONE_NEWUSER)`），並須將命名空間的 PodSecurity 等級自 `baseline` 放寬；`/proc` 的遮罩掛載另需以 `securityContext.procMount: Unmasked` 解除，而該項自 K8s 1.30 起要求 `hostUsers: false`，連帶需要 containerd 2.0 以上（或 CRI-O 1.25 以上）。無法滿足上述條件的叢集應維持 `filesystemConfinement: false`，改依賴永遠啟用的權限閘門、環境變數過濾與輸出代理。
    - **嚴格失敗原則 (Fail-Closed)**：若設定啟用了檔案系統沙盒隔離，但主機環境缺乏支援（如無法建立 namespace 或 `/usr/local` 符號連結拓樸限制），**系統會直接擲出例外並終止啟動**，絕不暗中降級至未隔離狀態。若需在無沙盒環境執行，必須由維運人員主動將該設定調整為 `false`。
 2. **原生工具與環境權限界限**：
    - ACP 回呼保護主要約束透過 ACP 協定請求的檔案操作；外部代理人二進位檔若透過底層原生 Shell 或內建工具存取未掛載隔離的本機檔案，仍受作業系統行程權限規範。
