@@ -1097,6 +1097,8 @@ Deno.test("ChatbotClient - OMP synthetic skip logs INFO classification, not erro
     assert(!("exitCode" in context));
     // A skip neither answers the turn nor records completed work.
     assertEquals(client.hasReplySent(), false);
+    // Classification is logging-only: it records no rejection or verification state.
+    assertEquals(client.getRecentPermissionRejections().length, 0);
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
@@ -1127,6 +1129,7 @@ Deno.test("ChatbotClient - OMP started interruption logs INFO started, not skip"
     assertEquals(context.execution, "started");
     assert(!("fullUpdate" in context));
     assertEquals(client.hasReplySent(), false);
+    assertEquals(client.getRecentPermissionRejections().length, 0);
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
@@ -1285,6 +1288,8 @@ Deno.test("ChatbotClient - interruption metadata never classifies non-OMP client
       assertEquals(errorLogs.length, 1, `expected ERROR for ${label}`);
       assertEquals(infoLogs.length, 0, `expected no INFO for ${label}`);
       assertEquals(errorLogs[0].message, "Tool call {id} failed", label);
+      const context = errorLogs[0].context as Record<string, unknown>;
+      assertEquals(context.classification, "failed", `expected failed classification for ${label}`);
     }
 
     // Payload metadata cannot select the configured agent type.
@@ -1307,6 +1312,10 @@ Deno.test("ChatbotClient - interruption metadata never classifies non-OMP client
     assertEquals(infoLogs.length, 0);
     assertEquals(errorLogs.length, 1);
     assertEquals(errorLogs[0].message, "Tool call {id} failed");
+    assertEquals(
+      (errorLogs[0].context as Record<string, unknown>).classification,
+      "failed",
+    );
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
