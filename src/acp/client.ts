@@ -208,6 +208,17 @@ export function sanitizeRejectionField(
 }
 
 /**
+ * Recognized native OMP interruption outcomes for a failed tool update.
+ * `skipped`/`not_started` means the assistant emitted a tool call the runtime
+ * never invoked; `interrupted`/`started` means the call entered execution and
+ * MAY have left partial side effects. Neither outcome is completed work.
+ */
+type OmpInterruptionOutcome = {
+  classification: "skipped" | "interrupted";
+  execution: "not_started" | "started";
+};
+
+/**
  * ChatbotClient implements the ACP Client interface
  * Handles callbacks from the external OpenCode ACP Agent
  */
@@ -1226,6 +1237,61 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
+   * Recognize the pinned native OMP interruption shapes on a failed tool update.
+   *
+   * The OMP agent loop emits two interruption result shapes on
+   * `tool_call_update.rawOutput.details`:
+   *  - `{ __synthetic: true, source: "interrupt_skipped", executed: false }` — a
+   *    call the assistant emitted but the runtime never invoked;
+   *  - `{ __interrupted: true, source: "interrupt_skipped", execution: "started" }` —
+   *    a call that entered execution and may have left partial side effects.
+   *
+   * Only a configured OMP session qualifies, and only these exact,
+   * non-contradictory marker sets are recognized. Unknown sources (including the
+   * `assistant_stop_*` synthetic results), missing or mistyped markers, mixed
+   * markers, malformed details and every non-OMP agent return `undefined` so the
+   * update keeps the ERROR path. Classification never inspects message text.
+   */
+  private classifyOmpInterruptedToolUpdate(
+    update: acp.ToolCallUpdate,
+  ): OmpInterruptionOutcome | undefined {
+    if (this.config.agentType !== "omp") return undefined;
+
+    const rawOutput = update.rawOutput;
+    if (typeof rawOutput !== "object" || rawOutput === null || Array.isArray(rawOutput)) {
+      return undefined;
+    }
+    if (!("details" in rawOutput)) return undefined;
+    const details = rawOutput.details;
+    if (typeof details !== "object" || details === null || Array.isArray(details)) {
+      return undefined;
+    }
+    if (!("source" in details) || details.source !== "interrupt_skipped") return undefined;
+
+    // Unexecuted skip: the exact synthetic marker set, with no started markers present.
+    if (
+      "__synthetic" in details && details.__synthetic === true &&
+      "executed" in details && details.executed === false &&
+      !("__interrupted" in details) &&
+      !("execution" in details)
+    ) {
+      return { classification: "skipped", execution: "not_started" };
+    }
+
+    // Started interruption: the exact interrupted marker set, with no synthetic markers present.
+    if (
+      "__interrupted" in details && details.__interrupted === true &&
+      "execution" in details && details.execution === "started" &&
+      !("__synthetic" in details) &&
+      !("executed" in details)
+    ) {
+      return { classification: "interrupted", execution: "started" };
+    }
+
+    return undefined;
+  }
+
+  /**
    * Handle session updates from the Agent
    * Logs various agent activities but doesn't send them externally
    */
@@ -1271,8 +1337,27 @@ export class ChatbotClient implements acp.Client {
           status: update.status,
         };
 
-        // Add error information if status is failed
-        if (update.status === "failed") {
+        const interruption = update.status === "failed"
+          ? this.classifyOmpInterruptedToolUpdate(update)
+          : undefined;
+
+        if (interruption) {
+          // Recognized native OMP interruption metadata is control flow, not a tool
+          // failure: log INFO with bounded classification only. Raw `failed` status is
+          // retained so the entry still correlates with the original tool-call ID, and
+          // no raw output, command content or full-update serialization is attached.
+          this.logger.info(
+            interruption.classification === "skipped"
+              ? "Tool call {id} skipped before execution (status: {status}, classification: {classification}, execution: {execution})"
+              : "Tool call {id} interrupted after execution started (status: {status}, classification: {classification}, execution: {execution})",
+            {
+              id: update.toolCallId,
+              status: update.status,
+              classification: interruption.classification,
+              execution: interruption.execution,
+            },
+          );
+        } else if (update.status === "failed") {
           // ACP SDK may include error details in various fields
           const updateAny = update as Record<string, unknown>;
           if (updateAny.output) {
@@ -1286,6 +1371,7 @@ export class ChatbotClient implements acp.Client {
           }
           // Log full update object for debugging
           logContext.fullUpdate = JSON.stringify(update);
+          logContext.classification = "failed";
           this.logger.error("Tool call {id} failed", logContext);
         } else {
           this.logger.info("Tool call {id} updated to status {status}", logContext);
