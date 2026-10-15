@@ -20,6 +20,14 @@
 // anything. Argument literalness is proved with the repository's own shell
 // tokenizer plus a focused POSIX single-quote reader; no shell, agent,
 // provider or platform process is launched.
+//
+// The same real-template renders also carry the delivered conversational
+// instruction contract of `condition-harness-context-gathering`: the reply
+// memory section owns the context-sufficiency rule exactly once, reply /
+// spontaneous-post / dashboard-chat instructions mandate no think-out-loud
+// narration, and the dashboard keeps its direct text output and skill
+// prohibition. Those assertions are instruction-contract evidence too — they
+// never prove a model's tool choices or its internal reasoning.
 
 import { assert, assertEquals, assertFalse, assertStringIncludes, assertThrows } from "@std/assert";
 import { join } from "@std/path";
@@ -481,4 +489,185 @@ Deno.test("prompt skills root - a generic render needs no root and gains no reci
   });
   assertEquals(rendered, "Generic assistant prompt.");
   assertFalse(rendered.includes("Skill Script Root"));
+});
+
+// ---------------------------------------------------------------------------
+// Delivered conversational instruction contract
+// (`condition-harness-context-gathering`)
+//
+// The reply memory section owns the information-gathering decision; a render
+// with adequate supplied context still delivers the missing-history and
+// explicit-recall directions, and no unconditional gathering mandate or
+// narration mandate survives anywhere in the conversational templates.
+// ---------------------------------------------------------------------------
+
+/** The one owning sufficiency permission the reply memory section must carry once. */
+const CONTEXT_SUFFICIENCY_RULE = "reply directly in character without gathering anything further";
+
+/** The missing-history direction the same section owns. */
+const MISSING_HISTORY_TRIGGER = "missing from the supplied context and recent messages";
+
+/** A greeting whose supplied context suffices for a first reply. */
+const GREETING_CONTEXT = "[User] 早安！今天過得好嗎？";
+
+/** A request whose answer needs history absent from the supplied context. */
+const MISSING_HISTORY_CONTEXT = "[User] 你還記得我們上週決定的專案方向嗎？";
+
+/** The `# Instructions` … `## Critical Rules` slice of one reply render. */
+function instructionSection(rendered: string): string {
+  const start = rendered.indexOf("# Instructions");
+  assert(start >= 0, "render carries the `# Instructions` section");
+  const end = rendered.indexOf("## Critical Rules", start);
+  assert(end > start, "render carries `## Critical Rules` after the instruction section");
+  return rendered.slice(start, end);
+}
+
+/** Assert one reply render delivers the single conditional retrieval contract. */
+function assertRetrievalContract(rendered: string, label: string): void {
+  const instructions = instructionSection(rendered);
+  assertEquals(
+    instructions.split(CONTEXT_SUFFICIENCY_RULE).length - 1,
+    1,
+    `${label}: the memory section owns the context-sufficiency rule exactly once`,
+  );
+  assertStringIncludes(
+    instructions,
+    MISSING_HISTORY_TRIGGER,
+    `${label}: missing-history direction`,
+  );
+  assertStringIncludes(
+    instructions,
+    "the user explicitly asks you to recall past events",
+    `${label}: explicit-recall direction`,
+  );
+  assertStringIncludes(instructions, "--category", `${label}: category filter retained`);
+  assertStringIncludes(instructions, "--scope", `${label}: scope filter retained`);
+  assertFalse(
+    rendered.includes("Always use skills to gather enough information"),
+    `${label}: no unconditional gathering bullet`,
+  );
+  assertFalse(
+    rendered.includes("**Gather information**"),
+    `${label}: no duplicate critical gathering rule`,
+  );
+  assertStringIncludes(
+    rendered,
+    '**ALWAYS follow the skill({ name: "send-reply" }) instructions to send your final response**',
+    `${label}: mandatory delivery instruction retained`,
+  );
+  assertStringIncludes(
+    rendered,
+    '- **No second attempt**: If you fail to send the reply or if the script encounters an error, you won\'t get a second chance to send another reply. Make sure your message is final and well-crafted before executing this skill({ name: "send-reply" }).',
+    `${label}: no-second-attempt rule untouched`,
+  );
+  assertStringIncludes(rendered, "**Review in character**", `${label}: in-character reply review`);
+  assertStringIncludes(rendered, "**Save information**", `${label}: memory saving retained`);
+  assertStringIncludes(
+    instructions,
+    'skill({ name: "memory-patch" })',
+    `${label}: memory correction retained`,
+  );
+  for (const mandate of ["Think out loud", "**Think first**", "**Think before you send**"]) {
+    assertFalse(rendered.includes(mandate), `${label}: no ${mandate} narration mandate`);
+  }
+  assertFalse(rendered.includes("YOUR thought process"), `${label}: no narrated thought process`);
+}
+
+for (const agentType of ["opencode", "omp"] as const) {
+  for (const yolo of [false, true] as const) {
+    const label = `reply ${agentType} ${yolo ? "YOLO" : "restricted"}`;
+    Deno.test(`prompt instructions - ${label} owns one conditional retrieval rule`, async () => {
+      const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
+        ...baseVars,
+        agentType,
+        yolo,
+        ...stagingVars,
+        userContextMessage: GREETING_CONTEXT,
+      });
+      assertRetrievalContract(rendered, label);
+      // Variant gating is untouched: the OMP-only shell section and the
+      // restricted-only capability section keep their exact conditions.
+      assertEquals(rendered.includes("## OMP Shell Usage"), agentType === "omp", label);
+      assertEquals(rendered.includes("## Agent Capabilities"), !yolo, label);
+    });
+  }
+}
+
+Deno.test("prompt instructions - the retrieval rule follows context sufficiency, not message text", async () => {
+  const render = (userContextMessage: string) =>
+    renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
+      ...baseVars,
+      ...stagingVars,
+      userContextMessage,
+    });
+  const greeting = await render(GREETING_CONTEXT);
+  const missingHistory = await render(MISSING_HISTORY_CONTEXT);
+  // Channel-lurk replies reuse `system_reply.md`; that shape renders the same
+  // instruction section.
+  const channelLurk = await render(
+    `${MISSING_HISTORY_CONTEXT}\n\n## Relevant Channel Notes\n- [from c1] earlier channel topic`,
+  );
+
+  assertEquals(
+    instructionSection(greeting),
+    instructionSection(missingHistory),
+    "greeting and missing-history renders deliver identical instructions",
+  );
+  assertEquals(
+    instructionSection(greeting),
+    instructionSection(channelLurk),
+    "the lurk render delivers identical instructions",
+  );
+  // No hard-coded greeting branch: the fixture's own greeting text never
+  // reaches the instruction section, yet the recall directions stay delivered.
+  assertFalse(
+    instructionSection(greeting).includes("早安"),
+    "no greeting string in the instructions",
+  );
+  assertStringIncludes(instructionSection(missingHistory), CONTEXT_SUFFICIENCY_RULE);
+  assertStringIncludes(instructionSection(missingHistory), MISSING_HISTORY_TRIGGER);
+});
+
+Deno.test("prompt instructions - spontaneous posting keeps its purpose without narration mandates", async () => {
+  const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_spontaneous.md"), {
+    ...baseVars,
+    ...stagingVars,
+  });
+  assertStringIncludes(
+    rendered,
+    "### 2. Pick ONE topic that interests YOU",
+    "topic selection retained",
+  );
+  assertStringIncludes(
+    rendered,
+    "Craft a post in your own voice",
+    "character-authored posting retained",
+  );
+  assertStringIncludes(
+    rendered,
+    'Use the skill({ name: "send-reply" }) to post your content',
+    "delivery retained",
+  );
+  for (const mandate of ["Think out loud", "**Think first**", "**Think before you send**"]) {
+    assertFalse(rendered.includes(mandate), `spontaneous: no ${mandate} narration mandate`);
+  }
+});
+
+Deno.test("prompt instructions - dashboard chat stays direct and skill-free without narration mandates", async () => {
+  const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_web_chat.md"), {
+    ...baseVars,
+    isDm: true,
+  });
+  assertStringIncludes(
+    rendered,
+    "These skills are not available in this mode.",
+    "dashboard skill prohibition retained",
+  );
+  assertStringIncludes(rendered, "**Respond directly**", "direct text output retained");
+  assertStringIncludes(rendered, "**Review in character**", "in-character review retained");
+  assertFalse(rendered.includes("## Skill Script Root"), "no skills root");
+  for (const mandate of ["Think out loud", "**Think first**", "**Think before you send**"]) {
+    assertFalse(rendered.includes(mandate), `dashboard: no ${mandate} narration mandate`);
+  }
+  assertFalse(rendered.includes("YOUR thought process"), "dashboard: no narrated thought process");
 });
