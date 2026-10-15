@@ -11,11 +11,11 @@
 
 ## 2. Legacy Clutter Removal & Active Contract Migration
 
-- [ ] 2.1 Extract surviving OMP approval settings, native acceptance commands, and verification criteria from `docs/OMP_*.md` and `docs/USER-RUNTIME-VERIFICATION.md` into staging notes for `docs/agent/` chapters.
-- [ ] 2.2 Remove obsolete `docs/OMP_*.md` files (`OMP_SPAWN.md`, `OMP_SETTINGS.md`, `OMP_RECOVERY.md`, `OMP_POOL_MODES.md`, `OMP_PACKAGING.md`, `OMP_NETWORK.md`, `OMP_DISCOVERY.md`, `OMP_COMPATIBILITY.md`, `OMP_TOOL_POLICY.md`, `OMP_ENFORCEMENT.md`).
-- [ ] 2.3 Remove `docs/USER-RUNTIME-VERIFICATION.md` and `docs/CONTAINER_TOOLS.md`.
-- [ ] 2.4 Delete legacy directories `docs/omp-features/` and `docs/superpowers/specs/`.
-- [ ] 2.5 Delete `docs/misskey/misskey-open-api.json` and remove obsolete standalone docs superseded by new chapters (`docs/DEVELOPMENT.md`, `docs/DESIGN.md`, `docs/AGENT_PERMISSIONS.md`, `docs/SKILLS_IMPLEMENTATION.md`, `docs/PLATFORM_INTEGRATION.md`, `docs/MEMORY_DESIGN.md`, `docs/misskey/misskey-integration.md`).
+- [x] 2.1 Extract surviving OMP approval settings, native acceptance commands, and verification criteria from `docs/OMP_*.md` and `docs/USER-RUNTIME-VERIFICATION.md` into staging notes for `docs/agent/` chapters.
+- [x] 2.2 Remove obsolete `docs/OMP_*.md` files (`OMP_SPAWN.md`, `OMP_SETTINGS.md`, `OMP_RECOVERY.md`, `OMP_POOL_MODES.md`, `OMP_PACKAGING.md`, `OMP_NETWORK.md`, `OMP_DISCOVERY.md`, `OMP_COMPATIBILITY.md`, `OMP_TOOL_POLICY.md`, `OMP_ENFORCEMENT.md`).
+- [x] 2.3 Remove `docs/USER-RUNTIME-VERIFICATION.md` and `docs/CONTAINER_TOOLS.md`.
+- [x] 2.4 Delete legacy directories `docs/omp-features/` and `docs/superpowers/specs/`.
+- [x] 2.5 Delete `docs/misskey/misskey-open-api.json` and remove obsolete standalone docs superseded by new chapters (`docs/DEVELOPMENT.md`, `docs/DESIGN.md`, `docs/AGENT_PERMISSIONS.md`, `docs/SKILLS_IMPLEMENTATION.md`, `docs/PLATFORM_INTEGRATION.md`, `docs/MEMORY_DESIGN.md`, `docs/misskey/misskey-integration.md`).
 
 ## 3. Getting Started & User Guide Chapters
 
