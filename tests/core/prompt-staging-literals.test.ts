@@ -28,6 +28,12 @@
 // narration, and the dashboard keeps its direct text output and skill
 // prohibition. Those assertions are instruction-contract evidence too — they
 // never prove a model's tool choices or its internal reasoning.
+//
+// They additionally carry the delivery-recovery contract of
+// `clarify-delivery-recovery-guidance`: the reply template references the
+// send-reply skill's delivery-outcome policy exactly once (never duplicating
+// its outcome table) and its exit/edit bullets permit exactly one scoped
+// correction for an already-known concrete error in the active session.
 
 import { assert, assertEquals, assertFalse, assertStringIncludes, assertThrows } from "@std/assert";
 import { join } from "@std/path";
@@ -524,6 +530,73 @@ function instructionSection(rendered: string): string {
   return rendered.slice(start, end);
 }
 
+// ---------------------------------------------------------------------------
+// Delivered delivery-recovery contract (`clarify-delivery-recovery-guidance`)
+//
+// The reply template REFERENCES the send-reply skill's delivery-outcome policy
+// instead of duplicating it: one short reference, no outcome table, and exit/
+// edit bullets that permit exactly one active-session known-error correction
+// before exit. The owning policy text itself lives in
+// skills/send-reply/SKILL.md and is pinned by tests/skills/skill-docs-token-gate.test.ts.
+// ---------------------------------------------------------------------------
+
+/** The ONE delivery-policy reference the reply template must carry. */
+const DELIVERY_POLICY_REFERENCE = "Follow the send-reply delivery-outcome policy";
+
+/** Outcome-table vocabulary that must NOT be duplicated into the template. */
+const OUTCOME_TABLE_LEAKS = [
+  "**Confirmed success**",
+  "**Confirmed pre-delivery failure**",
+  "**Uncertain delivery**",
+  "SKILL_PAYLOAD_OUT_OF_BOUNDS",
+  "Delivery Recovery",
+] as const;
+
+/** Assert one reply render defers to the owner and bounds the correction. */
+function assertDeliveryRecoveryReference(rendered: string, label: string): void {
+  assertEquals(
+    rendered.split(DELIVERY_POLICY_REFERENCE).length - 1,
+    1,
+    `${label}: the delivery-outcome reference appears exactly once`,
+  );
+  for (const leak of OUTCOME_TABLE_LEAKS) {
+    assertFalse(
+      rendered.includes(leak),
+      `${label}: the owner's outcome policy is not duplicated (${leak})`,
+    );
+  }
+  // The blanket irreversible-failure wording this change replaces.
+  assertFalse(rendered.includes("No second attempt"), `${label}: no blanket failure finality`);
+  assertFalse(rendered.includes("there's no going back"), `${label}: no irreversible-send wording`);
+  assertFalse(
+    rendered.includes('ALWAYS USE skill({ name: "edit-reply" }) INSTEAD'),
+    `${label}: no open-ended follow-up promise`,
+  );
+  // The exit bullet permits exactly the one known-error correction and
+  // authorizes no proactive readback; the edit bullet stays inside the
+  // edit-reply skill's own quota.
+  assertStringIncludes(
+    rendered,
+    'the only exception is the single skill({ name: "edit-reply" }) correction above',
+    `${label}: exit bullet permits only the one correction`,
+  );
+  assertStringIncludes(
+    rendered,
+    "no further tool calls, summaries, memory writes or readback",
+    `${label}: success exit authorizes no readback`,
+  );
+  assertStringIncludes(
+    rendered,
+    "within edit-reply's own limit",
+    `${label}: correction stays inside the edit quota`,
+  );
+  assertStringIncludes(
+    rendered,
+    "If you already know of a concrete error in a reply you have just delivered",
+    `${label}: correction is scoped to an already-known error in the active session`,
+  );
+}
+
 /** Assert one reply render delivers the single conditional retrieval contract. */
 function assertRetrievalContract(rendered: string, label: string): void {
   const instructions = instructionSection(rendered);
@@ -567,14 +640,7 @@ function assertRetrievalContract(rendered: string, label: string): void {
     '**ALWAYS follow the skill({ name: "send-reply" }) instructions to send your final response**',
     `${label}: mandatory delivery instruction retained`,
   );
-  // `clarify-delivery-recovery-guidance` owns this sentence and will replace
-  // it: update this expectation with that change instead of treating the
-  // failure as a regression.
-  assertStringIncludes(
-    rendered,
-    '- **No second attempt**: If you fail to send the reply or if the script encounters an error, you won\'t get a second chance to send another reply. Make sure your message is final and well-crafted before executing this skill({ name: "send-reply" }).',
-    `${label}: no-second-attempt rule untouched`,
-  );
+  assertDeliveryRecoveryReference(rendered, label);
   assertStringIncludes(rendered, "**Review in character**", `${label}: in-character reply review`);
   assertStringIncludes(rendered, "**Check before you send**", `${label}: pre-send review retained`);
   assertStringIncludes(rendered, "**Save information**", `${label}: memory saving retained`);

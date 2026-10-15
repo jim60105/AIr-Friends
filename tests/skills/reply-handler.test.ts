@@ -1,6 +1,6 @@
 // tests/skills/reply-handler.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { ReplyHandler, stripXmlTags, unescapeNewlines } from "@skills/reply-handler.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
@@ -1382,6 +1382,20 @@ Deno.test("ReplyHandler - handleGetMessage falls back to lastFileMessageId", asy
 
   assertEquals(result.success, true);
   assertEquals(capturedMessageId, "file_msg_42");
+  // `clarify-delivery-recovery-guidance`: the fetched message carries no role
+  // LABEL, so the only discriminator the agent has is which ID the lookup used
+  // plus what came back. A file message returned through the file fallback is
+  // never confirmation that a separate text reply was delivered.
+  const data = result.data;
+  assert(data !== null && typeof data === "object", "get-message returns message data");
+  assertEquals("role" in data, false, "no role label is provided");
+  assertEquals(
+    "messageId" in data ? data.messageId : undefined,
+    "file_msg_42",
+    "the returned ID is the file message ID",
+  );
+  assertEquals("isBot" in data ? data.isBot : undefined, true);
+  assertEquals("content" in data ? data.content : undefined, "File message");
 });
 
 Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastFileMessageId", async () => {

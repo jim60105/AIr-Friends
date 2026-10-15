@@ -399,9 +399,17 @@ Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {
 Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system message intro", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   assertStringIncludes(strategy.retryPromptMessage, "System message:");
+  // `clarify-delivery-recovery-guidance`: the directive to communicate is
+  // CONDITIONAL on nothing having actually reached the user, because a missing
+  // recorded response is never proof of non-delivery.
   assertStringIncludes(
     strategy.retryPromptMessage,
-    "You must communicate with the user by using send-reply, react-message, or send-file",
+    "No recorded response is not by itself evidence that nothing reached the user",
+  );
+  assertStringIncludes(
+    strategy.retryPromptMessage,
+    "If nothing actually reached the user, you must communicate with them by using send-reply, " +
+      "react-message, or send-file",
   );
   // send-file carries the "only when a suitable file already exists" qualifier
   assertStringIncludes(
@@ -421,9 +429,16 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/send-reply/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send Reply Skill");
+  // `clarify-delivery-recovery-guidance` scopes the documented limit to
+  // SUCCESSFUL sends so a pre-delivery rejection can be corrected; the retry
+  // prompt embeds that owning document verbatim.
   assertStringIncludes(
     strategy.retryPromptMessage,
-    "You can only send ONE reply. You MUST send exactly ONE reply.",
+    "You MUST deliver exactly ONE reply per session",
+  );
+  assertStringIncludes(
+    strategy.retryPromptMessage,
+    "does not consume it, so correct the reported cause and invoke the skill again",
   );
 });
 
@@ -1023,8 +1038,11 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   const msg = strategy.retryPromptMessage;
 
-  // States the turn ended without a reply/reaction/file.
-  assertStringIncludes(msg, "ended without sending a reply, reaction, or file");
+  // States the turn ended without a RECORDED reply/reaction/file.
+  assertStringIncludes(
+    msg,
+    "Your previous turn ended without a reply, reaction, or file send RECORDED in this session",
+  );
 
   // Likely causes under the payload-file contract.
   assertStringIncludes(msg, "removed legacy flag");
@@ -1034,6 +1052,20 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   assertStringIncludes(msg, "read that error's output");
   // send-file causes: removed singular flag and caption legacy flag
   assertStringIncludes(msg, "--file-path");
+
+  // `clarify-delivery-recovery-guidance`: corrected sending is permitted ONLY
+  // for the named pre-platform-rejection causes, and every other failure —
+  // including a generic error whose cause is unknown — defers to the owning
+  // skill documents instead of authorizing a resend.
+  assertStringIncludes(
+    msg,
+    "failed before the platform was reached: fix that cause and send again, within the existing limits",
+  );
+  assertStringIncludes(msg, "or an error whose cause you cannot identify");
+  assertStringIncludes(
+    msg,
+    "do NOT send again unless that evidence rules out arrival",
+  );
 
   // Correct two-step example invocation with the payload-file flag, naming the
   // ctx's LITERAL session id + absolute staging dir (no shell tokens). Every
@@ -1060,6 +1092,76 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   assertStringIncludes(msg, "# Send Reply Skill");
   assertStringIncludes(msg, "# React Message Skill");
   assertStringIncludes(msg, "# Send File Skill");
+});
+
+// ============ Delivery-outcome recovery in the retry prompt ============
+// (`clarify-delivery-recovery-guidance`) The existing corrective prompt is
+// aligned with the owning skill policy without changing its gate: both agent
+// types, in both spawn shapes, get the SAME text, one corrective turn, the
+// qualified directive, the payload checklist, the literal recipe, and the
+// trusted documents that own the outcome table. Mocked text evidence only —
+// it proves what the retry turn is told, never what an agent then did.
+
+Deno.test("getRetryPromptStrategy - every agent type and spawn shape gets the same qualified recovery policy", () => {
+  const built: Array<{ label: string; msg: string }> = [];
+  for (const type of ["opencode", "omp"] as const) {
+    for (const sharedProcess of [false, true] as const) {
+      const strategy = getRetryPromptStrategy(type, {
+        sharedProcess,
+        sessionId: "sess_policy",
+        stagingDir: "/data/workspaces/discord/123/tmp/sess_policy",
+        skillsDir: TEST_RETRY_CTX.skillsDir,
+      });
+      const label = `${type} ${sharedProcess ? "pooled" : "per-spawn"}`;
+      const msg = strategy.retryPromptMessage;
+
+      // One corrective turn, unchanged.
+      assertEquals(strategy.maxRetries, 1, label);
+
+      // The directive to communicate is conditional; a missing record is not
+      // proof that nothing reached the user.
+      assertStringIncludes(
+        msg,
+        "No recorded response is not by itself evidence that nothing reached the user",
+        label,
+      );
+      assertStringIncludes(msg, "If nothing actually reached the user", label);
+
+      // Confirmed pre-delivery rejection is the ONLY case that authorizes a
+      // corrected resend; everything else defers to the included documents.
+      assertStringIncludes(
+        msg,
+        "a removed legacy flag, an unwritten payload file, or a payload staged outside the session " +
+          "staging directory",
+        label,
+      );
+      assertStringIncludes(msg, "may already have reached the user", label);
+      assertStringIncludes(
+        msg,
+        "inspect the evidence the send-reply and send-file documents included below allow",
+        label,
+      );
+      assertFalse(
+        /send again[^.]*\./i.test(msg.split("the most likely causes are")[0]),
+        `${label}: no unconditional resend instruction in the preamble`,
+      );
+
+      // The owning document travels with the retry, so the outcome policy is
+      // available where the decision is made.
+      assertStringIncludes(msg, "## Delivery Recovery", label);
+      assertStringIncludes(msg, "**Confirmed success**", label);
+      assertStringIncludes(msg, "**Uncertain delivery**", label);
+      assertStringIncludes(msg, "## Result", label); // send-file partial-delivery rule
+
+      built.push({ label, msg });
+    }
+  }
+  // One shared builder: both agent types and both spawn shapes render
+  // byte-identical guidance for the same session.
+  assertEquals(built.length, 4);
+  for (const { label, msg } of built) {
+    assertEquals(msg, built[0].msg, `${label}: identical to ${built[0].label}`);
+  }
 });
 
 // ============ Literal-first retry prompt (make-skill-staging-agent-portable) ============

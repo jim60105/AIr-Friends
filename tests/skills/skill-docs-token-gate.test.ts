@@ -389,6 +389,81 @@ Deno.test("skill docs gate - no published instruction prescribes a stale cancell
   assertStringIncludes(sendFile, "never retry that send");
   assertStringIncludes(sendFile, "may still have reached the platform");
   const sendReply = Deno.readTextFileSync("skills/send-reply/SKILL.md");
-  assertStringIncludes(sendReply, "No second attempt");
   assertStringIncludes(sendReply, "may still have reached the platform");
+});
+
+// ---------------------------------------------------------------------------
+// Delivery recovery ownership (`clarify-delivery-recovery-guidance`): the
+// send-reply skill OWNS the outcome-dependent recovery policy, send-file owns
+// its partial-delivery rule, and neither document promises an API the system
+// does not have. Honesty boundary: these are document-contract assertions
+// over the REAL bundled SKILL.md files — they prove what the agent is handed,
+// never that a platform accepted anything.
+// ---------------------------------------------------------------------------
+
+Deno.test("skill docs gate - send-reply owns the outcome-dependent delivery recovery policy", () => {
+  const sendReply = Deno.readTextFileSync("skills/send-reply/SKILL.md");
+
+  // The blanket irreversible-failure warning is gone; the outcome table owns
+  // the decision instead.
+  assertFalse(sendReply.includes("No second attempt"), "blanket finality warning removed");
+  assertFalse(sendReply.includes("there's no going back"), "irreversible-send wording removed");
+  assertStringIncludes(sendReply, "## Delivery Recovery");
+  for (
+    const outcome of [
+      "**Confirmed success**",
+      "**Confirmed pre-delivery failure**",
+      "**Uncertain delivery**",
+      "**Partial or ambiguous file output**",
+    ]
+  ) {
+    assertStringIncludes(sendReply, outcome);
+  }
+
+  // Confirmed pre-delivery rejection: correctable, quota untouched.
+  for (
+    const code of [
+      "`SKILL_LEGACY_FLAG`",
+      "`SKILL_MISSING_PAYLOAD`",
+      "`SKILL_PAYLOAD_OUT_OF_BOUNDS`",
+      "`SKILL_PAYLOAD_NOT_FOUND`",
+    ]
+  ) {
+    assertStringIncludes(sendReply, code);
+  }
+  assertStringIncludes(sendReply, "the one-reply limit is untouched");
+  assertStringIncludes(sendReply, "correct the reported cause and invoke the skill again");
+
+  // Confirmed success: exit, no resend, no readback, and the ONE scoped
+  // correction bounded to an already-known error in the active session.
+  assertStringIncludes(sendReply, "Known-error correction after a confirmed success");
+  assertStringIncludes(sendReply, "and this session is still active");
+  assertStringIncludes(sendReply, "No follow-up `send-reply`");
+  assertStringIncludes(sendReply, "nothing here promises another correction opportunity");
+  assertStringIncludes(sendReply, "an acknowledged success is a finished job");
+
+  // Inspection limits: no invented status API, no hidden state, and no
+  // negative inference from a missing ID or a rolled-back internal flag.
+  assertStringIncludes(sendReply, "no delivery-status API");
+  assertStringIncludes(sendReply, "the session's last delivered file message");
+  assertStringIncludes(
+    sendReply,
+    "is NEVER confirmation that a text reply was delivered",
+  );
+  assertStringIncludes(sendReply, "the failed result simply carrying no `messageId`");
+  assertStringIncludes(sendReply, "internal reply flag having been rolled back");
+});
+
+Deno.test("skill docs gate - send-file owns the partial-delivery slot rule", () => {
+  const sendFile = Deno.readTextFileSync("skills/send-file/SKILL.md");
+
+  // Positive delivered output is a consumed slot, not a retryable failure.
+  assertStringIncludes(sendFile, "positive `filesCount`");
+  assertStringIncludes(sendFile, "the remaining files are abandoned for this session");
+  assertStringIncludes(sendFile, "The slot is consumed");
+  // Preflight-only failure is the distinct case.
+  assertStringIncludes(sendFile, "Only a failure BEFORE any platform send");
+  // A pending text reply keeps its own quota and the last-file anchor.
+  assertStringIncludes(sendFile, "keeps its own separate quota");
+  assertStringIncludes(sendFile, "threaded to the last delivered file message");
 });
