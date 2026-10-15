@@ -8,6 +8,8 @@
 
 記憶檢索的評分實作於 `src/core/memory-recall/ranker.ts`，以 BM25 演算法計算語彙相關度，並搭配 `src/core/memory-recall/tokenizer.ts` 的 jieba 分詞（套件 `@node-rs/jieba`）。這套做法以純文字檢索為基礎，不需要向量資料庫（Vector Database），也不產生向量嵌入（Embedding）API 費用。jieba 分詞能處理繁體中文人名、專有名詞與標籤，分詞器載入失敗時會降級為實體與雙字組詞彙。記憶本身以 JSONL 檔案（`memory.public.jsonl`、`memory.private.jsonl`）附加寫入，檢索完全基於語彙索引與這些結構化紀錄。
 
+完整的引擎設計（分詞、BM25 評分、`relatedTo` 展開、Fast／Deep 預算與門檻校準）請參閱 [記憶回想引擎設計](../architecture/memory-recall.md)。
+
 ---
 
 ## 背景 LLM 記憶整併與修補

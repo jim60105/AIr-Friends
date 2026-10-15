@@ -27,6 +27,9 @@
   * [沙盒與安全界線](agent/security-and-sandbox.md)
   * [模型路由規則](agent/model-routing.md)
 
+* **架構設計**
+  * [記憶回想引擎設計](architecture/memory-recall.md)
+
 * **進階功能**
   * [自發貼文機制](features/spontaneous-posting.md)
   * [頻道潛水監聽](features/channel-lurk.md)
