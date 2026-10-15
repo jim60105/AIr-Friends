@@ -11,12 +11,12 @@ Send one or more files from your workspace to the current conversation channel i
 ## Critical Rules
 
 1. **Files must exist**: Every file must already exist in your workspace before calling this skill.
-2. **Workspace boundary**: Only files within the workspace or agent-workspace can be sent. Path traversal (../) is not allowed.
+2. **Workspace boundary**: Only files within the workspace or agent-workspace can be sent. Path traversal (../) is not allowed, and a symlink that resolves outside the workspace or agent-workspace is rejected.
 3. **Size limits**: Files exceeding the configured size limit will be rejected. Default per-file limit is 25 MB; default per-invocation batch limit is 50 MB total across all files. At most 10 files can be sent per invocation.
 4. **Extension restrictions**: If an extension whitelist is configured, only matching file types can be sent.
 5. **One send per session**: Only ONE successful `send-file` call is allowed per session (a multi-file batch counts as one call). Further calls are rejected with HTTP 429, and repeated attempts terminate the agent. If you need to send more, include everything in the single invocation.
 6. **This skill may be disabled**: The administrator may disable this skill. If you receive a "disabled" error, inform the user that file sending is not available.
-7. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash.
+7. **Timeout**: The script won't run for more than 30 seconds. If it hangs, cancel the running command with the running-command controls your agent documents (if any). A stopped send may still have reached the platform, so never retry that send.
 8. **Threading**: The file message is sent as a reply to the user's trigger message. A subsequent `send-reply` in the same session will be threaded to this file message (keeping the conversation in one thread), not to the trigger.
 
 ## Result
@@ -26,6 +26,24 @@ On success the script returns `messageId` (the delivered message ID), `messageId
 ## Usage
 
 Pass **one `--file-paths` flag per file** (repeatable; short alias `-f`). At least one occurrence is required.
+
+### Path resolution
+
+`--file-paths` values are resolved against the session workspace root (your working directory):
+
+- **Relative values resolve from that root.** With the example workspace root `/work/discord/123`,
+  the existing file `/work/discord/123/tmp/sess_42/file.png` is sent exactly as
+  `--file-paths "tmp/sess_42/file.png"`. Copying or moving that nested file to the workspace root
+  is unnecessary — send it where it already is.
+- **An absolute path inside the workspace or agent-workspace is also accepted**, e.g.
+  `--file-paths "/work/discord/123/exports/report.pdf"`.
+- **Attachment paths need NOT be session-staged.** Session staging is the required home of the
+  caption payload file only; a file anywhere inside the workspace can be sent.
+
+The boundaries above are unchanged: traversal and symlink escapes are rejected, the per-file, batch
+and count size limits apply, and the one-send quota still allows a single invocation.
+
+### Caption (optional)
 
 The caption is OPTIONAL. When present, it MUST NOT appear on the command line — use the two-step payload-file flow (same rules as `send-reply`):
 
@@ -56,7 +74,7 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line �
 | Parameter        | Required | Description                                                                                                                                                                                               |
 | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--session-id`   | Yes      | Pass the literal session id rendered in your system prompt — authoritative in every deployment shape; the skill library resolves the owning session automatically and a mismatched value is never honored |
-| `--file-paths`   | Yes      | Repeatable file path (relative to the workspace root); one occurrence per file, at least 1                                                                                                                |
+| `--file-paths`   | Yes      | Repeatable attachment path; a relative value resolves from the workspace root and an absolute value inside the workspace/agent-workspace is also accepted. One occurrence per file, at least 1           |
 | `-f`             | No       | Short alias for `--file-paths`                                                                                                                                                                            |
 | `--caption-file` | No       | Path of the payload file containing the caption text (must be under `<absolute staging directory rendered in your system prompt>/`)                                                                       |
 
@@ -74,6 +92,20 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line �
   --file-paths "exports/report.pdf" \
   --file-paths "exports/chart.png" \
   --file-paths "exports/data.json"
+
+# Send an existing session-staged file in place, without copying it to the workspace root
+# (fixture: workspace root /work/discord/123 and literal session sess_42 — substitute the
+# workspace root and the session id your system prompt renders, consistently with the
+# tmp/<sessionId>/ directory the file lives in)
+<skill root rendered in your system prompt>/send-file/scripts/send-file.ts \
+  --session-id "sess_42" \
+  --file-paths "tmp/sess_42/file.png"
+
+# Send a nested file by its absolute workspace path, with a caption
+<skill root rendered in your system prompt>/send-file/scripts/send-file.ts \
+  --session-id "<session id rendered in your system prompt>" \
+  --file-paths "/work/discord/123/tmp/sess_42/file.png" \
+  --caption-file "<absolute staging directory rendered in your system prompt>/caption.md"
 
 # Send multiple files with a description
 <skill root rendered in your system prompt>/send-file/scripts/send-file.ts \

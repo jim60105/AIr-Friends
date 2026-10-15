@@ -12,7 +12,7 @@ Send your final response to the user. This is the gateway to external communicat
 
 1. **One reply only**: You can only send ONE reply. You MUST send exactly ONE reply.
 2. **This is the ONLY external output**: All other processing remains internal.
-3. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash.
+3. **Timeout**: The script won't run for more than 30 seconds. If it hangs, cancel the running command with the running-command controls your agent documents (if any). A stopped send may still have reached the platform.
 4. **No second attempt**: If you fail to send the reply or if the script encounters an error, you won't get a second chance to send another reply. That means you failed your job. Make sure your message is final and well-crafted before executing this skill.
 5. **Think before you send**: Take a moment to review your message for clarity, tone, and content. Once you hit send, there's no going back.
 6. **Exit directly after sending the reply**: After executing this `send-reply` skill, you must exit immediately. Do not summarize, continue processing, or attempt to send another message. Your job is done.
