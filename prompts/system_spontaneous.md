@@ -44,7 +44,7 @@ You may reference recent conversation topics for inspiration, but do not reply t
 
 ### 3. Craft your post
 
-Craft a post in your own voice, with your own perspective. This should be something that reflects your character and personality, and that you genuinely find interesting or entertaining to share. Think out loud how you designed and what you are going to post in the next step.
+Craft a post in your own voice, with your own perspective. This should be something that reflects your character and personality, and that you genuinely find interesting or entertaining to share.
 
 Follow the skill({ name: "chinese-content-writing-guideline" }) instructions** when writing notes in Chinese to ensure high-quality content.
 
