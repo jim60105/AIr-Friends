@@ -39,9 +39,9 @@
 
 ## 5. Agent ACP Engine & Security Chapters
 
-- [ ] 5.1 Author `docs/agent/acp-engine.md`: OpenCode vs OMP engine comparison, setup matrix (container vs local/custom prerequisites: models.yml, skills.customDirectories, extension bundle), version verification (`verifyOmpVersion`), and native acceptance commands.
-- [ ] 5.2 Author `docs/agent/security-and-sandbox.md`: workspace boundary isolation, Restricted mode vs YOLO mode, explicit security guarantees and limitations (opt-in OS confinement, Rootless Podman constraints, proxy limitations, OMP accepted upstream differences, and distinction between client-side unit evidence and operator runtime acceptance).
-- [ ] 5.3 Author `docs/agent/model-routing.md`: contextual model routing rules, first-match evaluation, and reasoning effort (`thought_level`).
+- [x] 5.1 Author `docs/agent/acp-engine.md`: OpenCode vs OMP engine comparison, setup matrix (container vs local/custom prerequisites: models.yml, skills.customDirectories, extension bundle), version verification (`verifyOmpVersion`), and native acceptance commands.
+- [x] 5.2 Author `docs/agent/security-and-sandbox.md`: workspace boundary isolation, Restricted mode vs YOLO mode, explicit security guarantees and limitations (opt-in OS confinement, Rootless Podman constraints, proxy limitations, OMP accepted upstream differences, and distinction between client-side unit evidence and operator runtime acceptance).
+- [x] 5.3 Author `docs/agent/model-routing.md`: contextual model routing rules, first-match evaluation, and reasoning effort (`thought_level`).
 
 ## 6. Features & Operations Chapters
 
