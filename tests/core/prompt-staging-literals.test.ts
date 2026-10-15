@@ -542,6 +542,11 @@ function assertRetrievalContract(rendered: string, label: string): void {
   );
   assertStringIncludes(instructions, "--category", `${label}: category filter retained`);
   assertStringIncludes(instructions, "--scope", `${label}: scope filter retained`);
+  assertStringIncludes(
+    instructions,
+    'the workspace notes check in "Your Personal Workspace" above is subject to the same condition',
+    `${label}: sufficiency condition governs the workspace notes check`,
+  );
   assertFalse(
     rendered.includes("Always use skills to gather enough information"),
     `${label}: no unconditional gathering bullet`,
@@ -561,6 +566,7 @@ function assertRetrievalContract(rendered: string, label: string): void {
     `${label}: no-second-attempt rule untouched`,
   );
   assertStringIncludes(rendered, "**Review in character**", `${label}: in-character reply review`);
+  assertStringIncludes(rendered, "**Check before you send**", `${label}: pre-send review retained`);
   assertStringIncludes(rendered, "**Save information**", `${label}: memory saving retained`);
   assertStringIncludes(
     instructions,
