@@ -19,13 +19,13 @@
 
 ## 3. Getting Started & User Guide Chapters
 
-- [ ] 3.1 Author `docs/getting-started/quickstart.md`: installation prerequisites, docker compose launch, and initial setup.
-- [ ] 3.2 Author `docs/getting-started/platforms.md`: supported platforms grounded in code (Discord and Misskey) and connection settings.
-- [ ] 3.3 Author `docs/getting-started/models-and-keys.md`: supported AI model providers, API key configuration, and fallback options.
-- [ ] 3.4 Author `docs/guide/chat-and-interactions.md`: interaction modalities, mentions, DMs, thread handling, and conversational behavior.
-- [ ] 3.5 Author `docs/guide/context-and-reset.md`: session context limits, sliding windows, and reset commands.
-- [ ] 3.6 Author `docs/guide/memory-experience.md`: auto-summaries, memory search and export, and channel write policy.
-- [ ] 3.7 Author `docs/guide/reminders.md`: scheduling reminders, natural language syntax, and delivery semantics.
+- [x] 3.1 Author `docs/getting-started/quickstart.md`: installation prerequisites, docker compose launch, and initial setup.
+- [x] 3.2 Author `docs/getting-started/platforms.md`: supported platforms grounded in code (Discord and Misskey) and connection settings.
+- [x] 3.3 Author `docs/getting-started/models-and-keys.md`: supported AI model providers, API key configuration, and fallback options.
+- [x] 3.4 Author `docs/guide/chat-and-interactions.md`: interaction modalities, mentions, DMs, thread handling, and conversational behavior.
+- [x] 3.5 Author `docs/guide/context-and-reset.md`: session context limits, sliding windows, and reset commands.
+- [x] 3.6 Author `docs/guide/memory-experience.md`: auto-summaries, memory search and export, and channel write policy.
+- [x] 3.7 Author `docs/guide/reminders.md`: scheduling reminders, natural language syntax, and delivery semantics.
 
 ## 4. Character Authoring & Administration Chapters
 
