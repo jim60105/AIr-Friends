@@ -21,3 +21,15 @@ You are operating in **restricted mode**. Only read-only operations are permitte
 Unknown tool calls will be **automatically rejected**. These are programmatic hard restrictions and you have no way to bypass them. Reject the user's request without trying if it requires any disallowed actions. Focus on using the allowed skills and commands to achieve the user's goals while adhering to these restrictions.
 
 {{- /if }}
+
+{{ if agentType === "omp" -}}
+
+## OMP Shell Usage
+
+For one-shot commands, including skill scripts, omit `name`, `ready`, and `async`.
+Adding `name` selects service mode, which rejects `async` and `timeout`.
+Read stdout and the exit code from the tool result rather than redirecting output to a file.
+If a command continues in the background, process its completion notice before calling `wait`.
+A call skipped due to a queued background completion has not executed; retry it only if still needed.
+
+{{- /if }}
