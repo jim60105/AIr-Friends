@@ -7,7 +7,7 @@
 - [x] 1.3 Review the affected-template diff to confirm character fragments, memory correction/saving, research/summary/reminder work and the existing OMP shell fragment are unchanged. Confirm no greeting-string branch, new shared fragment or operational instruction copy was added.
 
 - [x] 1.4 Extend existing template-renderer and delivered-prompt tests for normal/lurk replies across OpenCode/OMP and restricted/YOLO variables. Include sufficient greeting context and a missing-history request; assert one conditional retrieval rule and preserved recall/delivery guidance.
-- [x] 1.5 Cover spontaneous and dashboard template delivery, asserting absence of compulsory narration and preservation of dashboard direct output/skill prohibition. Retain existing OMP-versus-OpenCode instruction-isolation assertions.
+- [x] 1.5 Cover spontaneous and dashboard template delivery, asserting absence of compulsory narration and preservation of dashboard direct output/skill prohibition. Add OMP-versus-OpenCode instruction-isolation assertions (none existed in the pre-change tree).
 
 ## 2. Integration acceptance
 
