@@ -497,8 +497,10 @@ Deno.test("prompt skills root - a generic render needs no root and gains no reci
 //
 // The reply memory section owns the information-gathering decision; a render
 // with adequate supplied context still delivers the missing-history and
-// explicit-recall directions, and no unconditional gathering mandate or
-// narration mandate survives anywhere in the conversational templates.
+// explicit-recall directions, and neither the reply template nor the
+// spontaneous-post and dashboard-chat sections mandate narration. The
+// spontaneous workflow deliberately keeps its own notes-gathering step, which
+// the reply gathering rule does not govern.
 // ---------------------------------------------------------------------------
 
 /** The one owning sufficiency permission the reply memory section must carry once. */
@@ -530,6 +532,11 @@ function assertRetrievalContract(rendered: string, label: string): void {
     1,
     `${label}: the memory section owns the context-sufficiency rule exactly once`,
   );
+  assertEquals(
+    instructions.split('skill({ name: "memory-search" })').length - 1,
+    1,
+    `${label}: the memory section owns the retrieval directive exactly once`,
+  );
   assertStringIncludes(
     instructions,
     MISSING_HISTORY_TRIGGER,
@@ -560,6 +567,9 @@ function assertRetrievalContract(rendered: string, label: string): void {
     '**ALWAYS follow the skill({ name: "send-reply" }) instructions to send your final response**',
     `${label}: mandatory delivery instruction retained`,
   );
+  // `clarify-delivery-recovery-guidance` owns this sentence and will replace
+  // it: update this expectation with that change instead of treating the
+  // failure as a regression.
   assertStringIncludes(
     rendered,
     '- **No second attempt**: If you fail to send the reply or if the script encounters an error, you won\'t get a second chance to send another reply. Make sure your message is final and well-crafted before executing this skill({ name: "send-reply" }).',
@@ -614,6 +624,10 @@ Deno.test("prompt instructions - the retrieval rule follows context sufficiency,
     `${MISSING_HISTORY_CONTEXT}\n\n## Relevant Channel Notes\n- [from c1] earlier channel topic`,
   );
 
+  // The fixture really reached the render, so the equality below compares two
+  // populated contexts rather than two dropped ones.
+  assertStringIncludes(greeting, GREETING_CONTEXT);
+  assertStringIncludes(missingHistory, MISSING_HISTORY_CONTEXT);
   assertEquals(
     instructionSection(greeting),
     instructionSection(missingHistory),
