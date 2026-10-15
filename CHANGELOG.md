@@ -7,36 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-15
+
 ### Added
 
 - **A second AI backend.** The bot can now run on Oh-My-Pi (OMP) as well as OpenCode. Set the default with `agent.defaultAgentType` (`opencode` or `omp`), or choose it per chat from the dashboard's Interactive Terminal, where the Agent Protocol selector now offers both.
-- **Restricted (non-YOLO) protection on the new backend.** The agent may use a fixed set of everyday tools — reading, searching, finding files, running commands, editing, writing, deleting and moving — inside its own workspace, and it can read the shipped skill instructions and run the shipped skills. Everything else, including the language-server tool and any tool it does not recognise, is refused before it runs, and deleting or moving files is accepted only when the source and destination are unambiguous. Restricted and unrestricted sessions keep separate on-disk working areas and never share state.
-- **Misskey:** reactions are now confirmed with the server after they are posted, so the bot reports the reaction the instance actually stored — sensitive or role-restricted emoji can be silently downgraded — instead of the one it asked for, and the emoji list shown to the agent flags sensitive and role-restricted entries.
-- **Misskey:** quote-renotes now reach the agent together with the quoted note, so the bot no longer answers a quotation with its context stripped away.
+- **Restricted (non-YOLO) protection on the new backend.** The agent may use a fixed set of everyday tools inside its own workspace: reading, searching, finding files, running commands, editing, writing, deleting and moving. It can also read the shipped skill instructions and run the shipped skills. Everything outside that set, including the language-server tool and any tool it does not recognise, is refused before it runs, and deleting or moving files is accepted only when the source and destination are unambiguous. Restricted and unrestricted sessions keep separate on-disk working areas and never share state.
+- **Misskey.** Reactions are now confirmed with the server after they are posted, so the bot reports the reaction the instance actually stored instead of the one it asked for. An instance can downgrade a sensitive or role-restricted emoji without rejecting the request, and the emoji list shown to the agent now flags those entries.
+- **Misskey.** Quote-renotes now reach the agent together with the quoted note, so the bot no longer answers a quotation without the note it quotes.
 - The bot now declares the skills folder to OpenCode itself at startup, editing the managed OpenCode configuration in place and leaving every other setting untouched, so skill discovery needs no hand configuration; if that file cannot be updated, startup fails with a clear message naming the file and the folder.
 - A browsable feature inventory for the OMP integration (docsify site under `docs/omp-features/`).
+- **Documentation site.** The documentation was reorganised into a Docsify site with 正體中文 chapters covering quick start, the user guide, character and prompt templates, administration, the agent runtime and sandbox, features, operations, extension points and reference. A memory-recall engine design page was added, obsolete development notes were removed, and the surviving operational contracts were migrated into the new chapters.
 
 ### Changed
 
-- **BREAKING — one shared skills folder.** Both backends now use a single skill-script directory (`agent.skillsDir` / `AGENT_SKILLS_DIR`, `/home/deno/.agents/skills` in the stock image). The separate OMP image folder `/opt/air/skills` no longer exists, so a deployment that mounted it or pointed configuration at it must use the shared directory instead.
-- **BREAKING — stricter skill approval.** Only the skill scripts actually shipped in that one directory are approved automatically. A script found anywhere else — in a user's home directory, or in a relative `skills/` folder beside the process — is no longer approved, and a configured skill list can only narrow the approved set, never widen it.
-- **BREAKING — restricted writes.** In non-YOLO mode the agent can no longer write ordinary files in a user's workspace, Markdown included. It may write only its own staged reply and memory payloads, authorised shared-workspace files with the allowed extensions, and its own temporary directory.
-- **BREAKING — model requests.** A session that asks for a model the backend does not advertise now fails with a clear error instead of quietly falling back to an unverified model.
-- **BREAKING — container image layout.** Container artifacts now follow the image's ordinary ownership and permission convention and the internal checksum manifest is gone: the OMP runtime installs to `/usr/local/bin/omp` like any other tool, its settings and prompt live under `/opt/air/omp/`, and the image ships one shared skill tree instead of a second OMP-specific one.
+- **BREAKING: one shared skills folder.** Both backends now use a single skill-script directory (`agent.skillsDir` / `AGENT_SKILLS_DIR`, `/home/deno/.agents/skills` in the stock image). The separate OMP image folder `/opt/air/skills` no longer exists, so a deployment that mounted it or pointed configuration at it must use the shared directory.
+- **BREAKING: stricter skill approval.** Only the skill scripts actually shipped in that one directory are approved automatically. A script found anywhere else, whether in a user's home directory or in a relative `skills/` folder beside the process, is no longer approved. A configured skill list can narrow the approved set, never widen it.
+- **BREAKING: restricted writes.** In non-YOLO mode the agent can no longer write ordinary files in a user's workspace, Markdown included. It may write only its own staged reply and memory payloads, authorised shared-workspace files with the allowed extensions, and its own temporary directory.
+- **BREAKING: model requests.** A session that asks for a model the backend does not advertise now fails with a clear error instead of quietly falling back to an unverified model.
+- **BREAKING: container image layout.** Container artifacts now follow the image's ordinary ownership and permission convention, and the internal checksum manifest is gone. The OMP runtime installs to `/usr/local/bin/omp` like any other tool, its settings and prompt live under `/opt/air/omp/`, and the image ships one shared skill tree instead of a second OMP-specific one.
 - The language-server (LSP) tool is switched off for both backends in both modes.
-- Custom prompt templates now receive the skills folder as a required value: a mounted template that renders without the skill-root section is refused with an explicit error instead of sending skill instructions that point nowhere.
-- `misskey-js` was updated to the reviewed server baseline, so unsupported Misskey API calls are caught before they reach the server.
+- Custom prompt templates now receive the skills folder as a required value. A mounted template that renders without the skill-root section is refused with an explicit error instead of sending skill instructions that point nowhere.
+- `misskey-js` was updated to the reviewed server baseline, so unsupported Misskey API calls are rejected before they reach the server.
 
 ### Removed
 
-- Public code search for the new backend was dropped: the equivalent upstream tool had already been removed, so no code-search tool ships.
+- Public code search for the new backend was dropped. The equivalent upstream tool had already been removed, so no code-search tool ships.
 
 ### Fixed
 
 - Prompts now tell the agent the exact session id and the exact folder to stage its payloads in, instead of asking it to expand environment variables itself, so agents that run without a shell receive the same instructions.
-- Commands the agent is allowed to run are checked more strictly: every file path argument, input and output, must stay inside the areas the session is allowed to touch.
-- Misskey thread history now prefers genuinely direct replies, and a temporary Misskey API failure no longer silently returns an empty reply list — the session keeps what it did fetch and the failure is logged.
-- Container build fixes: declared file and directory permissions are applied in the intended order, the OMP packaging scripts are found during both architecture builds, the `dumb-init` download is checksum-verified like the other pinned binaries, and the CI executable runs with its documented permissions and reports failures instead of hiding them.
+- Commands the agent is allowed to run are checked more strictly. Every file path argument, input and output, must stay inside the areas the session is allowed to touch.
+- Misskey thread history now prefers genuinely direct replies, and a temporary Misskey API failure no longer silently returns an empty reply list. The session keeps what it did fetch and the failure is logged.
+- Misskey direct-message history now includes the bot's own earlier messages as well as the user's, so the bot's earlier replies to that user are part of the history it receives; the fetch reads both sides in one call and fails as a whole if either side cannot be read.
+- Misskey paginated requests now send the parameter name the server accepts and every request is capped to the supported 1 to 100 range, so asking for more messages than the API allows no longer fails with an invalid-parameter error. The fetch-context skill rejects a limit outside 1 to 100 up front and names the allowed range.
+- Container build fixes. The declared file and directory permissions are applied in the intended order, the OMP packaging scripts are found during both architecture builds, `dumb-init` is checksum-verified like the other pinned binaries, and the CI executable runs with its documented permissions and reports failures instead of hiding them.
 
 ## [0.32.0] - 2026-09-26
 
@@ -1173,7 +1178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/jim60105/AIr-Friends/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/jim60105/AIr-Friends/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/jim60105/AIr-Friends/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/jim60105/AIr-Friends/compare/v0.30.0...v0.31.0
