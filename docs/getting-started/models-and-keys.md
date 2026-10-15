@@ -1,6 +1,6 @@
 # 模型與金鑰設定
 
-AIr-Friends 支援透過 ACP 代理人引擎調用各大主力大型語言模型（LLM）。你可以靈活配置多家供應商的 API 金鑰與預設模型。
+AIr-Friends 支援透過 ACP 代理人引擎呼叫各大主力大型語言模型（LLM）。你可以靈活配置多家供應商的 API 金鑰與預設模型。
 
 ---
 
@@ -12,9 +12,9 @@ AIr-Friends 支援透過 ACP 代理人引擎調用各大主力大型語言模型
 | :--- | :--- | :--- |
 | **Anthropic** | `claude-3-7-sonnet`, `claude-3-5-sonnet`, `claude-3-5-haiku` | 邏輯推理優異、提示詞遵循度高、支援思考模式 |
 | **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | 多語言能力強、回應速度快、支援結構化輸出 |
-| **Google** | `gemini-2.0-flash`, `gemini-1.5-pro` | 長上下文視窗、經濟實惠 |
+| **Google** | `gemini-2.0-flash`, `gemini-1.5-pro` | 長脈絡視窗、經濟實惠 |
 | **DeepSeek** | `deepseek-chat`, `deepseek-reasoner` | 開源架構推論強、成本極低 |
-| **自建 / 本地端** | 相容 OpenAI API 的任何模型 (如 vLLM, Ollama, LiteLLM) | 隱私自主、無外部 API 成本 |
+| **自建 / 本地端** | 相容 OpenAI API 的任何模型（如 vLLM, Ollama, LiteLLM） | 隱私自主、無外部 API 成本 |
 
 ---
 

@@ -13,7 +13,7 @@ AIr-Friends 將每次對話工作階段的完整歷程以 JSONL（JSON Lines）�
 - `timestamp`：ISO 8601 時間戳記。
 - `platform`、`channelId`、`userId`：訊息來源中繼資料。
 - `inputPrompt`：完整組裝後的初始提示詞（包含注入的記憶與頻道歷史）。
-- `toolCalls`：代理人調用各項技能的輸入參數與執行結果。
+- `toolCalls`：代理人呼叫各項技能的輸入參數與執行結果。
 - `finalReply`：最終發布給使用者的文字內容。
 
 ---

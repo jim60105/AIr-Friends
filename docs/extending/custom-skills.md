@@ -6,7 +6,7 @@
 
 ## 安全檔案酬載契約 (Secure Payload File Contract)
 
-在過去的指令列工具調用中，若直接將使用者輸入以命令列參數（CLI Arguments）拼接至 Shell 指令，極易引發 Shell 注入漏洞（Command Injection）。
+在過去的指令列工具呼叫中，若直接將使用者輸入以命令列參數（CLI Arguments）拼接至 Shell 指令，極易引發 Shell 注入漏洞（Command Injection）。
 
 AIr-Friends 規定所有技能必須遵循**安全檔案酬載契約**：
 

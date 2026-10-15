@@ -9,7 +9,7 @@ AIr-Friends 是一套 **ACP (Agent Client Protocol)** 客戶端系統，負責�
 | 特性比較 | OpenCode CLI (`opencode`) | Oh-My-Pi (`omp`) |
 | :--- | :--- | :--- |
 | **通訊方式** | 子行程 Stdio JSON-RPC | 子行程 Stdio JSON-RPC |
-| **組態檔案** | `opencode.json` (JSON 格式) | 手寫原生 YAML (`restricted.yml`, `native-yolo.yml`, `models.yml`) |
+| **組態檔案** | `opencode.json`（JSON 格式） | 手寫原生 YAML（`restricted.yml`, `native-yolo.yml`, `models.yml`） |
 | **沙盒隔離** | 工作階段模式控制 + 檔案存取過濾 | 支援以 bwrap 進行作業系統層級掛載隔離 + 原生擴充套件回呼機制 |
 | **自訂技能載入** | 讀取單一受信任的技能根目錄 | 透過 `skills.customDirectories` 指向單一受信任技能根目錄 |
 | **模型設定路徑** | 透過環境變數或 CLI 參數傳遞 | 位於 OMP 組態根目錄之 `models.yml` (`getAgentDir()/models.yml`) |

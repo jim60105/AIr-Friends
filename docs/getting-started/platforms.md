@@ -6,7 +6,7 @@ AIr-Friends 在設計上採用平台抽象層架構，程式碼定義於 `src/ty
 
 ## 支援平台列表
 
-| 平台名稱 | 平台代碼 (`platform`) | 通訊協定 | 主要功能支援 |
+| 平台名稱 | 平台程式碼 (`platform`) | 通訊協定 | 主要功能支援 |
 | :--- | :--- | :--- | :--- |
 | **Discord** | `discord` | WebSocket Gateway (discord.js v14) | 伺服器文字頻道、討論串（Threads）、私訊（DM）、表情符號回應、打字中指示 |
 | **Misskey** | `misskey` | WebSocket Streaming API (misskey-js) | 公開貼文、首頁時間軸、提及通知、私密筆記（Direct）、表情符號反應 |
@@ -40,10 +40,10 @@ platforms:
 
 ## Misskey 平台設定
 
-AIr-Friends 支援 Misskey 及其分支實例（例如 Firefish、Sharkey 等相容 Misskey API 的聯邦宇宙節點）。
+AIr-Friends 支援 Misskey 及其分支執行個體（例如 Firefish、Sharkey 等相容 Misskey API 的聯邦宇宙節點）。
 
 ### 1. 取得使用者存取權杖
-1. 登入你的 Misskey 實例帳號。
+1. 登入你的 Misskey 執行個體帳號。
 2. 前往 **設定** -> **API / 應用程式** -> 建立存取權杖（Access Token）。
 3. 確保權杖具備以下權限：
    - 讀取通知 (`read:notifications`)
@@ -65,9 +65,9 @@ platforms:
 
 ---
 
-## 平台連線與多重實例管理
+## 平台連線與多重執行個體管理
 
 AIr-Friends 可以在同一份程序中同時啟用多個平台。當兩種平台同時啟用時：
-- 訊息接收與發送分別由各平台的適配器處理。
+- 訊息接收與發送分別由各平台的介面卡處理。
 - 每個使用者的工作區按 `{platform}/{userId}` 嚴密隔離，確保 Discord 使用者與 Misskey 使用者的對話記錄與記憶資料互不混淆。
 - 更多擴充新平台的說明請參閱 [平台介面介接](../extending/platform-adapters.md)。

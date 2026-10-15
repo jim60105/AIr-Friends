@@ -6,7 +6,7 @@ AIr-Friends 支援多種常見的現代化生產部署模式，無論是容器�
 
 ## 1. 容器部署模式 (Docker & Podman)
 
-### Docker Compose 部署 (標準推薦)
+### Docker Compose 部署（標準推薦）
 專案根目錄附帶完整的 `compose.yml`。容器內預設以非 root 使用者（`deno`，UID 1000）身分執行：
 
 ```yaml
@@ -27,7 +27,7 @@ services:
 
 ### 無根容器模式 (Rootless Podman)
 在具備嚴格權限限制的主機上，推薦使用 Rootless Podman 部署：
-- 容器行程與使用者工作階段完全運行於非 root 使用者權限下。
+- 容器行程與使用者工作階段完全在非 root 使用者權限下執行。
 - 若搭配 bwrap 等沙盒工具，請確認主機的核心設定已開啟 `kernel.unprivileged_userns_clone=1`，以利代理人子行程建立掛載命名空間。
 
 ---

@@ -47,7 +47,7 @@ AIr-Friends 是一套專為社群對話打造的多平台對話式 AI 機器人�
 ### 1. 一般終端使用者 (End-User)
 如果你想了解如何與 AIr-Friends 機器人互動、掌握記憶功能或設定提醒：
 - 閱讀 [對話與互動](guide/chat-and-interactions.md)：認識標記（Mention）、私訊（DM）與討論串對話模式。
-- 閱讀 [對話脈絡與重設](guide/context-and-reset.md)：學習如何使用 `/clear` 指令清除對話上下文。
+- 閱讀 [對話脈絡與重設](guide/context-and-reset.md)：學習如何使用 `/clear` 指令清除對話脈絡。
 - 閱讀 [記憶機制與體驗](guide/memory-experience.md)：了解機器人如何自動記住互動內容與偏好。
 - 閱讀 [定時提醒功能](guide/reminders.md)：使用自然語言設定定時通知。
 

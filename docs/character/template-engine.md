@@ -19,7 +19,7 @@ AIr-Friends 整合了輕量且功能強大的 **[Vento](https://vento.js.org/)**
 | 變數名稱 | 型別 | 說明 |
 | :--- | :--- | :--- |
 | `botName` | `string` | 機器人顯示名稱 |
-| `platform` | `string` | 當前平台代碼（`discord` 或 `misskey`） |
+| `platform` | `string` | 當前平台程式碼（`discord` 或 `misskey`） |
 | `channelId` | `string` | 當前對話所在的頻道識別碼 |
 | `userId` | `string` | 觸發使用者的識別碼 |
 | `userName` | `string` | 觸發使用者的暱稱 |

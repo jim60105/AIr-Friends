@@ -12,7 +12,7 @@
 | `platforms.discord.token` | `DISCORD_TOKEN` | `""` | Discord Bot Token |
 | `platforms.discord.applicationId` | `DISCORD_CLIENT_ID` | `""` | Discord Application ID |
 | `platforms.misskey.enabled` | `MISSKEY_ENABLED` | `false` | 是否啟用 Misskey 平台 |
-| `platforms.misskey.host` | `MISSKEY_HOST` | `""` | Misskey 實例主機網址 |
+| `platforms.misskey.host` | `MISSKEY_HOST` | `""` | Misskey 執行個體主機網址 |
 | `platforms.misskey.token` | `MISSKEY_TOKEN` | `""` | Misskey 存取權杖 |
 | `agent.type` | `AGENT_TYPE` | `"opencode"` | 代理人引擎類型 (`opencode` 或 `omp`) |
 | `agent.defaultModel` | `AGENT_DEFAULT_MODEL`| `"anthropic/claude-3-7-sonnet"` | 預設主要大型語言模型 |
@@ -27,6 +27,6 @@
 | `dashboard.enabled` | `DASHBOARD_ENABLED` | `true` | 是否啟用 Web 儀表板 |
 | `dashboard.port` | `DASHBOARD_PORT` | `8090` | 儀表板 HTTP 連接埠 |
 | `dashboard.bindAddress` | `DASHBOARD_BIND_ADDRESS`| `"127.0.0.1"` | 儀表板綁定網路位址 |
-| `dashboard.passphrase` | `DASHBOARD_PASSPHRASE`| `""` | 儀表板登入密碼 (長度至少 16 字元) |
+| `dashboard.passphrase` | `DASHBOARD_PASSPHRASE`| `""` | 儀表板登入密碼（長度至少 16 字元） |
 | `gitBackup.enabled` | `GIT_BACKUP_ENABLED` | `false` | 是否啟用 Git 自動備份 |
 | `gitBackup.remoteUrl` | `GIT_BACKUP_REMOTE_URL`| `""` | 遠端 Git 儲存庫 URL |
