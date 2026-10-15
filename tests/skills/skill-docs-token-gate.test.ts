@@ -9,8 +9,15 @@
 // future SKILL.md edit resurrecting a token recipe fails CI instead of
 // quietly regressing the literal-first contract.
 
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
 import { globSync } from "node:fs";
+import { resolve } from "@std/path";
+import { ContextAssembler } from "@core/context-assembler.ts";
+import { MemoryStore } from "@core/memory-store.ts";
+import { WorkspaceManager } from "@core/workspace-manager.ts";
+import { DiscordAdapter } from "@platforms/discord/discord-adapter.ts";
+import { MisskeyAdapter } from "@platforms/misskey/misskey-adapter.ts";
+import type { PlatformEmoji } from "../../src/types/platform.ts";
 
 const TOKENS = ["$TMPDIR", "$SESSION_ID", "${TMPDIR}", "${SESSION_ID}"] as const;
 
@@ -39,4 +46,298 @@ Deno.test("skill docs gate - script examples carry no token-form staging strings
     }
   }
   assertEquals(offenders, [], `script token-form examples: ${offenders.join(", ")}`);
+});
+
+// ---------------------------------------------------------------------------
+// Platform recipes (clarify-platform-skill-recipes): the reaction recipe quotes
+// the values the REAL adapters publish and the REAL emoji-section renderer
+// emits, and the attachment recipe matches the REAL handler's path resolution.
+//
+// Honesty boundary: platform data is mocked at the client/transport seam, so
+// these assertions prove the delivered instructions agree with this
+// repository's adapter transformation, rendering and path resolution — never
+// that a public platform accepted a reaction or a file.
+// ---------------------------------------------------------------------------
+
+const DISCORD_EMOJI_ID = "123456789012345678";
+const DISCORD_ANIMATED_EMOJI_ID = "223456789012345678";
+
+/**
+ * The seeded shape of the adapter's private discord.js client cache. An
+ * unchecked cast is the only way in: `client` is private, and this is the same
+ * seam the repository's adapter tests use.
+ */
+interface DiscordClientCacheStub {
+  guilds: { cache: Map<string, { emojis: { cache: Map<string, unknown> } }> };
+}
+
+/**
+ * The REAL `DiscordAdapter.fetchEmojis()` transformation over a seeded guild
+ * emoji cache (the transport seam is the mocked platform data): one static and
+ * one animated guild emoji, i.e. exactly the values the recipes quote.
+ */
+async function discordEmojiFixture(): Promise<{
+  adapter: DiscordAdapter;
+  emojis: PlatformEmoji[];
+}> {
+  const adapter = new DiscordAdapter({ token: "fixture-token" });
+  // `client` is private, and its runtime type is a discord.js Client the
+  // adapter test seam already seeds directly.
+  const adapterInternals = adapter as unknown as { client: DiscordClientCacheStub };
+  adapterInternals.client.guilds.cache.set("guild-fixture", {
+    emojis: {
+      cache: new Map([
+        ["e1", {
+          id: DISCORD_EMOJI_ID,
+          name: "wave",
+          animated: false,
+          roles: { cache: new Map<string, unknown>() },
+        }],
+        ["e2", {
+          id: DISCORD_ANIMATED_EMOJI_ID,
+          name: "wave_anim",
+          animated: true,
+          roles: { cache: new Map<string, unknown>() },
+        }],
+      ]),
+    },
+  });
+  // `botId` is null before login, so the application-emoji REST block is skipped.
+  return { adapter, emojis: await adapter.fetchEmojis() };
+}
+
+/** The REAL `MisskeyAdapter.fetchEmojis()` transformation over one mocked instance response. */
+async function misskeyEmojiFixture(): Promise<{
+  adapter: MisskeyAdapter;
+  emojis: PlatformEmoji[];
+  requestedEndpoints: string[];
+}> {
+  const adapter = new MisskeyAdapter({
+    host: "localhost",
+    token: "fixture-token",
+    secure: false,
+  });
+  const requestedEndpoints: string[] = [];
+  // The Misskey API client is private; stubbing its `request` at the transport
+  // seam is how the repository's Misskey adapter test exercises the same method.
+  const adapterInternals = adapter as unknown as {
+    client: { request: (endpoint: string) => Promise<unknown> };
+  };
+  adapterInternals.client = {
+    request: (endpoint: string) => {
+      requestedEndpoints.push(endpoint);
+      if (endpoint === "emojis") {
+        return Promise.resolve({
+          emojis: [{
+            name: "wave",
+            category: "Reactions",
+            aliases: [],
+            url: "https://example.invalid/wave.png",
+          }],
+        });
+      }
+      return Promise.resolve({});
+    },
+  };
+  return { adapter, emojis: await adapter.fetchEmojis(), requestedEndpoints };
+}
+
+/** Run `fn` with the REAL assembler whose emoji section the prompts deliver. */
+async function withEmojiAssembler(
+  fn: (assembler: ContextAssembler) => Promise<void> | void,
+): Promise<void> {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
+    const assembler = new ContextAssembler(new MemoryStore(manager, {}), {
+      recentMessageLimit: 20,
+      tokenLimit: 20000,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills")),
+    });
+    await fn(assembler);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+}
+
+Deno.test("skill docs gate - reaction recipe quotes the adapter values the emoji section renders", async () => {
+  const { adapter: discord, emojis: discordEmojis } = await discordEmojiFixture();
+  try {
+    const { emojis: misskeyEmojis, requestedEndpoints } = await misskeyEmojiFixture();
+
+    // Real adapter transformation: Discord reacts with `name:id`, Misskey with `:name:`.
+    assertEquals(
+      discordEmojis.map((e) => e.useAsReaction),
+      [`wave:${DISCORD_EMOJI_ID}`, `wave_anim:${DISCORD_ANIMATED_EMOJI_ID}`],
+    );
+    assertEquals(discordEmojis[0].useInText, `<:wave:${DISCORD_EMOJI_ID}>`);
+    // Animated: only the text markup carries the `a`; the reaction shape is unchanged.
+    assertEquals(discordEmojis[1].useInText, `<a:wave_anim:${DISCORD_ANIMATED_EMOJI_ID}>`);
+    assertEquals(discordEmojis[1].useAsReaction, `wave_anim:${DISCORD_ANIMATED_EMOJI_ID}`);
+    assertEquals(requestedEndpoints, ["emojis"]);
+    assertEquals(misskeyEmojis.map((e) => e.useAsReaction), [":wave:"]);
+    assertEquals(misskeyEmojis[0].useInText, ":wave:");
+
+    await withEmojiAssembler((assembler) => {
+      // The REAL renderer the delivered prompt uses presents the reaction value in `<r>`.
+      const rendered = assembler.formatEmojiSection([...discordEmojis, ...misskeyEmojis]);
+      assertStringIncludes(
+        rendered,
+        `<e><t><:wave:${DISCORD_EMOJI_ID}></t><r>wave:${DISCORD_EMOJI_ID}</r></e>`,
+      );
+      assertStringIncludes(rendered, "<e><t>:wave:</t><r>:wave:</r></e>");
+      assertStringIncludes(rendered, "<t><a:wave_anim:");
+
+      const doc = Deno.readTextFileSync("skills/react-message/SKILL.md");
+      // Every rendered `<r>` value, and only those, are the documented `--emoji` values.
+      assertStringIncludes(doc, `<r>wave:${DISCORD_EMOJI_ID}</r>`);
+      assertStringIncludes(doc, "<r>:wave:</r>");
+      assertStringIncludes(doc, `--emoji "wave:${DISCORD_EMOJI_ID}"`);
+      assertStringIncludes(doc, '--emoji ":wave:"');
+      // Embedded entry lines mirror both rendered entries verbatim.
+      assertStringIncludes(
+        doc,
+        `<e><t><:wave:${DISCORD_EMOJI_ID}></t><r>wave:${DISCORD_EMOJI_ID}</r></e>`,
+      );
+      assertStringIncludes(doc, "<e><t>:wave:</t><r>:wave:</r></e>");
+      // Platform-labeled: the Discord value is never presented as grouped with Misskey.
+      for (const platform of ["Discord", "Misskey"]) {
+        assertStringIncludes(doc, platform);
+      }
+      assertStringIncludes(doc, "Discord does not accept `:name:`");
+      // Exact-provided-value guidance, Unicode use, optional reaction and once-only rule survive.
+      assertStringIncludes(doc, "exact string this platform accepts");
+      assertStringIncludes(doc, "useAsReaction");
+      assertStringIncludes(doc, '--emoji "❤️"');
+      assertStringIncludes(doc, "Reaction is optional");
+      assertStringIncludes(doc, "React only ONCE");
+      // A restricted emoji is never presented as usable via the recipe.
+      assertStringIncludes(doc, "reaction restricted");
+      assertStringIncludes(doc, "does not bypass those platform restrictions");
+    });
+  } finally {
+    await discord.disconnect();
+  }
+});
+
+/** The code lines of one Skill document: fenced content that is not a `#` comment. */
+function fencedCodeLines(text: string): string[] {
+  const lines: string[] = [];
+  let inFence = false;
+  for (const line of text.split("\n")) {
+    if (line.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence && !line.trimStart().startsWith("#")) lines.push(line);
+  }
+  return lines;
+}
+
+Deno.test("skill docs gate - attachment recipe sends an existing nested workspace file in place", () => {
+  const doc = Deno.readTextFileSync("skills/send-file/SKILL.md");
+  const prose = doc.replace(/\s+/g, " ");
+
+  // The delta's fixture mapping, including the literal session id it belongs to.
+  assertStringIncludes(doc, '--file-paths "tmp/sess_42/file.png"');
+  assertStringIncludes(doc, '--session-id "sess_42"');
+  assertStringIncludes(doc, "/work/discord/123/tmp/sess_42/file.png");
+  assertStringIncludes(
+    prose,
+    "Copying or moving that nested file to the workspace root is unnecessary",
+  );
+  assertStringIncludes(prose, "resolved against the session workspace root");
+
+  // Root-relative and accepted in-workspace absolute attachment paths stay documented,
+  // and caption payload paths stay absolute and session-scoped.
+  assertStringIncludes(doc, '--file-paths "output/chart.png"');
+  assertStringIncludes(doc, '--file-paths "exports/report.pdf"');
+  assertStringIncludes(doc, '--file-paths "/work/discord/123/tmp/sess_42/file.png"');
+  assertStringIncludes(
+    prose,
+    "absolute path inside the workspace or agent-workspace is also accepted",
+  );
+  assertStringIncludes(prose, "Attachment paths need NOT be session-staged");
+  assertStringIncludes(
+    doc,
+    '--caption-file "<absolute staging directory rendered in your system prompt>/caption.md"',
+  );
+
+  // No boundary was relaxed: traversal, symlink escape, limits and the one-send quota survive.
+  assertStringIncludes(prose, "Path traversal (../) is not allowed");
+  assertStringIncludes(prose, "symlink that resolves outside the workspace or agent-workspace");
+  assertStringIncludes(prose, "At most 10 files can be sent per invocation");
+  assertStringIncludes(prose, "ONE successful `send-file` call is allowed per session");
+
+  // No removed singular or inline-caption flag reappears as an executable recipe argument.
+  for (const line of fencedCodeLines(doc)) {
+    assertFalse(/--file-path(?!s)/.test(line), `singular --file-path flag reintroduced: ${line}`);
+    assertFalse(/--caption(?!-file)/.test(line), `inline caption flag reintroduced: ${line}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Tool-neutral cancellation wording (clarify-platform-skill-recipes)
+// ---------------------------------------------------------------------------
+
+/** Every published instruction surface that carries a script-timeout rule. */
+const TIMEOUT_DOCS = [...globSync("skills/*/SKILL.md").sort(), "prompts/system_summary.md"];
+
+/** The surfaces whose operations never deliver anything and must keep their no-retry rule. */
+const NO_RETRY_DOCS = [
+  "prompts/system_summary.md",
+  "skills/cancel-reminder/SKILL.md",
+  "skills/fetch-context/SKILL.md",
+  "skills/list-reminders/SKILL.md",
+  "skills/memory-export/SKILL.md",
+  "skills/memory-patch/SKILL.md",
+  "skills/memory-save/SKILL.md",
+  "skills/memory-search/SKILL.md",
+  "skills/memory-stats/SKILL.md",
+  "skills/set-reminder/SKILL.md",
+];
+
+Deno.test("skill docs gate - no published instruction prescribes a stale cancellation tool name", () => {
+  assert(TIMEOUT_DOCS.length >= 14, `expected all skill docs swept, found ${TIMEOUT_DOCS.length}`);
+
+  const sweptWithCancellationAdvice: string[] = [];
+  for (const doc of TIMEOUT_DOCS) {
+    const text = Deno.readTextFileSync(doc);
+    assertFalse(text.includes("stop_bash"), `${doc} still prescribes stop_bash`);
+    // Cancellation advice names no tool (so no speculative alias), and no doc
+    // claims that stopping a script proves nothing reached the platform.
+    const hangLines = text.split("\n").filter((line) => line.includes("If it hangs"));
+    if (hangLines.length > 0) sweptWithCancellationAdvice.push(doc);
+    for (const line of hangLines) {
+      assertStringIncludes(line, "running-command controls your agent documents");
+      assertFalse(/`[a-z_]+`/.test(line), `${doc} names a tool in cancellation advice: ${line}`);
+    }
+    assertFalse(
+      /cancel[^.]*proves?[^.]*(nothing|no delivery)/i.test(text),
+      `${doc} treats cancellation as proof of non-delivery`,
+    );
+  }
+  // Enumeration guard: the sweep found the twelve skill documents the change
+  // rewrote plus the summary template — no timeout doc was silently skipped.
+  assertEquals(
+    sweptWithCancellationAdvice.length,
+    13,
+    `swept: ${sweptWithCancellationAdvice.join(", ")}`,
+  );
+
+  for (const doc of NO_RETRY_DOCS) {
+    assertStringIncludes(
+      Deno.readTextFileSync(doc),
+      "then do not retry; return an error message in JSON format",
+    );
+  }
+
+  // Sending skills keep their own non-retry rules and their delivery uncertainty.
+  const sendFile = Deno.readTextFileSync("skills/send-file/SKILL.md");
+  assertStringIncludes(sendFile, "never retry that send");
+  assertStringIncludes(sendFile, "may still have reached the platform");
+  const sendReply = Deno.readTextFileSync("skills/send-reply/SKILL.md");
+  assertStringIncludes(sendReply, "No second attempt");
+  assertStringIncludes(sendReply, "may still have reached the platform");
 });
