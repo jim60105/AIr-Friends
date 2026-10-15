@@ -25,6 +25,7 @@ import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { SessionAuditWriter } from "@core/audit-logger.ts";
 import type { AuditConfig } from "../../src/types/config.ts";
+import type { LogEntry } from "../../src/types/logger.ts";
 import type { SessionAuditEntry } from "../../src/types/audit.ts";
 import type { AuditPhase } from "../../src/types/audit.ts";
 import { join } from "@std/path";
@@ -987,6 +988,443 @@ Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", a
     assertEquals(context.id, "test-id");
     assertEquals(context.status, "failed");
   } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// --- OMP native interruption classification (`classify-omp-interrupted-tool-updates`) ---
+//
+// Native shapes pinned from OMP v18.6.1 `agent-loop.ts` (forwarded verbatim on the
+// ACP `tool_call_update.rawOutput` by `acp-event-mapper.ts`). Fixtures are sanitized
+// metadata examples, not user messages or credentials.
+
+/** Pinned native synthetic unexecuted-skip details. */
+const SYNTHETIC_SKIP_DETAILS = {
+  __synthetic: true,
+  source: "interrupt_skipped",
+  executed: false,
+} as const;
+
+/** Pinned native started-interruption details. */
+const STARTED_INTERRUPTION_DETAILS = {
+  __interrupted: true,
+  source: "interrupt_skipped",
+  execution: "started",
+} as const;
+
+const SKIPPED_INFO_TEMPLATE =
+  "Tool call {id} skipped before execution (status: {status}, classification: {classification}, execution: {execution})";
+const INTERRUPTED_INFO_TEMPLATE =
+  "Tool call {id} interrupted after execution started (status: {status}, classification: {classification}, execution: {execution})";
+
+/**
+ * Capture logger recording every INFO/ERROR call with its raw message template
+ * and context. Originals are not re-emitted, so captured calls do not print.
+ */
+function createCapturingLogger(): {
+  logger: Logger;
+  infoLogs: Array<{ message: string; context: unknown }>;
+  errorLogs: Array<{ message: string; context: unknown }>;
+} {
+  const logger = new Logger("test", { level: LogLevel.DEBUG });
+  const infoLogs: Array<{ message: string; context: unknown }> = [];
+  const errorLogs: Array<{ message: string; context: unknown }> = [];
+  logger.info = (message: string, context?: Record<string, unknown>) => {
+    infoLogs.push({ message, context });
+  };
+  logger.error = (message: string, context?: Record<string, unknown>) => {
+    errorLogs.push({ message, context });
+  };
+  return { logger, infoLogs, errorLogs };
+}
+
+/** A configured-OMP client config over `workingDir`. */
+function ompClientConfig(workingDir: string): ClientConfig {
+  return {
+    workingDir,
+    platform: "discord",
+    userId: "123",
+    channelId: "456",
+    isDM: false,
+    agentType: "omp",
+  };
+}
+
+/** Build a `tool_call_update` notification carrying an optional `rawOutput`. */
+function toolCallUpdateNotification(
+  toolCallId: string,
+  status: "pending" | "in_progress" | "completed" | "failed",
+  rawOutput?: unknown,
+): acp.SessionNotification {
+  return {
+    sessionId: "test-session",
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      status,
+      ...(rawOutput === undefined ? {} : { rawOutput }),
+    },
+  } as unknown as acp.SessionNotification;
+}
+
+Deno.test("ChatbotClient - OMP synthetic skip logs INFO classification, not error", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const { logger, infoLogs, errorLogs } = createCapturingLogger();
+    const client = createRegisteredClient(
+      createTestSkillRegistry(),
+      logger,
+      ompClientConfig(tempDir),
+    );
+
+    await client.sessionUpdate(toolCallUpdateNotification("call-skip", "failed", {
+      content: [{ type: "text", text: "Skipped due to queued user message." }],
+      details: SYNTHETIC_SKIP_DETAILS,
+    }));
+
+    assertEquals(errorLogs.length, 0);
+    assertEquals(infoLogs.length, 1);
+    assertEquals(infoLogs[0].message, SKIPPED_INFO_TEMPLATE);
+    const context = infoLogs[0].context as Record<string, unknown>;
+    assertEquals(context.id, "call-skip");
+    assertEquals(context.status, "failed");
+    assertEquals(context.classification, "skipped");
+    assertEquals(context.execution, "not_started");
+    // No verbose interruption payload is attached to the INFO path.
+    assert(!("fullUpdate" in context));
+    assert(!("output" in context));
+    assert(!("error" in context));
+    assert(!("exitCode" in context));
+    // A skip neither answers the turn nor records completed work.
+    assertEquals(client.hasReplySent(), false);
+    // Classification is logging-only: it records no rejection or verification state.
+    assertEquals(client.getRecentPermissionRejections().length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - OMP started interruption logs INFO started, not skip", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const { logger, infoLogs, errorLogs } = createCapturingLogger();
+    const client = createRegisteredClient(
+      createTestSkillRegistry(),
+      logger,
+      ompClientConfig(tempDir),
+    );
+
+    await client.sessionUpdate(toolCallUpdateNotification("call-started", "failed", {
+      content: [{ type: "text", text: "Skipped due to queued user message." }],
+      details: STARTED_INTERRUPTION_DETAILS,
+    }));
+
+    assertEquals(errorLogs.length, 0);
+    assertEquals(infoLogs.length, 1);
+    assertEquals(infoLogs[0].message, INTERRUPTED_INFO_TEMPLATE);
+    const context = infoLogs[0].context as Record<string, unknown>;
+    assertEquals(context.id, "call-started");
+    assertEquals(context.status, "failed");
+    assertEquals(context.classification, "interrupted");
+    assertEquals(context.execution, "started");
+    assert(!("fullUpdate" in context));
+    assertEquals(client.hasReplySent(), false);
+    assertEquals(client.getRecentPermissionRejections().length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - OMP non-matching failed updates keep ERROR severity", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const cases: Array<[string, unknown]> = [
+      ["null rawOutput", null],
+      ["array rawOutput", []],
+      ["string rawOutput", "interrupt_skipped"],
+      ["rawOutput without details", { content: [] }],
+      ["null details", { details: null }],
+      ["array details", { details: [] }],
+      ["string details", { details: "interrupt_skipped" }],
+      ["string-typed synthetic booleans", {
+        details: { __synthetic: "true", source: "interrupt_skipped", executed: "false" },
+      }],
+      ["string-typed interrupted booleans", {
+        details: { __interrupted: "true", source: "interrupt_skipped", execution: "started" },
+      }],
+      ["missing executed marker", { details: { __synthetic: true, source: "interrupt_skipped" } }],
+      ["missing synthetic marker", {
+        details: { source: "interrupt_skipped", executed: false },
+      }],
+      ["missing execution marker", {
+        details: { __interrupted: true, source: "interrupt_skipped" },
+      }],
+      ["missing source", { details: { __synthetic: true, executed: false } }],
+      ["contradictory synthetic and interrupted markers", {
+        details: {
+          __synthetic: true,
+          __interrupted: true,
+          source: "interrupt_skipped",
+          executed: false,
+          execution: "started",
+        },
+      }],
+      ["malformed opposite marker", {
+        details: {
+          __synthetic: true,
+          source: "interrupt_skipped",
+          executed: false,
+          __interrupted: "true",
+        },
+      }],
+      ["unknown execution marker", {
+        details: {
+          __synthetic: true,
+          source: "interrupt_skipped",
+          executed: false,
+          execution: "unknown",
+        },
+      }],
+      ["unknown source", {
+        details: { __synthetic: true, source: "other_source", executed: false },
+      }],
+      ["assistant_stop source", {
+        details: { __synthetic: true, source: "assistant_stop_aborted", executed: false },
+      }],
+      ["prose-only lookalike", {
+        content: [{
+          type: "text",
+          text:
+            "Skipped due to queued user message. Do not count this skipped result as completed work. interrupt_skipped",
+        }],
+      }],
+      ["service parameter failure", {
+        details: { source: "service", message: "Invalid parameter" },
+      }],
+    ];
+
+    for (const [label, rawOutput] of cases) {
+      const { logger, infoLogs, errorLogs } = createCapturingLogger();
+      const client = createRegisteredClient(
+        createTestSkillRegistry(),
+        logger,
+        ompClientConfig(tempDir),
+      );
+
+      await client.sessionUpdate(toolCallUpdateNotification("call-neg", "failed", rawOutput));
+
+      assertEquals(errorLogs.length, 1, `expected ERROR for ${label}`);
+      assertEquals(infoLogs.length, 0, `expected no INFO for ${label}`);
+      assertEquals(errorLogs[0].message, "Tool call {id} failed", label);
+      const context = errorLogs[0].context as Record<string, unknown>;
+      assertEquals(context.status, "failed", label);
+      assertEquals(context.classification, "failed", label);
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - OMP command failure keeps ERROR diagnostics", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const { logger, infoLogs, errorLogs } = createCapturingLogger();
+    const client = createRegisteredClient(
+      createTestSkillRegistry(),
+      logger,
+      ompClientConfig(tempDir),
+    );
+
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-fail",
+        status: "failed",
+        output: "command produced output",
+        error: "exit status 1",
+        exitCode: 1,
+      },
+    } as unknown as acp.SessionNotification);
+
+    assertEquals(infoLogs.length, 0);
+    assertEquals(errorLogs.length, 1);
+    assertEquals(errorLogs[0].message, "Tool call {id} failed");
+    const context = errorLogs[0].context as Record<string, unknown>;
+    assertEquals(context.id, "call-fail");
+    assertEquals(context.status, "failed");
+    assertEquals(context.classification, "failed");
+    assertEquals(context.output, "command produced output");
+    assertEquals(context.error, "exit status 1");
+    assertEquals(context.exitCode, 1);
+    assert(typeof context.fullUpdate === "string");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - interruption metadata never classifies non-OMP clients", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const baseConfig = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const configs: Array<[string, ClientConfig]> = [
+      ["opencode", { ...baseConfig, agentType: "opencode" }],
+      ["absent agentType", { ...baseConfig }],
+    ];
+
+    for (const [label, config] of configs) {
+      const { logger, infoLogs, errorLogs } = createCapturingLogger();
+      const client = createRegisteredClient(createTestSkillRegistry(), logger, config);
+      await client.sessionUpdate(toolCallUpdateNotification("call-scope", "failed", {
+        content: [],
+        details: SYNTHETIC_SKIP_DETAILS,
+      }));
+      assertEquals(errorLogs.length, 1, `expected ERROR for ${label}`);
+      assertEquals(infoLogs.length, 0, `expected no INFO for ${label}`);
+      assertEquals(errorLogs[0].message, "Tool call {id} failed", label);
+      const context = errorLogs[0].context as Record<string, unknown>;
+      assertEquals(context.classification, "failed", `expected failed classification for ${label}`);
+    }
+
+    // Payload metadata cannot select the configured agent type.
+    const { logger, infoLogs, errorLogs } = createCapturingLogger();
+    const client = createRegisteredClient(
+      createTestSkillRegistry(),
+      logger,
+      { ...baseConfig, agentType: "opencode" },
+    );
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-injected",
+        status: "failed",
+        agentType: "omp",
+        rawOutput: { details: { ...SYNTHETIC_SKIP_DETAILS, agentType: "omp" } },
+      },
+    } as unknown as acp.SessionNotification);
+    assertEquals(infoLogs.length, 0);
+    assertEquals(errorLogs.length, 1);
+    assertEquals(errorLogs[0].message, "Tool call {id} failed");
+    assertEquals(
+      (errorLogs[0].context as Record<string, unknown>).classification,
+      "failed",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - OMP completed, pending and in-progress updates stay unchanged", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    for (const status of ["completed", "pending", "in_progress"] as const) {
+      const { logger, infoLogs, errorLogs } = createCapturingLogger();
+      const client = createRegisteredClient(
+        createTestSkillRegistry(),
+        logger,
+        ompClientConfig(tempDir),
+      );
+
+      await client.sessionUpdate(toolCallUpdateNotification("call-status", status, {
+        content: [],
+        details: SYNTHETIC_SKIP_DETAILS,
+      }));
+
+      assertEquals(errorLogs.length, 0, `unexpected ERROR for ${status}`);
+      assertEquals(infoLogs.length, 1, `expected one INFO for ${status}`);
+      assertEquals(infoLogs[0].message, "Tool call {id} updated to status {status}", status);
+      const context = infoLogs[0].context as Record<string, unknown>;
+      assertEquals(context.status, status);
+      assert(!("classification" in context), `unexpected classification for ${status}`);
+      assert(!("execution" in context), `unexpected execution for ${status}`);
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - recognized OMP interruption renders a bounded structured entry", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const entries: LogEntry[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = () => {};
+  console.error = () => {};
+  try {
+    const logger = new Logger("test", {
+      level: LogLevel.DEBUG,
+      gelfTransport: { send: (entry: LogEntry) => entries.push(entry) },
+    });
+    const client = createRegisteredClient(
+      createTestSkillRegistry(),
+      logger,
+      ompClientConfig(tempDir),
+    );
+
+    const secret = "SENTINEL_RAW_TOOL_OUTPUT_DO_NOT_LOG";
+    await client.sessionUpdate(toolCallUpdateNotification("call-skip", "failed", {
+      content: [{ type: "text", text: secret }],
+      details: SYNTHETIC_SKIP_DETAILS,
+    }));
+    await client.sessionUpdate(toolCallUpdateNotification("call-started", "failed", {
+      content: [{ type: "text", text: secret }],
+      details: STARTED_INTERRUPTION_DETAILS,
+    }));
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-fail",
+        status: "failed",
+      },
+    } as unknown as acp.SessionNotification);
+
+    assertEquals(entries.length, 3);
+    const [skip, interrupted, failed] = entries;
+
+    assertEquals(skip.level, "INFO");
+    assertEquals(
+      skip.message,
+      "Tool call call-skip skipped before execution (status: failed, classification: skipped, execution: not_started)",
+    );
+    assertEquals(skip.messageTemplate, SKIPPED_INFO_TEMPLATE);
+    assertEquals(skip.context, {
+      id: "call-skip",
+      status: "failed",
+      classification: "skipped",
+      execution: "not_started",
+    });
+
+    assertEquals(interrupted.level, "INFO");
+    assertEquals(
+      interrupted.message,
+      "Tool call call-started interrupted after execution started (status: failed, classification: interrupted, execution: started)",
+    );
+    assertEquals(interrupted.context, {
+      id: "call-started",
+      status: "failed",
+      classification: "interrupted",
+      execution: "started",
+    });
+
+    assertEquals(failed.level, "ERROR");
+    assertEquals(failed.message, "Tool call call-fail failed");
+    assertEquals((failed.context as Record<string, unknown>).classification, "failed");
+
+    // No emitted entry may carry the raw tool output.
+    for (const entry of entries) {
+      assert(!JSON.stringify(entry).includes(secret));
+    }
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
