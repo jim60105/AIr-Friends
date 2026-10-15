@@ -579,3 +579,39 @@ Deno.test("FileHandler - existing legit relative path containing workspace-key s
 
   await Deno.remove(dir, { recursive: true });
 });
+
+// The documented session-staged recipe (clarify-platform-skill-recipes): an
+// existing `tmp/<sessionId>/file.png` is sent in place, relative to the
+// workspace root, with no root-level copy.
+Deno.test("FileHandler - existing nested session-staged file delivers in place without a root copy", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  try {
+    await Deno.mkdir(`${dir}/tmp/sess_42`, { recursive: true });
+    await Deno.writeTextFile(`${dir}/tmp/sess_42/file.png`, "nested png bytes");
+
+    const capture: CapturedSendFile[] = [];
+    const context = createContext(
+      createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+      undefined,
+      workspace,
+    );
+
+    const handler = new FileHandler({ enabled: true });
+    const result = await handler.handleSendFile(
+      { filePaths: ["tmp/sess_42/file.png"] },
+      context,
+    );
+
+    assertEquals(result.success, true);
+    assertEquals(capture.length, 1);
+    assertEquals(capture[0].files.length, 1);
+    assertEquals(capture[0].files[0].fileName, "file.png");
+    assertEquals(new TextDecoder().decode(capture[0].files[0].content), "nested png bytes");
+
+    // Sent in place: the nested file is untouched, and no root-level copy exists.
+    assertEquals(await Deno.readTextFile(`${dir}/tmp/sess_42/file.png`), "nested png bytes");
+    await assertRejects(() => Deno.stat(`${dir}/file.png`), Deno.errors.NotFound);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});

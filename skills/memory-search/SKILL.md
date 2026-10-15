@@ -77,4 +77,4 @@ Write the query as **natural language**, not as keywords: the whole query text i
 
 ## Critical Rules
 
-1. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash and do not retry, return an error message in JSON format.
+1. **Timeout**: The script won't run for more than 30 seconds. If it hangs, cancel the running command with the running-command controls your agent documents (if any), then do not retry; return an error message in JSON format.

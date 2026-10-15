@@ -15,7 +15,7 @@ Export the current user's memories as a file attachment, sent via DM.
 3. **Privacy**: This exports the user's own memories only. It will never include other users' data or your personal notes from the agent workspace.
 4. **DM delivery**: The export file is always sent via private message (DM), even if the user made the request in a public channel. You do NOT need to use send-reply to deliver the file.
 5. **After export**: Use send-reply to inform the user that the export has been sent to their DM (e.g., "已匯出 N 筆記憶，請查收私訊。").
-6. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash and do not retry, return an error message in JSON format.
+6. **Timeout**: The script won't run for more than 30 seconds. If it hangs, cancel the running command with the running-command controls your agent documents (if any), then do not retry; return an error message in JSON format.
 
 ## Usage
 
