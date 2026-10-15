@@ -68,6 +68,7 @@
 - [ ] 7.8 Author `docs/reference/troubleshooting.md`: common failure modes, connection diagnostics, and FAQ.
 - [ ] 7.9 Update inbound documentation links in root `README.md` to dual-mode (direct relative Markdown paths for GitHub browsing and Docsify site link).
 - [ ] 7.10 Update active documentation citations across the repository: `config.example.yaml`, `.env.example`, `AGENTS.md`, and `tests/README.md`.
+- [ ] 7.11 Review all written documentation outcomes according to `chinese-content-writing-guideline` and `chinese-traditional-conversion` (Traditional Chinese zh-TW, full-width punctuation, Taiwan terminology, no mainland phrasing/calques, proper CJK-alphanumeric spacing).
 
 ## 8. Runtime Smoke Verification
 
