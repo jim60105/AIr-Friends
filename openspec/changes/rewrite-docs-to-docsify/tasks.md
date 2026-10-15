@@ -45,16 +45,16 @@
 
 ## 6. Features & Operations Chapters
 
-- [ ] 6.1 Author `docs/features/spontaneous-posting.md`: spontaneous posting trigger conditions, timing intervals, and topic generation.
-- [ ] 6.2 Author `docs/features/channel-lurk.md`: channel lurk listener, message harvesting, and conversation joining criteria.
-- [ ] 6.3 Author `docs/features/self-research.md`: autonomous web research, tool invocation, and knowledge synthesis.
-- [ ] 6.4 Author `docs/features/memory-maintenance.md`: lexical recall indexing (`indexed-memory.ts`), agent-driven LLM background consolidation and memory patching (`session-orchestrator.ts`), and explicit exclusion of vector embeddings.
-- [ ] 6.5 Author `docs/features/git-backup.md`: automated git backup workflow for characters, memory stores, and configuration state, including the recommended baseline `.gitignore` pattern.
-- [ ] 6.6 Author `docs/features/scheduler-lifecycle.md`: shared scheduler lifecycle, restart catchup execution, and randomized interval jitter.
-- [ ] 6.7 Author `docs/operations/dashboard.md`: Web Dashboard configuration (port 8090, loopback default, passphrase length, behindHttpsProxy, trustedProxies, 5 tabs).
-- [ ] 6.8 Author `docs/operations/metrics-and-health.md`: Prometheus `/metrics`, health endpoints (`/health`, `/ready`, `/readyz`), and `--dry-run` flag.
-- [ ] 6.9 Author `docs/operations/audit-logs.md`: session JSONL audit logging, SHA-256 integrity hashing, and retention policies.
-- [ ] 6.10 Author `docs/operations/logging.md`: structured JSON log formatting, Message Template conventions, and GELF HTTP transport.
+- [x] 6.1 Author `docs/features/spontaneous-posting.md`: spontaneous posting trigger conditions, timing intervals, and topic generation.
+- [x] 6.2 Author `docs/features/channel-lurk.md`: channel lurk listener, message harvesting, and conversation joining criteria.
+- [x] 6.3 Author `docs/features/self-research.md`: autonomous web research, tool invocation, and knowledge synthesis.
+- [x] 6.4 Author `docs/features/memory-maintenance.md`: lexical recall indexing (`indexed-memory.ts`), agent-driven LLM background consolidation and memory patching (`session-orchestrator.ts`), and explicit exclusion of vector embeddings.
+- [x] 6.5 Author `docs/features/git-backup.md`: automated git backup workflow for characters, memory stores, and configuration state, including the recommended baseline `.gitignore` pattern.
+- [x] 6.6 Author `docs/features/scheduler-lifecycle.md`: shared scheduler lifecycle, restart catchup execution, and randomized interval jitter.
+- [x] 6.7 Author `docs/operations/dashboard.md`: Web Dashboard configuration (port 8090, loopback default, passphrase length, behindHttpsProxy, trustedProxies, 5 tabs).
+- [x] 6.8 Author `docs/operations/metrics-and-health.md`: Prometheus `/metrics`, health endpoints (`/health`, `/ready`, `/readyz`), and `--dry-run` flag.
+- [x] 6.9 Author `docs/operations/audit-logs.md`: session JSONL audit logging, SHA-256 integrity hashing, and retention policies.
+- [x] 6.10 Author `docs/operations/logging.md`: structured JSON log formatting, Message Template conventions, and GELF HTTP transport.
 
 ## 7. Extending, Reference & Inbound Link Updates Across Repository
 
