@@ -100,7 +100,7 @@ interface RecoveryContext {
   /** Named post-restore recovery hook: called by the connector exactly
    * once after gate-context restoration and before success/resumed
    * prompting. Gates nothing — no readiness assertion, request, channel,
-   * or prompt gate (docs/OMP_RECOVERY.md names it as the attach point).
+   * or prompt gate.
    * Production passes the documented no-op; the seam remains so the
    * position is observable and extendable. */
   onGateContextRestored?: (sessionId: string) => void | Promise<void>;

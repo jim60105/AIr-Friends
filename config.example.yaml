@@ -98,7 +98,7 @@ agent:
   # This only affects the bootstrap WARN marker (OMP version check:
   # OK/BELOW_MINIMUM/UNKNOWN) — it is NOT a functional gate. The container image
   # pins the version via Containerfile OMP_VERSION + per-arch SHA-256 checksums
-  # (see docs/OMP_PACKAGING.md).
+  # (see docs/agent/acp-engine.md).
 
   # External skills to install at startup (optional)
   # Each entry specifies a GitHub repo and skill name to install via `npx --yes --package=skills skills add`
@@ -375,7 +375,7 @@ audit:
 
 # Git backup - backs up the entire data/ directory to a remote Git repository
 # Note: The data directory's .gitignore is operator-maintained; the service never writes or modifies it.
-# See docs/DESIGN.md (Git Backup section) for the recommended baseline .gitignore.
+# See docs/features/git-backup.md for the recommended baseline .gitignore.
 gitBackup:
   enabled: false                  # Enable Git backup (default: false); override with env GIT_BACKUP_ENABLED
   remoteUrl: ""                   # Remote Git repository URL (HTTPS); override with env GIT_BACKUP_REMOTE_URL

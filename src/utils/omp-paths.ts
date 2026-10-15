@@ -43,7 +43,7 @@ export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH =
 /**
  * Installed image tree of the deployment's OMP artifacts, following the
  * image's ordinary `$UID:0` + 775 install convention (see
- * docs/OMP_PACKAGING.md §3): a stable deployment LOCATION, never an ownership
+ * docs/agent/acp-engine.md): a stable deployment LOCATION, never an ownership
  * authority. Existence of this root IS the deployment signal; development
  * checkouts never own /opt/air, so every image-first resolution below keeps
  * byte-identical dev behavior.

@@ -12,7 +12,7 @@
  *
  * Assertions are about the DELIVERED ARTIFACT'S OWN wiring. Nothing here claims
  * the official host binary evaluates or honors the extension — that stays
- * user-owned runtime verification (docs/OMP_ENFORCEMENT.md §Checklist).
+ * user-owned runtime verification (docs/agent/security-and-sandbox.md).
  */
 
 import { assertEquals } from "@std/assert";

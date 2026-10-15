@@ -2,7 +2,7 @@
 // (OpenSpec `package-bun-compatible-omp-extension` D1), factored out of
 // bundle-extension.ts so packaging tests exercise the exact production
 // predicate on synthetic bundle text (deterministic, zero network — the
-// real-runtime loader behavior stays user-owned per docs/OMP_PACKAGING.md §7).
+// real-runtime loader behavior stays user-owned per docs/agent/acp-engine.md).
 //
 // The boundary: the generated ESM bundle must be self-contained for the
 // pinned native (Bun-embedded) runtime. Only documented native builtins

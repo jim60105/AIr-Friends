@@ -95,7 +95,7 @@ Mock evidence never certifies native behavior. Nothing in this tree
 demonstrates or claims that the native OMP binary invokes the attached
 handler, honors a denial, rejects a cross-mode load, emits readiness, or
 suppresses a language server. Those remain the user-owned runtime checklist
-(`docs/OMP_ENFORCEMENT.md` §Checklist). Extension-load failure stays the
+(`docs/agent/security-and-sandbox.md`). Extension-load failure stays the
 accepted residual risk: pinned `runner.emit` logs lifecycle errors without
 failing startup, and no client-observable readiness assertion compensates.
 
@@ -108,7 +108,7 @@ carried no changes. Correction-batch row C2 (`align-omp-native-tool-contracts`)
 once pinned `@sinclair/typebox` in `deno.json`/`deno.lock` so Deno fixtures
 resolved the schema-builder facade the pinned host resolved; the native
 runtime cutover removed that alias, so no import-map pin remains
-(`docs/OMP_PACKAGING.md` §5).
+(`docs/agent/acp-engine.md`).
 Correction-batch row C3 (`package-bun-compatible-omp-extension`) replaces the
 extension packaging under test: the image-side mirror tree and generated
 `deno.json` import map are gone, replaced by ONE generated native-loadable

@@ -86,7 +86,7 @@ export function extractOmpEnvNames(text: string): string[] {
   const found = new Set<string>();
   for (const match of text.matchAll(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)) {
     const token = match[0]!;
-    // Path-adjacent tokens (`docs/OMP_PACKAGING.md`) are documentation
+    // Path-adjacent tokens (a `docs/OMP_*.md`-style path citation) are documentation
     // citations, not configuration/environment identifiers.
     const before = match.index > 0 ? text[match.index - 1] : "";
     const after = text[match.index + token.length] ?? "";

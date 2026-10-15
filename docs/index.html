@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>AIr-Friends 文件</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="AIr-Friends - 多平台對話式 AI 機器人與 ACP Client 架構">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+
+  <!-- Docsify v5 Core Themes -->
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@5.0.0-rc.4/dist/themes/core.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@5.0.0-rc.4/dist/themes/addons/core-dark.min.css" media="(prefers-color-scheme: dark)">
+
+  <style>
+    :root {
+      --theme-color: #2b6cb0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">正在載入文件...</div>
+
+  <script>
+    window.$docsify = {
+      name: 'AIr-Friends',
+      repo: 'https://github.com/jim60105/AIr-Friends',
+      homepage: 'README.md',
+      loadSidebar: true,
+      subMaxLevel: 3,
+      loadNavbar: true,
+      coverpage: true,
+      onlyCover: false,
+      auto2top: true,
+      relativePath: false,
+      search: {
+        maxAge: 86400000,
+        paths: 'auto',
+        placeholder: '搜尋文件...',
+        noData: '找不到相符結果',
+        depth: 4
+      },
+      copyCode: {
+        buttonText: '複製',
+        errorText: '錯誤',
+        successText: '已複製'
+      }
+    };
+  </script>
+
+  <!-- Docsify v5 Script -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@5.0.0-rc.4/dist/docsify.min.js"></script>
+
+  <!-- Search & Copy Code Plugins -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@5.0.0-rc.4/dist/plugins/search.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code@3.0.0/dist/docsify-copy-code.min.js"></script>
+
+  <!-- Prism Syntax Highlighting -->
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-yaml.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-json.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
+</body>
+</html>

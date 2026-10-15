@@ -9,7 +9,7 @@
 // for the postures the deployed one does not carry. Its evidence limit is
 // honest: it proves what this repository writes, never that a live OpenCode
 // session consumed it — live agent discovery stays user-owned and UNVERIFIED
-// (`docs/USER-RUNTIME-VERIFICATION.md`).
+// (`docs/agent/security-and-sandbox.md`).
 
 import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
