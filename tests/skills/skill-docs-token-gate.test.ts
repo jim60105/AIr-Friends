@@ -281,8 +281,8 @@ Deno.test("skill docs gate - attachment recipe sends an existing nested workspac
 // Tool-neutral cancellation wording (clarify-platform-skill-recipes)
 // ---------------------------------------------------------------------------
 
-/** Every published instruction surface that carries a script-timeout rule. */
-const TIMEOUT_DOCS = [...globSync("skills/*/SKILL.md").sort(), "prompts/system_summary.md"];
+/** Every published instruction surface: each bundled skill document and the summary template. */
+const PUBLISHED_DOCS = [...globSync("skills/**/*.md").sort(), "prompts/system_summary.md"];
 
 /** The surfaces whose operations never deliver anything and must keep their no-retry rule. */
 const NO_RETRY_DOCS = [
@@ -299,10 +299,13 @@ const NO_RETRY_DOCS = [
 ];
 
 Deno.test("skill docs gate - no published instruction prescribes a stale cancellation tool name", () => {
-  assert(TIMEOUT_DOCS.length >= 14, `expected all skill docs swept, found ${TIMEOUT_DOCS.length}`);
+  assert(
+    PUBLISHED_DOCS.length >= 26,
+    `expected all bundled skill documents swept, found ${PUBLISHED_DOCS.length}`,
+  );
 
   const sweptWithCancellationAdvice: string[] = [];
-  for (const doc of TIMEOUT_DOCS) {
+  for (const doc of PUBLISHED_DOCS) {
     const text = Deno.readTextFileSync(doc);
     assertFalse(text.includes("stop_bash"), `${doc} still prescribes stop_bash`);
     // Cancellation advice names no tool (so no speculative alias), and no doc
