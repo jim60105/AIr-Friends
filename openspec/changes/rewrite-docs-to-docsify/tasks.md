@@ -2,12 +2,12 @@
 
 ## 1. Docsify Site Scaffolding & Site Assets
 
-- [ ] 1.1 Create `docs/index.html` with pinned `docsify@5.0.0-rc.4`, core light theme, core dark theme addon, search plugin, copy-code plugin, and Prism syntax highlighting components (bash, yaml, json, ts, python).
-- [ ] 1.2 Create `docs/.nojekyll` to ensure GitHub Pages serves underscore-prefixed Docsify files.
-- [ ] 1.3 Create `docs/_navbar.md` with links to repository, release notes, and top-level entrypoints.
-- [ ] 1.4 Create `docs/_coverpage.md` displaying the project logo/badge, title, tagline, and call-to-action buttons.
-- [ ] 1.5 Create `docs/_sidebar.md` specifying complete hierarchical navigation across all 9 topical chapters and 30 documentation pages.
-- [ ] 1.6 Create `docs/README.md` containing the project overview, core architecture, and 3 explicit reader entry paths (End-User, Operator, Developer).
+- [x] 1.1 Create `docs/index.html` with pinned `docsify@5.0.0-rc.4`, core light theme, core dark theme addon, search plugin, copy-code plugin, and Prism syntax highlighting components (bash, yaml, json, ts, python).
+- [x] 1.2 Create `docs/.nojekyll` to ensure GitHub Pages serves underscore-prefixed Docsify files.
+- [x] 1.3 Create `docs/_navbar.md` with links to repository, release notes, and top-level entrypoints.
+- [x] 1.4 Create `docs/_coverpage.md` displaying the project logo/badge, title, tagline, and call-to-action buttons.
+- [x] 1.5 Create `docs/_sidebar.md` specifying complete hierarchical navigation across all 9 topical chapters and 30 documentation pages.
+- [x] 1.6 Create `docs/README.md` containing the project overview, core architecture, and 3 explicit reader entry paths (End-User, Operator, Developer).
 
 ## 2. Legacy Clutter Removal & Active Contract Migration
 
