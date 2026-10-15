@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- External skills configured under `agent.externalSkills` install again. The image now ships the pinned Node.js 24 LTS runtime that the `skills` installer CLI and the bundled `agent-browser` helper require, instead of the distribution's Node 20, which made every configured skill fail at startup with a `fs/promises` import error.
+
 ## [0.33.0] - 2026-10-15
 
 ### Added

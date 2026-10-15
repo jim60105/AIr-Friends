@@ -18,15 +18,50 @@ ARG TARGETVARIANT
 RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/cache/apt \
     --mount=type=cache,id=aptlists-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/lib/apt/lists \
     apt-get update && apt-get install -y --no-install-recommends \
-    git nodejs npm \
+    git \
     curl wget ca-certificates \
     build-essential ripgrep jq moreutils strace \
-    zip file tree bc \
+    zip file tree bc xz-utils \
     python3 python3-pip python-is-python3 \
     ffmpeg 7zip poppler-utils imagemagick exiftool \
      util-linux bubblewrap \
      procps \
      pandoc
+
+# Node.js runtime for the two `npx`/`npm` consumers in this image: the daemon's
+# external-skill installer (`src/core/skill-installer.ts`, External Skill
+# Auto-Installation) and the build-time `npm install -g agent-browser` /
+# `npx playwright install-*` steps below.
+#
+# Installed from the OFFICIAL Node.js tarball with per-arch SHA-256 verification
+# instead of the base distribution's `nodejs`/`npm` packages. On Debian 13 those
+# resolve to Node 20.19.2, which is too old for both consumers:
+#   - the `skills` CLI the installer drives declares `engines.node >= 22.20.0`
+#     and imports `glob` from `node:fs/promises` (exported only from Node 22),
+#     so every configured external skill died at import with
+#       SyntaxError: The requested module 'fs/promises' does not provide an export named 'glob'
+#   - the global `agent-browser` package declares `engines.node >= 24.0.0`
+# The pinned LTS line (24.x, Active LTS) satisfies every Node consumer here, and
+# the tarball install keeps the swap off the moving Debian package. The verified
+# digest is fail-closed: a moved upstream tarball aborts the build before install.
+# Bump deliberately and recompute BOTH digests against the real assets; verify with:
+#   curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz | sha256sum
+ARG NODE_VERSION=24.22.0
+ARG NODE_SHA256_X64=cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008
+ARG NODE_SHA256_ARM64=fef00bb4d36e1c50104a9775a10359beee98f162b4104dd12472c75065c6a143
+# Map Docker TARGETARCH to Node.js naming convention
+# TARGETARCH: amd64 -> x64, arm64 -> arm64
+RUN case "${TARGETARCH}" in \
+      amd64) NODE_ARCH="x64"; NODE_SHA256="${NODE_SHA256_X64}" ;; \
+      arm64) NODE_ARCH="arm64"; NODE_SHA256="${NODE_SHA256_ARM64}" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
+    -o /tmp/node.tar.xz && \
+    echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner && \
+    rm -f /tmp/node.tar.xz && \
+    node --version && npm --version
 
 ########################################
 # Opencode unpack stage
