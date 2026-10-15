@@ -7,7 +7,7 @@ The reply template and send-reply skill claim that every script failure is irrev
 ## What Changes
 
 - Make send-reply's skill instructions the canonical owner of outcome-dependent recovery guidance and replace the reply template's blanket warning with a short reference.
-- Permit correction after a confirmed pre-delivery error within existing quotas. After confirmed success, stop without resending; preserve the separate scoped edit-reply correction workflow.
+- Permit correction after a confirmed pre-delivery error within existing quotas. After confirmed success, exit without resending or proactive checking. If a concrete error is already known while the current session remains active, permit the necessary payload write and scoped edit-reply, then exit.
 - For uncertain delivery, consult existing results and `get-message` when a usable session message ID exists. An absent ID or unsuccessful lookup does not prove non-delivery; unresolved ambiguity forbids an automatic resend.
 - Align the existing missing-response retry preamble with this policy, retaining one corrective turn, trusted skill documents and literal root/session/staging recipes.
 - Preserve partial file delivery as a consumed file-send slot and session response, including when the result reports an error.

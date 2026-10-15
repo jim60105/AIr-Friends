@@ -4,7 +4,7 @@
 
 ### Requirement: Retry on Missing Reply
 
-The system SHALL automatically retry when an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without a recorded successful `send-reply`, `react-message`, or `send-file` response. The retry SHALL clear the reply state, send a second prompt on the same ACP session requesting a response subject to delivery-outcome guidance, and if the retry also fails, return a failure response. A session that produced a reply, a reaction, or a file send SHALL NOT be retried. The retry prompt SHALL be instructive and agent-portable in every spawn shape (per-spawn and pooled). It SHALL state that the turn ended without a recorded reply, reaction, or file send, without treating missing recorded state as proof of non-delivery. It SHALL list the likely payload-file failure causes, including rejected legacy `--message`/`--caption` flags, an unwritten payload, a payload outside the session staging directory, or a previous errored call whose output must be read. It SHALL give the correct two-step example naming the literal active Skill API session id and absolute staging directory, writing through the edit/write tool before invoking the payload-file flag. It SHALL include the full trusted `send-reply`, `react-message`, and `send-file` SKILL.md content. File-tool and payload-flag instructions SHALL contain no unexpanded `$TMPDIR`/`$SESSION_ID` tokens. Retry timing, attempt limits and reply-quota authority SHALL remain unchanged. The prompt SHALL permit corrected sending only after confirmed pre-delivery failure and SHALL defer uncertain or partially delivered results to the owning delivery guidance.
+The system SHALL automatically retry when an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without a recorded reply, reaction or file response, including partial file delivery regardless of the API success flag. The retry SHALL clear the reply state, send a second prompt on the same ACP session requesting a response subject to delivery-outcome guidance, and if the retry also fails, return a failure response. A session that produced a reply, a reaction, or a file send, including partial file delivery, SHALL NOT be retried. The retry prompt SHALL be instructive and agent-portable in every spawn shape (per-spawn and pooled). It SHALL state that the turn ended without a recorded reply, reaction, or file send, without treating missing recorded state as proof of non-delivery. It SHALL list the likely payload-file failure causes, including rejected legacy `--message`/`--caption` flags, an unwritten payload, a payload outside the session staging directory, or a previous errored call whose output must be read. It SHALL give the correct two-step example naming the literal active Skill API session id and absolute staging directory, writing through the edit/write tool before invoking the payload-file flag. It SHALL include the full trusted `send-reply`, `react-message`, and `send-file` SKILL.md content. File-tool and payload-flag instructions SHALL contain no unexpanded `$TMPDIR`/`$SESSION_ID` tokens. Retry timing, attempt limits and reply-quota authority SHALL remain unchanged. The prompt SHALL permit corrected sending only after confirmed pre-delivery failure and SHALL defer uncertain or partially delivered results to the owning delivery guidance.
 
 #### Scenario: Successful retry produces reply
 - **GIVEN** an agent completes without sending a reply, reaction, or file
@@ -14,7 +14,7 @@ The system SHALL automatically retry when an ACP Agent completes a prompt turn (
 
 #### Scenario: Failed retry returns error
 - **GIVEN** an agent completes without a reply and the retry also fails
-- **WHEN** the retry prompt completes without a successful `send-reply`, `react-message`, or `send-file` response
+- **WHEN** the retry prompt completes without a recorded reply, reaction or file response, including partial file delivery regardless of the API success flag
 - **THEN** the system SHALL return a failure response indicating the agent did not produce a recorded response
 
 #### Scenario: Retry prompt explains the cause and the correct pattern
@@ -60,7 +60,7 @@ The system SHALL automatically retry when an ACP Agent completes a prompt turn (
 
 ### Requirement: Delivery Recovery Instructions Depend on Outcome
 
-The send-reply skill SHALL own the shared delivery-recovery guidance. Confirmed success SHALL prohibit resending and require exit. Confirmed pre-delivery failure SHALL permit correction within existing quotas. Uncertain delivery SHALL require inspection of available authoritative evidence before any resend, with unresolved uncertainty prohibiting automatic resend. Reply templates SHALL reference this policy without duplicating it or declaring every script error irreversible.
+The send-reply skill SHALL own delivery-recovery guidance. Confirmed success SHALL prohibit resending and require exit except for a known-error correction in the active session. Confirmed pre-delivery failure SHALL permit correction within existing quotas. Uncertain delivery SHALL require available authoritative evidence to be inspected; unresolved uncertainty SHALL prohibit resend. Reply templates SHALL reference this policy without duplication.
 
 #### Scenario: Local payload failure is recoverable
 - **GIVEN** `SKILL_LEGACY_FLAG`, `SKILL_MISSING_PAYLOAD`, `SKILL_PAYLOAD_OUT_OF_BOUNDS` or `SKILL_PAYLOAD_NOT_FOUND` rejects a send before the Skill API is called
@@ -70,9 +70,16 @@ The send-reply skill SHALL own the shared delivery-recovery guidance. Confirmed 
 
 #### Scenario: Successful reply ends the turn
 - **GIVEN** the reply skill returns confirmed success
+- **AND** no concrete error is already known
 - **WHEN** the agent follows the delivery instructions
 - **THEN** it SHALL exit without further checking or another send
-- **AND** a separate supported correction SHALL use scoped `edit-reply` with the session's current text-reply ID rather than a follow-up `send-reply`
+
+#### Scenario: Known error permits a scoped correction before exit
+- **GIVEN** a concrete error in the delivered text is already known when success is acknowledged and the current session is still active
+- **WHEN** the agent follows the correction exception
+- **THEN** instructions SHALL permit the necessary correction-payload write and scoped `edit-reply` using the session's current text-reply ID within the existing edit quota
+- **AND** they SHALL require exit after that correction attempt without a follow-up `send-reply`, proactive readback or unrelated work
+- **AND** they SHALL NOT promise another correction turn or editing after the session ends
 
 #### Scenario: A transport error is not a pre-delivery rejection
 - **GIVEN** a timeout, cancellation, connection loss or generic platform error after dispatch may have occurred

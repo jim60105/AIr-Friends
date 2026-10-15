@@ -25,11 +25,11 @@ Revise instructions only, including the existing retry-message builder text. Kee
 
 ### Put the shared decision in send-reply's skill document
 
-Replace its irreversible-error warning with a short outcome table. Confirmed success means no resend and immediate exit. Confirmed pre-delivery rejection means correct the reported issue and retry within current limits. Uncertain delivery means inspect available authoritative evidence before considering another send; unresolved uncertainty means no automatic resend.
+Replace its irreversible-error warning with a short outcome table. Confirmed success means no resend and immediate exit unless the known-error correction exception below applies. Confirmed pre-delivery rejection means correct the reported issue and retry within current limits. Uncertain delivery means inspect available authoritative evidence before considering another send; unresolved uncertainty means no automatic resend.
 
 Local payload errors are the primary confirmed pre-delivery cases because the scripts reject them before `callSkillApi`. Explicit preflight validation errors are also pre-delivery. Generic adapter errors, interrupted commands, timeouts and missing stdout are insufficient. A successful response needs no extra readback.
 
-The reply template retains a brief instruction to follow the skill's delivery-outcome policy. Delete its blanket “No second attempt” warning and the remaining irreversible-send phrase in its review bullet. Retain the final-reply ordering and immediate-exit rule for confirmed success. The existing edit-reply instruction remains a separate supported correction path within the session's current text ID and edit quota; it does not authorize tools after an ordinary successful final response. Do not duplicate the decision table in prompts or generic shell guidance.
+The reply template retains a brief instruction to follow the skill's delivery-outcome policy. Delete its blanket “No second attempt” warning and the remaining irreversible-send phrase in its review bullet. Retain final-reply ordering and immediate exit after confirmed success when no concrete error is already known. Define a narrow exception in the skill owner. If a concrete error is already known when success is acknowledged and the current session remains active, permit the necessary correction-payload write and scoped `edit-reply` using the session's current text ID within its existing edit quota, then exit after the correction attempt. No proactive readback, unrelated work, follow-up `send-reply` or new correction turn is authorized. Editing after the session ends is not promised. The template's exit and edit bullets must reference this same exception so neither contradicts it. Do not duplicate the decision table in prompts or generic shell guidance.
 
 ### Explain lookup limits instead of promising a status service
 
@@ -49,7 +49,7 @@ Extend its Result section to say positive delivered counts/IDs consume the one f
 
 ### Reuse existing regression suites
 
-Extend `tests/acp/agent-factory.test.ts` to check the delivered corrective text for both agent types, trusted document inclusion and one retry. Extend the existing skill-document gate and prompt-rendering tests for policy ownership and successful-send exit. Use existing real handler/Skill API fixtures to pin pre-API rejection, a recorded successful reply, ambiguous failure with no ID, get-message fallback roles, and partial file delivery without a second batch. Inspect existing quota/doom-loop tests as unchanged safeguards. Mocked platform outcomes are labeled as such; runtime behavior is not inferred from prompt prose.
+Extend `tests/acp/agent-factory.test.ts` to check the delivered corrective text for both agent types, trusted document inclusion and one retry. Extend the existing skill-document gate and prompt-rendering tests for policy ownership, ordinary successful-send exit and the explicit active-session known-error correction exception. Assert that only the necessary correction-payload write and scoped edit are permitted by that exception, followed by exit with no proactive readback or new correction turn. Use existing real handler/Skill API fixtures to pin pre-API rejection, a recorded successful reply, ambiguous failure with no ID, get-message fallback roles, and partial file delivery without a second batch. Inspect existing quota/doom-loop tests as unchanged safeguards. Mocked platform outcomes are labeled as such; runtime behavior is not inferred from prompt prose.
 
 ## Risks / Trade-offs
 
