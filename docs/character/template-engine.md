@@ -6,9 +6,7 @@ AIr-Friends 整合輕量且功能完整的 **[Vento](https://vento.js.org/)** �
 
 ## 為什麼選擇 Vento
 
-- **與 Deno 生態原生相容**：極致輕量、無須複雜編譯器工具鏈。
-- **靈活的語法表達**：支援變數替換、條件判斷、迴圈迭代以及樣板包含（`include`）。
-- **非同步支援**：可在渲染階段非同步取得資料。
+Vento 與 Deno 生態原生相容，體積輕巧且不需要複雜的編譯器工具鏈。語法涵蓋變數替換、條件判斷、迴圈迭代與樣板包含（`include`），渲染階段也能非同步取得資料。
 
 ---
 
@@ -42,13 +40,13 @@ AIr-Friends 整合輕量且功能完整的 **[Vento](https://vento.js.org/)** �
 
 ## 語法範例與常用過濾器
 
-### 1. 檔案包含 (Include)
+### 檔案包含 (Include)
 
 ```vento
 {{ include "./character_name.md" }}
 ```
 
-### 2. 條件判斷 (If-Else)
+### 條件判斷 (If-Else)
 
 ```vento
 {{ if platform == "discord" }}
@@ -58,4 +56,4 @@ AIr-Friends 整合輕量且功能完整的 **[Vento](https://vento.js.org/)** �
 {{ /if }}
 ```
 
-透過 Vento 引擎的彈性組合，AIr-Friends 能針對每次會話動態生成高度聚焦且語意完整的提示詞，協助外部代理人精確掌握推理脈絡。
+各流程只需注入自己需要的變數，Vento 便能在每次會話組出聚焦且語意完整的提示詞，讓外部代理人掌握推理所需的脈絡。

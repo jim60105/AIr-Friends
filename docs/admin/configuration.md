@@ -6,13 +6,7 @@ AIr-Friends 以階層式架構載入組態，支援 YAML 設定檔與環境變�
 
 ## 載入順序與階層
 
-系統啟動時，組態載入模組（`src/core/config-loader.ts`）依序執行以下步驟。
-
-1. **內建預設值（Built-in Defaults）**：程式碼中定義的基底預設值，例如 `DEFAULT_CONFIG`、`DEFAULT_RATE_LIMIT`、`DEFAULT_DASHBOARD`。
-2. **YAML 組態檔案**：預設讀取根目錄的 `config.yaml`；提供 `--config <路徑>` 參數時改讀指定檔案。
-3. **環境變數覆寫**：`src/utils/env.ts` 的 `ENV_MAPPINGS` 定義了環境變數與組態路徑的對應表。
-   - YAML 內容支援 `${ENV_VAR_NAME}` 語法，解析時代入作業系統環境變數或 `.env` 檔案中的值。
-   - 部分欄位另有專屬環境變數可直接覆寫對應路徑，例如 `AGENT_MODEL`、`AGENT_DEFAULT_TYPE`、`REPLY_POLICY`、`LOG_LEVEL`。
+系統啟動時，組態載入模組（`src/core/config-loader.ts`）依序疊合三層來源。最底層是程式碼中定義的內建預設值，例如 `DEFAULT_CONFIG`、`DEFAULT_RATE_LIMIT` 與 `DEFAULT_DASHBOARD`。其上為 YAML 組態檔案，預設讀取根目錄的 `config.yaml`，提供 `--config <路徑>` 參數時改讀指定檔案。最上層是環境變數覆寫，對應表定義於 `src/utils/env.ts` 的 `ENV_MAPPINGS`。YAML 內容中的 `${ENV_VAR_NAME}` 語法會在解析時代入作業系統環境變數或 `.env` 檔案的值，部分欄位另有專屬環境變數可直接覆寫對應路徑，例如 `AGENT_MODEL`、`AGENT_DEFAULT_TYPE`、`REPLY_POLICY` 與 `LOG_LEVEL`。
 
 ---
 

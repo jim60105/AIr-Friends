@@ -10,7 +10,7 @@ AIr-Friends 內建一組開箱即用的專屬技能（Skills），存放於專�
 | :--- | :--- | :--- |
 | `memory-save` | `skills/memory-save/scripts/memory-save.ts` | 儲存一則長期記憶條目至使用者的記憶庫 |
 | `memory-search` | `skills/memory-search/scripts/memory-search.ts` | 以語彙評分搜尋使用者記憶與全域知識筆記 |
-| `memory-patch` | `skills/memory-patch/scripts/memory-patch.ts` | 更新或刪除既有記憶條目 |
+| `memory-patch` | `skills/memory-patch/scripts/memory-patch.ts` | 更新既有記憶條目的屬性（含停用） |
 | `memory-stats` | `skills/memory-stats/scripts/memory-stats.ts` | 查詢記憶庫的統計摘要 |
 | `memory-export` | `skills/memory-export/scripts/memory-export.ts` | 匯出使用者的記憶資料 |
 | `send-reply` | `skills/send-reply/scripts/send-reply.ts` | 將最終回覆發布至當前對話頻道或私訊 |
@@ -36,6 +36,4 @@ AIr-Friends 內建一組開箱即用的專屬技能（Skills），存放於專�
 
 ## 執行與通訊架構
 
-1. **子行程執行**：外部代理人（OpenCode / OMP）在工作區中透過 shell 命令呼叫技能腳本，例如 `.../memory-save/scripts/memory-save.ts --session-id ... --content-file ...`。
-2. **安全酬載傳遞**：自由文字內容不會出現在命令列上，而是由代理人寫入工作階段暫存目錄的酬載檔案，腳本再讀取該檔案。
-3. **HTTP 回呼（Callback）**：技能腳本透過本地 HTTP 請求與主程序的 **Skill API 伺服器**通訊，驗證工作階段 Session ID 後完成記憶儲存或訊息發布。Skill API 伺服器預設監聽 `127.0.0.1:3001`（`skillApi.port`）。
+外部代理人（OpenCode / OMP）在工作區中透過 shell 命令呼叫技能腳本，例如 `.../memory-save/scripts/memory-save.ts --session-id ... --content-file ...`。自由文字內容不會出現在命令列上，而是由代理人寫入工作階段暫存目錄的酬載檔案，腳本再讀取該檔案。腳本透過本地 HTTP 請求與主程序的 **Skill API 伺服器** 通訊，驗證工作階段 Session ID 後完成記憶儲存或訊息發布。Skill API 伺服器預設監聽 `127.0.0.1:3001`（`skillApi.port`）。

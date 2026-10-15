@@ -4,9 +4,9 @@ AIr-Friends 支援容器化與本機 systemd 服務兩種常見的生產部署�
 
 ---
 
-## 1. 容器部署模式（Docker 與 Podman）
+## 1. 容器部署模式（Podman 與 Docker）
 
-### Docker Compose 部署
+### Podman Compose 部署
 
 專案根目錄附帶 `compose.yml`，映像檔以非 root 使用者身分執行（`user: "1000:0"`），並丟棄所有能力、禁止提權。主要設定如下。
 
@@ -36,7 +36,7 @@ volumes:
 
 ### 無根容器模式（Rootless Podman）
 
-在權限受限的主機上可改用 Rootless Podman 部署，容器行程完全在非 root 使用者權限下執行。F12 檔案系統沙盒（`AGENT_SANDBOX_FILESYSTEM_CONFINEMENT`）無法在無根 Podman 中驗證，因為 bwrap 需在巢狀使用者命名空間內重新掛載 `/proc`，此動作必然失敗。啟用前請以 `scripts/probe-sandbox-caps.sh` 在真實執行環境驗證。
+在權限受限的主機上可以改用 Rootless Podman 部署，容器行程完全在非 root 使用者權限下執行。F12 檔案系統沙盒（`AGENT_SANDBOX_FILESYSTEM_CONFINEMENT`）無法在無根 Podman 中驗證，因為 bwrap 需在巢狀使用者命名空間內重新掛載 `/proc`，此動作必然失敗。啟用前請以 `scripts/probe-sandbox-caps.sh` 在真實執行環境驗證。
 
 ---
 
@@ -78,6 +78,4 @@ sudo systemctl status air-friends.service
 
 ## 3. 生產環境安全建議
 
-1. **工作區目錄權限**：將資料儲存目錄（`data/`）設定為只有執行使用者可讀寫（`chmod 700 data`）。
-2. **Web 儀表板綁定**：儀表板連接埠預設綁定 `127.0.0.1`，對外服務時請透過 Nginx 或 Caddy 反向代理並加上 HTTPS。
-3. **金鑰管理**：請勿將 `.env` 或 `config.yaml` 提交至公開的 Git 專案庫。
+將資料儲存目錄（`data/`）設定為只有執行使用者可讀寫（`chmod 700 data`）。儀表板連接埠預設綁定 `127.0.0.1`，對外服務時請透過 Nginx 或 Caddy 反向代理並加上 HTTPS。`.env` 與 `config.yaml` 含有平台權杖與 API 金鑰，請勿提交至公開的 Git 專案庫。

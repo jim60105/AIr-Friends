@@ -6,21 +6,17 @@
 
 ## 回覆政策架構
 
-評估邏輯實作於 `src/core/reply-policy.ts`。每則訊息事件會經過兩層判斷。
+評估邏輯實作於 `src/core/reply-policy.ts`。每則訊息事件會先經過全域回覆政策，再比對頻道與帳號條目。
 
-1. **全域回覆政策（`replyPolicy`）**
-   系統層級的 `replyPolicy` 決定一般訊息的處理範圍。
-   - `all`：所有訊息皆評估回覆。
-   - `public`：公開頻道訊息全部回覆，私訊則需該頻道條目已啟用。
-   - `channels`（預設）：只有 `channels` 清單中列出的條目才會回覆。
+全域回覆政策（`replyPolicy`）決定一般訊息的處理範圍。`all` 評估所有訊息是否回覆；`public` 回覆所有公開頻道訊息，私訊則需該頻道條目已啟用；`channels`（預設）只回覆 `channels` 清單中列出的條目。
 
-2. **頻道與帳號條目（`channels`）**
-   `channels` 是存取控制清單，每個條目以 `{platform}/channel/{id}` 或 `{platform}/account/{id}` 為識別碼，並可設定下列欄位。
-   - `enabled`（預設 `true`）：設為 `false` 時停用該條目。
-   - `spontaneousPost`（預設 `false`）：允許在該頻道自發貼文。
-   - `channelLurk`（預設 `false`）：允許在該頻道啟用頻道潛水，僅限 `discord/channel/*`。
-   - `rateLimitBypass`（預設 `false`）：略過頻率限制。
-   - `yolo`（預設 `false`）：在該頻道或帳號以 YOLO 模式執行代理人。
+`channels` 是存取控制清單，每個條目以 `{platform}/channel/{id}` 或 `{platform}/account/{id}` 為識別碼，並可設定下列欄位。
+
+- `enabled`（預設 `true`）：設為 `false` 時停用該條目。
+- `spontaneousPost`（預設 `false`）：允許在該頻道自發貼文。
+- `channelLurk`（預設 `false`）：允許在該頻道啟用頻道潛水，僅限 `discord/channel/*`。
+- `rateLimitBypass`（預設 `false`）：略過頻率限制。
+- `yolo`（預設 `false`）：在該頻道或帳號以 YOLO 模式執行代理人。
 
 ---
 

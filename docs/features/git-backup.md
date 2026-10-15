@@ -6,11 +6,7 @@ AIr-Friends 內建 Git 備份流程，能定期將資料目錄的異動提交並
 
 ## 運作流程
 
-1. **資料目錄即 Git 專案庫**：資料儲存目錄（`data/`）被初始化為標準 Git 儲存庫。
-2. **自動定時提交**：備份排程器（`src/core/git-backup-scheduler.ts` 與 `src/core/git-backup-service.ts`）以 `intervalMs` 為間隔檢查目錄異動，執行 `git add` 並產生帶時間戳記的提交。
-3. **安全推播至遠端**：透過 HTTPS 遠端網址推送，憑證取自 `gitBackup.authUser` 與 `gitBackup.authPassword`，未設定密碼時回退至環境變數 `GITHUB_TOKEN`。
-
-遠端網址為 HTTPS 格式（`gitBackup.remoteUrl`）。
+資料儲存目錄（`data/`）被初始化為標準 Git 儲存庫。備份排程器（`src/core/git-backup-scheduler.ts` 與 `src/core/git-backup-service.ts`）以 `intervalMs` 為間隔檢查目錄異動，執行 `git add` 並產生帶時間戳記的提交，再透過 HTTPS 遠端網址（`gitBackup.remoteUrl`）推送。推送憑證取自 `gitBackup.authUser` 與 `gitBackup.authPassword`，未設定密碼時回退至環境變數 `GITHUB_TOKEN`。
 
 ---
 

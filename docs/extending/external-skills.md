@@ -6,10 +6,7 @@
 
 ## 代理技能標準 (Agent Skills Standard)
 
-系統相容於 [Agent Skills Standard](https://agentskills.io/) 規範。
-
-- 每個技能為一個獨立目錄，根目錄具備 `SKILL.md` 說明檔案。
-- `SKILL.md` 定義該技能的名稱、描述、參數架構與呼叫範例。
+系統相容於 [Agent Skills Standard](https://agentskills.io/) 規範。每個技能為一個獨立目錄，根目錄具備 `SKILL.md` 說明檔案，該檔案定義技能的名稱、描述、參數架構與呼叫範例。
 
 ---
 

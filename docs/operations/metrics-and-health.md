@@ -41,6 +41,4 @@
 deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --dry-run
 ```
 
-- **零 API 成本**：系統會完整執行工作區準備、記憶檢索、提示詞組裝與 Vento 樣板渲染，但不呼叫外部付費 LLM。
-- **提示詞落盤除錯**：組裝後的完整 Prompt 會儲存至 `agent.dryRun.outputPath`（預設 `./data/dry-run/`）供審閱。
-- **測試回覆**：若設定了 `agent.dryRun.mockReply`，系統會直接發送測試文字至平台，方便驗證連線與排版。
+這個模式會完整執行工作區準備、記憶檢索、提示詞組裝與 Vento 樣板渲染，但不呼叫外部付費 LLM，因此沒有 API 成本。組裝後的完整 Prompt 會儲存至 `agent.dryRun.outputPath`（預設 `./data/dry-run/`）供審閱，若同時設定了 `agent.dryRun.mockReply`，系統會直接發送測試文字至平台，方便驗證連線與排版。

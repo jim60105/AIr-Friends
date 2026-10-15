@@ -57,6 +57,4 @@ deno task test
 
 ## 提交 Pull Request (PR)
 
-1. 基於 `master` 分支建立新的功能分支，例如 `git checkout -b feat/your-feature`。
-2. 撰寫明確的 Conventional Commits 提交訊息（例如 `feat: ...`、`fix: ...`、`docs: ...`）。
-3. 送出 PR 並確認所有 CI 檢查項目（Format、Lint、Tests）均通過。
+貢獻流程以 `master` 分支為基礎，先建立新的功能分支（例如 `git checkout -b feat/your-feature`），撰寫明確的 Conventional Commits 提交訊息（例如 `feat: ...`、`fix: ...`、`docs: ...`），送出 PR 後確認所有 CI 檢查項目（Format、Lint、Tests）均通過。

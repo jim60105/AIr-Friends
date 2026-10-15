@@ -61,6 +61,4 @@ export abstract class PlatformAdapter implements MessageFetcher {
 
 ## 新增平台步驟
 
-1. 在 `src/types/events.ts` 的 `Platform` 型別與 `VALID_PLATFORMS` 清單新增你的平台名稱。
-2. 在 `src/platforms/` 下建立新的目錄與介面卡類別（例如 `telegram/adapter.ts`），繼承 `PlatformAdapter` 並實作所有抽象方法。
-3. 在平台註冊流程（`src/platforms/platform-registry.ts` 與 `src/bootstrap.ts`）註冊並啟動該介面卡。
+先在 `src/types/events.ts` 的 `Platform` 型別與 `VALID_PLATFORMS` 清單新增你的平台名稱，再於 `src/platforms/` 下建立新的目錄與介面卡類別（例如 `telegram/adapter.ts`），繼承 `PlatformAdapter` 並實作所有抽象方法。最後在平台註冊流程（`src/platforms/platform-registry.ts` 與 `src/bootstrap.ts`）註冊並啟動該介面卡。

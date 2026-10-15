@@ -6,25 +6,16 @@ AIr-Friends 擁有共用的背景排程器架構（`src/core/base-scheduler.ts`�
 
 ## 統一生命週期管理
 
-所有定時任務皆以 `BaseScheduler` 為基底並註冊至啟動流程，遵循下列規則。
-
-- **啟動階段**：系統開機完成並連線至聊天平台後，排程器依序啟動各項任務計時器。
-- **優雅關閉階段（Graceful Shutdown）**：收到 `SIGTERM` 或 `SIGINT` 時，排程器會停止派發新任務，並等待執行中的代理人工作階段完成後才退出。
+所有定時任務皆以 `BaseScheduler` 為基底並註冊至啟動流程。系統開機完成並連線至聊天平台後，排程器依序啟動各項任務計時器；收到 `SIGTERM` 或 `SIGINT` 時則進入優雅關閉階段（Graceful Shutdown），停止派發新任務，並等待執行中的代理人工作階段完成後才退出。
 
 ---
 
 ## 重啟補償機制（Restart Catchup）
 
-系統重啟或臨時斷線期間，部分排程任務可能已到期。
-
-- 排程狀態會寫入狀態儲存（`src/core/scheduler-state-store.ts`），啟動時可還原下次預定時間。
-- 定時提醒採用固定間隔輪詢（`reminders.checkIntervalMs`），因此重啟後會自動挑出逾期的提醒並立即補發。
+系統重啟或臨時斷線期間，部分排程任務可能已到期。排程狀態會寫入狀態儲存（`src/core/scheduler-state-store.ts`），啟動時可還原下次預定時間；定時提醒採用固定間隔輪詢（`reminders.checkIntervalMs`），因此重啟後會自動挑出逾期的提醒並立即補發。
 
 ---
 
 ## 執行間隔的安排
 
-不同任務採用不同的間隔策略。
-
-- **固定間隔**：定時提醒輪詢與頻道潛水以設定的 `intervalMs` 固定執行。
-- **隨機間隔**：自發貼文與自主研究在 `minIntervalMs` 與 `maxIntervalMs` 之間取隨機值，分散執行時點，避免同時觸發造成主機負載或外部 API 速率限制。
+不同任務採用不同的間隔策略。定時提醒輪詢與頻道潛水以設定的 `intervalMs` 固定執行；自發貼文與自主研究則在 `minIntervalMs` 與 `maxIntervalMs` 之間取隨機值，分散執行時點，避免同時觸發造成主機負載或外部 API 速率限制。
