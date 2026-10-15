@@ -459,6 +459,14 @@ Deno.test("skill docs gate - send-file owns the partial-delivery slot rule", () 
 
   // Positive delivered output is a consumed slot, not a retryable failure.
   assertStringIncludes(sendFile, "positive `filesCount`");
+  // The delivered-count and delivered-ID cardinalities are NOT equal: a batch
+  // sent as one platform message reports one ID for several files
+  // (tests/skills/file-handler.test.ts "multi-file success" pins the handler
+  // behaviour this wording has to describe).
+  assertStringIncludes(
+    sendFile,
+    "a batch sent as a single message can report fewer IDs than files",
+  );
   assertStringIncludes(sendFile, "the remaining files are abandoned for this session");
   assertStringIncludes(sendFile, "The slot is consumed");
   // Preflight-only failure is the distinct case.
