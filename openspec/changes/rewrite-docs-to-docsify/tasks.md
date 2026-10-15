@@ -29,13 +29,13 @@
 
 ## 4. Character Authoring & Administration Chapters
 
-- [ ] 4.1 Author `docs/character/concepts.md`: character identity, soul prompt structure, personality framing, and tone.
-- [ ] 4.2 Author `docs/character/fragments.md`: modular system prompt fragments, conditional inclusion, and organization.
-- [ ] 4.3 Author `docs/character/template-engine.md`: Vento template engine integration, custom variables, filters, and rendering lifecycle.
-- [ ] 4.4 Author `docs/admin/configuration.md`: configuration loading order, YAML hierarchy, environment variable substitution.
-- [ ] 4.5 Author `docs/admin/reply-policy.md`: reply rules, whitelist/blacklist controls, and direct mention restrictions.
-- [ ] 4.6 Author `docs/admin/rate-limiting.md`: per-user sliding-window request timestamp limits, cooldown period enforcement, and burst capacity as implemented in `src/core/rate-limiter.ts`.
-- [ ] 4.7 Author `docs/admin/deployment-modes.md`: container deployment (Docker/Podman), systemd service setup, and rootless environments.
+- [x] 4.1 Author `docs/character/concepts.md`: character identity, soul prompt structure, personality framing, and tone.
+- [x] 4.2 Author `docs/character/fragments.md`: modular system prompt fragments, conditional inclusion, and organization.
+- [x] 4.3 Author `docs/character/template-engine.md`: Vento template engine integration, custom variables, filters, and rendering lifecycle.
+- [x] 4.4 Author `docs/admin/configuration.md`: configuration loading order, YAML hierarchy, environment variable substitution.
+- [x] 4.5 Author `docs/admin/reply-policy.md`: reply rules, whitelist/blacklist controls, and direct mention restrictions.
+- [x] 4.6 Author `docs/admin/rate-limiting.md`: per-user sliding-window request timestamp limits, cooldown period enforcement, and burst capacity as implemented in `src/core/rate-limiter.ts`.
+- [x] 4.7 Author `docs/admin/deployment-modes.md`: container deployment (Docker/Podman), systemd service setup, and rootless environments.
 
 ## 5. Agent ACP Engine & Security Chapters
 
