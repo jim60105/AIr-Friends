@@ -4,7 +4,7 @@
 
 ---
 
-## 使用者工作區邊界隔離 (Workspace Boundary Isolation)
+## 使用者工作區邊界 (Workspace Boundary)
 
 AIr-Friends 嚴格貫徹工作區信任邊界原則：
 
@@ -12,9 +12,9 @@ AIr-Friends 嚴格貫徹工作區信任邊界原則：
    - 每個使用者的獨立工作目錄格式為：`repo/workspaces/{platform}/{userId}/`。
    - 代理人啟動子行程時，其工作目錄（cwd）會被強制釘選在該使用者的工作區內。
    - 代理人產生的暫存檔案統一置於 `{workspace}/tmp/{sessionId}/` 中。
-2. **禁止跨工作區存取**：
+2. **禁止跨工作區路徑遍歷**：
    - 系統檔案存取防護層會攔截並拒絕任何路徑遍歷（Directory Traversal）嘗試（例如 `../` 或符號連結跳躍）。
-   - 使用者 A 永遠無法透過任何代理人指令存取或讀取使用者 B 的工作區目錄與記憶檔案。
+   - 在 ACP 回呼層面，使用者 A 無法透過回呼 API 存取使用者 B 的工作區目錄與記憶檔案。
 
 ---
 
@@ -34,17 +34,19 @@ AIr-Friends 嚴格貫徹工作區信任邊界原則：
 
 ## 明確安全保證與限制 (Guarantees & Limitations)
 
-在架構設計上，AIr-Friends 秉持誠實面對邊界限制的原則：
+在架構設計上，AIr-Friends 誠實面對邊界限制與防護範疇：
 
 1. **選擇性作業系統層級沙盒 (Opt-in OS Confinement)**：
-   - 搭配 bwrap 建立的掛載隔離需要主機核心具備未授權使用者命名空間（User Namespace）支援。
-   - 在部分發行版或容器架構中（如 `/usr/local` 屬於符號連結的唯讀環境），沙盒掛載可能受限。
-2. **無根 Podman (Rootless Podman) 限制**：
-   - 在無根容器內再啟動子沙盒時，若未開啟特定核心參數或缺乏必要權限，子沙盒功能將自動降級，退回應用程式層級的權限攔截。
+   - 搭配 bwrap 建立的掛載隔離為明確選擇性功能（`agent.sandbox.filesystemConfinement: true`），需要主機核心具備未授權使用者命名空間（User Namespace）支援。
+   - **嚴格失敗原則 (Fail-Closed)**：若設定啟用了檔案系統沙盒隔離，但主機環境缺乏支援（如無法建立 namespace 或 `/usr/local` 符號連結拓樸限制），**系統會直接擲出例外並終止啟動**，絕不暗中降級至未隔離狀態。若需在無沙盒環境執行，必須由維運人員主動將該設定調整為 `false`。
+2. **原生工具與環境權限界限**：
+   - ACP 回呼保護主要約束透過 ACP 協定請求的檔案操作；外部代理人二進位檔若透過底層原生 Shell 或內建工具存取未掛載隔離的本機檔案，仍受作業系統行程權限規範。
 3. **網路代理限制 (Proxy Limitations)**：
    - 設定 `HTTP_PROXY` 僅為輸出傳輸路由，並不等同於防火牆層級的網頁存取阻擋或封包內容防護。
 4. **OMP 原生上游差異 (Accepted Upstream Differences)**：
    - OMP 與 OpenCode 的原生工具解析邏輯存在差異，部分工具名稱與原生載入機制由專案自訂的原生擴充套件（Trusted Extension）進行相容性適配。
 5. **證據邊界分立原則 (Evidence Boundaries)**：
+   - **原始碼審查 (Source Audit)**：確認上游與專案合約邏輯之靜態規範。
    - **單元與模擬測試 (Unit/Mock)**：僅證明本專案客戶端層面的邏輯決策正確，不代表官方代理人二進位檔的真實行為。
-   - **維運者執行階段驗收 (Operator Runtime Acceptance)**：真實環境中是否能百分之百阻擋未授權行為，必須由維運者在具備真實權限的環境中執行驗收指令以親自觀察確認。
+   - **映像檔二進位派發 (Native Dispatch)**：驗證二進位檔在特定測試套件下的原生工具派發能力。
+   - **維運者執行階段驗收 (Operator Runtime Acceptance)**：真實環境中是否能百分之百阻擋未授權行為，必須由維運人員在具備真實權限的環境中執行驗收指令以親自觀察確認。

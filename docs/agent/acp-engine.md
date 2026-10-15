@@ -24,10 +24,26 @@ AIr-Friends 是一套 **ACP (Agent Client Protocol)** 客戶端系統，負責�
 | 先決條件項目 | 容器化部署 (Docker/Podman) | 本機開發或自訂主機部署 |
 | :--- | :--- | :--- |
 | **代理人執行檔** | 官方發布映像檔已預先包裝對應二進位檔 | 須於主機 `$PATH` 安裝 `opencode` 或 `omp` 執行檔 |
-| **OMP 原生模式 YAML** | 映像檔預先內建於 `/opt/air/omp/` | 須手動提供 `agent-config/omp/restricted.yml` 與 `native-yolo.yml` |
-| **OMP 模型清單 (`models.yml`)** | 預先安裝至 `/home/deno/.omp/agent/models.yml` | 須手動建立於 `$HOME/.omp/agent/models.yml` 或透過組態指定 |
-| **技能目錄 (`skills.customDirectories`)**| 指向單一共用根目錄 `/home/deno/.agents/skills/` | 指向專案的 `skills/` 目錄，雙代理人共用單一根目錄 |
+| **OMP 原生模式 YAML** | 映像檔預先內建於 `/opt/air/omp/` | 須手動提供 `agent-config/omp/restricted.yml` 與 `native-yolo.yml`（無插值或產生器） |
+| **OMP 模型清單 (`models.yml`)** | 預先安裝至 `/home/deno/.omp/agent/models.yml` | 須手動建立於 `$HOME/.omp/agent/models.yml`，且模型 ID 須對齊 OMP 格式 |
+| **技能目錄 (`skills.customDirectories`)**| 指向單一共用根目錄 `/home/deno/.agents/skills/` | 在 OMP 模式檔與 `AGENT_SKILLS_DIR` 明確配置相同的技能目錄路徑 |
 | **OMP 擴充套件 Bundle** | 映像檔建置時自動產生於 `/opt/air/omp/extension/index.js` | 開發環境使用產生的 `build/omp-extension/index.js` |
+| **LSP 阻絕政策** | 映像檔模式檔已設定 `tools.approval.lsp: deny` | 手寫模式檔必須在受限與 YOLO 模式中明確宣告 LSP 拒絕 |
+
+---
+
+## OMP 原生執行階段重要部署契約
+
+在配置 OMP 原生執行環境時，維運人員應注意以下關鍵契約：
+
+1. **手寫原生配置無動態插值**：
+   - OMP 模式設定（`agent-config/omp/restricted.yml` 與 `native-yolo.yml`）是由 OMP 本身直接解析的原生 YAML，AIr-Friends 程式碼不會對其進行字串插值、範本替換或動態重寫。
+2. **共用單一受信任技能根目錄**：
+   - 雙代理人共用單一技能根目錄。自訂部署時，維運者必須手動在 OMP 模式 YAML 中的 `skills.customDirectories` 填入技能路徑，並與系統的 `agent.skillsDir`（或 `AGENT_SKILLS_DIR`）指向相同目錄。
+3. **金鑰與憑證傳遞界限**：
+   - OMP 子行程採用繼承之 HOME 環境，但沙盒環境下僅會轉發核可的供應商金鑰（如 `GEMINI_API_KEY`、`OPENROUTER_API_KEY`），其餘非核可環境變數與平台 Token 受到模組層級嚴密隔離。
+4. **雙模式 LSP 工具阻絕**：
+   - 在受限模式與原生 YOLO 模式下，皆透過模式檔中精確命名的 `tools.approval.lsp: deny` 阻擋 LSP 工具呼叫，但這屬於工具審查層面，不代表能完全壓制原生語言伺服器的內部隱式啟動。
 
 ---
 
