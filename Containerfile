@@ -92,7 +92,7 @@ COPY --link --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/
 ########################################
 # OMP unpack stage
 # Official `omp` executable + notices, pinned by exact tag + per-arch SHA-256,
-# mirroring the opencode-unpacker pattern (design §12, docs/OMP_PACKAGING.md).
+# mirroring the opencode-unpacker pattern (design §12, docs/agent/acp-engine.md).
 ########################################
 FROM base AS omp-unpacker
 
@@ -136,7 +136,7 @@ RUN case "${TARGETARCH}" in \
     # Downloads use the SAME API listing's per-asset browser_download_url (not a
     # re-derived download URL), so uniqueness and the fetched bytes bind to one
     # listing response; the pinned digests stay the fail-closed content check.
-    # Observed asset name (echoed below; also recorded in docs/OMP_PACKAGING.md):
+    # Observed asset name (echoed below; also recorded in docs/agent/acp-engine.md):
     #   v18.6.1 publishes plain `omp-linux-x64` / `omp-linux-arm64` names.
     listing="$(curl -fsSL "https://api.github.com/repos/can1357/oh-my-pi/releases/tags/v${OMP_VERSION}")" && \
     sel="$(printf '%s' "${listing}" | jq -r '.assets[].name' | grep -E "^omp-linux-${OMP_ARCH}[^/]*$" || true)" && \

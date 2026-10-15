@@ -112,7 +112,7 @@ export function opencodeDaemonHome(
 
 /**
  * The deployed OpenCode GLOBAL configuration document the AGENT reads: the
- * file an operator mount shadows (documented in `docs/DEVELOPMENT.md`).
+ * file an operator mount shadows (documented in `docs/admin/configuration.md`).
  *
  * The home-based resolution is the agent subprocess's own, not a preference:
  * that process is spawned with `clearEnv: true` and an explicit allow-list
@@ -300,7 +300,7 @@ function requireStringArray(node: JsonSourceNode, label: string): string[] {
 /**
  * The `/**` or `/*` directory a permission KEY names, if it ends in one. The
  * pinned engine turns both forms into `…/.*`, which matches any characters
- * INCLUDING `/` (`docs/AGENT_PERMISSIONS.md`), so the two are one form here.
+ * INCLUDING `/` (`docs/agent/security-and-sandbox.md`), so the two are one form here.
  */
 function keyedDirectory(key: string, home: string | undefined): string | undefined {
   const suffix = key.endsWith("/**") ? "/**" : key.endsWith("/*") ? "/*" : undefined;
@@ -425,7 +425,7 @@ function declaresSkillDiscoveryPath(
 /**
  * Whether the document's external-directory rules EFFECTIVELY allow reads
  * under the resolved root. The pinned engine is LAST-MATCH-WINS in source
- * order (`docs/AGENT_PERMISSIONS.md`), so the verdict is the value of the last
+ * order (`docs/agent/security-and-sandbox.md`), so the verdict is the value of the last
  * rule covering the root subtree — never merely the presence of an `allow`
  * somewhere, which a later `"*": "deny"` contradicts.
  */

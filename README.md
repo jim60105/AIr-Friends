@@ -2,6 +2,8 @@
 
 ![preview image](./docs/preview.webp)
 
+> 📖 **官方文件網站**: [https://jim60105.github.io/AIr-Friends/](https://jim60105.github.io/AIr-Friends/)（本地瀏覽亦可閱讀 [`docs/`](docs/README.md)）
+
 [![codecov](https://codecov.io/gh/jim60105/AIr-Friends/graph/badge.svg?token=0DtdMc3GBq)](https://codecov.io/gh/jim60105/AIr-Friends) [![Build Status](https://img.shields.io/github/actions/workflow/status/jim60105/AIr-Friends/ci.yaml?branch=master)](https://github.com/jim60105/AIr-Friends/actions) [![Release](https://img.shields.io/github/v/tag/jim60105/AIr-Friends?label=release)](https://github.com/jim60105/AIr-Friends/releases) [![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE) [![Container Image](https://img.shields.io/badge/ghcr.io%2Fjim60105%2Fair--friends-available-brightgreen)](https://github.com/jim60105/AIr-Friends/pkgs/container/air-friends)
 
 Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP AI agents, it remembers conversations across channels while keeping your data organized in isolated workspaces.
@@ -96,7 +98,7 @@ prompts:
       An AI assistant
 ```
 
-See [Development Guide -- Customizing the Bot](docs/DEVELOPMENT.md#customizing-the-bot) section for details.
+See [Character Customization](docs/character/concepts.md) and [Template Engine](docs/character/template-engine.md) for details.
 
 ## 🔐 Reply Policy
 
@@ -124,7 +126,7 @@ channels:
     yolo: false
 ```
 
-See [Development Guide -- Access Control & Reply Policy](docs/DEVELOPMENT.md#access-control--reply-policy) section for details.
+See [Reply Policy](docs/admin/reply-policy.md) and [Configuration](docs/admin/configuration.md) for details.
 
 ## 🛡️ Rate Limiting
 
@@ -138,7 +140,11 @@ rateLimit:
   cooldownMs: 600000  # Cooldown after limit exceeded
 ```
 
+See [Rate Limiting Guide](docs/admin/rate-limiting.md) for details.
+
 ## ⏰ Scheduled Reminders
+- Skills: `set-reminder`, `cancel-reminder`, `list-reminders`
+See [Reminders Guide](docs/guide/reminders.md) for details.
 
 Allow users to set one-time reminders via DM. The bot delivers them at the scheduled time:
 
@@ -171,7 +177,7 @@ agent:
         model: "openrouter/deepseek/deepseek-v3.2"
 ```
 
-Rules are evaluated in order (first-match wins). See [Development Guide -- Model Routing](docs/DEVELOPMENT.md#model-routing) for details.
+Rules are evaluated in order (first-match wins). See [Model Routing Guide](docs/agent/model-routing.md) for details.
 
 ## 🏗️ Architecture
 
@@ -190,7 +196,7 @@ AIr-Friends acts as an [ACP (Agent Client Protocol)](https://agentclientprotocol
 └─────────────────────────────────────────┘
 ```
 
-See [Design Document](docs/DESIGN.md) for detailed architecture.
+See [Architecture Overview](docs/README.md) for detailed architecture.
 
 ## 📦 Container Details
 
@@ -200,9 +206,7 @@ The official container image includes:
 - Pre-installed OMP CLI (`omp`), pinned by exact tag + per-arch SHA-256 checksums
   (`Containerfile` `OMP_VERSION`), with the generated trusted-extension
   packaging/launch integration landed. Native enforcement and image/runtime
-  acceptance remain user-owned and unverified — see
-  [OMP Packaging](docs/OMP_PACKAGING.md) and the
-  [consolidated runtime checklist](docs/USER-RUNTIME-VERIFICATION.md).
+  acceptance remain user-owned and unverified — see [ACP Engine Integration](docs/agent/acp-engine.md) and [Security & Sandbox](docs/agent/security-and-sandbox.md).
 - Auto-approval mode enabled for isolated execution
 - Health check endpoint on port 8080
 - Default prompts at `/app/prompts` (can be overridden)
@@ -224,29 +228,24 @@ settings plus the restricted capability extension that blocks unmatched tool
 names before dispatch) and **native-YOLO** (operator-approved; native permissive
 policy with only the LSP tool denied). LSP is denied in every agent and mode —
 OMP restricted and YOLO via the authored exact-name `tools.approval.lsp: deny`,
-OpenCode build and yolo via per-agent explicit denies. Details:
-[OMP Spawn & Modes](docs/OMP_SPAWN.md), [OMP Settings](docs/OMP_SETTINGS.md).
+OpenCode build and yolo via per-agent explicit denies. Details: [ACP Engine Integration](docs/agent/acp-engine.md) and [Security & Sandbox](docs/agent/security-and-sandbox.md).
 
 Custom/development deployments provision the native side by hand: the deployer
 MUST author the native skill root in the OMP mode YAML (`skills.customDirectories`)
 AND point `agent.skillsDir` / `AGENT_SKILLS_DIR` at that same root, and MUST
 provision the native HOME model file (`$HOME/.omp/agent/models.yml`) before
 launch. There is no interpolator, generator or byte-equality gate, and native
-OMP's own discovery/config errors stay upstream-owned — see
-[OMP Settings](docs/OMP_SETTINGS.md) §2–§3 and
-[OMP Discovery](docs/OMP_DISCOVERY.md).
+OMP's own discovery/config errors stay upstream-owned — see [ACP Engine Integration](docs/agent/acp-engine.md).
 
 Honest status: automated unit and mock evidence certifies this repository's
 client-side decisions only. Real native tool dispatch is additionally observed by
 the pinned `omp` **18.6.1** smoke and integration suites
-([OMP Spawn & Modes](docs/OMP_SPAWN.md) §6); native runtime enforcement beyond
-those exercised paths, the image build's other architecture, and platform
-delivery remain user-owned and unverified in the single consolidated checklist
-[docs/USER-RUNTIME-VERIFICATION.md](docs/USER-RUNTIME-VERIFICATION.md).
+([ACP Engine Integration](docs/agent/acp-engine.md)); native runtime enforcement beyond
+those exercised paths, the image build's other architecture, and platform delivery remain user-owned and unverified in [Security & Sandbox](docs/agent/security-and-sandbox.md).
 
 ## 🛠️ Development
 
-See [Development Guide](docs/DEVELOPMENT.md) for complete setup instructions.
+See [Quickstart](docs/getting-started/quickstart.md) and [Contributing Guide](docs/extending/contributing.md) for complete setup instructions.
 
 ## License
 

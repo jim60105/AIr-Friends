@@ -58,16 +58,16 @@
 
 ## 7. Extending, Reference & Inbound Link Updates Across Repository
 
-- [ ] 7.1 Author `docs/extending/built-in-skills.md`: catalog of out-of-the-box skills and execution requirements.
-- [ ] 7.2 Author `docs/extending/external-skills.md`: installing and integrating external agent skills.
-- [ ] 7.3 Author `docs/extending/custom-skills.md`: authoring custom skills with secure payload file contract.
-- [ ] 7.4 Author `docs/extending/platform-adapters.md`: architecture and interface contracts for adding new chat platform adapters.
-- [ ] 7.5 Author `docs/extending/mcp-servers.md`: Model Context Protocol (MCP) server configuration and tool binding.
-- [ ] 7.6 Author `docs/extending/contributing.md`: developer environment setup, style conventions, and pull request guidelines.
-- [ ] 7.7 Author `docs/reference/config-schema.md`: complete YAML configuration dictionary and environment variable mapping table.
-- [ ] 7.8 Author `docs/reference/troubleshooting.md`: common failure modes, connection diagnostics, and FAQ.
-- [ ] 7.9 Update inbound documentation links in root `README.md` to dual-mode (direct relative Markdown paths for GitHub browsing and Docsify site link).
-- [ ] 7.10 Update active documentation citations across the repository: `config.example.yaml`, `.env.example`, `AGENTS.md`, and `tests/README.md`.
+- [x] 7.1 Author `docs/extending/built-in-skills.md`: catalog of out-of-the-box skills and execution requirements.
+- [x] 7.2 Author `docs/extending/external-skills.md`: installing and integrating external agent skills.
+- [x] 7.3 Author `docs/extending/custom-skills.md`: authoring custom skills with secure payload file contract.
+- [x] 7.4 Author `docs/extending/platform-adapters.md`: architecture and interface contracts for adding new chat platform adapters.
+- [x] 7.5 Author `docs/extending/mcp-servers.md`: Model Context Protocol (MCP) server configuration and tool binding.
+- [x] 7.6 Author `docs/extending/contributing.md`: developer environment setup, style conventions, and pull request guidelines.
+- [x] 7.7 Author `docs/reference/config-schema.md`: complete YAML configuration dictionary and environment variable mapping table.
+- [x] 7.8 Author `docs/reference/troubleshooting.md`: common failure modes, connection diagnostics, and FAQ.
+- [x] 7.9 Update inbound documentation links in root `README.md` to dual-mode (direct relative Markdown paths for GitHub browsing and Docsify site link).
+- [x] 7.10 Update active documentation citations across the repository: `config.example.yaml`, `.env.example`, `AGENTS.md`, and `tests/README.md`.
 - [ ] 7.11 Review all written documentation outcomes according to `chinese-content-writing-guideline` and `chinese-traditional-conversion` (Traditional Chinese zh-TW, full-width punctuation, Taiwan terminology, no mainland phrasing/calques, proper CJK-alphanumeric spacing).
 
 ## 8. Runtime Smoke Verification
