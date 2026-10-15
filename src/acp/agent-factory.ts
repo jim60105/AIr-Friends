@@ -486,9 +486,10 @@ function buildDefaultRetryMessage(
   sendFileContent: string,
 ): string {
   return (
-    `System message: Your previous turn ended without sending a reply, reaction, or file to the user. ` +
-    `You must communicate with the user by using send-reply, react-message, or send-file (only when a ` +
-    `suitable file already exists in the workspace) before ending this session.\n\n` +
+    `System message: Your previous turn ended without a reply, reaction, or file send RECORDED in this ` +
+    `session. No recorded response is not by itself evidence that nothing reached the user. If nothing ` +
+    `actually reached the user, you must communicate with them by using send-reply, react-message, or ` +
+    `send-file (only when a suitable file already exists in the workspace) before ending this session.\n\n` +
     `If you tried send-reply or send-file and it failed, the most likely causes are:\n` +
     `- You used a removed legacy flag with the text on the command line (--message for send-reply, ` +
     `--caption for send-file, --file-path for a single send-file file) — it was rejected. ` +
@@ -499,6 +500,13 @@ function buildDefaultRetryMessage(
     `- The payload was staged outside ${stagingDir}/ (e.g. a workspace file) and was rejected — the ` +
     `script only reads its own session's staging directory.\n` +
     `- A previous send-reply/send-file call errored — read that error's output; it contains the exact fix.\n\n` +
+    `A send-reply/send-file run rejected for one of those exact causes — a removed legacy flag, an ` +
+    `unwritten payload file, or a payload staged outside the session staging directory — failed before the ` +
+    `platform was reached: fix that cause and send again, within the existing limits. Any OTHER failure — ` +
+    `a timeout, a cancellation, a connection loss, a generic platform error, or an error whose cause you ` +
+    `cannot identify — may already have reached the user: treat it as UNCERTAIN, inspect the evidence the ` +
+    `send-reply and send-file documents included below allow, and do NOT send again unless that evidence ` +
+    `rules out arrival. A partially delivered file result is judged by those same documents.\n\n` +
     `Correct pattern (two steps):\n` +
     `1. Write the reply text to ${stagingDir}/reply.md with your edit/write tool.\n` +
     `2. Invoke: ${skillScriptPath(skillsDir, "send-reply")} ` +
