@@ -67,7 +67,7 @@ import type {
 import type { AgentConfig, AgentConnectorOptions } from "../../../src/acp/types.ts";
 import type { Config } from "../../../src/types/config.ts";
 import { createSkillJwt } from "@utils/skill-jwt.ts";
-import { useMockOmpAgent } from "../../mocks/omp-mock-session.ts";
+import { mockOmpNativeCache, useMockOmpAgent } from "../../mocks/omp-mock-session.ts";
 import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
 
 // ---------------------------------------------------------------------------
@@ -463,6 +463,10 @@ function buildHarnessConfig(params: {
       model: "mock-model-canonical",
       systemPromptPath: join(params.tempDir, "prompts", "system_reply.md"),
       tokenLimit: 20000,
+      // The shipped `omp` factory requires the ONE shared prepared native payload before it
+      // spawns; this suite selects the synthetic process-scoped one (a fixture, never native
+      // evidence). OpenCode ignores it.
+      ompNativeCache: mockOmpNativeCache(),
       // jwtDir is consumed in BOTH shapes (per-spawn JWT issuance uses the
       // same dir); `enabled` marks the pooled deployment.
       sharedProcess: { enabled: params.shared, jwtDir: params.jwtDir, reclaimIdleMs: 120_000 },

@@ -18,6 +18,10 @@ import {
   resolveOmpExtensionPath,
   resolveOmpSystemPromptPath,
 } from "@utils/omp-paths.ts";
+import {
+  ompNativeCacheForbiddenRoots,
+  prepareOmpNativeCacheRoot,
+} from "@utils/omp-native-cache.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import {
   observeTrustedSkillsRoot,
@@ -260,9 +264,20 @@ function buildBaseAgentConfig(
       // application directory already exists, so create it before spawn. Only
       // this native data is mode-specific; process cwd and TMPDIR are shared
       // with the ordinary launch convention.
+      //
+      // Native RUNTIME CODE, by contrast, is shared: `$XDG_DATA_HOME/omp/natives` is
+      // linked to the one prepared payload selected by `src/utils/omp-native-cache.ts`.
+      // The launch preflight below refuses to spawn when that payload is absent,
+      // incomplete or mismatched, instead of letting the loader extract a
+      // channel-local copy.
       const xdgDataHome = ompXdgDataHome(baseRoot, mode);
       const nativeDataDir = resolve(join(xdgDataHome, "omp"));
-      Deno.mkdirSync(nativeDataDir, { recursive: true });
+      const nativeCache = prepareOmpNativeCacheRoot({
+        baseRoot,
+        mode,
+        selection: appConfig.agent.ompNativeCache,
+        forbiddenRoots: ompNativeCacheForbiddenRoots(appConfig.workspace),
+      });
 
       const args = ["acp", "--config", modeSettingsPath, "--system-prompt", systemPromptPath];
 
@@ -380,6 +395,7 @@ function buildBaseAgentConfig(
         readOnlyPaths: readOnlyMounts,
         writableRuntimePaths: writableMounts,
         shadowedPaths: shadowedMounts,
+        payloadReadOnlyPaths: [nativeCache.payloadDir],
       };
 
       return {

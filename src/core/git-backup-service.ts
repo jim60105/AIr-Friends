@@ -1,5 +1,9 @@
 import { resolve } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
+import {
+  isReservedOmpNativeCachePath,
+  ompNativeCacheExclusionPathspecs,
+} from "@utils/omp-native-cache.ts";
 import type { GitBackupConfig } from "../types/config.ts";
 
 const logger = createLogger("GitBackupService");
@@ -132,8 +136,7 @@ export class GitBackupService {
     const hasHead = await this.runGit(["rev-parse", "--verify", "HEAD"], [128]);
     if (!hasHead.success) {
       logger.info("Remote repository is empty, creating initial commit");
-      await this.deregisterSubmodules();
-      await this.runGit(["add", "-A"]);
+      if (!(await this.stageBackupTree())) return;
       const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
       if (!diff.success) {
         const timestamp = new Date().toISOString();
@@ -144,8 +147,7 @@ export class GitBackupService {
     }
 
     // Remote had commits: commit uncommitted changes if any, and push
-    await this.deregisterSubmodules();
-    await this.runGit(["add", "-A"]);
+    if (!(await this.stageBackupTree())) return;
     const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (!diff.success) {
       const timestamp = new Date().toISOString();
@@ -169,8 +171,7 @@ export class GitBackupService {
     await this.configureRemote();
 
     // Commit all existing files
-    await this.deregisterSubmodules();
-    await this.runGit(["add", "-A"]);
+    if (!(await this.stageBackupTree())) return;
     const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (!diff.success) {
       const timestamp = new Date().toISOString();
@@ -199,8 +200,7 @@ export class GitBackupService {
     }
 
     // Commit any uncommitted changes
-    await this.deregisterSubmodules();
-    await this.runGit(["add", "-A"]);
+    if (!(await this.stageBackupTree())) return;
     const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (!diff.success) {
       const timestamp = new Date().toISOString();
@@ -290,15 +290,8 @@ export class GitBackupService {
   }
 
   private async performBackupInternal(): Promise<boolean> {
-    // De-register submodules before staging
-    await this.deregisterSubmodules();
-
-    // Stage all changes
-    const add = await this.runGit(["add", "-A"]);
-    if (!add.success) {
-      logger.error("Git add failed", { stderr: add.errorOutput });
-      return false;
-    }
+    // De-register submodules, untrack reserved native-cache entries, stage the rest.
+    if (!(await this.stageBackupTree())) return false;
 
     // Check for staged changes (git diff --cached --quiet exits with 1 if there are staged changes)
     const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
@@ -420,6 +413,69 @@ export class GitBackupService {
     }
 
     return { success: code === 0, output, errorOutput };
+  }
+
+  /**
+   * Stage the data directory for a backup commit: de-register submodules, remove any
+   * reserved OMP native-cache entries from the index WITHOUT touching working files, then
+   * stage everything else with the reserved shapes excluded.
+   *
+   * The reserved shapes are the shared-native-payload link points this deployment creates;
+   * `src/utils/omp-native-cache.ts` owns them. They are removed from the index rather than
+   * ignored, so operator `.gitignore` bytes stay untouched, and an already-tracked cache path
+   * is untracked here so a future ordinary backup stages its deletion. Every staging step is
+   * part of one command, so native bytes are never staged and then unstaged, and the
+   * top-anchored exclusion pathspecs are the last line of defense against a root created
+   * between the index removal and the add.
+   *
+   * Returns false when any step fails; the caller then commits and pushes nothing.
+   */
+  private async stageBackupTree(): Promise<boolean> {
+    await this.deregisterSubmodules();
+
+    const listed = await this.runGit(["ls-files", "-z"]);
+    if (!listed.success) {
+      logger.error("Git ls-files failed", { stderr: listed.errorOutput });
+      return false;
+    }
+    // NUL-delimited enumeration: a path containing spaces or newlines survives, and each one
+    // travels as its own argv element, so no quoting or stdin plumbing is involved.
+    const reserved = listed.output.split("\0").filter((path) =>
+      path.length > 0 && isReservedOmpNativeCachePath(path)
+    );
+    if (reserved.length > 0) {
+      const removed = await this.runGit([
+        "rm",
+        "--cached",
+        "-q",
+        "--ignore-unmatch",
+        "--",
+        ...reserved,
+      ]);
+      if (!removed.success) {
+        logger.error("Untracking reserved native-cache entries failed", {
+          stderr: removed.errorOutput,
+          count: reserved.length,
+        });
+        return false;
+      }
+      logger.debug("Untracked {count} reserved OMP native-cache index entries", {
+        count: reserved.length,
+      });
+    }
+
+    const add = await this.runGit([
+      "add",
+      "-A",
+      "--",
+      ".",
+      ...ompNativeCacheExclusionPathspecs(),
+    ]);
+    if (!add.success) {
+      logger.error("Git add failed", { stderr: add.errorOutput });
+      return false;
+    }
+    return true;
   }
 
   /** De-register any submodules so nested .git directories are not tracked as submodules. */

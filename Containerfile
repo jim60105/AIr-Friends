@@ -195,6 +195,41 @@ RUN case "${TARGETARCH}" in \
     mv /tmp/LICENSE /omp/licenses/LICENSE && \
     mv /tmp/THIRD-PARTY-NOTICES.txt /omp/licenses/THIRD-PARTY-NOTICES.txt
 
+# Prepare the ONE shared OMP native runtime payload from the SAME checksum-verified
+# executable (design D1; `deno task prepare:omp-natives` is the same entry) and publish it
+# at the image layout the launch resolver reads (`src/utils/omp-native-cache.ts`).
+# Ordered AFTER the checksum step above and handed that stage's OMP_SHA256 explicitly, so
+# the executable pin and the cache identity cannot drift. The entry runs the pinned
+# executable's real, bounded ACP initialization in a throwaway HOME/cwd/XDG and publishes
+# ONLY the native subtree plus its sidecar manifest — probe databases, HOME and sessions are
+# discarded. The `--mount` reuses the cache stage's root-owned copy of the committed entry
+# and its sources, and the step reads that copy's own `deno.json`/`deno.lock` explicitly with
+# `--frozen`, so the mount stays read-only and lock drift fails the build. The Deno runtime
+# is already part of the base image, so no JavaScript/Bun runtime is installed by this step.
+# A separate layer keeps preparation re-runnable without touching the verified
+# executable/notices install above, and any change to the entry or its sources invalidates
+# exactly this layer. Packaged as root here; the final stage installs the result under the
+# ordinary $UID:0 + 775 convention.
+RUN --mount=type=bind,from=cache,src=/app,target=/build-src \
+    case "${TARGETARCH}" in \
+      amd64) OMP_PLATFORM="linux-x64"; OMP_SHA256="${OMP_SHA256_X64}" ;; \
+      arm64) OMP_PLATFORM="linux-arm64"; OMP_SHA256="${OMP_SHA256_ARM64}" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    deno run --frozen \
+    --config /build-src/deno.json \
+    --lock=/build-src/deno.lock \
+    --allow-read --allow-write --allow-env --allow-run \
+    /build-src/scripts/omp/prepare-native-cache.ts \
+    --executable /omp/out/omp \
+    --cache-root /opt/air/omp/native-cache \
+    --platform "${OMP_PLATFORM}" \
+    --executable-sha256 "${OMP_SHA256}" && \
+    # Fail closed on the published layout the launch resolver expects: exactly this
+    # platform's payload directory plus its sidecar manifest.
+    test -f "/opt/air/omp/native-cache/${OMP_PLATFORM}/native-manifest.json" && \
+    test -d "/opt/air/omp/native-cache/${OMP_PLATFORM}/natives/${OMP_VERSION}"
+
 ########################################
 # Final stage
 ########################################
@@ -264,6 +299,14 @@ COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/out/omp /usr/loc
 # $UID:0 + 775 license-packaging convention used for the project LICENSE.
 COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
 COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
+
+# Copy the prepared shared native runtime payload (extracted by the pinned, checksum-
+# verified executable in the unpacker stage above) to the same absolute image path the
+# launch resolver reads (`src/utils/omp-native-cache.ts`), under the ordinary $UID:0 + 775
+# install convention. Exactly ONE `{platform}` subtree is present, because the unpacker
+# stage prepared only its own target platform: the executable, LICENSE and
+# THIRD-PARTY-NOTICES installs above are unchanged.
+COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /opt/air/omp/native-cache /opt/air/omp/native-cache
 
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
@@ -347,16 +390,18 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
     install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser && \
     # OMP artifact destinations (mode settings, prompt artifact, generated
-    # extension bundle). Prepared AFTER every linked copy above — including the
-    # FILES in them, which is why the generated tree is re-owned and re-moded
-    # here: the build-time bundler runs as root while the deployment
-    # convention is $UID:0 + 775. Only these named paths get 775; the
-    # `/opt` and `/opt/air` ancestors are created by the linked copies as
-    # $UID:0 0755 and are deliberately left that way.
+    # extension bundle, prepared shared native cache). Prepared AFTER every
+    # linked copy above — including the FILES in them, which is why the
+    # generated tree is re-owned and re-moded here: the build-time bundler and
+    # the native-cache preparation run as root while the deployment convention
+    # is $UID:0 + 775. Only these named paths get 775; the `/opt` and
+    # `/opt/air` ancestors are created by the linked copies as $UID:0 0755 and
+    # are deliberately left that way.
     install -d -m 775 -o $UID -g 0 /opt/air/omp && \
     install -d -m 775 -o $UID -g 0 /opt/air/omp/config && \
     install -d -m 775 -o $UID -g 0 /opt/air/omp/prompt && \
     install -d -m 775 -o $UID -g 0 /opt/air/omp/extension && \
+    install -d -m 775 -o $UID -g 0 /opt/air/omp/native-cache && \
     chown -R $UID:0 /opt/air/omp && \
     find /opt/air/omp -type d -exec chmod 775 {} + && \
     find /opt/air/omp -type f -exec chmod 775 {} + && \

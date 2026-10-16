@@ -2,11 +2,17 @@
 //
 // Consumer-visible tests for the native-OMP launch assembly: the assembled
 // argument vector, environment, process cwd and confinement mounts of each
-// approval mode, plus the fail-closed preflight for the generated trusted
-// extension. The assertions observe the assembled launch output (args, env,
-// cwd, mounts, filesystem state) — never source text.
-
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+// approval mode, plus the two fail-closed preflights: the generated trusted
+// extension and the shared prepared native runtime payload. The assertions
+// observe the assembled launch output (args, env, cwd, mounts, filesystem
+// state) — never source text.
+//
+// The shared native payload is injected through the internal selection seam
+// (`agent.ompNativeCache`, `src/types/config.ts`) over a REAL temporary payload
+// tree, so no test needs the installed `/opt/air` image tree and no OMP process
+// is ever spawned.
+//
+import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { join, resolve } from "@std/path";
 import {
   createAgentConfig,
@@ -25,6 +31,19 @@ import {
   resolveOmpSystemPromptPath,
 } from "../../src/utils/omp-paths.ts";
 import type { Config } from "../../src/types/config.ts";
+import {
+  OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
+  OMP_NATIVE_CACHE_VERSION,
+  type OmpNativeCache,
+  ompNativeCacheDescriptor,
+  ompNativeCacheExpectedAddons,
+  ompNativeCacheLinkPath,
+  type OmpNativeCachePlatform,
+  ompNativeCachePlatform,
+  ompNativeCachePrepareRemedy,
+  readOmpNativeCacheManifest,
+  serializeOmpNativeCacheManifest,
+} from "../../src/utils/omp-native-cache.ts";
 
 // The launch face of the trusted extension is the GENERATED bundle (C3):
 // the factory preflight fails closed without it, so this suite builds the
@@ -62,6 +81,49 @@ function createTestConfig(overrides: Partial<Config> = {}): Config {
     },
     ...overrides,
   } as Config;
+}
+
+/** Real fixture payload bytes (the pinned v18.6.1 binary is not installed here). */
+const NATIVE_PAYLOAD_FIXTURE = "native-payload-fixture";
+
+/** The addon file names a complete fixture payload of `platform` publishes. */
+function fixtureAddonNames(platform: OmpNativeCachePlatform): string[] {
+  const { exact } = ompNativeCacheExpectedAddons(platform);
+  if (exact.length > 0) return [...exact];
+  // The arm64 set is a pattern requirement (the pinned arm64 names are
+  // uncharacterised); the fixture uses the container-packaging name.
+  return ["pi_natives.linux-arm64.node"];
+}
+
+/** Write a COMPLETE fixture native payload for `platform` under `base`. */
+function writeNativeCachePayload(base: string, platform: OmpNativeCachePlatform): OmpNativeCache {
+  const cache = ompNativeCacheDescriptor(base, platform, "development");
+  const names = fixtureAddonNames(platform);
+  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  for (const name of names) {
+    Deno.writeTextFileSync(join(cache.versionDir, name), NATIVE_PAYLOAD_FIXTURE);
+  }
+  Deno.writeTextFileSync(
+    cache.manifestPath,
+    serializeOmpNativeCacheManifest({
+      version: OMP_NATIVE_CACHE_VERSION,
+      platform,
+      executableSha256: OMP_NATIVE_CACHE_EXECUTABLE_SHA256[platform],
+      files: names.map((name) => ({
+        name,
+        size: new TextEncoder().encode(NATIVE_PAYLOAD_FIXTURE).length,
+      })),
+    }),
+  );
+  return cache;
+}
+
+/** The internal native-cache selection seam for a prepared fixture payload. */
+function nativeCacheSelection(
+  cache: OmpNativeCache,
+  launchExecutableVersion = OMP_NATIVE_CACHE_VERSION,
+) {
+  return { installRoot: cache.installRoot, launchExecutableVersion };
 }
 
 /**
@@ -110,6 +172,12 @@ Deno.test("agent-factory omp - fails closed when the trusted extension artifact 
     const config = createTestConfig({
       workspace: { repoPath, workspacesDir: join(root, "workspaces") },
     });
+    // The native-cache preflight runs BEFORE the extension check, so this test
+    // must supply a complete prepared payload to reach the extension verdict it
+    // is about.
+    config.agent.ompNativeCache = nativeCacheSelection(
+      writeNativeCachePayload(join(root, "native-cache"), ompNativeCachePlatform()),
+    );
     const workingDir = join(root, "ws");
     Deno.mkdirSync(workingDir, { recursive: true });
     // C3: absence of the generated entry fails the preflight with the build
@@ -143,6 +211,12 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
     const config = createTestConfig({
       workspace: { repoPath, workspacesDir: join(root, "workspaces") },
     });
+    // ONE shared prepared payload outside every workspace root: each mode root
+    // links its reserved `omp/natives` entry to it.
+    const platform = ompNativeCachePlatform();
+    const payload = writeNativeCachePayload(join(root, "native-cache"), platform);
+    config.agent.ompNativeCache = nativeCacheSelection(payload);
+    const fixtureAddon = fixtureAddonNames(platform)[0];
 
     const sessionId = "session-abc";
     const poolKey = "pool-abc";
@@ -237,6 +311,25 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
           `native data dir must exist: ${xdgDataHome}/omp`,
         );
 
+        // The reserved runtime entry is the SHARED prepared payload, not a
+        // channel-local copy: the mode root's `omp/natives` is an absolute link
+        // to `{installRoot}/natives`, and the loader appends 18.6.1 itself.
+        const nativesLink = ompNativeCacheLinkPath(expectedBaseRoot, mode);
+        assertEquals(nativesLink, join(xdgDataHome, "omp", "natives"), label);
+        assert(Deno.lstatSync(nativesLink).isSymlink, `${label}: natives must be a symlink`);
+        assertEquals(Deno.readLinkSync(nativesLink), payload.payloadDir, label);
+        assertEquals(
+          Deno.statSync(join(nativesLink, OMP_NATIVE_CACHE_VERSION, fixtureAddon)).ino,
+          Deno.statSync(join(payload.versionDir, fixtureAddon)).ino,
+          `${label}: the root consumes the shared payload bytes, never a local copy`,
+        );
+        // The mode application directory itself stays a real writable directory
+        // (sessions, database, auth side files remain private to the mode).
+        assert(
+          Deno.lstatSync(join(xdgDataHome, "omp")).isDirectory,
+          `${label}: the omp application directory must stay a real directory`,
+        );
+
         // HOME is inherited normally (native model configuration) and no
         // generated settings plan or daemon-owned home rides the launch.
         assertEquals(assembled.env?.["HOME"], Deno.env.get("HOME"), label);
@@ -262,6 +355,10 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
           poolArgument === undefined ? [resolve(join(expectedBaseRoot, "omp-agent"))] : [],
           label,
         );
+        // The selected payload is handed to the confinement as the read-only
+        // payload bind input (its own emission order is covered by the
+        // filesystem-confinement suite).
+        assertEquals(mounts!.payloadReadOnlyPaths, [payload.payloadDir], label);
         const readOnly = mounts!.readOnlyPaths ?? [];
         assert(readOnly.includes(settingsPath), `${label}: settings must be mounted read-only`);
         assert(readOnly.includes(promptPath), `${label}: prompt must be mounted read-only`);
@@ -295,6 +392,183 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
         ompXdgDataHome(resolve(join(workingDir, "tmp")), "native-yolo"),
       true,
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("agent-factory omp - refuses to spawn with the remedy when no prepared payload exists", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    const repoPath = join(root, "repo");
+    const workingDir = join(root, "ws");
+    Deno.mkdirSync(repoPath, { recursive: true });
+    Deno.mkdirSync(workingDir, { recursive: true });
+    const config = createTestConfig({
+      workspace: { repoPath, workspacesDir: join(root, "workspaces") },
+    });
+    // No prepared payload exists on this host; the seam names an absent install
+    // root explicitly so the verdict is deterministic.
+    config.agent.ompNativeCache = {
+      installRoot: join(root, "absent-cache", ompNativeCachePlatform()),
+      launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
+    };
+
+    for (const [label, poolKey] of [["per-spawn", undefined], ["pooled", "pool-absent"]] as const) {
+      const error = assertThrows(
+        () =>
+          createAgentConfig("omp", workingDir, config, false, undefined, "session-abc", poolKey),
+        Error,
+        "is missing",
+        `${label}: an absent payload must fail the preflight`,
+      );
+      // The descriptive preparation remedy, never a raw loader error.
+      assertStringIncludes(error.message, ompNativeCachePrepareRemedy(), label);
+
+      const baseRoot = poolKey === undefined
+        ? resolve(join(workingDir, "tmp"))
+        : resolve(join(repoPath, "omp-pools", poolKey));
+      // A failed preflight installs no reserved entry and downloads no bytes.
+      assertThrows(
+        () => Deno.lstatSync(ompNativeCacheLinkPath(baseRoot, "restricted")),
+        Deno.errors.NotFound,
+        undefined,
+        `${label}: no reserved entry may be installed`,
+      );
+      assertThrows(
+        () => Deno.lstatSync(ompXdgDataHome(baseRoot, "restricted")),
+        Deno.errors.NotFound,
+        undefined,
+        `${label}: no managed directory may be created for a failed preflight`,
+      );
+    }
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("agent-factory omp - refuses an incomplete or identity-mismatched prepared payload", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    const repoPath = join(root, "repo");
+    const workingDir = join(root, "ws");
+    Deno.mkdirSync(repoPath, { recursive: true });
+    Deno.mkdirSync(workingDir, { recursive: true });
+    const platform = ompNativeCachePlatform();
+    const config = createTestConfig({
+      workspace: { repoPath, workspacesDir: join(root, "workspaces") },
+    });
+
+    // An installed root carrying no manifest: incomplete, never a fallback.
+    const incompleteRoot = join(root, "incomplete-cache", platform);
+    Deno.mkdirSync(join(incompleteRoot, "natives"), { recursive: true });
+    config.agent.ompNativeCache = {
+      installRoot: incompleteRoot,
+      launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
+    };
+    const incomplete = assertThrows(
+      () =>
+        createAgentConfig(
+          "omp",
+          workingDir,
+          config,
+          true,
+          undefined,
+          "session-abc",
+          "pool-incomplete",
+        ),
+      Error,
+      "incomplete",
+    );
+    assertStringIncludes(incomplete.message, ompNativeCachePrepareRemedy());
+
+    // A complete payload prepared for another OMP version.
+    const stale = writeNativeCachePayload(join(root, "stale-cache"), platform);
+    const staleManifest = readOmpNativeCacheManifest(stale.manifestPath);
+    assert(staleManifest !== null, "fixture manifest must be readable");
+    await Deno.writeTextFile(
+      stale.manifestPath,
+      serializeOmpNativeCacheManifest({ ...staleManifest!, version: "18.6.0" }),
+    );
+    config.agent.ompNativeCache = nativeCacheSelection(stale);
+    const versionMismatch = assertThrows(
+      () =>
+        createAgentConfig("omp", workingDir, config, true, undefined, "session-abc", "pool-stale"),
+      Error,
+      "identity mismatch",
+    );
+    assertStringIncludes(versionMismatch.message, "18.6.0");
+    assertStringIncludes(versionMismatch.message, OMP_NATIVE_CACHE_VERSION);
+    assertStringIncludes(versionMismatch.message, ompNativeCachePrepareRemedy());
+
+    // A matching payload with a launch executable that reports another version.
+    const payload = writeNativeCachePayload(join(root, "native-cache"), platform);
+    config.agent.ompNativeCache = nativeCacheSelection(payload, "18.5.0");
+    const launchMismatch = assertThrows(
+      () =>
+        createAgentConfig("omp", workingDir, config, true, undefined, "session-abc", "pool-launch"),
+      Error,
+      "identity mismatch",
+    );
+    assertStringIncludes(launchMismatch.message, "18.5.0");
+    assertStringIncludes(launchMismatch.message, ompNativeCachePrepareRemedy());
+
+    // Every refused root stays untouched: no reserved entry, no local bytes.
+    for (const poolKey of ["pool-incomplete", "pool-stale", "pool-launch"]) {
+      assertThrows(
+        () =>
+          Deno.lstatSync(
+            ompNativeCacheLinkPath(resolve(join(repoPath, "omp-pools", poolKey)), "native-yolo"),
+          ),
+        Deno.errors.NotFound,
+        undefined,
+        poolKey,
+      );
+    }
+    // The refused payload itself was not modified.
+    assertEquals(readOmpNativeCacheManifest(stale.manifestPath)?.version, "18.6.0");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("agent-factory omp - refuses the reserved entry occupied by a legacy native directory", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    const repoPath = join(root, "repo");
+    const workingDir = join(root, "ws");
+    Deno.mkdirSync(repoPath, { recursive: true });
+    Deno.mkdirSync(workingDir, { recursive: true });
+    const config = createTestConfig({
+      workspace: { repoPath, workspacesDir: join(root, "workspaces") },
+    });
+    const payload = writeNativeCachePayload(join(root, "native-cache"), ompNativeCachePlatform());
+    config.agent.ompNativeCache = nativeCacheSelection(payload);
+
+    // A previous OMP release extracted channel-local native copies into the
+    // reserved entry as a REAL directory.
+    const poolKey = "pool-legacy";
+    const legacyEntry = ompNativeCacheLinkPath(
+      resolve(join(repoPath, "omp-pools", poolKey)),
+      "restricted",
+    );
+    const legacyAddon = join(legacyEntry, OMP_NATIVE_CACHE_VERSION, "pi_natives.legacy.node");
+    Deno.mkdirSync(join(legacyEntry, OMP_NATIVE_CACHE_VERSION), { recursive: true });
+    await Deno.writeTextFile(legacyAddon, "legacy native bytes");
+
+    const error = assertThrows(
+      () => createAgentConfig("omp", workingDir, config, false, undefined, "session-abc", poolKey),
+      Error,
+    );
+    // The diagnostic names the exact path AND the operator removal action.
+    assertStringIncludes(error.message, legacyEntry);
+    assertStringIncludes(error.message, `rm -rf '${legacyEntry}'`);
+    assertStringIncludes(error.message, "Stop the bot");
+    assertStringIncludes(error.message, "never deletes or migrates legacy native copies");
+
+    // The legacy directory is left untouched: not followed, deleted or migrated.
+    assert(Deno.lstatSync(legacyEntry).isDirectory);
+    assertEquals(await Deno.readTextFile(legacyAddon), "legacy native bytes");
   } finally {
     await Deno.remove(root, { recursive: true });
   }

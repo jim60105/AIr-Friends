@@ -13,6 +13,20 @@ import type { Config } from "../../src/types/config.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
 import { resolve } from "@std/path";
+import { mockOmpNativeCache } from "../mocks/omp-mock-session.ts";
+
+/**
+ * One per-run deployment root. The pooled mode roots carry the reserved `natives` link, so a
+ * fixed path would make a later run refuse the previous run's link to a by-then-deleted payload.
+ */
+const TEST_REPO_ROOT = Deno.makeTempDirSync({ prefix: "air-pool-test-repo-" });
+globalThis.addEventListener("unload", () => {
+  try {
+    Deno.removeSync(TEST_REPO_ROOT, { recursive: true });
+  } catch {
+    // Already gone.
+  }
+});
 
 /** Minimal stub standing in for AgentConnector (no real `opencode` subprocess). */
 class StubConnector {
@@ -47,6 +61,9 @@ function makeConfig(): Config {
       tokenLimit: 20000,
       opencodeApiKey: "oc1",
       geminiApiKey: "gm1",
+      // The shipped `omp` pool prepares each mode root's reserved `natives` entry from the ONE
+      // shared prepared payload; mock suites select the synthetic process-scoped one.
+      ompNativeCache: mockOmpNativeCache(),
       sharedProcess: {
         enabled: true,
         jwtDir: "data/skill-jwt",
@@ -58,7 +75,7 @@ function makeConfig(): Config {
       workingTierLimit: 20,
     },
     workspace: {
-      repoPath: "/tmp/test",
+      repoPath: TEST_REPO_ROOT,
       workspacesDir: "workspaces",
     },
     logging: { level: "INFO" },

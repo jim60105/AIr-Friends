@@ -26,8 +26,18 @@
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { createAgentConfig } from "@acp/agent-factory.ts";
 import { ompXdgDataHome } from "@utils/omp-paths.ts";
+import {
+  OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
+  OMP_NATIVE_CACHE_VERSION,
+  ompNativeCacheDescriptor,
+  ompNativeCacheExpectedAddons,
+  ompNativeCachePlatform,
+  type OmpNativeCacheSelection,
+  serializeOmpNativeCacheManifest,
+} from "@utils/omp-native-cache.ts";
 import type { AgentConfig, ClientConfig, OmpPermissionMode } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
+import { join } from "@std/path";
 import {
   createMockAcpConnection,
   type MockAcpConnection,
@@ -41,6 +51,52 @@ export const SILENT_LOGGER = {
   warn: () => {},
   error: () => {},
 };
+
+/**
+ * The synthetic native payload every mock OMP launch selects, created lazily once per process.
+ *
+ * It must live OUTSIDE any deployment data root (the shipped location guard refuses a cache
+ * inside `workspace.repoPath`), and mock suites never run native code, so the addon files are
+ * placeholders. Selecting this payload keeps the real factory preflight on its shipped path
+ * without claiming any native behavior.
+ */
+let mockNativeCache: OmpNativeCacheSelection | undefined;
+
+export function mockOmpNativeCache(): OmpNativeCacheSelection {
+  if (mockNativeCache !== undefined) return mockNativeCache;
+  const platform = ompNativeCachePlatform();
+  const cacheBase = Deno.makeTempDirSync({ prefix: "air-omp-mock-native-cache-" });
+  // Best-effort: the payload is process-scoped, so one directory per test process is bounded
+  // even where the runtime does not deliver this event.
+  globalThis.addEventListener("unload", () => {
+    try {
+      Deno.removeSync(cacheBase, { recursive: true });
+    } catch {
+      // Already gone.
+    }
+  });
+  const cache = ompNativeCacheDescriptor(cacheBase, platform, "development");
+  const { exact } = ompNativeCacheExpectedAddons(platform);
+  const names = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
+  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  for (const name of names) {
+    Deno.writeTextFileSync(join(cache.versionDir, name), "mock-native-payload");
+  }
+  Deno.writeTextFileSync(
+    cache.manifestPath,
+    serializeOmpNativeCacheManifest({
+      version: OMP_NATIVE_CACHE_VERSION,
+      platform,
+      executableSha256: OMP_NATIVE_CACHE_EXECUTABLE_SHA256[platform],
+      files: names.map((name) => ({ name, size: "mock-native-payload".length })),
+    }),
+  );
+  mockNativeCache = {
+    installRoot: cache.installRoot,
+    launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
+  };
+  return mockNativeCache;
+}
 
 /**
  * Per-test Config for the OMP factory/pool: repoPath pinned to the test's
@@ -62,6 +118,11 @@ export function createOmpTestConfig(params: {
       model: "mock-model-canonical",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
+      // The shipped `omp` factory requires the shared prepared native payload
+      // before it spawns. Mock suites never run native code, so they select the
+      // synthetic process-scoped payload below; it is a fixture, never evidence
+      // of native behavior.
+      ompNativeCache: mockOmpNativeCache(),
       ...(params.poolKey
         ? { sharedProcess: { jwtDir: `${params.tempRepoRoot}/skill-jwt`, reclaimIdleMs: 120_000 } }
         : {}),

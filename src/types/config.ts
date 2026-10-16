@@ -3,6 +3,7 @@
 import type { LogLevel } from "./logger.ts";
 import type { AuditPhase } from "./audit.ts";
 import type { AgentType } from "../acp/types.ts";
+import type { OmpNativeCacheSelection } from "../utils/omp-native-cache.ts";
 
 /**
  * Base platform configuration
@@ -209,6 +210,14 @@ export interface AgentConfig {
 
   /** External skills to install at startup (optional) */
   externalSkills?: ExternalSkillConfig[];
+
+  /**
+   * INTERNAL native-runtime cache selection seam for the `omp` agent type (tests, embedded
+   * harnesses and advanced installs). Production leaves it unset so the contracted
+   * image/development mapping in `src/utils/omp-native-cache.ts` selects the shared prepared
+   * payload. It is not an OMP environment variable and is never handed to the agent process.
+   */
+  ompNativeCache?: OmpNativeCacheSelection;
 
   /** Idle timeout detection for ACP connections (optional) */
   idleTimeout?: IdleTimeoutConfig;

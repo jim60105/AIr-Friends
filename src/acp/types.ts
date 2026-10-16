@@ -162,6 +162,15 @@ export interface AgentRuntimeMounts {
    * be listed.
    */
   shadowedPaths?: readonly string[];
+  /**
+   * The selected shared OMP native payload subtree (the mode root's
+   * `omp/natives` link target). Emitted LAST — after every writable bind, every
+   * mode-parent shadow and the skill root — as a HARD read-only bind (never a
+   * `-try` variant), so a vanished source fails the launch instead of silently
+   * degrading into a dangling link and an opaque loader error. Only the OMP
+   * factory populates it.
+   */
+  payloadReadOnlyPaths?: readonly string[];
 }
 
 /**

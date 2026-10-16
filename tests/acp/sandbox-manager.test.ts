@@ -422,6 +422,15 @@ function bindSources(args: string[], flag: string): string[] {
   return sources;
 }
 
+/** Every hard `--ro-bind <src> <dst>` pair in argv order (`-try` excluded). */
+function hardRoBindPairs(args: string[]): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i < args.length - 2; i++) {
+    if (args[i] === "--ro-bind") pairs.push([args[i + 1], args[i + 2]]);
+  }
+  return pairs;
+}
+
 /**
  * Whether THIS host has the known topology that cannot materialise the production
  * confinement mount list at all.
@@ -611,6 +620,233 @@ Deno.test("SandboxManager - no runtimeMounts emits exactly the shared default mo
   });
 });
 
+// ---------------------------------------------------------------------------
+// Shared OMP native payload (`runtimeMounts.payloadReadOnlyPaths`): the factory
+// threads the selected payload subtree through the sandbox, which emits it as a
+// HARD `--ro-bind` LAST — after every writable bind and after the mode-parent
+// tmpfs shadow. No payload input means no hard ro bind (OpenCode's posture), and
+// a vanished source fails a REAL confined launch rather than falling back.
+// ---------------------------------------------------------------------------
+
+const PAYLOAD = "/srv/devhome/.cache/air-friends/omp/linux-x64/natives";
+
+Deno.test("SandboxManager - the OMP payload is a hard ro bind emitted last, after every writable bind and the shadow", () => {
+  withCapabilities(false, true, () => {
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    const shadowed = "/ws/tmp/omp-agent";
+    const nativeDataDir = "/ws/tmp/omp-agent/restricted/xdg-data/omp";
+    const opts = sandbox.buildSpawnOptions(
+      "omp",
+      "omp",
+      ["acp"],
+      { TMPDIR: "/ws/tmp" },
+      "/ws",
+      { root: "/srv/air/skills", identity: { dev: 1, ino: 2 } },
+      {
+        readOnlyPaths: ["/ro/restricted.yml"],
+        writableRuntimePaths: [nativeDataDir],
+        shadowedPaths: [shadowed],
+        payloadReadOnlyPaths: [PAYLOAD],
+      },
+    );
+    assertEquals(opts.command, "bwrap");
+
+    // Hard `--ro-bind <literal> <literal>` — never the lenient `-try` variant.
+    const payloadIdx = bindSourceIndex(opts.args, "--ro-bind", PAYLOAD);
+    assert(payloadIdx > -1, `the payload must be hard-bound: ${opts.args.join(" ")}`);
+    assertEquals(opts.args[payloadIdx + 2], PAYLOAD);
+    assertEquals(bindSources(opts.args, "--ro-bind-try").includes(PAYLOAD), false);
+
+    // The payload is the LAST mount, immediately before the inner-command separator.
+    const separator = opts.args.indexOf("--");
+    assertEquals(opts.args.slice(separator - 3, separator), ["--ro-bind", PAYLOAD, PAYLOAD]);
+
+    // Every earlier group precedes it: the writable binds, the tmpfs shadow and
+    // the late writable child re-bind that restores the link's parent path.
+    const shadowIdx = opts.args.findIndex((arg, i) =>
+      arg === "--tmpfs" && opts.args[i + 1] === shadowed
+    );
+    assert(shadowIdx > -1, "the mode parent must be shadowed");
+    for (
+      const [flag, source, label] of [
+        ["--bind", "/ws", "session workspace"],
+        ["--bind", "/ws/tmp", "session TMPDIR"],
+        ["--bind-try", nativeDataDir, "late writable child"],
+      ] as const
+    ) {
+      assert(
+        bindSourceIndex(opts.args, flag, source) < payloadIdx,
+        `${label} must precede the payload bind`,
+      );
+    }
+    assert(shadowIdx < payloadIdx, "the mode-parent shadow must precede the payload bind");
+
+    // Only the payload subtree is exposed: no mount target is its ancestor.
+    const mountedTargets = [
+      ...bindSources(opts.args, "--bind"),
+      ...bindSources(opts.args, "--bind-try"),
+      ...bindSources(opts.args, "--ro-bind-try"),
+      ...hardRoBindPairs(opts.args).map(([src]) => src),
+    ];
+    for (const target of mountedTargets) {
+      if (target === PAYLOAD) continue;
+      assertEquals(
+        PAYLOAD.startsWith(`${target}/`),
+        false,
+        `"${target}" must not expose the payload's ancestor tree`,
+      );
+    }
+  });
+});
+
+Deno.test("SandboxManager - a launch without payload inputs emits no hard ro bind (OpenCode unchanged)", () => {
+  withCapabilities(false, true, () => {
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    for (const agentType of ["opencode", "omp"] as const) {
+      const opts = sandbox.buildSpawnOptions(
+        agentType,
+        agentType,
+        ["acp"],
+        { TMPDIR: "/ws/tmp" },
+        "/ws",
+      );
+      assertEquals(hardRoBindPairs(opts.args).length, 0, agentType);
+      assertEquals(opts.args.includes("/opt/air/omp/native-cache"), false, agentType);
+    }
+  });
+});
+
+Deno.test({
+  name:
+    "SandboxManager - a vanished payload source fails the confined launch (hard ro bind, no fallback)",
+  // The real spawn needs bwrap AND a host that can materialise the production
+  // mount list; otherwise the leg stays UNEXERCISED.
+  ignore: !canConfineFilesystem() || confinementHostUnsupported(),
+  fn: async () => {
+    const baseRoot = Deno.makeTempDirSync({ prefix: "air-omp-payload-missing-" });
+    try {
+      const tmpDir = join(baseRoot, "tmp");
+      Deno.mkdirSync(tmpDir, { recursive: true });
+      const missingPayload = join(baseRoot, "native-cache", "natives");
+      // The source really is absent, so only a HARD `--ro-bind` can fail the spawn.
+      assertEquals(await Deno.lstat(missingPayload).catch(() => null), null);
+
+      const sandbox = new SandboxManager(
+        createSandboxConfig({
+          filesystemConfinement: true,
+          egressProxy: false,
+          unrestrictedEgress: true,
+          filterEnv: false,
+        }),
+      );
+      const opts = sandbox.buildSpawnOptions(
+        "omp",
+        "sh",
+        ["-c", "echo should-not-run"],
+        { PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin", TMPDIR: tmpDir },
+        baseRoot,
+        undefined,
+        { payloadReadOnlyPaths: [missingPayload] },
+      );
+      assertEquals(opts.command, "bwrap");
+      // argv already proves the hard variant (no `-try`), independent of the spawn.
+      assert(bindSourceIndex(opts.args, "--ro-bind", missingPayload) > -1);
+      assertEquals(bindSources(opts.args, "--ro-bind-try").includes(missingPayload), false);
+
+      const output = await new Deno.Command(opts.command, {
+        args: opts.args,
+        cwd: opts.cwd,
+        env: opts.env,
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      const stdout = new TextDecoder().decode(output.stdout);
+      const stderr = new TextDecoder().decode(output.stderr);
+      // The missing source fails the launch instead of degrading into a dangling
+      // link, and the inner command never starts (no unconfined fallback).
+      assertEquals(output.success, false, `expected a failed launch, stderr: ${stderr}`);
+      assertEquals(stdout.includes("should-not-run"), false);
+    } finally {
+      Deno.removeSync(baseRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test("SandboxManager - an absent payload source is still emitted as a hard ro bind, never a lenient variant", () => {
+  withCapabilities(false, true, () => {
+    // The path does not exist, yet the mount list must stay hard: a `-try`
+    // variant would silently continue and surface an opaque loader error later.
+    const missingPayload = "/srv/absent/native-cache/natives";
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    const opts = sandbox.buildSpawnOptions(
+      "omp",
+      "omp",
+      ["acp"],
+      { TMPDIR: "/ws/tmp" },
+      "/ws",
+      undefined,
+      { payloadReadOnlyPaths: [missingPayload] },
+    );
+    assertEquals(opts.command, "bwrap");
+    assert(bindSourceIndex(opts.args, "--ro-bind", missingPayload) > -1);
+    assertEquals(bindSources(opts.args, "--ro-bind-try").includes(missingPayload), false);
+    // And it remains the last mount, so no earlier bind can widen it.
+    const separator = opts.args.indexOf("--");
+    assertEquals(opts.args.slice(separator - 3, separator), [
+      "--ro-bind",
+      missingPayload,
+      missingPayload,
+    ]);
+  });
+});
+
+Deno.test("SandboxManager - with filesystem confinement disabled the payload posture is unchanged", () => {
+  // The operator-trusted, confinement-disabled posture mounts nothing: the
+  // payload input is simply ignored (no bwrap, no bind, no failure), so this
+  // change adds no restriction and no mount to that posture.
+  const sandbox = new SandboxManager(
+    createSandboxConfig({
+      filesystemConfinement: false,
+      unrestrictedEgress: true,
+      filterEnv: false,
+    }),
+  );
+  const opts = sandbox.buildSpawnOptions(
+    "omp",
+    "omp",
+    ["acp"],
+    { TMPDIR: "/ws/tmp" },
+    "/ws",
+    undefined,
+    { payloadReadOnlyPaths: [PAYLOAD] },
+  );
+  assertEquals(opts.command, "omp");
+  assertEquals(opts.args, ["acp"]);
+  assertEquals(opts.args.includes("--ro-bind"), false);
+  assertEquals(opts.args.includes("--ro-bind-try"), false);
+});
+
 Deno.test({
   name: "SandboxManager - confined omp: mounts read, own data written, no sibling access",
   // Both gates must hold: bwrap can namespace (canConfineFilesystem) AND this host can
@@ -638,6 +874,21 @@ Deno.test({
         "marker",
       );
       const skillRoot = join(baseRoot, "skills");
+      // The shared prepared payload of the OTHER mode root's link target: outside
+      // the workspace and the mode tree, under the development cache HOME so the
+      // "cache parent HOME stays hidden" property is observable too.
+      const payloadCacheHome = join(baseRoot, "cache-home");
+      const payloadDir = join(
+        payloadCacheHome,
+        ".cache",
+        "air-friends",
+        "omp",
+        "linux-x64",
+        "natives",
+      );
+      const payloadVersionDir = join(payloadDir, "18.6.1");
+      const payloadFile = join(payloadVersionDir, "pi_natives.linux-x64-modern.node");
+      const cacheHomeMarker = join(payloadCacheHome, "home-marker");
       const directories = [
         dirname(modelsFile),
         nativeDataDir,
@@ -645,6 +896,7 @@ Deno.test({
         skillRoot,
         workspace,
         tmpDir,
+        payloadVersionDir,
       ];
       for (const directory of directories) {
         Deno.mkdirSync(directory, { recursive: true });
@@ -652,12 +904,20 @@ Deno.test({
       const modelBytes = "model: deployment-authored";
       const siblingSentinel = "sibling-mode-sentinel";
       const skillInstruction = "trusted instruction";
+      const payloadBytes = "shared native payload bytes";
+      const cacheHomeSentinel = "cache-home-sentinel";
       Deno.writeTextFileSync(modelsFile, `${modelBytes}\n`);
       Deno.writeTextFileSync(siblingMarker, siblingSentinel);
       Deno.writeTextFileSync(join(skillRoot, "SKILL.md"), `${skillInstruction}\n`);
+      Deno.writeTextFileSync(payloadFile, payloadBytes);
+      Deno.writeTextFileSync(cacheHomeMarker, cacheHomeSentinel);
+      // The mode root's reserved `omp/natives` entry: an absolute symlink to the
+      // shared payload, exactly as the shipped factory installs it.
+      Deno.symlinkSync(payloadDir, join(nativeDataDir, "natives"));
       // The sibling marker IS readable outside the confinement, so a failing read inside can
       // only come from the mount policy — not from a missing fixture.
       assertEquals(Deno.readTextFileSync(siblingMarker), siblingSentinel);
+      assertEquals(Deno.readTextFileSync(cacheHomeMarker), cacheHomeSentinel);
 
       const ownMarker = join(nativeDataDir, "agent-marker");
       const forbiddenInSkillRoot = join(skillRoot, "forbidden.md");
@@ -674,6 +934,16 @@ Deno.test({
         `echo "sibling_read_status=$?"`,
         `touch '${forbiddenInSkillRoot}' 2>/dev/null`,
         `echo "skill_write_status=$?"`,
+        // The payload reads through the mode root's `natives` link, whose parent
+        // path is re-bound after the mode-parent tmpfs shadow.
+        `cat '${join(nativeDataDir, "natives", "18.6.1", "pi_natives.linux-x64-modern.node")}'`,
+        `echo "payload_read_status=$?"`,
+        `printf 'tampered' > '${
+          join(nativeDataDir, "natives", "18.6.1", "pi_natives.linux-x64-modern.node")
+        }' 2>/dev/null`,
+        `echo "payload_write_status=$?"`,
+        `cat '${cacheHomeMarker}' 2>/dev/null`,
+        `echo "cache_home_read_status=$?"`,
       ].join("\n");
 
       const sandbox = new SandboxManager(
@@ -695,9 +965,18 @@ Deno.test({
           readOnlyPaths: [modelsFile],
           writableRuntimePaths: [nativeDataDir],
           shadowedPaths: [shadowedModeParent],
+          payloadReadOnlyPaths: [payloadDir],
         },
       );
       assertEquals(opts.command, "bwrap");
+      // The payload is the hard-bound LAST mount, after the shadow and the late
+      // writable child re-bind, so the write attempt below cannot reach it.
+      const separator = opts.args.indexOf("--");
+      assertEquals(opts.args.slice(separator - 3, separator), [
+        "--ro-bind",
+        payloadDir,
+        payloadDir,
+      ]);
       const output = await new Deno.Command(opts.command, {
         args: opts.args,
         cwd: opts.cwd,
@@ -730,6 +1009,15 @@ Deno.test({
       // (c) The SIBLING mode's marker is absent from the mount namespace.
       assertEquals(status("sibling_read_status") !== 0, true);
       assertEquals(stdout.includes(siblingSentinel), false, stdout);
+      // (d) The shared payload is reachable (read) through the mode root's link,
+      // yet it refuses every write and its host bytes stay unchanged; the cache's
+      // parent HOME is never exposed to make the link resolve.
+      assertEquals(stdout.includes(payloadBytes), true, stdout);
+      assertEquals(status("payload_read_status"), 0);
+      assertEquals(status("payload_write_status") !== 0, true);
+      assertEquals(Deno.readTextFileSync(payloadFile), payloadBytes);
+      assertEquals(status("cache_home_read_status") !== 0, true);
+      assertEquals(stdout.includes(cacheHomeSentinel), false, stdout);
     } finally {
       Deno.removeSync(baseRoot, { recursive: true });
     }

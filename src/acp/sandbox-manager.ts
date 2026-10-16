@@ -200,6 +200,7 @@ export class SandboxManager {
           runtimeReadOnlyPaths: runtimeMounts?.readOnlyPaths,
           runtimeWritablePaths: runtimeMounts?.writableRuntimePaths,
           shadowedRuntimePaths: runtimeMounts?.shadowedPaths,
+          payloadReadOnlyPaths: runtimeMounts?.payloadReadOnlyPaths,
           shareNet: !wantsNetworkIsolation,
         },
         command,

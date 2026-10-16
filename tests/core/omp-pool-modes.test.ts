@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
-import { isAbsolute, join } from "@std/path";
+import { isAbsolute, join, resolve } from "@std/path";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { AgentProcessPool, type PoolRunOptions } from "@core/agent-process-pool.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
@@ -18,6 +18,16 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditEntry } from "../../src/types/audit.ts";
 import { createAgentConfig } from "../../src/acp/agent-factory.ts";
 import { ompXdgDataHome } from "@utils/omp-paths.ts";
+import {
+  OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
+  OMP_NATIVE_CACHE_VERSION,
+  ompNativeCacheDescriptor,
+  ompNativeCacheExpectedAddons,
+  ompNativeCacheLinkPath,
+  ompNativeCachePlatform,
+  type OmpNativeCacheSelection,
+  serializeOmpNativeCacheManifest,
+} from "../../src/utils/omp-native-cache.ts";
 
 /** Offline asset fixture only: never imported or executed by a real agent. */
 async function withExtensionFixture(run: () => Promise<void>): Promise<void> {
@@ -64,6 +74,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                 }/${decision}/${entry}`,
                 async () => {
                   const root = await Deno.makeTempDir();
+                  const nativeCache = await makePreparedNativeCache();
                   const registry = new SessionRegistry();
                   let pool: AgentProcessPool | null = null;
                   try {
@@ -102,6 +113,9 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                           jwtDir: join(root, "jwt"),
                           queueDeadlineMs: 10000,
                         },
+                        // The launch consumes this ONE shared prepared payload
+                        // instead of extracting channel-local native copies.
+                        ompNativeCache: nativeCache.selection,
                       },
                       memory: { recentMessageLimit: 10, workingTierLimit: 10 },
                       workspace: { repoPath: root, workspacesDir: "workspaces" },
@@ -477,6 +491,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                     }
                     registry.stop();
                     await Deno.remove(root, { recursive: true });
+                    await Deno.remove(nativeCache.root, { recursive: true });
                   }
                 },
               );
@@ -536,6 +551,7 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
               `${agentType}/${usesPool ? "pool" : "spawn"}/${decision}/${entry}`,
               async () => {
                 const root = await Deno.makeTempDir();
+                const nativeCache = await makePreparedNativeCache();
                 const registry = new SessionRegistry();
                 let pool: AgentProcessPool | null = null;
                 try {
@@ -568,6 +584,7 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                       // Non-empty operator MCP definitions: recovery must carry
                       // exactly the definitions the acquisition supplied.
                       mcpServers: [{ name: "matrix-server", command: "echo", args: ["hello"] }],
+                      ompNativeCache: nativeCache.selection,
                       systemPromptPath: join(promptDir, "system_reply.md"),
                       idleTimeout: { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 },
                       sharedProcess: {
@@ -896,6 +913,7 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                   }
                   registry.stop();
                   await Deno.remove(root, { recursive: true });
+                  await Deno.remove(nativeCache.root, { recursive: true });
                 }
               },
             );
@@ -916,9 +934,52 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * One REAL prepared-native fixture payload per test step, in its own temporary
+ * directory (outside the step's data root, which the location guard forbids),
+ * plus the internal selection seam that points the launch at it. The pinned
+ * v18.6.1 executable is not installed here, so fixture bytes stand in; no OMP
+ * process is spawned by these tests.
+ */
+async function makePreparedNativeCache(): Promise<{
+  root: string;
+  selection: OmpNativeCacheSelection;
+}> {
+  const root = await Deno.makeTempDir();
+  const platform = ompNativeCachePlatform();
+  const cache = ompNativeCacheDescriptor(join(root, "native-cache"), platform, "development");
+  const { exact } = ompNativeCacheExpectedAddons(platform);
+  const names = exact.length > 0 ? [...exact] : ["pi_natives.linux-arm64.node"];
+  const payloadBytes = "native-payload-fixture";
+  await Deno.mkdir(cache.versionDir, { recursive: true });
+  for (const name of names) {
+    await Deno.writeTextFile(join(cache.versionDir, name), payloadBytes);
+  }
+  await Deno.writeTextFile(
+    cache.manifestPath,
+    serializeOmpNativeCacheManifest({
+      version: OMP_NATIVE_CACHE_VERSION,
+      platform,
+      executableSha256: OMP_NATIVE_CACHE_EXECUTABLE_SHA256[platform],
+      files: names.map((name) => ({
+        name,
+        size: new TextEncoder().encode(payloadBytes).length,
+      })),
+    }),
+  );
+  return {
+    root,
+    selection: {
+      installRoot: cache.installRoot,
+      launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
+    },
+  };
+}
+
 Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse", async () => {
   await withExtensionFixture(async () => {
     const root = await Deno.makeTempDir();
+    const nativeCache = await makePreparedNativeCache();
     const registry = new SessionRegistry();
     let pool: AgentProcessPool | undefined;
     try {
@@ -932,6 +993,7 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
           tokenLimit: 10000,
           systemPromptPath: "prompts/system_reply.md",
           sharedProcess: { enabled: true, jwtDir: join(root, "jwt") },
+          ompNativeCache: nativeCache.selection,
         },
         memory: { recentMessageLimit: 10, workingTierLimit: 10 },
         workspace: { repoPath: root, workspacesDir: "workspaces" },
@@ -1002,6 +1064,16 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
                 join(agentConfig.env!.XDG_DATA_HOME!, "omp"),
               ]
             ) assert((await Deno.stat(path)).isDirectory);
+            // The reserved runtime entry links THIS mode root to the one shared
+            // prepared payload: neither a channel-local native copy nor an
+            // unlinked application directory.
+            const natives = ompNativeCacheLinkPath(base, mode);
+            assert((await Deno.lstat(natives)).isSymlink, `${poolKey}/${mode}`);
+            assertEquals(
+              await Deno.readLink(natives),
+              resolve(join(nativeCache.selection.installRoot!, "natives")),
+              `${poolKey}/${mode}`,
+            );
           } else {
             assertEquals(agentConfig.env?.TMPDIR, join(root, "channel-tmp", poolKey));
             assertEquals(agentConfig.env?.XDG_DATA_HOME, join(root, "opencode-data", poolKey));
@@ -1029,6 +1101,17 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
         createAgentConfig("omp", join(root, "workspace"), config, mode === "native-yolo")
       );
       assert(perSpawn[0].env!.XDG_DATA_HOME !== perSpawn[1].env!.XDG_DATA_HOME);
+      // The per-spawn shape (`{workingDir}/tmp`) gets the same shared payload in
+      // its own mode-distinct root.
+      for (const mode of ["restricted", "native-yolo"] as const) {
+        const natives = ompNativeCacheLinkPath(join(root, "workspace", "tmp"), mode);
+        assert((await Deno.lstat(natives)).isSymlink, mode);
+        assertEquals(
+          await Deno.readLink(natives),
+          resolve(join(nativeCache.selection.installRoot!, "natives")),
+          mode,
+        );
+      }
     } finally {
       if (pool) {
         // The release path includes asynchronous filesystem I/O; yield to its completion.
@@ -1037,6 +1120,7 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
       }
       registry.stop();
       await Deno.remove(root, { recursive: true });
+      await Deno.remove(nativeCache.root, { recursive: true });
     }
   });
 });
