@@ -108,6 +108,21 @@ OMP 會把被截斷的 bash 輸出寫進原生工作階段日誌旁的產物目�
 
 ---
 
+## 提示詞權限說明與實際引擎及模式對齊
+
+捆綁的提示詞片段（`prompts/agent_permissions.md`、`prompts/browser_automation.md`、`prompts/omp_shell.md`）依目前工作階段所選的引擎與生效模式提供權限說明，不再把受限模式的 shell 限制描述成通則，也不再把 OpenCode 的拒絕規則套用到其他引擎。
+
+- 受限模式：保留共用的命令允許清單、`;`／`&&`／`||` 的分段規則，以及管線、背景執行、檔案重導向與換行的拒絕；`2>&1`、`1>&2` 這類標準串流之間的 fd 重導向不寫入檔案，仍被容忍。
+- OpenCode 專屬的權限閘門前命令拒絕（`echo`、`curl`、`git` 等）只在 OpenCode 的說明中列出；OMP 只陳述共用的命令與路徑規則。
+- YOLO 與原生 YOLO：不再出現受限模式的 shell 拒絕敘述，也不宣稱所有操作或路徑皆可使用。OMP 仍保留 LSP 工具在所有模式皆拒絕的敘述，以及一次性命令、服務模式與背景完成通知的工具用法。
+- 共享 Agent 工作區的寫入說明依 `canWriteAgentWorkspace` 與 `agent.sandbox.allowedWriteExtensions` 政策描述，受限模式不再一律稱為唯讀。
+
+強制執行本身沒有改變：命令閘門、ACP 檔案系統授權、OMP 模式 YAML 與 OpenCode 權限對應都維持原樣，上述調整只涉及交付給代理人的文字。自主研究未產生筆記時的一次性修正提示，同樣依該工作階段實際選用的引擎與模式挑選措辭。
+
+維運者若以 Volume 掛載自訂的 `prompts/agent_permissions.md`、`prompts/browser_automation.md` 或 `prompts/omp_shell.md`，覆寫檔全由維運者維護；要取得修正後的措辭，必須比照更新或重新掛載，本專案不會改寫掛載內容。
+
+---
+
 ## 原生驗收指令 (Native Acceptance Commands)
 
 在進行 OMP 原生執行階段驗收測試時，必須區分一般單元測試與嚴格原生驗收。在一般 CI 或本機測試環境中（未安裝 `omp`、`bwrap` 或 `strace`），所有涉及原生二進位檔的測試案例皆會明確標註為 `UNEXERCISED`，絕不以 Mock 偽造原生成功。若要在真實環境執行完整原生驗收，必須設定 `OMP_NATIVE_ACCEPTANCE=1`，此時缺少先決條件將會直接讓測試失敗。

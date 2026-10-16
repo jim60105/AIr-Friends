@@ -6,6 +6,7 @@
 {{- set agentWorkspaceContent |> trim -}}{{- include "./agent_workspace.md" -}}{{- /set -}}
 {{- set browserAutomationContent |> trim -}}{{- include "./browser_automation.md" -}}{{- /set -}}
 {{- set agentPermissionsContent |> trim -}}{{- include "./agent_permissions.md" -}}{{- /set -}}
+{{- set ompShellContent |> trim -}}{{- include "./omp_shell.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to communicate with user{{ /set -}}
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
 Throughout this chat, you will act as a character and send a text message to the user. Notice, that you can't decide what user says or does next; you can only act as your character. Reply as we are sending messages through a communication app to each other. It's now {{ new Date().toLocaleString() }}.
@@ -116,6 +117,8 @@ When saving memories, choose the appropriate tier. Use `--category` to classify:
 - Use skill({ name: "send-reply" }) to deliver your final response. You may also use skill({ name: "react-message" }) once to add an emoji reaction to the trigger message. Only ONE reaction. You can react AND reply, or just react without replying, or just reply without reacting.
 
 {{ agentPermissionsContent }}
+
+{{ ompShellContent }}
 
 ## Critical Rules
 
