@@ -16,7 +16,11 @@ import type {
 import type { FilesystemAccessFailureReason } from "./filesystem-access.ts";
 import type { SessionGateContext } from "./client.ts";
 import type { ClientConfig } from "./types.ts";
-import { validateSessionContext } from "./filesystem-roots.ts";
+import {
+  isWithinRoot,
+  OMP_BASH_ARTIFACT_NAME_PATTERN,
+  validateSessionContext,
+} from "./filesystem-roots.ts";
 
 /** Trusted lifecycle input; never derived from a requested path or ambient HOME. */
 export interface TrustedSkillsSource extends TrustedSkillsRootConfig {
@@ -36,7 +40,8 @@ export type FilesystemDenialReason =
   | "rejected_workspace_write_restricted"
   | "rejected_trusted_skills_read_only"
   | "rejected_trusted_skills_identity"
-  | "rejected_read_extension";
+  | "rejected_read_extension"
+  | "rejected_omp_native_state";
 
 /**
  * Result of an authorization evaluation.
@@ -109,6 +114,14 @@ export function buildSessionFilesystemContext(
     explicitStagingPath,
     sharedWorkspacePath: clientConfig.agentWorkspacePath,
     sessionContextGeneration: currentGeneration,
+    // OMP native-state provenance is bound to the cwd it was derived for. A
+    // provenance from another cwd (a re-registration that moved the session) is
+    // dropped rather than re-bound: the artifact capability and the reservation
+    // belong to exactly one native state tree, and unrelated workspace
+    // operations must keep working.
+    ...(gateCtx.ompNativeState?.cwd === sessionCwd
+      ? { ompNativeState: gateCtx.ompNativeState }
+      : {}),
   };
 
   if (!validateSessionContext(context).ok) {
@@ -140,6 +153,7 @@ export const ROOT_PATH_FAILURE_MAP: Record<RootPathFailureReason, FilesystemDeni
   canonicalization_failed: "rejected_filesystem_path_unavailable",
   path_changed: "rejected_filesystem_path_unavailable",
   trusted_identity_mismatch: "rejected_trusted_skills_identity",
+  reserved_native_state: "rejected_omp_native_state",
 };
 
 /**
@@ -215,7 +229,40 @@ export function authorizeFilesystemRead(
     };
   }
 
-  // 2. Workspace, staging, or shared root admission
+  // 2. Current-session OMP bash artifacts (D2): the artifact role admits a
+  // DIRECT regular `<numeric-id>.bash.log` child and nothing else. The ordinary
+  // extension allowlist does not apply, and no other name, nested child or
+  // broader root is substituted. Native state is reserved away from every broad
+  // role, so this branch is the only read authority there.
+  if (target.roles.includes("omp-session-artifacts")) {
+    const name = target.rootRelativePath;
+    if (
+      name.includes("/") || name.includes("\\") || !OMP_BASH_ARTIFACT_NAME_PATTERN.test(name)
+    ) {
+      return {
+        ok: false,
+        reason: name.includes("/") || name.includes("\\")
+          ? "rejected_filesystem_path_unavailable"
+          : "rejected_read_extension",
+        message: `OMP bash artifacts admit only direct '<numeric-id>.bash.log' children: '${name}'`,
+      };
+    }
+    if (target.targetType !== "file" || target.observedSymlinks.length > 0) {
+      return {
+        ok: false,
+        reason: "rejected_filesystem_path_unavailable",
+        message: "OMP bash artifacts must be regular files reached without request-time links",
+      };
+    }
+    return {
+      ok: true,
+      role: "omp-session-artifacts",
+      access: "read",
+      useTrustedReadRule: false,
+    };
+  }
+
+  // 3. Workspace, staging, or shared root admission
   const hasWorkspaceRole = target.roles.includes("workspace") ||
     target.roles.includes("staging") ||
     target.roles.includes("shared");
@@ -271,6 +318,7 @@ export function authorizeFilesystemWrite(
   params: AuthorizeWriteParams,
 ): FilesystemAuthorizationResult {
   const {
+    roots,
     target,
     yolo,
     canWriteAgentWorkspace = false,
@@ -286,9 +334,28 @@ export function authorizeFilesystemWrite(
     };
   }
 
+  // 2. Current-session OMP bash artifacts are read-only in every mode, and
+  // reserved OMP native state admits no callback mutation at all. This precedes
+  // the YOLO branch deliberately: broad workspace membership beneath the
+  // session cwd never authorizes native-state writes or destructive targets
+  // (D3). Native shell execution is unaffected — this gate only covers ACP
+  // callbacks.
+  if (
+    target.roles.includes("omp-session-artifacts") ||
+    (roots.reservedOmpState ?? []).some((reserved) =>
+      isWithinRoot(target.canonicalTarget, reserved)
+    )
+  ) {
+    return {
+      ok: false,
+      reason: "rejected_omp_native_state",
+      message: "OMP native state is read-only for ACP callbacks",
+    };
+  }
+
   const access: "overwrite" | "create" = target.targetType === "file" ? "overwrite" : "create";
 
-  // 2. YOLO mode: broad physical containment (workspace or shared role allowed for any extension)
+  // 3. YOLO mode: broad physical containment (workspace or shared role allowed for any extension)
   if (yolo) {
     if (target.roles.includes("staging")) {
       return { ok: true, role: "staging", access, useTrustedReadRule: false };

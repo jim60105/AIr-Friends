@@ -20,6 +20,8 @@ import {
   verifyRecoveryOwnership,
 } from "./recovery-ownership.ts";
 import type { TrustedSkillsSource } from "./filesystem-policy.ts";
+import type { OmpNativeStateProvenance } from "./filesystem-roots.ts";
+import { resolveOmpSessionArtifacts } from "./omp/session-artifacts.ts";
 import {
   collectOptionValues,
   findOptionByCategory,
@@ -381,6 +383,11 @@ export class AgentConnector {
 
     // Shared-process mode: register the per-session working directory with the client
     // so the permission gate confines this session to the session's own workspace.
+    // For OMP the registration also carries this session's native-state
+    // reservation and, when a unique persisted journal is proven for the id OMP
+    // just returned, the current-session bash-artifact provenance. Discovery
+    // failure is a bounded diagnostic only: it never fails session creation and
+    // never widens a root.
     this.setSessionGateContext(result.sessionId, {
       cwd: sessionCwd,
       shellSessionId: this.options.clientConfig?.sessionId,
@@ -388,6 +395,7 @@ export class AgentConnector {
       canWriteAgentWorkspace: this.options.clientConfig?.canWriteAgentWorkspace,
       allowedWriteExtensions: this.options.clientConfig?.allowedWriteExtensions,
       trustedSkills: this.options.clientConfig?.trustedSkills,
+      ompNativeState: await this.resolveOmpNativeState(result.sessionId, sessionCwd),
     });
 
     // Capture initial config options (session-scoped); refreshed later via
@@ -851,10 +859,20 @@ export class AgentConnector {
       this.process = null;
     }
     this.connection = null;
+    // Revoke the discarded epoch's registrations on the client itself before it
+    // is dropped: an in-flight callback that still holds this client must fail
+    // its generation currency check instead of reading content after the
+    // disconnect (D4).
+    this.client?.revokeAllSessionContexts();
     this.client = null;
     this.capabilities = null;
     this.sessionConfigOptions = new Map();
     this.sessionModelIds = new Map();
+    // The connection (and the client that held this epoch's registrations) is
+    // gone. Cached artifact authority is revoked here so neither a later
+    // `connect()` replay nor a sibling session can act on provenance from the
+    // discarded epoch; the recovered session re-resolves its own.
+    this.revokeCachedArtifactAuthority();
   }
 
   /**
@@ -900,6 +918,85 @@ export class AgentConnector {
       source: "deployment_owned",
       rootIdentity: observation.identity,
     };
+  }
+
+  /**
+   * Derive one session's OMP native-state reservation and, when a unique
+   * persisted journal is proven for the ACP id, its bash-artifact provenance
+   * (design D1/D2).
+   *
+   * Every input is trusted lifecycle state: the factory-selected
+   * `XDG_DATA_HOME`, the ACP session id and the registered cwd. A discovery
+   * failure returns the reservation alone — a bounded diagnostic that neither
+   * fails session creation/recovery nor authorizes a broader root. `undefined`
+   * for a non-OMP connector, so OpenCode callbacks are untouched.
+   */
+  private async resolveOmpNativeState(
+    acpSessionId: string,
+    sessionCwd: string,
+  ): Promise<OmpNativeStateProvenance | undefined> {
+    if (this.options.agentType !== "omp") return undefined;
+    const logger = this.options.logger as Logger;
+    const nativeDataRoot = this.options.agentConfig.env?.["XDG_DATA_HOME"];
+    const reservation: OmpNativeStateProvenance = {
+      cwd: sessionCwd,
+      ...(nativeDataRoot === undefined ? {} : { nativeDataRoot }),
+    };
+    try {
+      const resolution = await resolveOmpSessionArtifacts({
+        agentType: "omp",
+        xdgDataHome: nativeDataRoot,
+        acpSessionId,
+        sessionCwd,
+        nativeCalls: this.options.clientConfig?.nativeCalls,
+      });
+      if (!resolution.ok) {
+        logger.info(
+          "OMP artifact provenance unavailable for session {sessionId}: {reason}",
+          { sessionId: acpSessionId, reason: resolution.reason },
+        );
+        return reservation;
+      }
+      return {
+        cwd: sessionCwd,
+        ...(nativeDataRoot === undefined
+          ? {}
+          : { nativeDataRoot, dataRootIdentity: resolution.dataRootIdentity }),
+        artifacts: resolution.provenance,
+      };
+    } catch (error) {
+      logger.warn("OMP artifact discovery failed for session {sessionId}", {
+        sessionId: acpSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return reservation;
+    }
+  }
+
+  /**
+   * Revoke the cached artifact capability of the connection epoch that is being
+   * discarded (D4). A reconnect replays ordinary gate context identity, never
+   * artifact authority from the prior client epoch; the recovered session
+   * re-resolves its own provenance after a successful `session/load`, and the
+   * native-state reservation itself is retained so sibling state stays private.
+   */
+  private revokeCachedArtifactAuthority(): void {
+    for (const [sessionId, ctx] of this.sessionGateContexts) {
+      const nativeState = ctx.ompNativeState;
+      if (nativeState?.artifacts === undefined) continue;
+      this.sessionGateContexts.set(sessionId, {
+        ...ctx,
+        ompNativeState: {
+          cwd: nativeState.cwd,
+          ...(nativeState.nativeDataRoot === undefined
+            ? {}
+            : { nativeDataRoot: nativeState.nativeDataRoot }),
+          ...(nativeState.dataRootIdentity === undefined
+            ? {}
+            : { dataRootIdentity: nativeState.dataRootIdentity }),
+        },
+      });
+    }
   }
 
   /**
@@ -1242,6 +1339,7 @@ export class AgentConnector {
         allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
           this.options.clientConfig?.allowedWriteExtensions,
         trustedSkills: this.options.clientConfig?.trustedSkills,
+        ompNativeState: await this.resolveOmpNativeState(sessionId, cwd),
       });
     }
 
@@ -1267,6 +1365,13 @@ export class AgentConnector {
     // The recovered id's OWN context is re-registered via the existing merge
     // path (so it also survives later `connect()` replays). Other sessions'
     // cached contexts are never substituted for it and replay unchanged.
+    //
+    // OMP re-resolves its native provenance here (D4): the prior epoch's
+    // artifact authority was revoked on disconnect, and this one registration
+    // re-binds the restored context to the journal and artifact directory the
+    // native runtime actually holds after the load. A failed re-resolution
+    // carries the reservation alone — never a retry trigger, never a recovery
+    // failure — and stale generations still never authorize IO.
     if (opts?.gateContext) {
       // A supplied context that disagrees with the recovery cwd is a restore
       // failure for this session — never a silent overwrite of either value.
@@ -1277,7 +1382,10 @@ export class AgentConnector {
           `supplied context cwd "${opts.gateContext.cwd}" disagrees with recovery cwd "${cwd}"`,
         );
       }
-      this.setSessionGateContext(sessionId, opts.gateContext);
+      this.setSessionGateContext(sessionId, {
+        ...opts.gateContext,
+        ompNativeState: await this.resolveOmpNativeState(sessionId, cwd),
+      });
     } else if (recoveryContextSupplied && !this.sessionGateContexts.has(sessionId)) {
       // No context supplied AND none cached for the recovered id (fresh
       // connector): fail closed instead of resuming on the process-frozen

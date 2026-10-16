@@ -750,3 +750,134 @@ Deno.test("Task 3.4: Agent-neutral OpenCode/OMP contexts and broad workspace mem
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("OMP native state: reservation, optional artifact root and reserved precedence", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const workspace = join(tempDir, "workspace");
+    const sharedWorkspace = join(workspace, "shared");
+    const dataRoot = join(workspace, "tmp", "omp-agent", "restricted", "xdg-data");
+    const bucket = join(dataRoot, "omp", "sessions", "-tmp-workspace");
+    const journalPath = join(
+      bucket,
+      "2026-01-02T03-04-05-678Z_0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl",
+    );
+    await Deno.mkdir(sharedWorkspace, { recursive: true });
+    await Deno.mkdir(bucket, { recursive: true });
+    const artifactDirectory = journalPath.slice(0, -".jsonl".length);
+    await Deno.writeTextFile(journalPath, '{"type":"session"}\n');
+
+    const dataInfo = await Deno.lstat(dataRoot);
+    const anchorInfo = await Deno.lstat(bucket);
+    const journalInfo = await Deno.lstat(journalPath);
+    const context: SessionContext = {
+      acpSessionId: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+      skillSessionId: "skill-1",
+      sessionCwd: workspace,
+      explicitStagingPath: join(workspace, "tmp", "skill-1"),
+      sharedWorkspacePath: sharedWorkspace,
+      sessionContextGeneration: "gen-omp",
+      ompNativeState: {
+        cwd: workspace,
+        nativeDataRoot: dataRoot,
+        dataRootIdentity: { dev: dataInfo.dev!, ino: dataInfo.ino! },
+        artifacts: {
+          acpSessionId: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+          journalPath,
+          journalIdentity: { dev: journalInfo.dev!, ino: journalInfo.ino! },
+          anchorDirectory: bucket,
+          anchorIdentity: { dev: anchorInfo.dev!, ino: anchorInfo.ino! },
+        },
+      },
+    };
+
+    const roots = unwrap(await canonicalizeSessionRoots(context));
+    assertEquals(roots.reservedOmpState, [
+      join(workspace, "tmp", "omp-agent"),
+      dataRoot,
+    ]);
+    // The artifact directory does not exist yet: the capability is prospective
+    // and creates nothing.
+    const prospective = roots.roots.find((root) => root.role === "omp-session-artifacts");
+    assertEquals(prospective?.isProspective, true);
+    assertEquals(prospective?.prospectiveAncestor, bucket);
+    assertEquals(await Deno.lstat(artifactDirectory).catch(() => null), null);
+
+    // A native-state target can be admitted by no broad role.
+    const journalTarget = unwrap(
+      await resolveSessionPath(journalPath, context),
+    );
+    const journalObservation = await resolveFilesystemTarget(
+      journalTarget,
+      roots,
+      "existing-file",
+    );
+    assertEquals(journalObservation.ok, false);
+    if (!journalObservation.ok) {
+      assertEquals(journalObservation.reason, "reserved_native_state");
+    }
+    // Ordinary workspace files keep their broad membership.
+    const ordinaryPath = unwrap(resolveSessionPath(join(sharedWorkspace, "note.jsonl"), context));
+    await Deno.writeTextFile(join(sharedWorkspace, "note.jsonl"), "{}");
+    const sharedObservation = unwrap(
+      await resolveFilesystemTarget(ordinaryPath, roots, "existing-file"),
+    );
+    assertEquals(sharedObservation.roles, ["workspace", "shared"]);
+
+    // A bound identity that no longer matches the directory denies the whole
+    // artifact capability (no partial grant).
+    await Deno.mkdir(artifactDirectory);
+    const artifactInfo = await Deno.lstat(artifactDirectory);
+    const rebound = unwrap(
+      await canonicalizeSessionRoots({
+        ...context,
+        ompNativeState: {
+          ...context.ompNativeState!,
+          artifacts: {
+            ...context.ompNativeState!.artifacts!,
+            artifactDirectoryIdentity: { dev: artifactInfo.dev!, ino: -1 },
+          },
+        },
+      }),
+    );
+    assertEquals(
+      rebound.roots.find((root) => root.role === "omp-session-artifacts"),
+      undefined,
+    );
+    const originalIdentity = unwrap(
+      await canonicalizeSessionRoots({
+        ...context,
+        ompNativeState: {
+          ...context.ompNativeState!,
+          artifacts: {
+            ...context.ompNativeState!.artifacts!,
+            artifactDirectoryIdentity: { dev: artifactInfo.dev!, ino: artifactInfo.ino! },
+          },
+        },
+      }),
+    );
+    const boundArtifactRoot = originalIdentity.roots.find(
+      (root) => root.role === "omp-session-artifacts",
+    );
+    assertEquals(boundArtifactRoot?.isProspective, undefined);
+    assertEquals(boundArtifactRoot?.readOnly, true);
+
+    // A reservation overlapping the shared writable root is refused outright.
+    const overlapping = await canonicalizeSessionRoots({
+      ...context,
+      sharedWorkspacePath: join(workspace, "tmp"),
+    });
+    assertEquals(overlapping.ok, false);
+    if (!overlapping.ok) assertEquals(overlapping.reason, "root_overlap");
+
+    // A provenance for another cwd is rejected as an invalid context.
+    const movedCwd = await canonicalizeSessionRoots({
+      ...context,
+      ompNativeState: { ...context.ompNativeState!, cwd: tempDir },
+    });
+    assertEquals(movedCwd.ok, false);
+    if (!movedCwd.ok) assertEquals(movedCwd.reason, "invalid_context");
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

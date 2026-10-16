@@ -4,7 +4,7 @@
  * Implements OpenSpec change `secure-acp-filesystem-access`.
  */
 
-import type { CanonicalRootInfo, CanonicalTarget } from "./filesystem-roots.ts";
+import type { CanonicalRootInfo, CanonicalTarget, ObservedIdentity } from "./filesystem-roots.ts";
 import type {
   FilesystemAccessFailure,
   FilesystemAccessFailureReason,
@@ -357,14 +357,36 @@ export function getRealLinuxNativeCalls(): {
 }
 
 export interface PerformLinuxAccessOptions {
-  readonly operation: "read" | "write";
+  readonly operation: "read" | "write" | "read-prefix";
   readonly selectedRoot: CanonicalRootInfo;
   readonly target: CanonicalTarget;
   readonly relativePath: string;
   readonly isNewFile: boolean;
   readonly content: string;
+  /** Byte bound for a `read-prefix` operation (ignored by full reads/writes). */
+  readonly maxBytes?: number;
+  /**
+   * Optional descriptor-bound re-verification of the observed journal and its
+   * parent directory, performed before the selected root is opened. It makes a
+   * journal/anchor replacement between observation and protected opening fail
+   * closed (D4) without granting the guard any callback authority.
+   */
+  readonly anchorGuard?: ProtectedAccessAnchorGuard;
   readonly nativeCalls?: LinuxNativeCalls;
 }
+
+/** Descriptor-bound re-verification inputs for a proven journal location. */
+export interface ProtectedAccessAnchorGuard {
+  /** Absolute observed path of the journal's parent directory. */
+  readonly anchorPath: string;
+  readonly anchorIdentity: ObservedIdentity;
+  /** Journal basename inside the anchor directory. */
+  readonly journalName: string;
+  readonly journalIdentity: ObservedIdentity;
+}
+
+/** Default byte bound for a lifecycle-internal prefix read (64 KiB). */
+export const DEFAULT_READ_PREFIX_BYTES = 64 * 1024;
 
 export function performLinuxSecureAccess<T = unknown>(
   options: PerformLinuxAccessOptions,
@@ -416,6 +438,104 @@ export function performLinuxSecureAccess<T = unknown>(
       );
     }
     acquiredFds.push(rootCap.fd);
+
+    // 1b. Optional anchor re-verification (D4): the journal and its parent must
+    // still be the exact link-free objects observed before this operation. Both
+    // are opened beneath `/` with RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS and
+    // identity-checked, so a replacement between observation and protected
+    // opening fails closed before any artifact content path is touched.
+    const guard = options.anchorGuard;
+    if (guard) {
+      for (const identity of [guard.anchorIdentity, guard.journalIdentity]) {
+        if (
+          !Number.isSafeInteger(identity.dev) || !Number.isSafeInteger(identity.ino) ||
+          (identity.dev ?? -1) < 0 || (identity.ino ?? -1) < 0
+        ) {
+          return {
+            ok: false,
+            reason: "identity_unavailable",
+            message: "Anchor re-verification requires safe observed identities.",
+          };
+        }
+      }
+      let anchorRelative = guard.anchorPath.startsWith("/")
+        ? guard.anchorPath.slice(1)
+        : guard.anchorPath;
+      if (anchorRelative === "") anchorRelative = ".";
+      const guardOpen = native.openat2(
+        rootCap.fd,
+        anchorRelative,
+        BigInt(c.O_PATH | c.O_DIRECTORY | c.O_CLOEXEC),
+        0n,
+        c.RESOLVE_BENEATH | c.RESOLVE_NO_SYMLINKS | c.RESOLVE_NO_MAGICLINKS,
+      );
+      if (guardOpen.fd < 0) {
+        return mapLinuxErrnoToFailure(
+          guardOpen.errno,
+          "guard_anchor_open",
+          `Observed journal parent '${guard.anchorPath}' is no longer openable`,
+        );
+      }
+      acquiredFds.push(guardOpen.fd);
+      const anchorStat = native.statx(guardOpen.fd);
+      if (!anchorStat.statx) {
+        return mapLinuxErrnoToFailure(
+          anchorStat.errno,
+          "guard_anchor_statx",
+          "Failed to statx the observed journal parent descriptor",
+        );
+      }
+      const guardAnchorDev = decodeLinuxDev(guard.anchorIdentity.dev!);
+      if (
+        (anchorStat.statx.mode & c.S_IFMT) !== c.S_IFDIR ||
+        anchorStat.statx.ino !== BigInt(guard.anchorIdentity.ino!) ||
+        anchorStat.statx.devMajor !== guardAnchorDev.major ||
+        anchorStat.statx.devMinor !== guardAnchorDev.minor
+      ) {
+        return {
+          ok: false,
+          reason: "path_changed",
+          message: "Observed journal parent identity changed before protected access.",
+        };
+      }
+
+      const journalGuardOpen = native.openat2(
+        guardOpen.fd,
+        guard.journalName,
+        BigInt(c.O_RDONLY | c.O_CLOEXEC | c.O_NONBLOCK | c.O_NOFOLLOW),
+        0n,
+        c.RESOLVE_BENEATH | c.RESOLVE_NO_SYMLINKS | c.RESOLVE_NO_MAGICLINKS,
+      );
+      if (journalGuardOpen.fd < 0) {
+        return mapLinuxErrnoToFailure(
+          journalGuardOpen.errno,
+          "guard_journal_open",
+          `Observed journal '${guard.journalName}' is no longer openable`,
+        );
+      }
+      acquiredFds.push(journalGuardOpen.fd);
+      const journalStat = native.statx(journalGuardOpen.fd);
+      if (!journalStat.statx) {
+        return mapLinuxErrnoToFailure(
+          journalStat.errno,
+          "guard_journal_statx",
+          "Failed to statx the observed journal descriptor",
+        );
+      }
+      const guardJournalDev = decodeLinuxDev(guard.journalIdentity.dev!);
+      if (
+        (journalStat.statx.mode & c.S_IFMT) !== c.S_IFREG ||
+        journalStat.statx.ino !== BigInt(guard.journalIdentity.ino!) ||
+        journalStat.statx.devMajor !== guardJournalDev.major ||
+        journalStat.statx.devMinor !== guardJournalDev.minor
+      ) {
+        return {
+          ok: false,
+          reason: "path_changed",
+          message: "Observed journal identity changed before protected access.",
+        };
+      }
+    }
 
     // 2. Open selected canonical root beneath `/` using openat2
     const canonicalRootPath = options.selectedRoot.canonicalPath;
@@ -484,7 +604,13 @@ export function performLinuxSecureAccess<T = unknown>(
     }
 
     // 4. Perform content access
-    if (options.operation === "read") {
+    if (options.operation === "read" || options.operation === "read-prefix") {
+      // A prefix read stops at `maxBytes` (or the default OMP header prefix) and
+      // keeps every open/identity check of a full read; it never truncates or
+      // rewrites the file.
+      const prefixByteLimit = options.operation === "read-prefix"
+        ? Math.max(1, Math.floor(options.maxBytes ?? DEFAULT_READ_PREFIX_BYTES))
+        : Number.POSITIVE_INFINITY;
       // READ: open destination relative to rootFd without creation or truncation
       const fileOpen = native.openat2(
         rootFd,
@@ -545,10 +671,15 @@ export function performLinuxSecureAccess<T = unknown>(
       // Stream read in chunks using a single TextDecoder instance
       const decoder = new TextDecoder("utf-8", { fatal: false });
       let resultText = "";
+      let bytesAccepted = 0;
       const readChunkBuf = new Uint8Array(64 * 1024);
 
-      while (true) {
-        const r = native.read(fileFd, readChunkBuf);
+      while (bytesAccepted < prefixByteLimit) {
+        const window = readChunkBuf.subarray(
+          0,
+          Math.min(readChunkBuf.length, prefixByteLimit - bytesAccepted),
+        );
+        const r = native.read(fileFd, window);
         if (r.bytesRead < 0) {
           return mapLinuxErrnoToFailure(r.errno, "read_io", "Error reading target file descriptor");
         }
@@ -556,6 +687,7 @@ export function performLinuxSecureAccess<T = unknown>(
           // EOF
           break;
         }
+        bytesAccepted += r.bytesRead;
         resultText += decoder.decode(readChunkBuf.subarray(0, r.bytesRead), { stream: true });
       }
       resultText += decoder.decode();
@@ -804,6 +936,10 @@ function writeAllBytes(
 
 export type OperationPhase =
   | "root_cap_open"
+  | "guard_anchor_open"
+  | "guard_anchor_statx"
+  | "guard_journal_open"
+  | "guard_journal_statx"
   | "root_open"
   | "root_statx"
   | "file_open_existing"

@@ -1,7 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { resolve, SEPARATOR } from "@std/path";
+import { basename, resolve, SEPARATOR } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";
@@ -24,9 +24,12 @@ import {
 import {
   canonicalizeSessionRoots,
   type CanonicalSessionRoots,
+  isWithinRoot,
+  type OmpNativeStateProvenance,
   resolveFilesystemTarget,
   resolveSessionPath,
   type RootPathResult,
+  sameObservedIdentity,
   type SessionContext,
 } from "./filesystem-roots.ts";
 import { readCanonicalTextFile, writeCanonicalTextFile } from "./filesystem-access.ts";
@@ -58,6 +61,39 @@ import { normalizeOmpDestructivePermissionInput } from "./omp/destructive-ingres
  * extension (e.g. a `.json` cache/token file) is denied.
  */
 export const ALLOWED_READ_EXTENSIONS = [".jsonl", ".md", ".txt"];
+
+/**
+ * Raw-input field names that carry a filesystem target in a file-operation
+ * permission request. Used only to decide whether a request touches reserved
+ * OMP native state BEFORE any approval shortcut; exact-name membership keeps a
+ * content or message payload from being mistaken for a target.
+ */
+const DESTRUCTIVE_PATH_FIELDS: Record<string, true> = {
+  path: true,
+  paths: true,
+  file_path: true,
+  filePath: true,
+  filepath: true,
+  file: true,
+  filename: true,
+  files: true,
+  source: true,
+  destination: true,
+  from: true,
+  to: true,
+  oldPath: true,
+  newPath: true,
+  targetPath: true,
+};
+
+/**
+ * Outcome of the pre-approval reserved-state evaluation for one permission
+ * request. `unknown` is treated as reserved by the caller.
+ */
+type OmpReservedStateVerdict =
+  | { readonly verdict: "clear" }
+  | { readonly verdict: "reserved"; readonly path: string }
+  | { readonly verdict: "unknown"; readonly path: string };
 
 /**
  * Boundary-safe containment check (F4).
@@ -240,6 +276,14 @@ export interface SessionGateContext {
   /** Deployment-owned trusted skills provenance */
   trustedSkills?: TrustedSkillsSource;
   /**
+   * OMP-only native-state reservation for this session, plus the proven
+   * current-session bash-artifact provenance when discovery succeeded. Owned by
+   * the connector's registration lifecycle; never supplied by a request. Its
+   * absence means the context applies no reservation at all (OpenCode, or an
+   * unregistered/undiscoverable OMP session).
+   */
+  ompNativeState?: OmpNativeStateProvenance;
+  /**
    * Context registration generation (assigned by ChatbotClient). The client both
    * increments a per-instance counter and prefixes a per-instance epoch, so a
    * generation never repeats across client instances.
@@ -369,15 +413,52 @@ export class ChatbotClient implements acp.Client {
     // this call assigns is exactly the one stored and later currency-checked.
     const generation = this.nextRegistrationGeneration();
     this.contextGenerationCounter += 1;
+    // Native-state provenance is bound to exactly one cwd. A registration that
+    // moves the session (or re-supplies the old provenance alongside a moved
+    // cwd) drops it instead of carrying the old authority into the new context;
+    // the connector supplies fresh provenance for the new native state tree.
+    const effectiveCwd = ctx.cwd ?? existing!.cwd;
+    const requestedOmpNativeState = ctx.ompNativeState ?? existing?.ompNativeState;
+    const provenance = requestedOmpNativeState?.cwd === effectiveCwd
+      ? requestedOmpNativeState
+      : undefined;
+    // A committed first-use artifact-directory binding is never dropped by a
+    // same-cwd re-registration that carries the same proven journal: the
+    // connector's cached provenance predates the client's binding, so letting
+    // it through would re-open the replacement window for a directory the
+    // client already proved (D2/D4).
+    const priorArtifacts = existing?.ompNativeState?.artifacts;
+    const nextArtifacts = provenance?.artifacts;
+    const boundArtifacts = nextArtifacts !== undefined &&
+        nextArtifacts.artifactDirectoryIdentity === undefined &&
+        priorArtifacts !== undefined &&
+        priorArtifacts.journalPath === nextArtifacts.journalPath &&
+        priorArtifacts.artifactDirectoryIdentity !== undefined
+      ? { ...nextArtifacts, artifactDirectoryIdentity: priorArtifacts.artifactDirectoryIdentity }
+      : nextArtifacts;
     this.sessionContexts.set(sessionId, {
       ...existing,
       ...ctx,
-      cwd: ctx.cwd ?? existing!.cwd,
+      cwd: effectiveCwd,
       generation,
       allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
         ?.slice(),
       trustedSkills: ctx.trustedSkills ? { ...ctx.trustedSkills } : ctx.trustedSkills,
+      ompNativeState: provenance === undefined
+        ? undefined
+        : (boundArtifacts === undefined
+          ? { ...provenance, artifacts: undefined }
+          : { ...provenance, artifacts: boundArtifacts }),
     });
+  }
+
+  /**
+   * Revoke every registered session context. Called when the owning connection
+   * is discarded, so an in-flight callback on this client can no longer pass a
+   * generation currency check or reach a broad root (D4).
+   */
+  revokeAllSessionContexts(): void {
+    this.sessionContexts.clear();
   }
 
   /**
@@ -396,11 +477,17 @@ export class ChatbotClient implements acp.Client {
 
   /** Validate owned-root provenance separately from the requested root-scoped read. */
   private async observeFilesystemRoots(
+    acpSessionId: string | undefined,
     context: SessionContext,
     trustedSkills?: TrustedSkillsSource,
   ): Promise<RootPathResult<CanonicalSessionRoots>> {
     const roots = await canonicalizeSessionRoots(context, trustedSkills);
-    if (!roots.ok || !trustedSkills) return roots;
+    if (!roots.ok) return roots;
+    if (acpSessionId !== undefined) {
+      const fence = this.bindOmpArtifactDirectoryIdentity(acpSessionId, context, roots.value);
+      if (!fence.ok) return fence;
+    }
+    if (!trustedSkills) return roots;
     const trustedRoot = roots.value.roots.find((root) => root.role === "trusted-skills");
     if (
       !trustedRoot || trustedRoot.canonicalPath !== trustedSkills.canonicalOwnedRootPath ||
@@ -418,6 +505,72 @@ export class ChatbotClient implements acp.Client {
       };
     }
     return roots;
+  }
+
+  /**
+   * Bind the lazily created current-session artifact directory's identity to
+   * the registration that first observed it (D2), under a generation fence.
+   *
+   * The artifact directory may legitimately appear after the native session
+   * persisted, so the first usable observation is recorded. The comparison and
+   * the write both run on the event loop in one synchronous step after the
+   * awaited observation, so a racing observation cannot overwrite a committed
+   * binding: a request that observed a different directory than the one already
+   * bound fails closed with the existing path-changed reason. A stale
+   * registration (the stored generation no longer matches the generation this
+   * request was built from) never binds.
+   */
+  private bindOmpArtifactDirectoryIdentity(
+    acpSessionId: string,
+    context: SessionContext,
+    roots: CanonicalSessionRoots,
+  ): RootPathResult<void> {
+    const artifacts = context.ompNativeState?.artifacts;
+    if (
+      artifacts === undefined ||
+      context.ompNativeState?.cwd !== context.sessionCwd ||
+      roots.acpSessionId !== acpSessionId ||
+      roots.sessionContextGeneration !== context.sessionContextGeneration
+    ) {
+      return { ok: true, value: undefined };
+    }
+    const stored = this.sessionContexts.get(acpSessionId);
+    if (
+      stored?.generation !== context.sessionContextGeneration ||
+      stored.ompNativeState?.cwd !== context.sessionCwd ||
+      stored.ompNativeState?.artifacts?.journalPath !== artifacts.journalPath
+    ) {
+      // Re-registered (or replaced) context: this observation never binds.
+      return { ok: true, value: undefined };
+    }
+
+    const artifactRoot = roots.roots.find((root) => root.role === "omp-session-artifacts");
+    const observed = artifactRoot?.isProspective ? undefined : artifactRoot?.identity;
+    const bound = stored.ompNativeState.artifacts.artifactDirectoryIdentity;
+
+    if (bound !== undefined) {
+      if (observed !== undefined && !sameObservedIdentity(observed, bound)) {
+        return {
+          ok: false,
+          reason: "path_changed",
+          message: "Current-session OMP artifact directory was replaced after binding",
+        };
+      }
+      return { ok: true, value: undefined };
+    }
+    if (observed === undefined || artifactRoot === undefined) {
+      return { ok: true, value: undefined };
+    }
+
+    const storedArtifacts = stored.ompNativeState.artifacts;
+    this.sessionContexts.set(acpSessionId, {
+      ...stored,
+      ompNativeState: {
+        ...stored.ompNativeState,
+        artifacts: { ...storedArtifacts, artifactDirectoryIdentity: observed },
+      },
+    });
+    return { ok: true, value: undefined };
   }
 
   private rejectFilesystemRequest(
@@ -606,7 +759,11 @@ export class ChatbotClient implements acp.Client {
         if (!normalized.ok) {
           reason = destructiveDenialReason(normalized.reason);
         } else {
-          const roots = await this.observeFilesystemRoots(built.context, gateCtx?.trustedSkills);
+          const roots = await this.observeFilesystemRoots(
+            params.sessionId,
+            built.context,
+            gateCtx?.trustedSkills,
+          );
           if (!roots.ok) {
             reason = mapRootPathFailureToDenial(roots.reason, true);
           } else {
@@ -671,6 +828,93 @@ export class ChatbotClient implements acp.Client {
       : { outcome: { outcome: "cancelled" } };
   }
 
+  /**
+   * Path-shaped operation fields inside a permission request's raw input, at a
+   * bounded nesting depth. Only exact field names qualify, so a content or
+   * message payload that happens to contain a path never becomes a target.
+   */
+  private collectOmpGuardPaths(rawInput: Record<string, unknown> | undefined): string[] {
+    const paths = this.extractPathsFromRawInput(rawInput ?? {});
+    const visit = (value: unknown, depth: number): void => {
+      if (depth > 3 || value === null || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item, depth + 1);
+        return;
+      }
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof item === "string" && item.length > 0 && DESTRUCTIVE_PATH_FIELDS[key] === true) {
+          paths.push(item);
+          continue;
+        }
+        visit(item, depth + 1);
+      }
+    };
+    visit(rawInput, 0);
+    return [...new Set(paths)];
+  }
+
+  /**
+   * Reserved-state verdict for one permission request.
+   *
+   * `reserved` means a requested path is inside this session's native state and
+   * the request must not be approved. `unknown` means a mutating request's
+   * reservation could not be evaluated (missing context or an unobservable
+   * root), which is treated as reserved: the boundary fails closed rather than
+   * falling through to an approval shortcut.
+   *
+   * The trusted lexical reservation (the connector's own configured spellings)
+   * is checked first, so the common denial never depends on observing an
+   * unrelated root; the physical observation is what additionally catches a
+   * workspace symlink aliased into native state.
+   */
+  private async ompReservedStateVerdict(
+    acpSessionId: string,
+    paths: readonly string[],
+  ): Promise<OmpReservedStateVerdict> {
+    if (paths.length === 0) return { verdict: "clear" };
+    const gateCtx = this.gateCtx(acpSessionId);
+    const state = gateCtx?.ompNativeState;
+    if (gateCtx === undefined || state === undefined) return { verdict: "clear" };
+    const built = buildSessionFilesystemContext(
+      acpSessionId,
+      gateCtx,
+      this.config,
+      gateCtx.generation ?? "",
+    );
+    if (!built.ok) return { verdict: "unknown", path: paths[0] };
+    const configured = [
+      resolve(built.context.sessionCwd, "tmp", "omp-agent"),
+      ...(state.nativeDataRoot === undefined ? [] : [resolve(state.nativeDataRoot)]),
+    ];
+    for (const path of paths) {
+      const resolved = resolveSessionPath(path, built.context);
+      if (!resolved.ok) continue;
+      if (configured.some((reserved) => isWithinRoot(resolved.value.normalizedPath, reserved))) {
+        return { verdict: "reserved", path };
+      }
+    }
+    const roots = await this.observeFilesystemRoots(
+      acpSessionId,
+      built.context,
+      gateCtx.trustedSkills,
+    );
+    if (!roots.ok) return { verdict: "unknown", path: paths[0] };
+    const reserved = roots.value.reservedOmpState ?? [];
+    if (reserved.length === 0) return { verdict: "clear" };
+    for (const path of paths) {
+      const resolved = resolveSessionPath(path, built.context);
+      if (!resolved.ok) continue;
+      if (reserved.some((root) => isWithinRoot(resolved.value.normalizedPath, root))) {
+        return { verdict: "reserved", path };
+      }
+      const observed = await resolveFilesystemTarget(resolved.value, roots.value, "existing-any");
+      if (!observed.ok && observed.reason === "reserved_native_state") {
+        return { verdict: "reserved", path };
+      }
+    }
+    return { verdict: "clear" };
+  }
+
   async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
@@ -686,6 +930,41 @@ export class ChatbotClient implements acp.Client {
     const kind = params.toolCall.kind ?? "unknown";
     const rawInput = params.toolCall.rawInput as Record<string, unknown> | undefined;
     const locations = params.toolCall.locations ?? [];
+
+    // Reserved OMP native state is decided BEFORE every approval shortcut below
+    // (YOLO blanket approval, registered-skill approval, read admission,
+    // edit/write evaluation), so no shortcut can authorize a callback mutation
+    // of a current or sibling artifact, journal or other native state (D3).
+    // Native command execution keeps its own unchanged path and is excluded.
+    const ompState = this.gateCtx(params.sessionId)?.ompNativeState;
+    const isCommandExecution = kind === "execute" || title === "bash" || title === "terminal";
+    if (ompState !== undefined && !isCommandExecution) {
+      const verdict = await this.ompReservedStateVerdict(params.sessionId, [
+        ...locations.flatMap((location) => location.path ? [location.path] : []),
+        ...this.collectOmpGuardPaths(rawInput),
+      ]);
+      if (verdict.verdict !== "clear") {
+        this.logger.warn("Rejecting request against OMP native state: {path} ({verdict})", {
+          path: verdict.path,
+          verdict: verdict.verdict,
+        });
+        void this.writePermissionAudit(
+          "permission_denied",
+          title,
+          kind,
+          sanitizeRejectionField(verdict.path),
+          "rejected_omp_native_state",
+        );
+        this.recordPermissionRejection(title, kind, verdict.path, "rejected_omp_native_state");
+        // Never select an arbitrary option here: an approval option must not be
+        // reachable through the reserved-state branch, and an unavailable
+        // reject option cancels instead.
+        const rejecting = params.options.find((o) => o.kind === "reject_once");
+        return rejecting
+          ? { outcome: { outcome: "selected", optionId: rejecting.optionId } }
+          : { outcome: { outcome: "cancelled" } };
+      }
+    }
 
     // Log external directory access requests
     if (title === "external_directory" || (kind === "other" && title.includes("directory"))) {
@@ -762,7 +1041,11 @@ export class ChatbotClient implements acp.Client {
       if (builtCtxRes.ok && gateCtx?.trustedSkills) {
         const sessionContext = builtCtxRes.context;
         const checkAllLocations = async () => {
-          const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx.trustedSkills);
+          const rootsRes = await this.observeFilesystemRoots(
+            params.sessionId,
+            sessionContext,
+            gateCtx.trustedSkills,
+          );
           if (!rootsRes.ok) return false;
           const roots = rootsRes.value;
 
@@ -1129,7 +1412,11 @@ export class ChatbotClient implements acp.Client {
         }
 
         const sessionContext = builtCtxRes.context;
-        const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx?.trustedSkills);
+        const rootsRes = await this.observeFilesystemRoots(
+          params.sessionId,
+          sessionContext,
+          gateCtx?.trustedSkills,
+        );
         if (!rootsRes.ok) {
           const mapped = mapRootPathFailureToDenial(rootsRes.reason, true);
           return { approved: false, reason: mapped, failingPath: paths.join(", ") };
@@ -1493,7 +1780,11 @@ export class ChatbotClient implements acp.Client {
       this.rejectFilesystemRequest("readTextFile", params.path, denialReason);
     }
 
-    const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx?.trustedSkills);
+    const rootsRes = await this.observeFilesystemRoots(
+      params.sessionId,
+      sessionContext,
+      gateCtx?.trustedSkills,
+    );
     if (!rootsRes.ok) {
       const denialReason = mapRootPathFailureToDenial(rootsRes.reason, false);
       this.rejectFilesystemRequest(
@@ -1540,6 +1831,18 @@ export class ChatbotClient implements acp.Client {
       roots: rootsRes.value,
       target: targetRes.value,
       selectedRole: authRes.role,
+      // Current-session OMP artifacts re-verify the proven journal and its
+      // parent at the protected-opening boundary, so a journal or ancestor
+      // replaced after observation cannot authorize the read (D4).
+      ompAnchor: authRes.role === "omp-session-artifacts" &&
+          sessionContext.ompNativeState?.artifacts !== undefined
+        ? {
+          anchorPath: sessionContext.ompNativeState.artifacts.anchorDirectory,
+          anchorIdentity: sessionContext.ompNativeState.artifacts.anchorIdentity,
+          journalName: basename(sessionContext.ompNativeState.artifacts.journalPath),
+          journalIdentity: sessionContext.ompNativeState.artifacts.journalIdentity,
+        }
+        : undefined,
       nativeCalls: this.config.nativeCalls,
     });
     if (!readRes.ok) {
@@ -1580,7 +1883,11 @@ export class ChatbotClient implements acp.Client {
       this.rejectFilesystemRequest("writeTextFile", params.path, denialReason);
     }
 
-    const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx?.trustedSkills);
+    const rootsRes = await this.observeFilesystemRoots(
+      params.sessionId,
+      sessionContext,
+      gateCtx?.trustedSkills,
+    );
     if (!rootsRes.ok) {
       const denialReason = mapRootPathFailureToDenial(rootsRes.reason, true);
       this.rejectFilesystemRequest(
