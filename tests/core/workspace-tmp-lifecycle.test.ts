@@ -770,3 +770,36 @@ Deno.test("reclaimOrphanTmpDirs - an unreadable workspace root is reported inste
     assertEquals(report.skipped, 1);
   });
 });
+
+Deno.test("reclaimOrphanTmpDirs - a root that cannot be enumerated is reported, not a silent zero", async () => {
+  await withWorkspaceRoot(async ({ repoPath, manager }) => {
+    const workspacesRoot = join(repoPath, "workspaces");
+    Deno.mkdirSync(join(workspacesRoot, "discord", "u1", "tmp"), { recursive: true });
+    writeFixture(join(workspacesRoot, "discord", "u1", "tmp", "orphan.txt"), "orphan");
+
+    const originalReadDirSync = Deno.readDirSync;
+    Deno.readDirSync = ((path: string | URL) => {
+      // The root is inspectable and resolvable, but its enumeration fails: the
+      // pass must report the skip instead of claiming it visited nothing.
+      if (String(path) === workspacesRoot) {
+        throw new Deno.errors.PermissionDenied("mock eacces");
+      }
+      return originalReadDirSync(path);
+    }) as typeof Deno.readDirSync;
+    let report;
+    try {
+      report = await manager.reclaimOrphanTmpDirs();
+    } finally {
+      Deno.readDirSync = originalReadDirSync;
+    }
+
+    assertEquals(report.workspaces, 0);
+    assertEquals(report.removed, 0);
+    assertEquals(report.skipped, 1);
+    // Nothing was touched, so a later pass can still reclaim the orphan.
+    assertEquals(
+      Deno.readTextFileSync(join(workspacesRoot, "discord", "u1", "tmp", "orphan.txt")),
+      "orphan",
+    );
+  });
+});
