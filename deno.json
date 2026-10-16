@@ -31,12 +31,16 @@
     "dev": "deno run --watch --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts",
     "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts",
     "start:config": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --config",
-    "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --parallel",
+    // `--parallel` is deliberately NOT used: Deno runs parallel test modules in one process, so
+    // `Deno.env` mutations leak between concurrently running files. The env-override tests set
+    // and restore process-global variables, so a neighbour could observe a transient value and
+    // fail on an unrelated assertion (observed on config-loader, scripts and agent-factory-omp).
+    "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi",
     "test:watch": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --watch",
     "test:coverage": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --coverage=coverage",
     "coverage:report": "deno coverage coverage --exclude='tests/'",
     "test:coverage:lcov": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --coverage=coverage && deno coverage coverage --lcov --output=coverage.lcov --exclude='tests/'",
-    "test:unit": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --parallel tests/ --ignore=tests/integration",
+    "test:unit": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi tests/ --ignore=tests/integration",
     "test:integration": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi tests/integration",
     "ci": "deno task fmt:check && deno task lint && deno task check && deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi",
     "fmt": "deno fmt src/ tests/",

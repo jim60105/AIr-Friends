@@ -1458,6 +1458,7 @@ log line per token. Buffering is unaffected: chunks still accumulate in
 - Unit tests: `{module}.test.ts`
 - Integration tests: `{feature}.integration.test.ts`
 - Use `Deno.test()` with `@std/assert`
+- Tests run one module at a time: `deno task test` and `deno task test:unit` deliberately pass no `--parallel`, because Deno shares `Deno.env` between parallel modules and the environment-override tests would observe another module's transient variables
 - **Test coverage MUST be over 75%** — CI enforces this threshold; PRs below 75% coverage will fail
 
 ```typescript
