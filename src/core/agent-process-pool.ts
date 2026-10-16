@@ -16,7 +16,10 @@
 import { createLogger } from "@utils/logger.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { AgentConnectorOptions, AgentType } from "@acp/types.ts";
-import { ompXdgDataHome } from "@utils/omp-paths.ts";
+import {
+  ompNativeCacheForbiddenRoots,
+  prepareOmpNativeCacheRoot,
+} from "@utils/omp-native-cache.ts";
 import {
   deleteSessionJwtFile,
   issueSessionJwtFile,
@@ -491,9 +494,16 @@ export class AgentProcessPool {
     if (agentType === "omp") {
       const baseRoot = resolve(join(dataRoot, "omp-pools", poolKey));
       // Native OMP redirects its data directory to `$XDG_DATA_HOME/omp`, so the
-      // application child (not just its parent) must exist before spawn.
-      await Deno.mkdir(resolve(join(ompXdgDataHome(baseRoot, permissionMode), "omp")), {
-        recursive: true,
+      // application child (not just its parent) must exist before spawn, and its
+      // reserved `natives` entry must be linked to the ONE shared prepared native
+      // payload. The SAME helper the per-spawn factory path uses performs both, so
+      // the pooled shape can never fall back to a channel-local extraction. The
+      // factory normally already prepared this root; the call is idempotent.
+      prepareOmpNativeCacheRoot({
+        baseRoot,
+        mode: permissionMode,
+        selection: this.config.agent?.ompNativeCache,
+        forbiddenRoots: ompNativeCacheForbiddenRoots(this.config.workspace),
       });
       // Pooled OMP processes share the pooled TMPDIR convention with OpenCode.
       await Deno.mkdir(resolve(join(dataRoot, "channel-tmp", poolKey)), { recursive: true });

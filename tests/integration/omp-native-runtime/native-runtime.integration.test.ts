@@ -71,6 +71,16 @@ import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { resolveOmpExtensionPath } from "@utils/omp-paths.ts";
+import {
+  OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
+  OMP_NATIVE_CACHE_VERSION,
+  ompNativeCacheDescriptor,
+  ompNativeCacheExpectedAddons,
+  ompNativeCachePlatform,
+  type OmpNativeCacheSelection,
+  serializeOmpNativeCacheManifest,
+} from "@utils/omp-native-cache.ts";
+import { prepareOmpNativeCache, resolveOnPath } from "../../../scripts/omp/prepare-native-cache.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
 import type { ChatbotClient } from "@acp/client.ts";
@@ -608,6 +618,47 @@ const NATIVE_MODES = ["restricted", "native-yolo"] as const;
 /** The mode type (one of the two shipped launch modes). */
 type NativeMode = typeof NATIVE_MODES[number];
 
+/**
+ * Provide the fixture's shared native payload.
+ *
+ * With the pinned executable present (acceptance mode) the payload is produced by the SAME
+ * entry a deployment runs, from the PINNED bytes, so the launch consumes a real prepared
+ * payload rather than a stand-in. Without it this fixture would be unusable for the ungated
+ * factory test, so a synthetic payload — explicitly labelled as a fixture, and never cited as
+ * native evidence — is written instead.
+ */
+async function provisionNativeCache(cacheBase: string): Promise<OmpNativeCacheSelection> {
+  const platform = ompNativeCachePlatform();
+  if (PINNED_BINARY_READY) {
+    const executable = resolveOnPath("omp");
+    assert(executable !== undefined, "the pinned omp executable resolves on PATH");
+    const result = await prepareOmpNativeCache({
+      executable,
+      cacheBase,
+      platform,
+      timeoutMs: 300_000,
+    });
+    return { installRoot: result.installRoot, launchExecutableVersion: OMP_NATIVE_CACHE_VERSION };
+  }
+  const cache = ompNativeCacheDescriptor(cacheBase, platform, "development");
+  const { exact } = ompNativeCacheExpectedAddons(platform);
+  const names = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
+  await Deno.mkdir(cache.versionDir, { recursive: true });
+  for (const name of names) {
+    await Deno.writeTextFile(join(cache.versionDir, name), "fixture-native-payload");
+  }
+  await Deno.writeTextFile(
+    cache.manifestPath,
+    serializeOmpNativeCacheManifest({
+      version: OMP_NATIVE_CACHE_VERSION,
+      platform,
+      executableSha256: OMP_NATIVE_CACHE_EXECUTABLE_SHA256[platform],
+      files: names.map((name) => ({ name, size: "fixture-native-payload".length })),
+    }),
+  );
+  return { installRoot: cache.installRoot, launchExecutableVersion: OMP_NATIVE_CACHE_VERSION };
+}
+
 /** One provisioned native leg environment. */
 interface NativeFixture {
   /** Temporary deployment root; also the `workspace.repoPath` used by the config. */
@@ -622,6 +673,14 @@ interface NativeFixture {
    * the external-directory read route and the denied bash command observable.
    */
   readonly externalFile: string;
+  /**
+   * The shared OMP native runtime payload this fixture's launch consumes, selected
+   * through the documented `agent.ompNativeCache` seam. An acceptance leg prepares it with
+   * the PINNED executable (`prepare:omp-natives`), exactly as a deployment does; without a
+   * pinned binary the fixture provisions a synthetic payload so the ungated factory test can
+   * still build the production configuration.
+   */
+  readonly nativeCache: OmpNativeCacheSelection;
 }
 
 /** One leg's workspace paths, all derived from one spelling. */
@@ -669,6 +728,9 @@ async function withNativeFixture(run: (fixture: NativeFixture) => Promise<void>)
   // shared agent workspace nor the trusted skills root authorizes this path.
   const externalRoot = await Deno.makeTempDir({ prefix: "air-omp-external-read-" });
   const externalFile = join(externalRoot, "external.md");
+  // The prepared native payload also lives OUTSIDE `root`, where the deployment's own cache
+  // location guard requires it (a canonical cache inside the data root is refused).
+  const cacheBase = await Deno.makeTempDir({ prefix: "air-omp-native-cache-" });
   const previousHome = Deno.env.get("HOME");
   try {
     const home = join(root, "home");
@@ -695,12 +757,14 @@ async function withNativeFixture(run: (fixture: NativeFixture) => Promise<void>)
     }
 
     Deno.env.set("HOME", home);
-    await run({ root, home, skillsRoot, externalFile });
+    const nativeCache = await provisionNativeCache(cacheBase);
+    await run({ root, home, skillsRoot, externalFile, nativeCache });
   } finally {
     if (previousHome === undefined) Deno.env.delete("HOME");
     else Deno.env.set("HOME", previousHome);
     await Deno.remove(root, { recursive: true }).catch(() => {});
     await Deno.remove(externalRoot, { recursive: true }).catch(() => {});
+    await Deno.remove(cacheBase, { recursive: true }).catch(() => {});
   }
 }
 
@@ -721,6 +785,10 @@ function legConfig(fixture: NativeFixture): Config {
       tokenLimit: 20_000,
       systemPromptPath: join(REPO_ROOT, "prompts/system_reply.md"),
       skillsDir: fixture.skillsRoot,
+      // The shared native runtime payload this fixture provisioned, selected through the
+      // documented seam: the launch consumes one prepared payload instead of letting the
+      // loader extract a channel-local copy.
+      ompNativeCache: fixture.nativeCache,
       idleTimeout: { enabled: false, timeoutMs: 300_000, checkIntervalMs: 30_000 },
       sandbox: {
         filterEnv: true,

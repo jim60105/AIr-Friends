@@ -24,6 +24,14 @@ import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
 import { HealthCheckServer } from "../../src/healthcheck.ts";
 import type { Config } from "../../src/types/config.ts";
 import {
+  OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
+  OMP_NATIVE_CACHE_VERSION,
+  ompNativeCacheDescriptor,
+  ompNativeCacheExpectedAddons,
+  ompNativeCachePlatform,
+  serializeOmpNativeCacheManifest,
+} from "../../src/utils/omp-native-cache.ts";
+import {
   resetSandboxCapabilityCache,
   setSandboxCapabilityCacheForTest,
 } from "../../src/acp/sandbox-capabilities.ts";
@@ -192,15 +200,46 @@ Deno.test("wiring identity - per-spawn and pooled connectors resolve the identic
   // One deployment configuration used by a per-spawn connector and by a pooled
   // connector must yield a byte-identical root for either agent type, and the
   // resolution must not read a per-session value to select one.
-  const config = makeConfig({ skillsDir: REPO_SKILLS_ROOT });
+  // The `omp` factory hard-requires the shared prepared native payload, so this
+  // suite supplies one over the internal selection seam (a real temporary tree,
+  // no OMP process and no installed image).
+  const nativeCacheRoot = Deno.makeTempDirSync();
+  // A per-run deployment root: the mode roots carry the reserved `natives` link, so a
+  // shared fixed path would make a second run refuse the previous run's link.
+  const deploymentRoot = Deno.makeTempDirSync();
+  const workingDir = `${deploymentRoot}/workspace`;
+  Deno.mkdirSync(workingDir, { recursive: true });
+  const platform = ompNativeCachePlatform();
+  const cache = ompNativeCacheDescriptor(nativeCacheRoot, platform, "development");
+  const { exact } = ompNativeCacheExpectedAddons(platform);
+  const addonNames = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
+  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  for (const name of addonNames) Deno.writeTextFileSync(`${cache.versionDir}/${name}`, "fixture");
+  Deno.writeTextFileSync(
+    cache.manifestPath,
+    serializeOmpNativeCacheManifest({
+      version: OMP_NATIVE_CACHE_VERSION,
+      platform,
+      executableSha256: OMP_NATIVE_CACHE_EXECUTABLE_SHA256[platform],
+      files: addonNames.map((name) => ({ name, size: "fixture".length })),
+    }),
+  );
+  const config = makeConfig({
+    skillsDir: REPO_SKILLS_ROOT,
+    ompNativeCache: {
+      installRoot: cache.installRoot,
+      launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
+    },
+  });
+  config.workspace.repoPath = deploymentRoot;
   const original = Deno.env.get("SESSION_ID");
   Deno.env.set("SESSION_ID", "sess_must_not_select_a_root");
   try {
     for (const agentType of ["opencode", "omp"] as const) {
-      const perSpawn = createAgentConfig(agentType, "/tmp/test/workspace", config);
+      const perSpawn = createAgentConfig(agentType, workingDir, config);
       const pooled = createAgentConfig(
         agentType,
-        "/tmp/test/workspace",
+        workingDir,
         config,
         false,
         undefined,
@@ -214,6 +253,8 @@ Deno.test("wiring identity - per-spawn and pooled connectors resolve the identic
   } finally {
     if (original === undefined) Deno.env.delete("SESSION_ID");
     else Deno.env.set("SESSION_ID", original);
+    Deno.removeSync(nativeCacheRoot, { recursive: true });
+    Deno.removeSync(deploymentRoot, { recursive: true });
   }
 });
 

@@ -116,7 +116,7 @@ The reserved-runtime-cache policy SHALL be the only narrowing of normal staging.
 
 ### Requirement: Data directory .gitignore is operator-owned
 
-The service SHALL NOT create, overwrite, or modify the `.gitignore` file in the data directory during initialization or backup, and SHALL NOT manipulate the git index to untrack files on the assumption of generated ignore rules. The reserved runtime-cache policy is the sole named exception and SHALL NOT be used to untrack files because of generated ignore rules. Whatever `.gitignore` the operator provides (via clone or manual creation) SHALL remain byte-identical across any number of backup cycles.
+The service SHALL NOT create, overwrite, or modify the `.gitignore` file in the data directory during initialization or backup, and SHALL NOT manipulate the git index to untrack files on the assumption of generated ignore rules. The reserved runtime-cache policy is the sole exception and SHALL NOT untrack files for generated ignore rules. Whatever `.gitignore` the operator provides (via clone or manual creation) SHALL remain byte-identical across any number of backup cycles.
 
 #### Scenario: Operator .gitignore survives initialization and backup
 - **GIVEN** the data directory contains an operator-authored `.gitignore` with custom rules

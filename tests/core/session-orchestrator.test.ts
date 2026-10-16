@@ -21,6 +21,7 @@ import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { ClientConfig } from "../../src/acp/types.ts";
 import type { PermissionRejection } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
+import { mockOmpNativeCache } from "../mocks/omp-mock-session.ts";
 import { GateContextRestoreError, RecoveryHookError } from "../../src/acp/agent-connector.ts";
 import { RecoveryOwnershipError } from "../../src/acp/recovery-ownership.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
@@ -107,6 +108,9 @@ function createTestConfig(tempDir: string): Config {
       systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
       defaultAgentType: "opencode",
+      // Suites that switch this config to `omp` need the ONE shared prepared native payload
+      // the shipped factory requires before spawning; this is the synthetic mock fixture.
+      ompNativeCache: mockOmpNativeCache(),
     },
     memory: {
       recentMessageLimit: 20,

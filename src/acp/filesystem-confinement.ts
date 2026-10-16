@@ -73,6 +73,14 @@ export interface BwrapConfinementOptions {
   /** Read-write runtime paths. Defaults to {@link DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS}. */
   writableRuntimePaths?: readonly string[];
   /**
+   * The selected shared OMP native payload subtrees. Each is bound at its LITERAL
+   * spelling as a HARD `--ro-bind` (never `-try`) as the very LAST mount, after
+   * every writable bind, every mode-parent shadow and the skill root — so a
+   * vanished source fails the launch instead of degrading into a dangling link,
+   * and no earlier writable bind can widen the payload. Absent for OpenCode.
+   */
+  payloadReadOnlyPaths?: readonly string[];
+  /**
    * Per-launch runtime paths that must end up READ-ONLY even when a mandatory
    * writable mount covers an ancestor (session workspace / TMPDIR / shared
    * agent workspace). Emitted AFTER every writable bind, so the last bind wins
@@ -154,18 +162,19 @@ export function buildBwrapConfinement(
   // read-only mount where the permission layer still reports the grant. A root
   // merely DESCENDING from a writable mount is legitimate (development repo
   // layouts) and is mounted read-only AFTER that parent below.
+  const mandatoryWritables: string[] = [
+    opts.sessionWorkspace,
+    opts.tmpDir,
+    ...writableRuntime,
+    // The per-launch writable inputs are bound LATE, but they are writable
+    // mounts all the same: a skill root that equals or contains one of them
+    // would be re-bound read-only over a writable state tree, so it must be
+    // refused here exactly like every other mandatory writable.
+    ...(opts.runtimeWritablePaths ?? []),
+  ];
+  if (opts.agentWorkspace) mandatoryWritables.push(opts.agentWorkspace);
+
   if (opts.skillRoot !== undefined) {
-    const mandatoryWritables: string[] = [
-      opts.sessionWorkspace,
-      opts.tmpDir,
-      ...writableRuntime,
-      // The per-launch writable inputs are bound LATE, but they are writable
-      // mounts all the same: a skill root that equals or contains one of them
-      // would be re-bound read-only over a writable state tree, so it must be
-      // refused here exactly like every other mandatory writable.
-      ...(opts.runtimeWritablePaths ?? []),
-    ];
-    if (opts.agentWorkspace) mandatoryWritables.push(opts.agentWorkspace);
     for (const writable of mandatoryWritables) {
       // Equal root OR the writable (physically) inside the root — compared on
       // BOTH spellings so a symlinked writable alias to the skill tree cannot
@@ -181,6 +190,33 @@ export function buildBwrapConfinement(
           `Skill root "${opts.skillRoot}" equals or contains mandatory writable mount ` +
             `"${writable}" (canonical: "${canonicalWritable}") — an agent-writable skill ` +
             "root is refused before spawn",
+        );
+      }
+    }
+  }
+
+  // The shared native payload is re-bound read-only as the LAST mount, so a
+  // writable ANCESTOR of the payload is safe (the payload's own literal bind
+  // wins) — that is exactly the documented development case of the HOME cache.
+  // What is never safe is a writable that *physically* resolves to the payload,
+  // or an alias spelling of one, because the later `--ro-bind` names the
+  // payload's literal path only and would leave the alias writable; nor a
+  // writable nested INSIDE the payload, which would silently hole it.
+  for (const payload of opts.payloadReadOnlyPaths ?? []) {
+    const canonicalPayload = canonicalSource(payload);
+    for (const writable of mandatoryWritables) {
+      const canonicalWritable = canonicalSource(writable);
+      const aliasOfPayload = (containsPath(canonicalWritable, canonicalPayload) ||
+        canonicalWritable === canonicalPayload) &&
+        !(containsPath(writable, payload) || writable === payload);
+      const nestedInPayload = containsPath(canonicalPayload, canonicalWritable) ||
+        containsPath(payload, writable);
+      if (aliasOfPayload || nestedInPayload) {
+        throw new Error(
+          `Shared native payload "${payload}" (canonical: "${canonicalPayload}") overlaps ` +
+            `mandatory writable mount "${writable}" (canonical: "${canonicalWritable}") — an ` +
+            "agent-writable alias or nested path would expose the shared payload read-write; " +
+            "refused before spawn",
         );
       }
     }
@@ -240,6 +276,18 @@ export function buildBwrapConfinement(
   // inventory, rechecking root identity, already denies).
   if (opts.skillRoot !== undefined) {
     a.push("--ro-bind-try", opts.skillRoot, opts.skillRoot);
+  }
+
+  // The shared OMP native payload, read-only at its LITERAL link-target
+  // spelling and applied ABSOLUTELY LAST: after every writable bind (so a
+  // writable ancestor such as the development HOME cache cannot widen it), after
+  // the mode-parent tmpfs shadow, after the per-launch writable child re-bind
+  // (which restores the path the `natives` link resolves through), and after the
+  // skill root. A plain `--ro-bind` is deliberate: a vanished source must FAIL
+  // the launch rather than degrade into a dangling link surfaced later as an
+  // opaque loader error.
+  for (const payload of opts.payloadReadOnlyPaths ?? []) {
+    a.push("--ro-bind", payload, payload);
   }
 
   a.push("--", command, ...args);

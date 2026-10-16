@@ -28,6 +28,7 @@ ACP 引擎依部署型態需要不同的先決條件。
 | **OMP 模型清單 (`models.yml`)** | 預先安裝至 `/home/deno/.omp/agent/models.yml` | 須手動建立於 `$HOME/.omp/agent/models.yml`，且模型 ID 須對齊 OMP 格式 |
 | **技能目錄 (`skills.customDirectories`)**| 指向單一共用根目錄 `/home/deno/.agents/skills/` | 在 OMP 模式檔與 `AGENT_SKILLS_DIR` 明確配置相同的技能目錄路徑 |
 | **OMP 擴充套件 Bundle** | 映像檔建置時自動產生於 `/opt/air/omp/extension/index.js` | 開發環境使用產生的 `build/omp-extension/index.js` |
+| **OMP 原生執行階段快取** | 映像檔建置時自動準備於 `/opt/air/omp/native-cache/{platform}/natives/18.6.1/`（OMP 啟動的硬性先決條件） | 須以固定版本執行檔執行 `deno task prepare:omp-natives`，預設輸出於 `${XDG_CACHE_HOME:-$HOME/.cache}/air-friends/omp/{platform}/natives/18.6.1/` |
 | **LSP 阻絕政策** | 映像檔模式檔已設定 `tools.approval.lsp: deny` | 手寫模式檔必須在受限與 YOLO 模式中明確宣告 LSP 拒絕 |
 
 ---
@@ -51,6 +52,29 @@ OMP 子行程採用繼承之 HOME 環境，但沙盒環境下僅會轉發核可�
 ### 雙模式 LSP 工具阻絕
 
 在受限模式與原生 YOLO 模式下，皆透過模式檔中精確命名的 `tools.approval.lsp: deny` 阻擋 LSP 工具呼叫，但這屬於工具審查層面，不代表能完全壓制原生語言伺服器的內部隱式啟動。
+
+---
+
+## 共用原生執行階段快取準備 (`prepare:omp-natives`)
+
+OMP 的原生載入器會把內嵌的原生附加檔（native addons，單一平台約 380 MB）解壓縮到 `$XDG_DATA_HOME/omp/natives/{version}`。AIr-Friends 改為準備**單一共用原生內容**（payload），讓所有模式、pool 與每次啟動的根目錄以符號連結共用同一份位元組。這份原生內容是 OMP 啟動的**硬性先決條件**，缺少、不完整或身分不符時，啟動階段會直接失敗並附上準備指令，不會退回由載入器自行解壓縮。
+
+映像檔建置時，`Containerfile` 的 `omp-unpacker` 階段會在執行檔雜湊校驗完成後自動執行同一支準備程式，並以專案既有的 `$UID:0`／775 慣例安裝到 `/opt/air/omp/native-cache/{platform}/natives/18.6.1/`；`{platform}` 為 `linux-x64` 或 `linux-arm64`，映像檔只包含自身目標平台的那一份。本機開發或自訂主機部署則需手動執行：
+
+```bash
+# 建置受信任原生擴充套件 Bundle（映像檔建置時自動執行相同步驟）
+deno task bundle:omp-extension
+
+# 準備共用的 OMP 原生執行階段快取
+# 預設輸出：${XDG_CACHE_HOME:-$HOME/.cache}/air-friends/omp/{platform}/natives/18.6.1/
+deno task prepare:omp-natives
+```
+
+`prepare:omp-natives` 預設解析 `$PATH` 上的 `omp` 執行檔，也可以 `--executable <path>` 明確指定。準備程式要求執行檔版本恰為固定的 `18.6.1`（快取身分取自版本固定值，`AGENT_OMP_MIN_VERSION` 不影響快取身分）、驗證該平台官方執行檔的 SHA-256，接著以拋棄式的 HOME／工作目錄與既有的臨時 `XDG_DATA_HOME/omp` 執行一次有界的 ACP `initialize` 交握，最後只發布原生子樹與其附帶的 `native-manifest.json` 清單檔；探測過程產生的資料庫、HOME 與工作階段一律丟棄。
+
+準備流程為獨占且不可分割（同檔案系統暫存目錄加原子更名），所以**變更已發布的原生內容前必須先停止部署**，完成後再啟動。目的地若已是完整且相符的原生內容，會經驗證後直接沿用而不重寫；不完整的既有目的地則明確失敗，不會被覆蓋。
+
+此外，若既有根目錄的 `omp/natives` 項目已是**實體目錄**（舊版 OMP 在該根目錄自行解壓縮的殘留），系統不會追隨或自動清除它，而是在產生代理人之前以「項目被佔用」的診斷失敗，訊息同時給出精確路徑與移除操作範例。維運者必須先手動清除該目錄，OMP 工作階段才能恢復；本專案不提供自動清理或搬移。
 
 ---
 

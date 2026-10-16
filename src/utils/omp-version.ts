@@ -30,6 +30,24 @@ export const OMP_VERSION_CHECK_TIMEOUT_MS = 5000;
 const logger = createLogger("OmpVersionCheck");
 
 /**
+ * The most recent `omp --version` observation for this process, recorded by
+ * {@link verifyOmpVersion}. `undefined` means no probe has run; `null` means the probe was
+ * undeterminable (no binary, spawn failure, timeout). The native-runtime cache preflight
+ * consumes this WITHOUT inheriting the compatibility verdict: a determinable value must
+ * equal the pinned cache version exactly, while `undefined`/`null` simply means the
+ * preflight falls through to its own payload identity check rather than failing fatally.
+ *
+ * This keeps the "one probe per lifetime" property: bootstrap observes the binary once and
+ * every later cache preflight reuses that observation instead of spawning again.
+ */
+let memoizedProbe: string | null | undefined = undefined;
+
+/** The recorded `omp --version` observation, or `undefined` when no probe has run yet. */
+export function getMemoizedOmpVersionProbe(): string | null | undefined {
+  return memoizedProbe;
+}
+
+/**
  * Result of the bootstrap version check.
  * - "ok": detected version >= minimum
  * - "below_minimum": detected version parses and is below the minimum
@@ -178,6 +196,7 @@ export async function verifyOmpVersion(
     // Spawn failures (command not found, permission errors) degrade to UNKNOWN.
     detected = null;
   }
+  memoizedProbe = detected;
 
   if (detected === null) {
     log.warn(

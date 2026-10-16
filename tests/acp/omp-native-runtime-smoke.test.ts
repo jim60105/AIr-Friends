@@ -49,6 +49,15 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { ompXdgDataHome } from "@utils/omp-paths.ts";
+import {
+  OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
+  OMP_NATIVE_CACHE_VERSION,
+  type OmpNativeCache,
+  ompNativeCacheDescriptor,
+  ompNativeCacheExpectedAddons,
+  ompNativeCachePlatform,
+  serializeOmpNativeCacheManifest,
+} from "@utils/omp-native-cache.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import type { AgentConfig, AgentConnectorOptions } from "@acp/types.ts";
 import type { Config, SandboxConfig } from "../../src/types/config.ts";
@@ -277,7 +286,60 @@ interface NativeFixture {
   readonly workspace: string;
   /** The ONE configured skill root, provisioned from tracked skill bytes. */
   readonly skillsRoot: string;
+  /**
+   * The synthetic-payload selection seam, present only for a `"synthetic"`
+   * fixture leg. The `"prepared"` legs leave it `undefined` so the shipped
+   * resolver selects the operator's real prepared payload.
+   */
+  readonly nativeCacheSelection?: {
+    readonly installRoot: string;
+    readonly launchExecutableVersion: string;
+  };
 }
+
+/**
+ * Write a COMPLETE stand-in native payload (never executed) so an ungated leg
+ * can drive the factory's cache preflight without an installed executable or a
+ * prepared cache. Byte content is irrelevant here: no OMP process is spawned.
+ */
+function writeSyntheticNativeCachePayload(base: string): OmpNativeCache {
+  const platform = ompNativeCachePlatform();
+  const cache = ompNativeCacheDescriptor(base, platform, "development");
+  const { exact } = ompNativeCacheExpectedAddons(platform);
+  // The arm64 requirement is a pattern (`pi_natives.*linux-arm64*.node`); this
+  // name satisfies it without a binary.
+  const names = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
+  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  const files = names.map((name) => {
+    const bytes = new TextEncoder().encode(`synthetic native stand-in ${name}`);
+    Deno.writeFileSync(join(cache.versionDir, name), bytes);
+    return { name, size: bytes.byteLength };
+  });
+  Deno.writeTextFileSync(
+    cache.manifestPath,
+    serializeOmpNativeCacheManifest({
+      version: OMP_NATIVE_CACHE_VERSION,
+      platform,
+      executableSha256: OMP_NATIVE_CACHE_EXECUTABLE_SHA256[platform],
+      files,
+    }),
+  );
+  return cache;
+}
+
+/**
+ * Which shared native payload a fixture leg consumes.
+ *
+ * - `"prepared"` (default, the gated native legs): expose the operator's
+ *   AMBIENT development cache through `XDG_CACHE_HOME`, so the shipped resolver
+ *   selects the REAL payload `deno task prepare:omp-natives` published (the
+ *   documented acceptance prerequisite) even though this fixture overrides HOME
+ *   to its own temporary tree.
+ * - `"synthetic"`: publish a complete stand-in payload under a temporary cache
+ *   OUTSIDE the fixture data root and hand back its selection seam, so the
+ *   ungated fixture leg never needs an installed executable or prepared cache.
+ */
+type FixtureNativeCache = "prepared" | "synthetic";
 
 /**
  * Provision the fixture boundary: temporary HOME + authored model bytes + the
@@ -285,9 +347,14 @@ interface NativeFixture {
  * factory inherits HOME and the confinement mounts the inherited HOME's native
  * model file). The parent environment is restored in `finally`.
  */
-async function withNativeFixture(run: (fixture: NativeFixture) => Promise<void>): Promise<void> {
+async function withNativeFixture(
+  run: (fixture: NativeFixture) => Promise<void>,
+  nativeCache: FixtureNativeCache = "prepared",
+): Promise<void> {
   const root = await Deno.makeTempDir({ prefix: "air-omp-native-runtime-" });
   const previousHome = Deno.env.get("HOME");
+  const previousCacheHome = Deno.env.get("XDG_CACHE_HOME");
+  let syntheticCacheRoot: string | undefined;
   try {
     const home = join(root, "home");
     const skillsRoot = join(home, ".agents", "skills");
@@ -309,10 +376,31 @@ async function withNativeFixture(run: (fixture: NativeFixture) => Promise<void>)
     );
 
     Deno.env.set("HOME", home);
-    await run({ root, home, workspace, skillsRoot });
+    let nativeCacheSelection: NativeFixture["nativeCacheSelection"];
+    if (nativeCache === "synthetic") {
+      syntheticCacheRoot = await Deno.makeTempDir({ prefix: "air-omp-native-cache-" });
+      const payload = writeSyntheticNativeCachePayload(syntheticCacheRoot);
+      Deno.env.set("XDG_CACHE_HOME", syntheticCacheRoot);
+      nativeCacheSelection = {
+        installRoot: payload.installRoot,
+        launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
+      };
+    } else {
+      // The ambient development cache base the documented preparation command
+      // writes to, captured BEFORE HOME was overridden.
+      const ambientBase = previousCacheHome?.trim() ||
+        join(previousHome ?? home, ".cache");
+      Deno.env.set("XDG_CACHE_HOME", ambientBase);
+    }
+    await run({ root, home, workspace, skillsRoot, nativeCacheSelection });
   } finally {
     if (previousHome === undefined) Deno.env.delete("HOME");
     else Deno.env.set("HOME", previousHome);
+    if (previousCacheHome === undefined) Deno.env.delete("XDG_CACHE_HOME");
+    else Deno.env.set("XDG_CACHE_HOME", previousCacheHome);
+    if (syntheticCacheRoot !== undefined) {
+      await Deno.remove(syntheticCacheRoot, { recursive: true }).catch(() => {});
+    }
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 }
@@ -799,6 +887,10 @@ Deno.test({
 
       // The configured root IS the provisioned root (one root for every consumer).
       const config = probeConfig(fixture, false);
+      // This leg runs without an installed executable or a prepared cache, so it
+      // consumes the fixture's complete stand-in payload through the documented
+      // internal selection seam (no OMP process is spawned here).
+      config.agent.ompNativeCache = fixture.nativeCacheSelection;
       assertEquals(config.agent.skillsDir, fixture.skillsRoot);
       const agentConfig = createAgentConfig("omp", fixture.workspace, config, false);
       assertEquals(agentConfig.skillsRoot?.root, observation.root);
@@ -822,7 +914,7 @@ Deno.test({
           `the fixture root gained unexpected entry ${entry.name}`,
         );
       }
-    });
+    }, "synthetic");
 
     // The parent environment is restored once the fixture boundary closes.
     assertEquals(Deno.env.get("HOME"), parentHome);
@@ -1077,6 +1169,130 @@ Deno.test({
           });
           await recordProcessTree(captured[captured.length - 1], recordedPids);
         }
+
+        // ── Per-spawn confined root ───────────────────────────────────────────
+        // The complementary launch shape: the per-spawn factory puts the mode
+        // data under the session TMPDIR and tmpfs-shadows its `omp-agent` parent.
+        // The payload's HARD ro bind is emitted LAST, after that shadow and after
+        // the late writable child re-bind that restores the path the `natives`
+        // link resolves through, so reading payload bytes through the link proves
+        // the shadow does not hide the payload binding (task 4.1).
+        const perSpawnCwd = join(fixture.root, "per-spawn-workspace");
+        await Deno.mkdir(join(perSpawnCwd, "tmp"), { recursive: true });
+        const perSpawnConfig = createAgentConfig("omp", perSpawnCwd, config, false);
+        const perSpawnMounts = perSpawnConfig.runtimeMounts;
+        assert(perSpawnMounts !== undefined, "the per-spawn factory exposes its runtime mounts");
+        const payloadDir = perSpawnMounts.payloadReadOnlyPaths?.[0];
+        assert(
+          payloadDir !== undefined,
+          "the per-spawn factory selects exactly one shared payload",
+        );
+        const perSpawnShadowedParent = join(perSpawnCwd, "tmp", "omp-agent");
+        const perSpawnLink = join(
+          ompXdgDataHome(join(perSpawnCwd, "tmp"), "restricted"),
+          "omp",
+          "natives",
+        );
+        assertEquals(
+          Deno.readLinkSync(perSpawnLink),
+          payloadDir,
+          "the per-spawn root's reserved entry links to the shared payload",
+        );
+        const perSpawnSiblingMarker = join(
+          perSpawnShadowedParent,
+          "native-yolo",
+          "xdg-data",
+          "omp",
+          "sibling-marker",
+        );
+        await Deno.mkdir(dirname(perSpawnSiblingMarker), { recursive: true });
+        const perSpawnSiblingSentinel = "per-spawn-sibling-sentinel";
+        await Deno.writeTextFile(perSpawnSiblingMarker, perSpawnSiblingSentinel);
+        assertEquals(
+          await Deno.readTextFile(perSpawnSiblingMarker),
+          perSpawnSiblingSentinel,
+        );
+
+        const payloadAddon = [...Deno.readDirSync(join(payloadDir, PINNED_OMP_VERSION))]
+          .map((entry) => entry.name)
+          .find((name) => name.endsWith(".node"));
+        assert(payloadAddon !== undefined, "the prepared payload holds a native addon");
+        const payloadFile = join(payloadDir, PINNED_OMP_VERSION, payloadAddon);
+        const payloadBytesBefore = await Deno.readFile(payloadFile);
+
+        const perSpawnScript = [
+          `cat '${join(perSpawnLink, PINNED_OMP_VERSION, payloadAddon)}' >/dev/null`,
+          'echo "payload_read_status=$?"',
+          `printf '%s' 'tampered' > '${
+            join(perSpawnLink, PINNED_OMP_VERSION, payloadAddon)
+          }' 2>/dev/null`,
+          'echo "payload_write_status=$?"',
+          `cat '${perSpawnSiblingMarker}' 2>/dev/null`,
+          'echo "sibling_read_status=$?"',
+        ].join("\n");
+        const perSpawnSpawn = new SandboxManager(probeSandbox(true)).buildSpawnOptions(
+          "omp",
+          "sh",
+          ["-c", perSpawnScript],
+          perSpawnConfig.env ?? {},
+          perSpawnCwd,
+          perSpawnConfig.skillsRoot,
+          perSpawnMounts,
+        );
+        assertEquals(perSpawnSpawn.command, "bwrap");
+        const perSpawnSeparator = perSpawnSpawn.args.indexOf("--");
+        assertEquals(
+          perSpawnSpawn.args.slice(perSpawnSeparator - 3, perSpawnSeparator),
+          ["--ro-bind", payloadDir, payloadDir],
+          "the payload is the hard-bound LAST mount of the per-spawn launch",
+        );
+        const perSpawnShadow = perSpawnSpawn.args.findIndex((arg, index) =>
+          arg === "--tmpfs" && perSpawnSpawn.args[index + 1] === perSpawnShadowedParent
+        );
+        assert(perSpawnShadow > -1, "the per-spawn mode parent is tmpfs-shadowed");
+        assert(perSpawnShadow < perSpawnSeparator - 3, "the shadow precedes the payload bind");
+        assertEquals(
+          perSpawnSpawn.args.some((arg, index) =>
+            arg === "--ro-bind-try" && perSpawnSpawn.args[index + 1] === payloadDir
+          ),
+          false,
+          "the payload is never bound through the lenient -try variant",
+        );
+
+        const perSpawnOutput = await new Deno.Command(perSpawnSpawn.command, {
+          args: perSpawnSpawn.args,
+          cwd: perSpawnSpawn.cwd,
+          env: perSpawnSpawn.env,
+          stdout: "piped",
+          stderr: "piped",
+        }).output();
+        assert(
+          perSpawnOutput.success,
+          `per-spawn confined control exited ${perSpawnOutput.code}: ${
+            new TextDecoder().decode(perSpawnOutput.stderr)
+          }`,
+        );
+        const perSpawnStatus = statusReader(new TextDecoder().decode(perSpawnOutput.stdout));
+        assertEquals(
+          perSpawnStatus("payload_read_status"),
+          0,
+          "the payload reads through the tmpfs-shadowed mode parent",
+        );
+        assertEquals(
+          perSpawnStatus("payload_write_status") !== 0,
+          true,
+          "the shared payload refuses writes from the confined view",
+        );
+        assertEquals(
+          perSpawnStatus("sibling_read_status") !== 0,
+          true,
+          "the per-spawn sibling mode's state stays hidden",
+        );
+        assertEquals(
+          await Deno.readFile(payloadFile),
+          payloadBytesBefore,
+          "the shared payload bytes stay unchanged",
+        );
 
         // ── Selected-root IO controls through the shipped mount policy ───────
         // The same real-bwrap controls the confinement suite uses, driven by the
