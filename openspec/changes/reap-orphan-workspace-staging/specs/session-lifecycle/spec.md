@@ -28,6 +28,12 @@ The system SHALL reclaim disposable entries inside recognized workspace temporar
 - **WHEN** another session's cleanup runs
 - **THEN** live temporary-use ownership SHALL prevent deletion until the producer and its tool children have completed teardown
 
+#### Scenario: Per-spawn background children retain files
+- **GIVEN** a per-spawn agent has a background tool child still using workspace temporary files
+- **WHEN** the owning session finishes
+- **THEN** cleanup SHALL wait for bounded child drain or confirmed termination before releasing its cleanup protection
+- **AND** a missing observation or surviving child SHALL retain an unreclaimable marker even if best-effort wrapper disconnect returns
+
 #### Scenario: Pooled completion waits for child release
 - **GIVEN** a pooled runner finishes while a tool child still uses a staged payload
 - **WHEN** the pool begins its existing child drain and pointer/JWT release
@@ -70,6 +76,12 @@ Cleanup SHALL visit only the configured recognized workspace layout and SHALL li
 - **WHEN** startup cleanup enumerates candidates
 - **THEN** it SHALL visit only actual temporary children of recognized user/channel workspace shapes
 - **AND** the channel container, unrelated nested directories, repository root and shared agent workspace SHALL NOT be deletion candidates
+
+#### Scenario: Dashboard protection depends on startup ordering
+- **GIVEN** dashboard chat uses its dedicated workspace without orchestrator temporary-use ownership
+- **WHEN** dashboard ingress starts or an unrelated orchestrator session tears down
+- **THEN** startup-wide reclamation SHALL already be finished and runtime teardown SHALL visit only the finishing orchestrator session's workspace
+- **AND** active dashboard temporary data SHALL NOT be swept by unrelated session cleanup
 
 #### Scenario: Links cannot redirect traversal
 - **WHEN** a platform/workspace/tmp component is linked or changes identity, or a disposable child is a symlink to outside data

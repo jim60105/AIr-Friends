@@ -7,7 +7,7 @@
 ## What Changes
 
 - Reuse one conservative temporary-entry cleanup policy at startup and normal session teardown, preserving native OMP `tmp/omp-agent` and OpenCode `tmp/opencode-data` state subtrees.
-- Run startup cleanup before any application session ingress, including dashboard chat, platform events and schedulers.
+- Run startup cleanup after core construction but before session-producing ingress, including dashboard chat, platform events and schedulers; the empty-registry Skill API listener cannot create sessions.
 - Track workspace temporary-use lifetime independently of Skill API authentication expiry, from before workspace creation until agent/child teardown completes; reclaim only an idle workspace.
 - Visit the configured workspace layout only, never pooled state, shared runtime payloads, memory files or the shared agent workspace; skip unsafe filesystem entries and retain failures for a later lifecycle pass.
 
@@ -20,10 +20,11 @@ None.
 ### Modified Capabilities
 
 - `session-lifecycle`: bounded orphan temporary-data reclamation with live-use and resumable-state preservation.
+- `workspace-trust-boundary`: replace the existing whole-`tmp` session-end deletion requirement with state-preserving entry cleanup and independent live-use protection.
 
 ## Impact
 
-Changes workspace-manager cleanup/discovery, session-orchestrator ownership and existing teardown callsites, process-pool result settlement after child drain, bootstrap ordering, focused lifecycle/workspace/pool/bootstrap tests and ACP engine documentation. Existing cleanup tests that expect removal of the entire `tmp` root become entry-level cleanup tests. No new scheduler, age/retention configuration, database, migration, multi-instance coordination platform or image-generation work. The work is a single engineer-day focused on the existing single-bot workspace lifecycle.
+Changes workspace-manager cleanup/discovery, session-orchestrator ownership and existing teardown callsites, reuse of bounded child drain for per-spawn teardown, process-pool result settlement after child drain, bootstrap ordering, focused lifecycle/workspace/pool/bootstrap tests and ACP engine documentation. Existing cleanup tests that expect removal of the entire `tmp` root become entry-level cleanup tests. No new scheduler, age/retention configuration, database, migration, multi-instance coordination platform or image-generation work. The work is a single engineer-day focused on the existing single-bot workspace lifecycle.
 
 ## Batch:
 
