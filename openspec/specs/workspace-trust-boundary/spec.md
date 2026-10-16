@@ -3,7 +3,9 @@
 ## Purpose
 
 Defines per-user workspace isolation, session lifecycle, and cross-workspace access prevention. Each user gets a dedicated filesystem workspace keyed by platform and user ID, ensuring memory and file isolation across users.
+
 ## Requirements
+
 ### Requirement: Workspace Key Generation
 
 The system SHALL compute workspace keys using the format `{platform}/{user_id}`, where `platform` is the normalized platform name (e.g., `"discord"`, `"misskey"`) and `user_id` is the platform-specific user identifier. The workspace key SHALL be per-user, not per-channel — the same user shares one workspace across all channels and threads.
@@ -119,25 +121,27 @@ The system SHALL validate file access boundaries before every read, write, and a
 
 ### Requirement: Workspace tmp/ Cleanup on Session End
 
-The `SessionOrchestrator` SHALL clean up the workspace `tmp/` directory after every session ends, across all session types (normal message, spontaneous post, self-research, memory maintenance, channel lurk, reminder, and dry-run).
+The system SHALL attempt bounded cleanup of disposable workspace `tmp/` entries after every session ends, across normal message, spontaneous, self-research, memory maintenance, channel lurk, reminder and dry-run sessions. It SHALL preserve the `tmp/` root and reserved native engine state, and SHALL skip workspaces with registered sessions, live temporary-use owners or uncertain producer teardown.
 
 #### Scenario: Cleanup after session completion
-- **GIVEN** a session has completed (successfully or with failure)
-- **WHEN** the session's `finally` block executes
-- **THEN** the system SHALL call `cleanupWorkspaceTmp()` which removes the workspace's `tmp/` directory recursively via synchronous `Deno.removeSync()`
+- **GIVEN** a session has completed (successfully or with failure) and its producer teardown has been confirmed
+- **WHEN** the session's final temporary-use ownership is released and no other workspace owner or registered session remains
+- **THEN** the system SHALL synchronously reclaim eligible disposable entries within its traversal budget
+- **AND** it SHALL preserve the `tmp/` directory itself and the reserved `omp-agent` and `opencode-data` entries without traversing them
 
 #### Scenario: Skip cleanup when other sessions share the workspace
-- **GIVEN** one or more other active sessions exist for the same workspace key
-- **WHEN** `cleanupWorkspaceTmp()` is called
-- **THEN** the system SHALL skip the removal and log a debug message indicating other active sessions exist
+- **GIVEN** one or more registered sessions or live temporary-use owners exist for the same workspace key, or producer teardown is uncertain
+- **WHEN** workspace temporary cleanup is requested
+- **THEN** the system SHALL skip removal and log the busy or uncertain-teardown reason
+- **AND** Skill API registry expiry SHALL NOT remove live temporary-use protection
 
 #### Scenario: NotFound error is silently ignored
-- **GIVEN** the workspace `tmp/` directory does not exist
-- **WHEN** `Deno.removeSync()` throws a `Deno.errors.NotFound` error
+- **GIVEN** the workspace `tmp/` directory or a disposable entry does not exist
+- **WHEN** a cleanup filesystem operation reports `Deno.errors.NotFound`
 - **THEN** the system SHALL silently ignore the error
 
 #### Scenario: Other removal errors are warned
-- **GIVEN** the `tmp/` directory removal fails with an error other than `NotFound`
-- **WHEN** `cleanupWorkspaceTmp()` catches the error
+- **GIVEN** a disposable entry removal fails with an error other than `NotFound`
+- **WHEN** workspace temporary cleanup catches the error
 - **THEN** the system SHALL log a warning with the error message and path but SHALL NOT propagate the error
-
+- **AND** eligible independent candidates SHALL remain reclaimable within the remaining traversal budget
