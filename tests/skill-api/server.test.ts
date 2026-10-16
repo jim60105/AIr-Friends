@@ -617,6 +617,13 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
 
     // Reply count should still be 0
     assertEquals(sessionRegistry.getReplyCount(sessionId), 0);
+    // `clarify-delivery-recovery-guidance`: the ambiguity the recovery guidance
+    // must not read as a negative acknowledgement. A platform failure with no
+    // message ID leaves the session UNRESPONDED (so the missing-response retry
+    // still applies) and records NO text-reply anchor — there is nothing to
+    // inspect the delivered text with, and nothing proves the reply arrived.
+    assertEquals(sessionRegistry.hasReplySent(sessionId), false);
+    assertEquals(sessionRegistry.getLastSentMessageId(sessionId), undefined);
 
     await server.stop();
     sessionRegistry.stop();
@@ -2307,6 +2314,62 @@ Deno.test("SkillAPIServer - send-file rejected after one successful call", async
     const body2 = await response2.json();
     assertEquals(body2.success, false);
     assertEquals(body2.error?.includes("File send limit reached"), true);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// `clarify-delivery-recovery-guidance`: only a failure that happened BEFORE any
+// platform send leaves the file slot unused, and the corrected invocation in
+// the same session then delivers exactly once. The payload/argument errors the
+// recovery table lists as "confirmed pre-delivery failure" are rejected by the
+// script before the Skill API is called; an unreadable path is the equivalent
+// server-side preflight rejection and must behave the same way for the quota.
+Deno.test("SkillAPIServer - send-file preflight rejection leaves the slot unused and a corrected call delivers", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/good.png`, "content");
+
+    const port = 3109;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    }, TEST_SKILL_SECRET);
+    server.start();
+    await waitForServer(port);
+
+    const callSendFile = async (filePaths: string[]) =>
+      fetch(`http://localhost:${port}/api/skill/send-file`, {
+        method: "POST",
+        headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
+        body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths } }),
+      });
+
+    // Preflight rejection: the file does not exist, so nothing was dispatched.
+    const rejected = await callSendFile(["missing.png"]);
+    assertEquals(rejected.status, 400);
+    const rejectedBody = await rejected.json();
+    assertEquals(rejectedBody.success, false);
+    assertEquals(rig.sessionRegistry.getFileSendCount(rig.sessionId), 0);
+    assertEquals(rig.sessionRegistry.hasFileSent(rig.sessionId), false);
+
+    // The corrected invocation still has the slot and delivers exactly once.
+    const corrected = await callSendFile(["good.png"]);
+    assertEquals(corrected.status, 200);
+    const correctedBody = await corrected.json();
+    assertEquals(correctedBody.success, true);
+    assertEquals(rig.sessionRegistry.getFileSendCount(rig.sessionId), 1);
+    assertEquals(rig.sessionRegistry.hasFileSent(rig.sessionId), true);
+    assertEquals(rig.sessionRegistry.getLastFileMessageId(rig.sessionId), "file_msg_1");
+
+    // The consumed slot is real: a further call is rejected by the quota.
+    const afterDelivery = await callSendFile(["good.png", "missing.png"]);
+    assertEquals(afterDelivery.status, 429);
+    await afterDelivery.json();
 
     await server.stop();
     rig.sessionRegistry.stop();
