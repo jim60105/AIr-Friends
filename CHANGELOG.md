@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-10-16
+
 ### Fixed
 
-- Image builds finish again. The pinned OMP executable carries the executable bit inside the build stage that prepares the shared native runtime payload, so that preparation can run the binary and publish the payload instead of failing with `reports no parseable version`.
+- Container images build again. The pinned OMP executable carries the executable bit in the build stage that prepares the shared native runtime payload, so the build can run it and publish the payload instead of failing with `reports no parseable version`. Because that step failed, 0.34.0 published no images; 0.34.1 is the first image of the shared-native-runtime release line.
+- The test suite stopped failing intermittently: pool assertions no longer depend on a test-only 100 ms queue deadline that the lease holder's release could outlive.
+
+### Changed
+
+- The test tasks run one module at a time. Deno shares the process environment between parallel test modules, so the environment-override tests could observe each other's transient values and fail on unrelated assertions; the suite is deterministic again at the cost of a slightly longer test job.
 
 ## [0.34.0] - 2026-10-16
 
@@ -1205,7 +1212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.34.1...HEAD
+[0.34.1]: https://github.com/jim60105/AIr-Friends/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/jim60105/AIr-Friends/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/jim60105/AIr-Friends/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/jim60105/AIr-Friends/compare/v0.31.1...v0.32.0
