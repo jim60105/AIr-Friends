@@ -839,20 +839,35 @@ async function observeOmpNativeState(
   }
 
   const reservedPaths: string[] = [];
+  // A configured native-state path can be a link (or contain one) whose real
+  // location is elsewhere in the same workspace. Reserving only the configured
+  // spelling would leave that real location readable/writable through a broad
+  // role, so the physically resolved destination is reserved too — always,
+  // independently of whether it can establish the artifact capability.
+  const reserveConfiguredState = async (configured: string): Promise<void> => {
+    const spelling = normalize(configured);
+    reservedPaths.push(spelling);
+    try {
+      const destination = await reader.realPath(spelling);
+      if (destination !== spelling) reservedPaths.push(destination);
+    } catch {
+      // Absent (or unlinkable): the configured spelling is the only reachable
+      // path, and it is already reserved.
+    }
+  };
   // Both mode children (`<mode>/xdg-data/...`) live beneath `omp-agent`, so the
   // per-spawn workspace native-state tree is reserved as one path.
   const configuredState = resolve(context.sessionCwd, "tmp", "omp-agent");
-  reservedPaths.push(normalize(configuredState));
+  await reserveConfiguredState(configuredState);
   const canonicalState = resolve(canonicalWorkspace, "tmp", "omp-agent");
   if (canonicalState !== normalize(configuredState)) reservedPaths.push(canonicalState);
 
   let dataRootUsable = false;
   if (state.nativeDataRoot !== undefined) {
     const configuredDataRoot = normalize(state.nativeDataRoot);
-    reservedPaths.push(configuredDataRoot);
+    await reserveConfiguredState(configuredDataRoot);
     const observed = await observeLinkFreeDirectory(configuredDataRoot, reader);
     if (observed !== undefined) {
-      if (observed.canonicalPath !== configuredDataRoot) reservedPaths.push(observed.canonicalPath);
       dataRootUsable = sameObservedIdentity(observed.identity, state.dataRootIdentity) &&
         state.dataRootIdentity !== undefined;
     }
@@ -1181,6 +1196,31 @@ export async function resolveFilesystemTarget(
     };
   }
 
+  // D3: reserved OMP native state dominates every broad workspace/staging/shared
+  // role for OMP callback contexts. A lexically reserved target can never be
+  // admitted by another root, so it is reported as reserved state directly —
+  // including when no broad root lexically reached it (a pooled sibling's state
+  // is outside the workspace entirely). The per-root physical check below still
+  // catches a workspace symlink aliased into reserved state.
+  const reservedState = roots.reservedOmpState ?? [];
+  const inReservedState = (path: string): boolean =>
+    reservedState.some((reserved) => isWithinRoot(path, reserved));
+  let sawReservedState = false;
+  if (
+    reservedState.length > 0 && inReservedState(resolvedPath.normalizedPath) &&
+    !roots.roots.some((root) =>
+      root.role === "omp-session-artifacts" &&
+      isWithinRoot(resolvedPath.normalizedPath, root.configuredPath)
+    )
+  ) {
+    return {
+      ok: false,
+      reason: "reserved_native_state",
+      message:
+        `Target '${resolvedPath.normalizedPath}' is reserved OMP native state and no current artifact capability admits it`,
+    };
+  }
+
   // Find candidate roots via lexical containment
   const candidateRoots = roots.roots.filter((r) =>
     isWithinRoot(resolvedPath.normalizedPath, r.configuredPath) ||
@@ -1199,14 +1239,6 @@ export async function resolveFilesystemTarget(
   // Evaluate candidate roots independently
   const admittedRoles: RootRole[] = [];
   const admittedRootInfos: CanonicalRootInfo[] = [];
-  // D3: reserved OMP native state dominates every broad workspace/staging/shared
-  // role for OMP callback contexts. A reserved target can be admitted only by
-  // the current artifact capability, so overlapping broad roots are dropped
-  // before any role/extension decision.
-  const reservedState = roots.reservedOmpState ?? [];
-  const inReservedState = (path: string): boolean =>
-    reservedState.some((reserved) => isWithinRoot(path, reserved));
-  let sawReservedState = false;
   let primarySuccess: {
     canonicalTarget: string;
     targetType: "file" | "directory" | "prospective";

@@ -87,6 +87,15 @@ const DESTRUCTIVE_PATH_FIELDS: Record<string, true> = {
 };
 
 /**
+ * Outcome of the pre-approval reserved-state evaluation for one permission
+ * request. `unknown` is treated as reserved by the caller.
+ */
+type OmpReservedStateVerdict =
+  | { readonly verdict: "clear" }
+  | { readonly verdict: "reserved"; readonly path: string }
+  | { readonly verdict: "unknown"; readonly path: string };
+
+/**
  * Boundary-safe containment check (F4).
  *
  * Returns `true` only when the resolved candidate path equals the resolved base
@@ -410,6 +419,23 @@ export class ChatbotClient implements acp.Client {
     // the connector supplies fresh provenance for the new native state tree.
     const effectiveCwd = ctx.cwd ?? existing!.cwd;
     const requestedOmpNativeState = ctx.ompNativeState ?? existing?.ompNativeState;
+    const provenance = requestedOmpNativeState?.cwd === effectiveCwd
+      ? requestedOmpNativeState
+      : undefined;
+    // A committed first-use artifact-directory binding is never dropped by a
+    // same-cwd re-registration that carries the same proven journal: the
+    // connector's cached provenance predates the client's binding, so letting
+    // it through would re-open the replacement window for a directory the
+    // client already proved (D2/D4).
+    const priorArtifacts = existing?.ompNativeState?.artifacts;
+    const nextArtifacts = provenance?.artifacts;
+    const boundArtifacts = nextArtifacts !== undefined &&
+        nextArtifacts.artifactDirectoryIdentity === undefined &&
+        priorArtifacts !== undefined &&
+        priorArtifacts.journalPath === nextArtifacts.journalPath &&
+        priorArtifacts.artifactDirectoryIdentity !== undefined
+      ? { ...nextArtifacts, artifactDirectoryIdentity: priorArtifacts.artifactDirectoryIdentity }
+      : nextArtifacts;
     this.sessionContexts.set(sessionId, {
       ...existing,
       ...ctx,
@@ -418,10 +444,21 @@ export class ChatbotClient implements acp.Client {
       allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
         ?.slice(),
       trustedSkills: ctx.trustedSkills ? { ...ctx.trustedSkills } : ctx.trustedSkills,
-      ompNativeState: requestedOmpNativeState?.cwd === effectiveCwd
-        ? requestedOmpNativeState
-        : undefined,
+      ompNativeState: provenance === undefined
+        ? undefined
+        : (boundArtifacts === undefined
+          ? { ...provenance, artifacts: undefined }
+          : { ...provenance, artifacts: boundArtifacts }),
     });
+  }
+
+  /**
+   * Revoke every registered session context. Called when the owning connection
+   * is discarded, so an in-flight callback on this client can no longer pass a
+   * generation currency check or reach a broad root (D4).
+   */
+  revokeAllSessionContexts(): void {
+    this.sessionContexts.clear();
   }
 
   /**
@@ -817,41 +854,65 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
-   * First requested path that is physically inside this session's reserved OMP
-   * native state, or undefined. A lexical hit covers directories and not-yet
-   * created paths; the physical observation is what catches a workspace symlink
-   * aliased into native state.
+   * Reserved-state verdict for one permission request.
+   *
+   * `reserved` means a requested path is inside this session's native state and
+   * the request must not be approved. `unknown` means a mutating request's
+   * reservation could not be evaluated (missing context or an unobservable
+   * root), which is treated as reserved: the boundary fails closed rather than
+   * falling through to an approval shortcut.
+   *
+   * The trusted lexical reservation (the connector's own configured spellings)
+   * is checked first, so the common denial never depends on observing an
+   * unrelated root; the physical observation is what additionally catches a
+   * workspace symlink aliased into native state.
    */
-  private async ompReservedStateTarget(
+  private async ompReservedStateVerdict(
     acpSessionId: string,
     paths: readonly string[],
-  ): Promise<string | undefined> {
-    if (paths.length === 0) return undefined;
+  ): Promise<OmpReservedStateVerdict> {
+    if (paths.length === 0) return { verdict: "clear" };
     const gateCtx = this.gateCtx(acpSessionId);
-    if (gateCtx?.ompNativeState === undefined) return undefined;
-    const generation = gateCtx.generation ?? "";
-    const built = buildSessionFilesystemContext(acpSessionId, gateCtx, this.config, generation);
-    if (!built.ok) return undefined;
+    const state = gateCtx?.ompNativeState;
+    if (gateCtx === undefined || state === undefined) return { verdict: "clear" };
+    const built = buildSessionFilesystemContext(
+      acpSessionId,
+      gateCtx,
+      this.config,
+      gateCtx.generation ?? "",
+    );
+    if (!built.ok) return { verdict: "unknown", path: paths[0] };
+    const configured = [
+      resolve(built.context.sessionCwd, "tmp", "omp-agent"),
+      ...(state.nativeDataRoot === undefined ? [] : [resolve(state.nativeDataRoot)]),
+    ];
+    for (const path of paths) {
+      const resolved = resolveSessionPath(path, built.context);
+      if (!resolved.ok) continue;
+      if (configured.some((reserved) => isWithinRoot(resolved.value.normalizedPath, reserved))) {
+        return { verdict: "reserved", path };
+      }
+    }
     const roots = await this.observeFilesystemRoots(
       acpSessionId,
       built.context,
       gateCtx.trustedSkills,
     );
-    if (!roots.ok) return undefined;
+    if (!roots.ok) return { verdict: "unknown", path: paths[0] };
     const reserved = roots.value.reservedOmpState ?? [];
-    if (reserved.length === 0) return undefined;
+    if (reserved.length === 0) return { verdict: "clear" };
     for (const path of paths) {
       const resolved = resolveSessionPath(path, built.context);
       if (!resolved.ok) continue;
-      if (reserved.some((root) => isWithinRoot(resolved.value.normalizedPath, root))) return path;
-      const observed = await resolveFilesystemTarget(
-        resolved.value,
-        roots.value,
-        "existing-any",
-      );
-      if (!observed.ok && observed.reason === "reserved_native_state") return path;
+      if (reserved.some((root) => isWithinRoot(resolved.value.normalizedPath, root))) {
+        return { verdict: "reserved", path };
+      }
+      const observed = await resolveFilesystemTarget(resolved.value, roots.value, "existing-any");
+      if (!observed.ok && observed.reason === "reserved_native_state") {
+        return { verdict: "reserved", path };
+      }
     }
-    return undefined;
+    return { verdict: "clear" };
   }
 
   async requestPermission(
@@ -878,30 +939,30 @@ export class ChatbotClient implements acp.Client {
     const ompState = this.gateCtx(params.sessionId)?.ompNativeState;
     const isCommandExecution = kind === "execute" || title === "bash" || title === "terminal";
     if (ompState !== undefined && !isCommandExecution) {
-      const reservedHit = await this.ompReservedStateTarget(
-        params.sessionId,
-        [
-          ...locations.flatMap((location) => location.path ? [location.path] : []),
-          ...this.collectOmpGuardPaths(rawInput),
-        ],
-      );
-      if (reservedHit !== undefined) {
-        this.logger.warn("Rejecting request for reserved OMP native state: {path}", {
-          path: reservedHit,
+      const verdict = await this.ompReservedStateVerdict(params.sessionId, [
+        ...locations.flatMap((location) => location.path ? [location.path] : []),
+        ...this.collectOmpGuardPaths(rawInput),
+      ]);
+      if (verdict.verdict !== "clear") {
+        this.logger.warn("Rejecting request against OMP native state: {path} ({verdict})", {
+          path: verdict.path,
+          verdict: verdict.verdict,
         });
         void this.writePermissionAudit(
           "permission_denied",
           title,
           kind,
-          sanitizeRejectionField(reservedHit),
+          sanitizeRejectionField(verdict.path),
           "rejected_omp_native_state",
         );
-        this.recordPermissionRejection(title, kind, reservedHit, "rejected_omp_native_state");
-        const reservedRejectOption = params.options.find((o) => o.kind === "reject_once") ??
-          params.options[0];
-        return {
-          outcome: { outcome: "selected", optionId: reservedRejectOption.optionId },
-        };
+        this.recordPermissionRejection(title, kind, verdict.path, "rejected_omp_native_state");
+        // Never select an arbitrary option here: an approval option must not be
+        // reachable through the reserved-state branch, and an unavailable
+        // reject option cancels instead.
+        const rejecting = params.options.find((o) => o.kind === "reject_once");
+        return rejecting
+          ? { outcome: { outcome: "selected", optionId: rejecting.optionId } }
+          : { outcome: { outcome: "cancelled" } };
       }
     }
 

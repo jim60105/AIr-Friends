@@ -859,6 +859,11 @@ export class AgentConnector {
       this.process = null;
     }
     this.connection = null;
+    // Revoke the discarded epoch's registrations on the client itself before it
+    // is dropped: an in-flight callback that still holds this client must fail
+    // its generation currency check instead of reading content after the
+    // disconnect (D4).
+    this.client?.revokeAllSessionContexts();
     this.client = null;
     this.capabilities = null;
     this.sessionConfigOptions = new Map();

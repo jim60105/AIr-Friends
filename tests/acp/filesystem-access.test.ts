@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { validateAccessAdmission } from "../../src/acp/filesystem-access.ts";
+import { join } from "@std/path";
+import { readCanonicalTextFile, validateAccessAdmission } from "../../src/acp/filesystem-access.ts";
 import {
   canonicalizeSessionRoots,
   type CanonicalSessionRoots,
@@ -7,6 +8,7 @@ import {
   resolveFilesystemTarget,
   type SessionContext,
 } from "../../src/acp/filesystem-roots.ts";
+import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
 
 function createValidContext(tmpDir = "/workspace"): SessionContext {
   return {
@@ -417,6 +419,109 @@ Deno.test("End-to-end with real predecessor canonicalizeSessionRoots and resolve
       assertEquals(admission.value.relativePath, "hello.txt");
       assertEquals(admission.value.isNewFile, false);
     }
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Protected OMP artifact read: the anchor guard re-verifies the journal at open time", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const workspace = join(tempDir, "workspace");
+    const dataRoot = join(workspace, "tmp", "omp-agent", "restricted", "xdg-data");
+    const bucket = join(dataRoot, "omp", "sessions", "-tmp-workspace");
+    const journalPath = join(
+      bucket,
+      "2026-01-02T03-04-05-678Z_0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl",
+    );
+    await Deno.mkdir(bucket, { recursive: true });
+    await Deno.writeTextFile(journalPath, '{"type":"session"}\n');
+    const artifactDirectory = journalPath.slice(0, -".jsonl".length);
+    await Deno.mkdir(artifactDirectory);
+    await Deno.writeTextFile(join(artifactDirectory, "17.bash.log"), "spilled text");
+
+    const dataInfo = await Deno.lstat(dataRoot);
+    const anchorInfo = await Deno.lstat(bucket);
+    const journalInfo = await Deno.lstat(journalPath);
+    const context: SessionContext = {
+      acpSessionId: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+      skillSessionId: "skill-1",
+      sessionCwd: workspace,
+      explicitStagingPath: join(workspace, "tmp", "skill-1"),
+      sessionContextGeneration: "gen-omp-access",
+      ompNativeState: {
+        cwd: workspace,
+        nativeDataRoot: dataRoot,
+        dataRootIdentity: { dev: dataInfo.dev!, ino: dataInfo.ino! },
+        artifacts: {
+          acpSessionId: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+          journalPath,
+          journalIdentity: { dev: journalInfo.dev!, ino: journalInfo.ino! },
+          anchorDirectory: bucket,
+          anchorIdentity: { dev: anchorInfo.dev!, ino: anchorInfo.ino! },
+        },
+      },
+    };
+    const roots = await canonicalizeSessionRoots(context);
+    if (!roots.ok) throw new Error(`roots failed: ${roots.reason}`);
+    const resolved = resolveFilesystemTarget(
+      {
+        acpSessionId: context.acpSessionId,
+        sessionContextGeneration: context.sessionContextGeneration,
+        rawPath: join(artifactDirectory, "17.bash.log"),
+        expandedPath: join(artifactDirectory, "17.bash.log"),
+        normalizedPath: join(artifactDirectory, "17.bash.log"),
+      },
+      roots.value,
+      "existing-file",
+    );
+    const target = await resolved;
+    if (!target.ok) throw new Error(`target failed: ${target.reason}`);
+    assertEquals(target.value.roles, ["omp-session-artifacts"]);
+
+    const nativeCalls = createFilesystemTestCalls();
+    const guard = {
+      anchorPath: bucket,
+      anchorIdentity: { dev: anchorInfo.dev!, ino: anchorInfo.ino! },
+      journalName: journalPath.split("/").pop()!,
+      journalIdentity: { dev: journalInfo.dev!, ino: journalInfo.ino! },
+    };
+    const ok = readCanonicalTextFile({
+      context,
+      roots: roots.value,
+      target: target.value,
+      selectedRole: "omp-session-artifacts",
+      ompAnchor: guard,
+      nativeCalls,
+    });
+    assertEquals(ok.ok, true);
+    if (ok.ok) assertEquals(ok.value, "spilled text");
+
+    // A journal or anchor that no longer matches the proven identity denies at
+    // the protected-opening boundary, before any content IO.
+    const stale = readCanonicalTextFile({
+      context,
+      roots: roots.value,
+      target: target.value,
+      selectedRole: "omp-session-artifacts",
+      ompAnchor: {
+        ...guard,
+        journalIdentity: { dev: journalInfo.dev!, ino: journalInfo.ino! + 1 },
+      },
+      nativeCalls,
+    });
+    assertEquals(stale.ok, false);
+    if (!stale.ok) assertEquals(stale.reason, "path_changed");
+    const staleAnchor = readCanonicalTextFile({
+      context,
+      roots: roots.value,
+      target: target.value,
+      selectedRole: "omp-session-artifacts",
+      ompAnchor: { ...guard, anchorIdentity: { dev: anchorInfo.dev!, ino: anchorInfo.ino! + 1 } },
+      nativeCalls,
+    });
+    assertEquals(staleAnchor.ok, false);
+    if (!staleAnchor.ok) assertEquals(staleAnchor.reason, "path_changed");
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }

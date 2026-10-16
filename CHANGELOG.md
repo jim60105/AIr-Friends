@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- An OMP session can read the bash output OMP spills beside its own native session journal. The capability is bound to the current ACP session's native identity and factory-selected data root, admits only direct `<number>.bash.log` files in that session's artifact directory, and is read-only in both permission modes. Native state — the journal itself, sibling sessions' artifacts, mode siblings, auth and database files — stays outside every broad workspace callback grant, so it cannot be reached by file extension or by workspace membership. Restricted-mode generic `cat`/`rg` commands keep their existing workspace path grants.
+- An OMP session can read the bash output OMP spills beside its own native session journal. The capability is bound to the current ACP session's native identity and factory-selected data root, admits only direct `<number>.bash.log` files in that session's artifact directory, and is read-only in both permission modes. Native state — the journal itself, sibling sessions' artifacts, mode siblings, auth and database files — stays outside every broad workspace callback grant, including when a native-state path is a link into the workspace, so it cannot be reached by file extension or by workspace membership; a permission request whose native-state reservation cannot be decided is denied instead of approved, and a request that offers no explicit reject option is cancelled. Restricted-mode generic `cat`/`rg` commands keep their existing workspace path grants.
 
 ## [0.34.1] - 2026-10-16
 
