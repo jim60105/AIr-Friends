@@ -388,20 +388,40 @@ export class SessionOrchestrator {
    *
    * The message is built in code (same pattern as `getRetryPromptStrategy`): it
    * states the note requirement, embeds the session's recent permission-rejection
-   * reasons (bounded via `formatPermissionRejections`), NAMES the commands OpenCode
-   * itself denies before the ACP gate so `|| echo`-style fallbacks are abandoned in
-   * favor of the Read tool, restates the sandbox usage rules (the `;`/`&&`/`||`
-   * chaining rule, the always-rejected operators, and the webfetch 403/429 →
-   * agent-browser fallback), and requires writing the note to
-   * `$AGENT_WORKSPACE/notes/{topic-slug}.md` (env-var path, deployment-independent).
+   * reasons (bounded via `formatPermissionRejections`), and restates the sandbox
+   * usage rules that ACTUALLY apply to the running session. Those rules are selected
+   * from the explicit `agentType` and resolved `yolo` the caller already used to
+   * acquire this session's connector (`scope-agent-permission-guidance` D1/D2) —
+   * never from a model name, a process default or a global flag on its own:
+   *
+   * - restricted wording carries the per-segment `;`/`&&`/`||` chaining rule, the
+   *   rejected operators INCLUDING the tolerated standard-stream fd redirects
+   *   (`2>&1`, `1>&2` — no file is written), and the OpenCode pre-gate denied
+   *   command list ONLY when the session runs on OpenCode;
+   * - native-YOLO wording omits the restricted shell-denial claims and keeps only
+   *   the callback filesystem limits (the trusted skills root stays read-only and
+   *   writes stay inside the session's authorized roots).
+   *
+   * Every mode keeps the webfetch 403/429 → `agent-browser` fallback, requires
+   * writing the note to `$AGENT_WORKSPACE/notes/{topic-slug}.md` (env-var path,
+   * deployment-independent) and updating `$AGENT_WORKSPACE/notes/_index.md`, and
+   * recommends the edit/write tool for creating the note.
+   *
    * `skillsRoot` is the SAME selected trusted root the session's initial
    * prompt rendered: it is named literally in the skill guidance (no new
    * command is added and the fallback guidance above is unchanged), and the
    * built message is asserted to carry it before it is sent.
+   *
+   * Read-only audit (task 2.2): the missing-response delivery recipe stays owned by
+   * `buildDefaultRetryMessage()` in `src/acp/agent-factory.ts`. That builder
+   * recommends the identical edit/write payload creation and makes no universal
+   * operator/command denial claim, so it is intentionally NOT modified here and this
+   * correction introduces no second delivery convention.
    */
   private buildSelfResearchRetryMessage(
     skillsRoot: string,
     rejections: PermissionRejection[],
+    session: { agentType: AgentType; yolo: boolean },
   ): string {
     // Classified skill-instructing retry: the SAME selected root the session's
     // initial prompt rendered (never a child-HOME expression).
@@ -413,21 +433,11 @@ export class SessionOrchestrator {
       "1. Read $AGENT_WORKSPACE/notes/_index.md with your Read tool (if the file does not " +
       "exist, Read simply fails — do NOT fall back to shell fallback tricks) and pick a NEW topic.\n" +
       "2. Write your study notes to $AGENT_WORKSPACE/notes/{topic-slug}.md using your " +
-      "edit/write tool (NOT shell redirection — `> file` is always rejected).\n" +
+      "edit/write tool.\n" +
       "3. Update $AGENT_WORKSPACE/notes/_index.md with an entry for the new note.\n\n" +
       `Skill scripts in this deployment live under the literal trusted root "${root}" — the same ` +
       "root your system prompt renders; never derive a skill path from a process HOME variable.\n\n" +
-      "If your previous tool calls were rejected, work within these sandbox rules:\n" +
-      "- Commands OpenCode denies BEFORE the permission gate (never attempt them): `echo`, " +
-      "`curl`, `git`, `python`/`python3`, `pip`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `make`, " +
-      '`gcc`, `strace`. In particular `cat x || echo "NO INDEX"` is impossible (both `||` ' +
-      "and `echo` are rejected) — use the Read tool on the path directly.\n" +
-      "- Multi-command bash calls with `;`, `&&`, or `||` are allowed ONLY when every " +
-      "command is individually allowed; the whole call is rejected otherwise.\n" +
-      "- Pipes `|`, backgrounding `&`, `2>/dev/null`, and `> file` are ALWAYS rejected.\n" +
-      "- If `webfetch` returns 403/429, switch to `agent-browser` (one command per call, " +
-      "or `;`/`&&`/`||`-chained individually-allowed commands).\n" +
-      "- Write files with your edit/write tool only — never with shell redirects.";
+      this.selfResearchSandboxGuidance(session.agentType, session.yolo);
     const rejectionSection = formatPermissionRejections(rejections);
     const message = rejectionSection.length > 0
       ? `${base}\n\n` +
@@ -436,6 +446,58 @@ export class SessionOrchestrator {
       : base;
     assertSkillsRootDelivered(message, root, "self research correction retry delivery");
     return message;
+  }
+
+  /**
+   * The engine- and mode-scoped sandbox bullet list embedded in the self-research
+   * corrective retry (`scope-agent-permission-guidance` D2/D3).
+   *
+   * A small explicit matrix instead of a policy engine: restricted wording is shared
+   * by both engines, OpenCode adds its own pre-gate denial list, OMP adds its
+   * LSP/tool-lifecycle rules in EVERY mode, and native-YOLO carries only the callback
+   * filesystem limits — never a restricted shell denial.
+   */
+  private selfResearchSandboxGuidance(agentType: AgentType, yolo: boolean): string {
+    const bullets: string[] = [];
+    if (!yolo) {
+      bullets.push(
+        "- Multi-command bash calls with `;`, `&&`, or `||` are allowed ONLY when every " +
+          "command is individually allowed; the whole call is rejected otherwise.",
+        "- Pipes `|`, backgrounding `&`, and file redirects such as `> file` or `2>/dev/null` " +
+          "are always rejected, as are newline separators; redirecting one standard stream " +
+          "into another (`2>&1`, `1>&2`) writes no file and is tolerated.",
+      );
+      if (agentType !== "omp") {
+        bullets.push(
+          "- Commands OpenCode denies BEFORE the permission gate (never attempt them): `echo`, " +
+            "`curl`, `git`, `python`/`python3`, `pip`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, " +
+            '`make`, `gcc`, `strace`. In particular `cat x || echo "NO INDEX"` fails because ' +
+            "`echo` is denied (`||` itself is allowed when every command in the chain " +
+            "qualifies) — use the Read tool on the path directly.",
+        );
+      }
+      bullets.push("- Write files with your edit/write tool only — never with shell redirects.");
+    } else {
+      bullets.push(
+        "- The callback filesystem limits still apply: the trusted skills root is read-only, " +
+          "and writes are accepted only in this session's staging directory, its workspace and " +
+          "the shared agent workspace.",
+      );
+    }
+    if (agentType === "omp") {
+      bullets.push(
+        "- The OMP language-server (LSP) tool is denied in every mode; never attempt it. " +
+          "One-shot commands omit `name`, `ready`, and `async`, and a command that continues in " +
+          "the background is handled through its completion notice. OMP native state and bash " +
+          "artifacts stay read-only for file callbacks in every mode.",
+      );
+    }
+    bullets.push(
+      "- If `webfetch` returns 403/429, switch to `agent-browser`.",
+      "- Create the note with your edit/write tool.",
+    );
+    return "If your previous tool calls were rejected, work within the rules that apply to " +
+      "this session:\n" + bullets.join("\n");
   }
 
   /**
@@ -2470,6 +2532,7 @@ export class SessionOrchestrator {
         const retryMessage = this.buildSelfResearchRetryMessage(
           this.trustedSkillsDir(),
           rejections,
+          { agentType, yolo: this.yolo },
         );
         await auditWriter?.write("prompt_sent", {
           promptLength: retryMessage.length,

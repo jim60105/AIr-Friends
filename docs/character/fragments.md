@@ -19,6 +19,7 @@ prompts/
 ├── agent_workspace.md             # 全域知識庫使用規則片段
 ├── agent_permissions.md           # 代理人權限說明片段
 ├── browser_automation.md          # 瀏覽器自動化工具規則片段
+├── omp_shell.md                   # OMP shell 使用規則片段
 ├── skills_root.md                 # 技能腳本根目錄宣告片段
 ├── system_reply.md                # 一般訊息回覆頂層提示詞
 ├── system_spontaneous.md          # 自發貼文頂層提示詞

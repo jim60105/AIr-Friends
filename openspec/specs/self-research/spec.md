@@ -156,7 +156,7 @@ After a self-research ACP session ends with `end_turn`, the system SHALL verify 
 - **GIVEN** a self-research session whose agent ended the turn without writing any file under `$AGENT_WORKSPACE/notes/` or `journal/` (e.g. after its tool calls were rejected)
 - **WHEN** completion verification runs
 - **THEN** the system SHALL record `retry_triggered` (reason `no_research_note`, retryCount 1, maxRetries 1) in the audit log
-- **AND** SHALL send one corrective retry prompt on the same ACP session embedding the recent permission rejections and naming OpenCode-denied commands
+- **AND** SHALL send one corrective retry prompt on the same ACP session embedding the recent permission rejections and guidance for that session's selected engine and effective permission mode
 - **AND** SHALL re-verify after the retry
 
 #### Scenario: Retry succeeds
@@ -187,7 +187,7 @@ After a self-research ACP session ends with `end_turn`, the system SHALL verify 
 - **THEN** the system SHALL log a warning and treat the session as having produced output, with no retry prompt sent
 
 #### Scenario: Non-end_turn stop reason keeps existing behavior
-- **GIVEN** a self-research session whose agent turn ends with a non-`end_turn` stop reason (e.g. `cancelled`)
+- **GIVEN** the session's agent turn ends with a non-`end_turn` stop reason (e.g. `cancelled`)
 - **WHEN** the session completes
 - **THEN** the session SHALL be reported failed without any completion retry
 
@@ -195,13 +195,15 @@ After a self-research ACP session ends with `end_turn`, the system SHALL verify 
 - **GIVEN** the system sends the one corrective retry on the same ACP session
 - **WHEN** the retry prompt is built
 - **THEN** it SHALL state that a research note must be written and SHALL embed the session's recent permission-rejection reasons (bounded via the per-session permission-rejection ring buffer and `formatPermissionRejections()`)
-- **AND** SHALL name the commands OpenCode denies before the ACP gate (`echo`, `curl`, `git`, `python`, `mkdir`, …) so `|| echo`-style fallbacks are abandoned in favor of the Read tool
+- **AND** restricted OpenCode guidance SHALL name its pre-gate denied commands (`echo`, `curl`, `git`, `python`, `mkdir`, …) while OMP and YOLO guidance SHALL NOT inherit that OpenCode-only denial list
 
 #### Scenario: Retry prompt restates sandbox and write rules
 - **GIVEN** the corrective retry prompt is being assembled
 - **WHEN** it instructs the agent's actions
-- **THEN** it SHALL restate the sandbox usage rules (multi-command bash with `;`/`&&`/`||` allowed only when every command is individually allowed; `|`, `&`, `2>/dev/null`, `> file` rejected; webfetch 403/429 responses → use `agent-browser`)
-- **AND** SHALL require writing the note to `$AGENT_WORKSPACE/notes/{topic-slug}.md` and updating `$AGENT_WORKSPACE/notes/_index.md` (env-var paths, deployment-independent)
+- **THEN** restricted guidance SHALL restate the per-command chaining and applicable operator restrictions, including tolerated standard-stream fd redirects, without describing `||` itself as forbidden
+- **AND** YOLO guidance SHALL omit restricted shell-denial claims while preserving applicable filesystem limits
+- **AND** all modes SHALL retain the webfetch 403/429 fallback to `agent-browser`, require writing the note to `$AGENT_WORKSPACE/notes/{topic-slug}.md` and updating `$AGENT_WORKSPACE/notes/_index.md` (env-var paths, deployment-independent)
+- **AND** edit/write note creation SHALL remain recommended without claiming native-YOLO rejects all shell redirects
 
 #### Scenario: Audit entries record each turn and one session_end
 - **GIVEN** a self-research session with completion verification enabled
@@ -213,6 +215,12 @@ After a self-research ACP session ends with `end_turn`, the system SHALL verify 
 - **GIVEN** the corrective retry also produced no research output
 - **WHEN** verification fails after the retry
 - **THEN** the session SHALL emit a WARN log and increment `airfriends_self_research_no_note_total` exactly once (only when completion verification is enabled)
+
+#### Scenario: Correction receives the running session context
+- **GIVEN** a session whose effective permission mode differs from the global default
+- **WHEN** its no-note correction is delivered for OpenCode or OMP
+- **THEN** guidance SHALL follow the running session's selected engine and resolved effective mode
+- **AND** it SHALL preserve the trusted script root and same-session retry target without changing retry count, completion criteria or platform-reply prohibition
 
 ### Requirement: Untrusted RSS Content Delimiting
 

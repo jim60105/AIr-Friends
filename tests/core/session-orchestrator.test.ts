@@ -1,6 +1,6 @@
 // tests/core/session-orchestrator.test.ts
 
-import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertExists, assertFalse, assertStringIncludes } from "@std/assert";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 
 import { activeSessionsGauge, selfResearchNoNoteTotal, sessionsTotal } from "@utils/metrics.ts";
@@ -20,6 +20,7 @@ import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { ClientConfig } from "../../src/acp/types.ts";
 import type { PermissionRejection } from "../../src/acp/types.ts";
+import type { AgentType } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import { mockOmpNativeCache } from "../mocks/omp-mock-session.ts";
 import { GateContextRestoreError, RecoveryHookError } from "../../src/acp/agent-connector.ts";
@@ -740,10 +741,14 @@ async function createTestableOrchestrator(
     skillApi?: boolean;
     /** Stub shared-process pool injected via the 10th constructor arg (default: null = per-spawn). */
     processPool?: AgentProcessPool | null;
+    /** Selected engine; defaults to the fixture's `opencode` deployment. */
+    agentType?: AgentType;
+    /** Effective session mode; defaults to the fixture's restricted (`false`) mode. */
+    yolo?: boolean;
   },
 ) {
   const config = createTestConfig(tempDir);
-  config.agent.defaultAgentType = "opencode";
+  config.agent.defaultAgentType = options?.agentType ?? "opencode";
   if (options?.skillApi !== false) {
     config.skillApi = {
       enabled: true,
@@ -838,7 +843,7 @@ Skill root: {{ skillsDir }}`,
     config,
     sessionRegistry,
     memoryStore,
-    false,
+    options?.yolo ?? false,
     undefined,
     "",
     options?.processPool ?? null,
@@ -2062,20 +2067,161 @@ Deno.test("Self-research verification - no note triggers one corrective retry th
     assertEquals(response.error, undefined);
     assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
     // The retry prompt carries the note requirement, sandbox rules, and the
-    // bounded rejection diagnostics.
-    assertStringIncludes(orchestrator.mockConnector!.lastPromptText, "$AGENT_WORKSPACE/notes/");
-    assertStringIncludes(
-      orchestrator.mockConnector!.lastPromptText,
-      "Recent permission rejections",
-    );
-    assertStringIncludes(orchestrator.mockConnector!.lastPromptText, "`echo`");
-    assertStringIncludes(orchestrator.mockConnector!.lastPromptText, "2>/dev/null");
+    // bounded rejection diagnostics. The engine/mode wording assertions read the
+    // INSTRUCTIONAL portion only: the diagnostics below legitimately quote the
+    // rejected command (including `2>/dev/null`), so they must not stand in for a
+    // policy sentence.
+    const delivered = orchestrator.mockConnector!.lastPromptText;
+    assertStringIncludes(delivered, "Recent permission rejections");
+    assertStringIncludes(delivered, "rejected_generic_command_shell_operator");
+    const instructions = retryInstructionSection(delivered);
+    assertStringIncludes(instructions, "$AGENT_WORKSPACE/notes/");
+    assertStringIncludes(instructions, "`echo`");
+    assertStringIncludes(instructions, "2>/dev/null");
 
     sessionRegistry.stop();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+/**
+ * The instructional portion of a delivered self-research correction: everything
+ * before the bounded rejection-diagnostics block, which is quoted session data
+ * rather than guidance.
+ */
+function retryInstructionSection(message: string): string {
+  const marker = "Recent permission rejections in this session";
+  const index = message.indexOf(marker);
+  return index === -1 ? message : message.slice(0, index);
+}
+
+// `scope-agent-permission-guidance` task 3.2: the no-note correction guidance
+// follows the RUNNING session's selected engine and resolved effective mode. The
+// fixture default is `opencode` + restricted, so the `omp` and YOLO rows are
+// sessions whose engine/mode differ from the fixture defaults: the session's own
+// context — never the default — decides the delivered wording.
+for (
+  const [agentType, yolo] of [
+    ["opencode", false],
+    ["opencode", true],
+    ["omp", false],
+    ["omp", true],
+  ] as const
+) {
+  const modeLabel = yolo ? "native-YOLO" : "restricted";
+  Deno.test(
+    `Self-research verification - no-note correction wording follows ${agentType} ${modeLabel}`,
+    async () => {
+      const tempDir = await Deno.makeTempDir();
+      try {
+        const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir, {
+          agentType,
+          yolo,
+        });
+        await Deno.writeTextFile(
+          `${tempDir}/prompts/system_self_research.md`,
+          "Research instructions\n{{ rssItems }}",
+        );
+
+        orchestrator.setConnectorSetup((connector) => {
+          // A recorded rejection rides along as BOUNDED DIAGNOSTIC DATA in every
+          // mode — including the modes whose guidance names no denied command.
+          connector.fakeClient = {
+            rejections: [{
+              toolName: "Execute shell command",
+              kind: "execute",
+              commandOrPath: 'cat x 2>/dev/null || echo "NO INDEX"',
+              reason: "rejected_generic_command_shell_operator",
+              ts: new Date().toISOString(),
+            }],
+            cleared: false,
+          };
+          connector.promptResponses = [
+            { stopReason: "end_turn" } as PromptResponse,
+            { stopReason: "end_turn" } as PromptResponse,
+          ];
+        });
+
+        selfResearchNoNoteTotal.reset();
+        const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+
+        // Exactly ONE corrective retry; without a note the session still fails.
+        assertEquals(response.success, false);
+        assertEquals(response.error, "no_research_note");
+        assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+        assertEquals((await selfResearchNoNoteTotal.get()).values[0].value, 1);
+
+        const delivered = orchestrator.mockConnector!.lastPromptText;
+        const instructions = retryInstructionSection(delivered);
+        // Bounded diagnostics survive verbatim in every engine/mode.
+        assertStringIncludes(delivered, "Recent permission rejections");
+        assertStringIncludes(delivered, "rejected_generic_command_shell_operator");
+        // The note + browser-fallback contract is mode-independent.
+        assertStringIncludes(instructions, "$AGENT_WORKSPACE/notes/{topic-slug}.md");
+        assertStringIncludes(instructions, "$AGENT_WORKSPACE/notes/_index.md");
+        assertStringIncludes(instructions, "403/429");
+        assertStringIncludes(instructions, "agent-browser");
+        assertStringIncludes(instructions, "edit/write tool");
+        // Rendered wording is delivered TEXT, never evidence that a native shell
+        // accepted or rejected anything.
+
+        if (yolo) {
+          // YOLO omits the restricted shell claims and keeps the real limits.
+          assertFalse(
+            instructions.includes("individually allowed"),
+            `${agentType} ${modeLabel}: no restricted chaining rule`,
+          );
+          assertFalse(
+            instructions.includes("always rejected"),
+            `${agentType} ${modeLabel}: no universal operator denial`,
+          );
+          assertFalse(
+            instructions.includes("newline separators"),
+            `${agentType} ${modeLabel}: no restricted operator restatement`,
+          );
+          assertFalse(
+            instructions.includes("Commands OpenCode denies"),
+            `${agentType} ${modeLabel}: no restricted command-denial list`,
+          );
+          assertStringIncludes(instructions, "callback filesystem limits still apply");
+        } else {
+          assertStringIncludes(instructions, "individually allowed");
+          assertStringIncludes(instructions, "`2>&1`");
+          assertStringIncludes(instructions, "tolerated");
+          assertStringIncludes(instructions, "newline separators");
+          assertStringIncludes(instructions, "shell redirects");
+          assertFalse(
+            instructions.includes("callback filesystem limits still apply"),
+            `${agentType} ${modeLabel}: YOLO limits are not restated as restricted rules`,
+          );
+          if (agentType === "opencode") {
+            assertStringIncludes(
+              instructions,
+              "Commands OpenCode denies BEFORE the permission gate",
+            );
+            // `||` is NOT the denial — the attribution is to `echo`.
+            assertStringIncludes(instructions, "`echo` is denied");
+          } else {
+            assertFalse(
+              instructions.includes("OpenCode"),
+              "restricted OMP correction does not attribute the policy to OpenCode",
+            );
+          }
+        }
+        if (agentType === "omp") {
+          assertStringIncludes(instructions, "language-server (LSP) tool is denied");
+          assertStringIncludes(instructions, "completion notice");
+          assertStringIncludes(instructions, "native state and bash artifacts stay read-only");
+        }
+
+        sessionRegistry.stop();
+      } finally {
+        await Deno.remove(tempDir, { recursive: true });
+      }
+    },
+  );
+}
 
 Deno.test("Self-research verification - no note after retry records failure, counter, and audit lifecycle", async () => {
   const tempDir = await Deno.makeTempDir();
