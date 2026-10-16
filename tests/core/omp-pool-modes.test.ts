@@ -3,10 +3,7 @@ import { isAbsolute, join, resolve } from "@std/path";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { AgentProcessPool, type PoolRunOptions } from "@core/agent-process-pool.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
-import type {
-  WorkspaceTmpCleanupOptions,
-  WorkspaceTmpCleanupOutcome,
-} from "@core/workspace-manager.ts";
+import { RecordingWorkspaceManager } from "../helpers/recording-workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
@@ -22,27 +19,6 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditEntry } from "../../src/types/audit.ts";
 import { createAgentConfig } from "../../src/acp/agent-factory.ts";
 import { ompXdgDataHome } from "@utils/omp-paths.ts";
-
-/**
- * Workspace manager that records temporary-use acquire/release calls, so the
- * acquisition matrix can assert per-entrypoint exactly-once ownership
- * (reap-orphan-workspace-staging D2) rather than only eventual cleanup.
- */
-class RecordingWorkspaceManager extends WorkspaceManager {
-  readonly acquired: string[] = [];
-  readonly released: string[] = [];
-  override acquireTmpUse(tmpPath: string): void {
-    this.acquired.push(tmpPath);
-    super.acquireTmpUse(tmpPath);
-  }
-  override releaseTmpUse(
-    tmpPath: string,
-    options?: WorkspaceTmpCleanupOptions,
-  ): WorkspaceTmpCleanupOutcome | null {
-    this.released.push(tmpPath);
-    return super.releaseTmpUse(tmpPath, options);
-  }
-}
 
 import {
   OMP_NATIVE_CACHE_EXECUTABLE_SHA256,

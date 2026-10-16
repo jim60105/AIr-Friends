@@ -9,13 +9,14 @@ import { AgentProcessPool } from "../../src/core/agent-process-pool.ts";
 import { poolEntryKey } from "../../src/core/agent-process-pool.ts";
 import type { ChildQuiescenceVerdict } from "../../src/utils/process-lifecycle.ts";
 import type { WorkspaceTmpUnreclaimableSink } from "../../src/core/workspace-manager.ts";
+import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
-import { resolve } from "@std/path";
+import { join, resolve } from "@std/path";
 import { mockOmpNativeCache } from "../mocks/omp-mock-session.ts";
 
 /**
@@ -968,6 +969,29 @@ class RecordingTmpSink implements WorkspaceTmpUnreclaimableSink {
   }
 }
 
+/** A pool whose drain verdict is scripted, so release-time uncertainty is observable. */
+class UncertainDrainPool extends AgentProcessPool {
+  verdict: ChildQuiescenceVerdict = { status: "uncertain", reason: "enumeration-failed" };
+  protected override awaitProducerQuiescence(
+    _wrapperPid: number,
+  ): Promise<ChildQuiescenceVerdict> {
+    return Promise.resolve(this.verdict);
+  }
+}
+
+/**
+ * The session id the pool's active pointer currently names, or `undefined` when
+ * the pointer is cleared (the owner-validated release writes an empty file).
+ */
+async function readPointerSession(jwtDir: string): Promise<string | undefined> {
+  const raw = (await Deno.readTextFile(`${jwtDir}/active.json`)).trim();
+  if (raw === "") return undefined;
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== "object" || !("sessionId" in parsed)) return undefined;
+  const value = parsed.sessionId;
+  return typeof value === "string" ? value : undefined;
+}
+
 /** Run options for one pooled session on the given channel. */
 function poolRunOptions(overrides: {
   channelId: string;
@@ -1021,14 +1045,11 @@ Deno.test({
 
       // The release path is now blocked inside the drain, holding the lease.
       await pool.drainEntered.promise;
-      const pointerWhileDraining = JSON.parse(
-        await Deno.readTextFile(`${jwtDir}/active.json`),
-      ) as { sessionId?: string };
 
       // While the drain runs: this session's own pointer and JWT must still be
       // present (a late tool child still needs them), the public result must not
       // have settled, and the workspace's staged files are untouched.
-      assertEquals(pointerWhileDraining.sessionId, sidA);
+      assertEquals(await readPointerSession(jwtDir), sidA);
       assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), true);
       assertEquals(settled, false, "the result must not settle during the drain");
 
@@ -1037,9 +1058,12 @@ Deno.test({
       const sidB = registerSession(registry, { channelId: "discord/2" });
       const runB = pool.run(
         poolRunOptions({ channelId: "discord/2", shellSessionId: sidB }),
-        () => {
+        async () => {
           events.push("B:start");
-          return Promise.resolve("acp-B");
+          // B holds the lease here: its own pointer must be visible, which is
+          // why the post-A assertion below accepts B's pointer as well as "".
+          assertEquals(await readPointerSession(jwtDir), sidB);
+          return "acp-B";
         },
       );
       await Promise.resolve();
@@ -1052,8 +1076,13 @@ Deno.test({
       assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
       assertEquals(settled, true);
       // The release completed BEFORE the result became visible to the caller.
+      // B's release/acquire may legitimately have advanced by now (the pointer
+      // is either cleared or B's), so the assertion is that A's is GONE.
       assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
-      assertEquals((await Deno.readTextFile(`${jwtDir}/active.json`)).trim(), "");
+      assert(
+        (await readPointerSession(jwtDir)) !== sidA,
+        "A's pointer must be cleared once A settled",
+      );
 
       const resultB = await runB;
       assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
@@ -1196,6 +1225,68 @@ Deno.test({
 });
 
 Deno.test({
+  name: "pool - an uncertain drain verdict retains the owning workspace after the release",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const repoPath = await Deno.makeTempDir();
+    const jwtDir = await Deno.makeTempDir();
+    const registry = new SessionRegistry(1000);
+    try {
+      const manager = new WorkspaceManager({ repoPath, workspacesDir: "workspaces" });
+      const workspacePath = join(repoPath, "workspaces", "discord", "u1");
+      const tmpPath = join(workspacePath, "tmp");
+      const staged = join(tmpPath, "owner-session", "staged.json");
+      await Deno.mkdir(join(tmpPath, "owner-session"), { recursive: true });
+      await Deno.writeTextFile(staged, "staged payload");
+
+      for (const reason of ["enumeration-failed", "survivors-remain"] as const) {
+        const config = makeConfig();
+        config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+        const pool = new UncertainDrainPool(
+          config,
+          registry,
+          "test-secret-0123456789abcdef0123456789",
+          () => new PidStubConnector(123_456) as unknown as AgentConnector,
+          30_000,
+          undefined,
+          manager,
+        );
+        pool.verdict = { status: "uncertain", reason };
+        try {
+          const sid = registerSession(registry, { channelId: "discord/u1" });
+          const result = await pool.run(
+            poolRunOptions({
+              channelId: "discord/u1",
+              shellSessionId: sid,
+              workspacePath,
+            }),
+            () => Promise.resolve("acp-uncertain"),
+          );
+
+          // The computed result and the pointer/JWT release are unaffected …
+          assertEquals(result, { acpSessionId: "acp-uncertain", cancelledByDeadline: false });
+          assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
+          // … and the owning workspace keeps its protection for this lifetime:
+          // a subsequent idle release must not touch the staged payload.
+          assertEquals(manager.isTmpUseUncertain(tmpPath), true);
+          manager.acquireTmpUse(tmpPath);
+          assertEquals(manager.releaseTmpUse(tmpPath)?.reason, "uncertain-teardown");
+          assertEquals(manager.getTmpUseCount(tmpPath), 0);
+          assertEquals(await exists(staged), true);
+        } finally {
+          await stopPool(pool);
+        }
+      }
+    } finally {
+      registry.stop();
+      await Deno.remove(repoPath, { recursive: true });
+      await Deno.remove(jwtDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
   name: "pool - a failed acquisition retains the workspace only once a producer generation started",
   sanitizeResources: false,
   sanitizeOps: false,
@@ -1228,6 +1319,7 @@ Deno.test({
         try {
           const workspacePath = "/tmp/test/workspaces/discord/9";
           const sid = registerSession(registry, { channelId: "discord/9" });
+          const disconnectCallsBefore = disconnectCalls;
           const result = await pool.run(
             poolRunOptions({
               channelId: "discord/9",
@@ -1250,8 +1342,9 @@ Deno.test({
               reason: "connect-failed",
             }]);
           }
-          // Best-effort teardown was still attempted without masking the error.
-          assertEquals(disconnectCalls > 0, true);
+          // Best-effort teardown was still attempted in THIS case, without
+          // masking the acquisition error.
+          assertEquals(disconnectCalls, disconnectCallsBefore + 1);
         } finally {
           await stopPool(pool);
         }

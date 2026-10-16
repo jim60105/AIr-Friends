@@ -1,10 +1,7 @@
 import { assert, assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
-import type {
-  WorkspaceTmpCleanupOptions,
-  WorkspaceTmpCleanupOutcome,
-} from "@core/workspace-manager.ts";
+import { RecordingWorkspaceManager } from "../helpers/recording-workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
@@ -82,26 +79,6 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
   protected override createConnector(options: AgentConnectorOptions): AgentConnector {
     this.mockConnector = new MockAgentConnector(options);
     return this.mockConnector as unknown as AgentConnector;
-  }
-}
-
-/**
- * Workspace manager that records temporary-use acquire/release calls, so a
- * dry-run entrypoint's exactly-once ownership can be asserted directly.
- */
-class RecordingWorkspaceManager extends WorkspaceManager {
-  readonly acquired: string[] = [];
-  readonly released: string[] = [];
-  override acquireTmpUse(tmpPath: string): void {
-    this.acquired.push(tmpPath);
-    super.acquireTmpUse(tmpPath);
-  }
-  override releaseTmpUse(
-    tmpPath: string,
-    options?: WorkspaceTmpCleanupOptions,
-  ): WorkspaceTmpCleanupOutcome | null {
-    this.released.push(tmpPath);
-    return super.releaseTmpUse(tmpPath, options);
   }
 }
 

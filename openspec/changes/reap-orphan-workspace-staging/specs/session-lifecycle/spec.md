@@ -84,14 +84,15 @@ Cleanup SHALL visit only the configured recognized workspace layout and SHALL li
 - **AND** active dashboard temporary data SHALL NOT be swept by unrelated session cleanup
 
 #### Scenario: Links cannot redirect traversal
-- **WHEN** a platform/workspace/tmp component is linked or changes identity, or a disposable child is a symlink to outside data
+- **WHEN** a platform/workspace/tmp component is a link or is no longer an ordinary directory, or a disposable child is a symlink to outside data
 - **THEN** cleanup SHALL skip unsafe ancestry and SHALL never descend through the disposable symlink
 - **AND** unlinking a disposable symlink SHALL leave its target and outside sentinel bytes unchanged
 
 #### Scenario: Traversal budget retains remaining work
 - **GIVEN** disposable contents exceed the per-workspace node or depth budget
 - **WHEN** one cleanup invocation reaches its bound
-- **THEN** it SHALL stop that workspace's traversal and retain unvisited data
+- **THEN** reaching the node budget SHALL stop that workspace's traversal and retain unvisited data
+- **AND** a depth violation SHALL retain that subtree as intentionally ineligible and SHALL continue with the remaining candidates, so an over-deep branch cannot starve its shallow siblings
 - **AND** a later normal teardown or startup pass SHALL be able to reclaim remaining eligible entries without a new periodic scheduler
 
 #### Scenario: Missing entries and partial IO failures

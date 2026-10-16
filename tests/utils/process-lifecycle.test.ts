@@ -205,6 +205,102 @@ Deno.test("awaitChildQuiescence - an emptied tool tree is not trusted once the w
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
+/** A live wrapper with one agent and one tool child, plus mutable drives for the two child phases. */
+function makeToolTree(): {
+  tree: ReturnType<typeof makeTree>;
+  children: Map<number, number[]>;
+  alive: Set<number>;
+} {
+  const children = new Map([[WRAPPER, [AGENT, TOOL]]]);
+  const alive = new Set([WRAPPER, AGENT, TOOL]);
+  return { tree: makeTree({ children, alive }), children, alive };
+}
+
+Deno.test("awaitChildQuiescence - a wrapper vanishing during the kill-loop snapshot is uncertain", async () => {
+  const { tree, alive } = makeToolTree();
+  const originalKill = tree.deps.killPids!;
+  const originalList = tree.deps.listChildPids!;
+  let terminated = false;
+  tree.deps.killPids = (pids, signal) => {
+    if (signal === "TERM") terminated = true;
+    return originalKill(pids, signal);
+  };
+  // After the TERM the tools AND the wrapper disappear while the drain is
+  // enumerating, so the empty snapshot that follows proves nothing.
+  tree.deps.listChildPids = (pid) => {
+    if (terminated && pid === WRAPPER) {
+      alive.delete(WRAPPER);
+      return Promise.resolve({ ok: true, pids: [] });
+    }
+    return originalList(pid);
+  };
+
+  // drainTimeoutMs 0 skips the drain loop, so the kill loop takes the snapshot.
+  const verdict = await awaitChildQuiescence(WRAPPER, {
+    drainTimeoutMs: 0,
+    killWindowMs: 50,
+    deps: tree.deps,
+  });
+
+  assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
+});
+
+Deno.test("awaitChildQuiescence - a wrapper vanishing at the first final observation is uncertain", async () => {
+  const { tree, alive } = makeToolTree();
+  const originalKill = tree.deps.killPids!;
+  const originalList = tree.deps.listChildPids!;
+  let finalEnumerations = 0;
+  tree.deps.killPids = (pids, signal) => {
+    if (signal === "TERM") finalEnumerations = 0; // the post-termination phase starts here
+    return originalKill(pids, signal);
+  };
+  tree.deps.listChildPids = (pid) => {
+    if (pid !== WRAPPER) return originalList(pid);
+    if (++finalEnumerations === 1) {
+      alive.delete(WRAPPER);
+      return Promise.resolve({ ok: true, pids: [] });
+    }
+    return originalList(pid);
+  };
+
+  // Both loops are skipped (0 waits), so the FIRST final observation is the one
+  // taken while the wrapper disappears.
+  const verdict = await awaitChildQuiescence(WRAPPER, {
+    drainTimeoutMs: 0,
+    killWindowMs: 0,
+    deps: tree.deps,
+  });
+
+  assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
+});
+
+Deno.test("awaitChildQuiescence - a wrapper vanishing at the second final observation is uncertain", async () => {
+  const { tree, alive } = makeToolTree();
+  const originalKill = tree.deps.killPids!;
+  const originalList = tree.deps.listChildPids!;
+  let finalEnumerations = 0;
+  tree.deps.killPids = (pids, signal) => {
+    if (signal === "TERM") finalEnumerations = 0;
+    return originalKill(pids, signal);
+  };
+  tree.deps.listChildPids = (pid) => {
+    if (pid !== WRAPPER) return originalList(pid);
+    // First final observation still sees the surviving tool (a KILL follows);
+    // the second one runs while the wrapper disappears.
+    if (++finalEnumerations === 1) return originalList(pid);
+    alive.delete(WRAPPER);
+    return Promise.resolve({ ok: true, pids: [] });
+  };
+
+  const verdict = await awaitChildQuiescence(WRAPPER, {
+    drainTimeoutMs: 0,
+    killWindowMs: 0,
+    deps: tree.deps,
+  });
+
+  assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
+});
+
 Deno.test("awaitChildQuiescence - failed enumeration at any level is uncertain", async () => {
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT, TOOL]]]),

@@ -7,6 +7,7 @@ import { activeSessionsGauge, selfResearchNoNoteTotal, sessionsTotal } from "@ut
 import type { AgentProcessPool } from "@core/agent-process-pool.ts";
 import type { CompletedSessionStore } from "../../src/dashboard/completed-session-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
+import { RecordingWorkspaceManager } from "../helpers/recording-workspace-manager.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -430,13 +431,80 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "workspace temporary-use ownership protects a live producer whose Skill API evidence is gone",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const gated = new GatedWorkspaceManager({
+        repoPath: tempDir,
+        workspacesDir: "workspaces",
+      });
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(
+          tempDir,
+          { workspaceManager: gated },
+        );
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+      const replyHandler = skillRegistry.getReplyHandler() as unknown as {
+        replySentMap: Map<string, boolean>;
+      };
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          replyHandler.replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+        };
+      });
+
+      const pending = orchestrator.processMessage(event, platformAdapter);
+      // The producer is suspended before registration, i.e. the registry holds
+      // NO evidence for its workspace at all — the same situation an expired
+      // authentication entry leaves behind.
+      await gated.entered.promise;
+      assertEquals(sessionRegistry.hasActiveSessionsForWorkspace(workspaceKey), false);
+
+      // A staged file the still-running producer owns.
+      const staged = join(tmpPath, "owner-session", "staged.json");
+      await Deno.mkdir(dirname(staged), { recursive: true });
+      await Deno.writeTextFile(staged, "staged payload");
+
+      // A peer completion path consults the registry (no evidence) and the live
+      // ownership reference: it must refuse, and the staged bytes must survive.
+      const peer = workspaceManager.cleanupTmpIfIdle(tmpPath, {
+        isWorkspaceBusy: () => sessionRegistry.hasActiveSessionsForWorkspace(workspaceKey),
+      });
+      assertEquals(peer.status, "skipped");
+      assertEquals(peer.reason, "live-temporary-use");
+      assertEquals(await pathExists(staged), true);
+
+      gated.gate.resolve();
+      const response = await pending;
+
+      assertEquals(response.success, true);
+      // Only the producer's own teardown ends the protection, and its release
+      // then reclaims the disposable entry.
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      assertEquals(await pathExists(staged), false);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
   name: "workspace temporary-use ownership is released exactly once when workspace setup fails",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
     const tempDir = await Deno.makeTempDir();
     try {
-      class FailingWorkspaceManager extends WorkspaceManager {
+      class FailingWorkspaceManager extends RecordingWorkspaceManager {
         override getOrCreateWorkspace(): Promise<WorkspaceInfo> {
           return Promise.reject(new Error("workspace creation failed"));
         }
@@ -460,8 +528,11 @@ Deno.test({
 
       assertEquals(response.success, false);
       assertEquals(response.error, "workspace creation failed");
-      // Exactly once: the count is back to zero and nothing stays marked busy.
+      // Exactly once, proven by the recorded CALLS: a duplicate release would be
+      // ignored by the manager (so the count alone could not expose it).
       assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      assertEquals(failing.acquired, [tmpPath]);
+      assertEquals(failing.released, [tmpPath]);
       assertEquals(sessionRegistry.activeCount, 0);
       sessionRegistry.stop();
     } finally {

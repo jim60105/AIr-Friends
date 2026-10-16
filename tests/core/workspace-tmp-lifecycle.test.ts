@@ -98,7 +98,29 @@ Deno.test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries 
       return { name, dev: stat.dev, ino: stat.ino };
     });
 
-    const outcome = manager.cleanupTmpIfIdle(tmpPath, { limits: DEFAULT_LIMITS });
+    // Every filesystem inspection inside the workspace is recorded, so "reserved
+    // names are never enumerated or inspected" is observed directly rather than
+    // inferred from the bytes still being present.
+    const originalLstatSync = Deno.lstatSync;
+    const originalReadDirSync = Deno.readDirSync;
+    const inspected: string[] = [];
+    Deno.lstatSync = ((path: string | URL) => {
+      const target = String(path);
+      if (target.startsWith(tmpPath)) inspected.push(target);
+      return originalLstatSync(path);
+    }) as typeof Deno.lstatSync;
+    Deno.readDirSync = ((path: string | URL) => {
+      const target = String(path);
+      if (target.startsWith(tmpPath)) inspected.push(target);
+      return originalReadDirSync(path);
+    }) as typeof Deno.readDirSync;
+    let outcome;
+    try {
+      outcome = manager.cleanupTmpIfIdle(tmpPath, { limits: DEFAULT_LIMITS });
+    } finally {
+      Deno.lstatSync = originalLstatSync;
+      Deno.readDirSync = originalReadDirSync;
+    }
 
     assertEquals(outcome.status, "cleaned");
     assertEquals(outcome.budgetExhausted, false);
@@ -139,6 +161,16 @@ Deno.test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries 
       assertEquals(after.dev, before.dev, `${before.name} changed device`);
       assertEquals(after.ino, before.ino, `${before.name} changed identity`);
     }
+    // The reserved names were preserved WITHOUT being inspected: nothing at or
+    // below them appears in the recorded inspection paths.
+    const reservedPrefixes = identityBefore.map((entry) => join(tmpPath, entry.name));
+    assertEquals(
+      inspected.filter((path) =>
+        reservedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+      ),
+      [],
+      `reserved engine state was inspected: ${inspected.join(", ")}`,
+    );
 
     // Persistent workspace data never moves.
     assertEquals(Deno.readTextFileSync(join(workspacePath, "memory.public.jsonl")), "memory");
@@ -387,14 +419,20 @@ Deno.test("cleanupTmpIfIdle - traversal bounds retain the remainder and a later 
   });
 });
 
-Deno.test("cleanupTmpIfIdle - the depth bound retains a deep tree instead of recursing without limit", async () => {
+Deno.test("cleanupTmpIfIdle - the depth bound retains the deep subtree and still reclaims shallow siblings", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     const deep = join(tmpPath, "a", "b", "c", "leaf.txt");
     writeFixture(deep, "deep");
+    writeFixture(join(tmpPath, "shallow.txt"), "shallow");
 
     const bounded = manager.cleanupTmpIfIdle(tmpPath, { limits: { maxDepth: 1 } });
-    assertEquals(bounded.budgetExhausted, true);
+    // The depth bound is an eligibility decision, not a work-budget exhaustion:
+    // it neither stops the pass …
+    assertEquals(bounded.budgetExhausted, false);
+    assert(bounded.retained >= 1);
+    // … nor starves the shallow, eligible sibling in the very same invocation.
+    assertFalse(exists(join(tmpPath, "shallow.txt")));
     assert(exists(deep), "work beyond the depth bound is retained");
 
     const complete = manager.cleanupTmpIfIdle(tmpPath);
@@ -606,14 +644,16 @@ Deno.test("cleanupTmpIfIdle - failing inspections consume the node budget instea
   });
 });
 
-Deno.test("cleanupTmpIfIdle - a depth-bound hit stops the whole workspace pass", async () => {
+Deno.test("cleanupTmpIfIdle - an over-deep branch never starves its shallow siblings", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
-    // Three independent deep chains: whichever one is visited first trips the
-    // depth bound, and the pass must then STOP — one trip, never one per chain.
+    // Three independent over-deep chains plus one shallow, eligible sibling. The
+    // same limits are used on every pass: the deep content stays ineligible, but
+    // it must never block the sibling from being reclaimed right away.
     for (const chain of ["d1", "d2", "d3"]) {
       writeFixture(join(tmpPath, chain, "x", "y", "leaf.txt"), "deep");
     }
+    writeFixture(join(tmpPath, "sibling.txt"), "shallow");
 
     const originalLstatSync = Deno.lstatSync;
     const attempted: string[] = [];
@@ -628,16 +668,27 @@ Deno.test("cleanupTmpIfIdle - a depth-bound hit stops the whole workspace pass",
       Deno.lstatSync = originalLstatSync;
     }
 
-    assertEquals(outcome.budgetExhausted, true);
-    assertEquals(outcome.removed, 0);
-    // The depth bound is hit while inspecting a depth-2 component; nothing may be
-    // examined afterwards, so exactly one such component is ever attempted.
+    assertEquals(outcome.budgetExhausted, false);
+    // The bound is applied per branch — one depth-2 component attempted per deep
+    // chain, never anything deeper — while the pass still reaches the sibling.
     const atBound = attempted.filter((path) => depthBelow(tmpPath, path) === 2);
-    assertEquals(atBound.length, 1, `examined past the depth bound: ${attempted.join(", ")}`);
-    assertEquals(attempted[attempted.length - 1], atBound[0]);
-    // Everything beyond the bound is retained for a later pass.
+    assertEquals(atBound.length, 3, `unexpected depth-2 attempts: ${attempted.join(", ")}`);
+    assertEquals(
+      attempted.filter((path) => depthBelow(tmpPath, path) > 2).length,
+      0,
+      `recursed past the depth bound: ${attempted.join(", ")}`,
+    );
+    assertEquals(outcome.retained, 3);
+    assertFalse(exists(join(tmpPath, "sibling.txt")));
     for (const chain of ["d1", "d2", "d3"]) {
       assertEquals(Deno.readTextFileSync(join(tmpPath, chain, "x", "y", "leaf.txt")), "deep");
+    }
+
+    // A later pass with the production limit reclaims the retained chains.
+    const complete = manager.cleanupTmpIfIdle(tmpPath);
+    assertEquals(complete.budgetExhausted, false);
+    for (const chain of ["d1", "d2", "d3"]) {
+      assertFalse(exists(join(tmpPath, chain)));
     }
   });
 });

@@ -124,9 +124,11 @@ export async function awaitChildQuiescence(
   // An empty observation is only evidence while the wrapper it was taken from is
   // STILL observable: if the wrapper exited between the check above and the
   // enumeration, its children re-parented away and "no children" says nothing
-  // about whether they finished. Re-check before trusting either empty snapshot.
+  // about whether they finished. EVERY empty snapshot — the initial childless
+  // one, the drained one, and each post-termination one — is re-checked this
+  // way before it may authorize cleanup.
   const quiescentFromEmpty = async (
-    drained: "no-child" | "drained",
+    drained: "no-child" | "drained" | "terminated",
   ): Promise<ChildQuiescenceVerdict> => {
     if (!(await deps.processAlive(wrapperPid))) {
       logger.debug(
@@ -179,7 +181,7 @@ export async function awaitChildQuiescence(
     }
     const snapshot = await collectToolPids(wrapperPid, agentPid, deps);
     if (!snapshot.ok) return { status: "uncertain", reason: "enumeration-failed" };
-    if (snapshot.pids.length === 0) return { status: "quiescent", drained: "terminated" };
+    if (snapshot.pids.length === 0) return await quiescentFromEmpty("terminated");
     await deps.killPids(snapshot.pids, "KILL");
   }
 
@@ -191,14 +193,14 @@ export async function awaitChildQuiescence(
   }
   let final = await collectToolPids(wrapperPid, agentPid, deps);
   if (!final.ok) return { status: "uncertain", reason: "enumeration-failed" };
-  if (final.pids.length === 0) return { status: "quiescent", drained: "terminated" };
+  if (final.pids.length === 0) return await quiescentFromEmpty("terminated");
   await deps.killPids(final.pids, "KILL");
   if (!(await deps.processAlive(wrapperPid))) {
     return { status: "uncertain", reason: "wrapper-not-observable" };
   }
   final = await collectToolPids(wrapperPid, agentPid, deps);
   if (!final.ok) return { status: "uncertain", reason: "enumeration-failed" };
-  if (final.pids.length === 0) return { status: "quiescent", drained: "terminated" };
+  if (final.pids.length === 0) return await quiescentFromEmpty("terminated");
 
   logger.warn("Tool processes survived termination for wrapper {pid} — teardown is uncertain", {
     pid: wrapperPid,

@@ -691,6 +691,7 @@ This is your personal workspace for long-term knowledge and notes.
         error: error instanceof Error ? error.message : String(error),
         path: root,
       });
+      report.skipped++;
       return report;
     }
 
@@ -854,14 +855,25 @@ This is your personal workspace for long-term knowledge and notes.
   /**
    * Classify one candidate `tmp/` target before touching it: `ok` when every
    * component below the canonical root is an ordinary, link-free directory and
-   * the shape is a recognized workspace; `absent` when the target (or a
-   * component) does not exist; `unsafe` otherwise. Never follows a link.
+   * the shape is a recognized workspace; `absent` when the target, a component
+   * or the configured root itself does not exist; `unsafe` otherwise. Never
+   * follows a link.
    */
   private inspectTmpTarget(
     tmpPath: string,
   ): { status: "ok" } | { status: "absent" } | { status: "unsafe"; reason: string } {
     const root = this.canonicalWorkspaceRoot();
-    if (root === undefined) return { status: "unsafe", reason: "workspace-root-unavailable" };
+    if (root === undefined) {
+      // An absent configured root is harmless — the first session creates it —
+      // and the trust-boundary policy treats a missing entry as a silent
+      // no-op. Any other unresolvable root state stays unsafe ancestry.
+      try {
+        Deno.lstatSync(this.workspacesRoot);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) return { status: "absent" };
+      }
+      return { status: "unsafe", reason: "workspace-root-unavailable" };
+    }
 
     const rel = relative(this.workspacesRoot, tmpPath);
     if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
@@ -939,9 +951,14 @@ This is your personal workspace for long-term knowledge and notes.
 
         if (stat.isDirectory) {
           if (depth + 1 > state.maxDepth) {
-            state.budgetExhausted = true;
+            // The depth bound is an eligibility decision, NOT a work-budget
+            // exhaustion: content deeper than the limit is intentionally
+            // retained, and the pass CONTINUES with the remaining candidates so
+            // an over-deep subtree can never starve its shallow siblings on this
+            // and every later pass. Only the node budget stops the pass.
             state.retained++;
-            return false;
+            emptied = false;
+            continue;
           }
           if (!this.removeDisposableChildren(childPath, depth + 1, state, log)) {
             // A bound reached ANYWHERE in this subtree stops this workspace's
