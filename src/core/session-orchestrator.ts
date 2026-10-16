@@ -1,6 +1,8 @@
 // src/core/session-orchestrator.ts
 
 import { createLogger } from "@utils/logger.ts";
+import type { Logger } from "@utils/logger.ts";
+import { awaitChildQuiescence, type ChildQuiescenceVerdict } from "@utils/process-lifecycle.ts";
 import type { ReplyPolicyEvaluator, YoloDecision } from "./reply-policy.ts";
 import {
   AgentConnector,
@@ -162,6 +164,16 @@ export interface SessionResponse {
   /** Whether at least one file was delivered via send-file (message flows only) */
   fileSent?: boolean;
   error?: string;
+}
+
+/**
+ * One workspace whose temporary files a session producer is currently using
+ * (design D2). `workspaceKey` is the registry identity used for the
+ * conservative registered-session busy check.
+ */
+interface ProducerTmpRoot {
+  workspaceKey: string;
+  tmpPath: string;
 }
 
 /**
@@ -621,6 +633,14 @@ export class SessionOrchestrator {
       };
     }
 
+    // Temporary-use ownership precedes workspace creation (design D2): it is
+    // acquired before the first await, so a workspace created below can never be
+    // reclaimed by another completion path while this session is setting up.
+    const tmpRoots = [
+      this.producerTmpRoot(this.workspaceManager.getWorkspaceKeyFromEvent(event)),
+    ];
+    this.acquireProducerTmpUse(tmpRoots);
+
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
     let result: SessionResponse;
@@ -863,6 +883,7 @@ export class SessionOrchestrator {
               connectTimeoutMs: this.config.agent.connectTimeoutMs,
             },
             sessionCwd: workspace.path,
+            workspacePath: workspace.path,
           },
           async (connector: AgentConnector, options: PoolRunOptions) => {
             // ACP session lifecycle on the shared connection (one process serves
@@ -1538,7 +1559,11 @@ export class SessionOrchestrator {
           clearInterval(typingInterval);
         }
 
-        await connector.disconnect();
+        await this.finishPerSpawnProducer({
+          connector,
+          tmpRoots,
+          sessionLogger,
+        });
         sessionLogger.debug("Agent disconnected");
 
         // Clean up shell session if it exists
@@ -1600,6 +1625,15 @@ export class SessionOrchestrator {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      try {
+        this.releaseProducerTmpUse(tmpRoots, sessionLogger);
+      } catch (error) {
+        sessionLogger.error("Failed to release workspace temporary-use ownership", {
+          platform: event.platform,
+          sessionType,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -1624,6 +1658,14 @@ export class SessionOrchestrator {
       channelId,
       fetchRecentMessages: options.fetchRecentMessages,
     });
+
+    // Temporary-use ownership precedes workspace creation (design D2).
+    const tmpRoots = [
+      this.producerTmpRoot(
+        this.workspaceManager.computeWorkspaceKey({ platform, userId: options.botId }),
+      ),
+    ];
+    this.acquireProducerTmpUse(tmpRoots);
 
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
@@ -2036,7 +2078,11 @@ export class SessionOrchestrator {
         };
         return result;
       } finally {
-        await connector.disconnect();
+        await this.finishPerSpawnProducer({
+          connector,
+          tmpRoots,
+          sessionLogger,
+        });
         sessionLogger.debug("Agent disconnected");
 
         if (shellSessionId) {
@@ -2097,6 +2143,15 @@ export class SessionOrchestrator {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      try {
+        this.releaseProducerTmpUse(tmpRoots, sessionLogger);
+      } catch (error) {
+        sessionLogger.error("Failed to release workspace temporary-use ownership", {
+          platform,
+          sessionType: "spontaneous",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -2116,6 +2171,18 @@ export class SessionOrchestrator {
       rssItemCount: rssItems.length,
       model: selfResearchConfig.model,
     });
+
+    // Temporary-use ownership precedes workspace creation (design D2): the
+    // internal self-research workspace key is fixed and computable here.
+    const tmpRoots = [
+      this.producerTmpRoot(
+        this.workspaceManager.computeWorkspaceKey({
+          platform: "discord",
+          userId: "self-research",
+        }),
+      ),
+    ];
+    this.acquireProducerTmpUse(tmpRoots);
 
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
@@ -2629,7 +2696,11 @@ export class SessionOrchestrator {
         };
         return result;
       } finally {
-        await connector.disconnect();
+        await this.finishPerSpawnProducer({
+          connector,
+          tmpRoots,
+          sessionLogger,
+        });
         sessionLogger.debug("Agent disconnected");
 
         if (shellSessionId) {
@@ -2688,6 +2759,15 @@ export class SessionOrchestrator {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      try {
+        this.releaseProducerTmpUse(tmpRoots, sessionLogger);
+      } catch (error) {
+        sessionLogger.error("Failed to release workspace temporary-use ownership", {
+          platform: "internal",
+          sessionType: "self_research",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -2717,6 +2797,10 @@ export class SessionOrchestrator {
       workspaceKey,
       model: memoryMaintenanceConfig.model,
     });
+
+    // Temporary-use ownership precedes workspace creation (design D2).
+    const tmpRoots = [this.producerTmpRoot(workspaceKey)];
+    this.acquireProducerTmpUse(tmpRoots);
 
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
@@ -3042,7 +3126,11 @@ export class SessionOrchestrator {
         };
         return result;
       } finally {
-        await connector.disconnect();
+        await this.finishPerSpawnProducer({
+          connector,
+          tmpRoots,
+          sessionLogger,
+        });
         sessionLogger.debug("Agent disconnected");
 
         if (shellSessionId) {
@@ -3101,6 +3189,15 @@ export class SessionOrchestrator {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      try {
+        this.releaseProducerTmpUse(tmpRoots, sessionLogger);
+      } catch (error) {
+        sessionLogger.error("Failed to release workspace temporary-use ownership", {
+          platform,
+          sessionType: "memory_maintenance",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -3130,6 +3227,24 @@ export class SessionOrchestrator {
       channelKey,
       model: memoryMaintenanceConfig.model,
     });
+
+    // Temporary-use ownership precedes workspace creation (design D2). This
+    // session uses TWO roots: the synthetic per-user workspace that carries the
+    // registry identity + payload staging, and the channel workspace the agent's
+    // process is actually anchored in (its ACP cwd and per-spawn TMPDIR).
+    const tmpRoots = [
+      this.producerTmpRoot(
+        this.workspaceManager.computeWorkspaceKey({
+          platform,
+          userId: "channel-maintenance",
+        }),
+      ),
+      {
+        workspaceKey: channelWorkspace.key,
+        tmpPath: join(channelWorkspace.path, "tmp"),
+      },
+    ];
+    this.acquireProducerTmpUse(tmpRoots);
 
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
@@ -3430,7 +3545,11 @@ export class SessionOrchestrator {
         };
         return result;
       } finally {
-        await connector.disconnect();
+        await this.finishPerSpawnProducer({
+          connector,
+          tmpRoots,
+          sessionLogger,
+        });
         sessionLogger.debug("Agent disconnected");
 
         if (shellSessionId) {
@@ -3487,6 +3606,15 @@ export class SessionOrchestrator {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      try {
+        this.releaseProducerTmpUse(tmpRoots, sessionLogger);
+      } catch (error) {
+        sessionLogger.error("Failed to release workspace temporary-use ownership", {
+          platform,
+          sessionType: "channel_memory_maintenance",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
   async processReminder(
@@ -3503,6 +3631,18 @@ export class SessionOrchestrator {
       userId: reminder.userId,
       scheduledAt: reminder.scheduledAt,
     });
+
+    // Temporary-use ownership precedes workspace creation (design D2), covering
+    // the cannot-resolve-DM branch that still creates this user's workspace.
+    const tmpRoots = [
+      this.producerTmpRoot(
+        this.workspaceManager.computeWorkspaceKey({
+          platform,
+          userId: reminder.userId,
+        }),
+      ),
+    ];
+    this.acquireProducerTmpUse(tmpRoots);
 
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
@@ -3889,7 +4029,11 @@ export class SessionOrchestrator {
         };
         return result;
       } finally {
-        await connector.disconnect();
+        await this.finishPerSpawnProducer({
+          connector,
+          tmpRoots,
+          sessionLogger,
+        });
         sessionLogger.debug("Agent disconnected");
 
         if (shellSessionId) {
@@ -3944,6 +4088,15 @@ export class SessionOrchestrator {
         });
       } catch (error) {
         sessionLogger.error("Failed to record session metrics", {
+          platform,
+          sessionType: "reminder",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.releaseProducerTmpUse(tmpRoots, sessionLogger);
+      } catch (error) {
+        sessionLogger.error("Failed to release workspace temporary-use ownership", {
           platform,
           sessionType: "reminder",
           error: error instanceof Error ? error.message : String(error),
@@ -4021,6 +4174,7 @@ export class SessionOrchestrator {
         priority,
         connectorOptions,
         sessionCwd,
+        workspacePath: workspace.path,
       },
       async (connector: AgentConnector) => {
         // Record session ownership at acquisition (before first ACP call/createSession)
@@ -4808,7 +4962,16 @@ export class SessionOrchestrator {
       // payload writes (via its edit/write tool or `writeTextFile`) have an
       // existing parent — neither write sink creates parent directories, and a
       // missing directory would otherwise surface later as SKILL_PAYLOAD_NOT_FOUND.
-      await Deno.mkdir(join(params.workspace.tmpPath, shellSessionId), { recursive: true });
+      try {
+        await Deno.mkdir(join(params.workspace.tmpPath, shellSessionId), { recursive: true });
+      } catch (error) {
+        // Registration precedes staging provisioning; the caller never receives
+        // this id on failure, so roll the entry back here. Otherwise a leaked
+        // registry entry would keep the workspace looking busy for the whole
+        // bot lifetime and block its temporary-file reclamation.
+        this.sessionRegistry.remove(shellSessionId);
+        throw error;
+      }
     }
 
     const auditWriter = shellSessionId
@@ -5284,38 +5447,115 @@ export class SessionOrchestrator {
   }
 
   /**
-   * Clean up the workspace tmp directory if no other active sessions exist.
-   * This prevents leftover files from occupying disk space — particularly
-   * important for agent-browser which stores Chrome profiles, screenshots,
-   * and video recordings in TMPDIR.
+   * Temporary-use root of a workspace key, computable BEFORE the workspace or
+   * its `tmp/` directory exists — the ownership reference must precede the
+   * first await that may create them (design D2).
+   */
+  private producerTmpRoot(workspaceKey: string): ProducerTmpRoot {
+    return {
+      workspaceKey,
+      tmpPath: this.workspaceManager.getWorkspaceTmpPath(workspaceKey),
+    };
+  }
+
+  /**
+   * Acquire one producer's temporary-use references. Called before the first
+   * await that may create the workspace/`tmp`, so a workspace is already busy
+   * while the session is still being set up — before Skill API registration.
+   */
+  private acquireProducerTmpUse(tmpRoots: readonly ProducerTmpRoot[]): void {
+    for (const root of tmpRoots) {
+      this.workspaceManager.acquireTmpUse(root.tmpPath);
+    }
+  }
+
+  /**
+   * Release one producer's references exactly once, from the entrypoint's outer
+   * `finally`. Registry membership stays an additional conservative busy check;
+   * the FINAL release performs the actual idle cleanup of eligible disposable
+   * entries.
+   */
+  private releaseProducerTmpUse(
+    tmpRoots: readonly ProducerTmpRoot[],
+    sessionLogger: Logger,
+  ): void {
+    for (const root of tmpRoots) {
+      this.workspaceManager.releaseTmpUse(root.tmpPath, {
+        isWorkspaceBusy: () =>
+          this.sessionRegistry.hasActiveSessionsForWorkspace(root.workspaceKey),
+        logger: sessionLogger,
+      });
+    }
+  }
+
+  /**
+   * Clean up the workspace `tmp/` directory's disposable entries if no other
+   * active session and no live temporary-use owner remains. This prevents
+   * leftover files from occupying disk space — particularly important for
+   * agent-browser, which stores Chrome profiles, screenshots and video
+   * recordings in TMPDIR — while preserving the `tmp/` root and the reserved
+   * `omp-agent`/`opencode-data` engine-state entries.
+   *
+   * One policy for teardown and startup: the workspace manager owns both the
+   * idle check (live references + registry occupancy + unconfirmed teardown)
+   * and the bounded entry traversal. While this session's own producer still
+   * holds its reference this call is a no-op; the final release cleans up.
    */
   private cleanupWorkspaceTmp(
     workspace: WorkspaceInfo,
-    logger: ReturnType<typeof createLogger>,
+    logger: Logger,
   ): void {
-    if (this.sessionRegistry.hasActiveSessionsForWorkspace(workspace.key)) {
-      logger.debug(
-        "Skipping tmp cleanup — other active sessions exist for workspace {workspaceKey}",
-        { workspaceKey: workspace.key },
-      );
-      return;
-    }
+    this.workspaceManager.cleanupTmpIfIdle(workspace.tmpPath, {
+      isWorkspaceBusy: () => this.sessionRegistry.hasActiveSessionsForWorkspace(workspace.key),
+      logger,
+    });
+  }
 
-    try {
-      // Keep the active-session check and tmp removal in one synchronous critical section
-      // so another same-workspace session cannot start and lose TMPDIR mid-cleanup.
-      Deno.removeSync(workspace.tmpPath, { recursive: true });
-      logger.debug("Cleaned up tmp directory for workspace {workspaceKey}", {
-        workspaceKey: workspace.key,
-      });
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        logger.warn("Failed to clean up tmp directory", {
-          error: error instanceof Error ? error.message : String(error),
-          path: workspace.tmpPath,
-        });
+  /**
+   * Establish (or refuse to establish) per-spawn producer quiescence BEFORE the
+   * best-effort disconnect, while the wrapper PID is still observable, then
+   * disconnect and retain the workspace's cleanup protection whenever that
+   * evidence is unavailable (design D2).
+   *
+   * The connector reports its own evidence: no spawned generation means no tool
+   * child can be using this session's staged files; a spawned generation whose
+   * wrapper is gone — or was replaced by a recovery re-spawn — was never
+   * drained and leaves the workspace marked unreclaimable.
+   */
+  private async finishPerSpawnProducer(params: {
+    connector: AgentConnector;
+    tmpRoots: readonly ProducerTmpRoot[];
+    sessionLogger: Logger;
+  }): Promise<void> {
+    const { connector, tmpRoots, sessionLogger } = params;
+    const evidence = connector.getProcessEvidence();
+
+    let verdict: ChildQuiescenceVerdict;
+    if (evidence.generations === 0) {
+      verdict = { status: "quiescent", drained: "no-child" };
+    } else if (evidence.pid === undefined) {
+      verdict = { status: "uncertain", reason: "wrapper-not-observable" };
+    } else {
+      verdict = await awaitChildQuiescence(evidence.pid);
+      if (verdict.status === "quiescent" && evidence.generations > 1) {
+        verdict = { status: "uncertain", reason: "superseded-generation" };
       }
     }
+    if (verdict.status === "quiescent" && verdict.drained === "terminated") {
+      sessionLogger.info(
+        "Killed agent tool-child process tree after drain timeout for wrapper {pid}",
+        { pid: evidence.pid },
+      );
+    }
+    // Record uncertainty BEFORE the disconnect: a best-effort disconnect that
+    // throws must not be able to bypass the retained protection.
+    if (verdict.status === "uncertain") {
+      for (const root of tmpRoots) {
+        this.workspaceManager.markTmpUseUncertain(root.tmpPath, verdict.reason);
+      }
+    }
+
+    await connector.disconnect();
   }
 
   /**

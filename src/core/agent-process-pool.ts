@@ -27,8 +27,15 @@ import {
   SKILL_JWT_TTL_SEC,
 } from "@utils/skill-jwt.ts";
 import { atomicWritePrivate } from "@utils/skill-secret.ts";
+import {
+  awaitChildQuiescence,
+  CHILD_DRAIN_TIMEOUT_MS,
+  type ChildQuiescenceVerdict,
+  processAlive,
+} from "@utils/process-lifecycle.ts";
 import type { Config } from "../types/config.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
+import type { WorkspaceTmpUnreclaimableSink } from "./workspace-manager.ts";
 import { join, resolve } from "@std/path";
 
 const logger = createLogger("AgentProcessPool");
@@ -44,11 +51,6 @@ const POLL_INTERVAL_MS = 30_000;
 
 /** Starvation guard: allow one maintenance job after every N interactive sessions. */
 const MAINTENANCE_STARVE_LIMIT = 4;
-
-/** Bounded wait for the agent's child processes to exit before clearing the pointer. */
-const CHILD_DRAIN_TIMEOUT_MS = 5_000;
-/** Budget for the post-timeout TERM/KILL rounds (re-enumerated each round). */
-const CHILD_KILL_WINDOW_MS = 4_000;
 
 export type SessionPriority = "interactive" | "maintenance";
 
@@ -88,6 +90,12 @@ export interface PoolRunOptions {
   connectorOptions: AgentConnectorOptions;
   /** Session-scoped working directory (per-user workspace) for ACP `newSession.cwd`. */
   sessionCwd: string;
+  /**
+   * Absolute owning workspace root. The pool marks its `tmp/` directory
+   * unreclaimable for this bot lifetime when pooled producer quiescence cannot
+   * be confirmed, so cleanup never races a surviving tool child.
+   */
+  workspacePath?: string;
 }
 
 interface PoolEntry {
@@ -141,6 +149,11 @@ export class AgentProcessPool {
    */
   private connectorFactory: (options: AgentConnectorOptions) => AgentConnector;
   private jwtRenewalIntervalMs: number;
+  /**
+   * Workspace temporary-use owner (the workspace manager). Used ONLY to retain a
+   * workspace's cleanup protection when pooled producer quiescence is uncertain.
+   */
+  private tmpOwnership: WorkspaceTmpUnreclaimableSink | null;
 
   constructor(
     config: Config,
@@ -149,12 +162,14 @@ export class AgentProcessPool {
     connectorFactory: ((options: AgentConnectorOptions) => AgentConnector) | null = null,
     sweepIntervalMs: number = POLL_INTERVAL_MS,
     jwtRenewalIntervalMs: number = (SKILL_JWT_TTL_SEC * 1000) / 2,
+    tmpOwnership: WorkspaceTmpUnreclaimableSink | null = null,
   ) {
     this.config = config;
     this.sessionRegistry = sessionRegistry;
     this.skillApiSecret = skillApiSecret;
     this.connectorFactory = connectorFactory ?? ((options) => new AgentConnector(options));
     this.jwtRenewalIntervalMs = jwtRenewalIntervalMs;
+    this.tmpOwnership = tmpOwnership;
     const sp = config.agent.sharedProcess;
     this.jwtDir = resolveSkillJwtDir(sp?.jwtDir);
     this.reclaimIdleMs = sp?.reclaimIdleMs ?? DEFAULT_RECLAIM_IDLE_MS;
@@ -261,6 +276,23 @@ export class AgentProcessPool {
     let ownershipHeartbeat: ReturnType<typeof setInterval> | undefined;
     let renewalActive = false;
     const pendingRenewals = new Set<Promise<void>>();
+    let settled = false;
+    let runnerResult: string | undefined;
+    let primaryError: unknown;
+    // Explicit failure flags: a runner that rejects with `undefined` is still a
+    // failure, so the error VALUE must never double as the classification.
+    let primaryFailed = false;
+    let releaseError: unknown;
+    let releaseFailed = false;
+    // The caller-visible result settles exactly once, and only after the whole
+    // release path (child drain + pointer/JWT release) completed: a caller
+    // awaiting `run()` must never begin workspace cleanup while a tool child of
+    // this very session still uses a staged file.
+    const settle = (acpSessionId: string | undefined, cancelledByDeadline: boolean) => {
+      if (settled) return;
+      settled = true;
+      item.resolveResult?.(acpSessionId, cancelledByDeadline);
+    };
     try {
       // Keep queued/in-flight sessions alive against the registry idle reaper.
       if (options.registrySessionId ?? options.shellSessionId) {
@@ -308,14 +340,13 @@ export class AgentProcessPool {
         }, this.jwtRenewalIntervalMs);
       }
 
-      const acpSessionId = await item.runner(entry.connector, options);
-
-      item.resolveResult?.(acpSessionId, false);
+      runnerResult = await item.runner(entry.connector, options);
     } catch (error) {
-      // Acquire or runner failure still resolves the `run()` promise (as a
-      // deadline-cancelled run) so callers never hang.
-      item.resolveResult?.(undefined, true);
-      throw error;
+      // Acquire or runner failure still settles the `run()` promise (as a
+      // deadline-cancelled run) in the finally block below, so callers never
+      // hang and the release path is never skipped.
+      primaryFailed = true;
+      primaryError = error;
     } finally {
       // Stop renewals and await EVERY renewal already past its await point (no
       // await between the flag clear and clearInterval), so a late or stalled
@@ -332,36 +363,109 @@ export class AgentProcessPool {
       // (2) owner-validated pointer clear; (3) JWT file deletion; (4) refcount
       // release + reclaim scheduling only after everything above, so a reclaim
       // never races the drain or kills the shared process mid-release.
-      if (entry) {
-        entry.lastActivity = Date.now();
-        // Refresh the tracked PID: the runner may have re-spawned the connector
-        // (session/load recovery), so the drain must target the CURRENT process.
-        const currentPid = entry.connector.getProcessPid();
-        if (currentPid !== undefined) {
-          entry.processPid = currentPid;
-        }
-        if (entry.processPid) {
-          const drained = await this.waitForChildProcesses(
-            entry.processPid,
-            CHILD_DRAIN_TIMEOUT_MS,
-          );
-          if (drained === "killed") {
-            logger.info("Killed agent tool-child process tree after drain timeout", {
-              pid: entry.processPid,
-              timeoutMs: CHILD_DRAIN_TIMEOUT_MS,
-            });
+      //
+      // Every step is exception-safe: a failing pointer clear can no longer skip
+      // the JWT deletion, the refcount release or the public settlement, and the
+      // FIRST error (an acquire/runner failure) stays the reported primary one.
+      try {
+        if (entry) await this.releaseEntry(entry, options);
+      } catch (error) {
+        releaseFailed = true;
+        releaseError = error;
+      } finally {
+        if (entry) {
+          entry.refCount--;
+          if (entry.refCount === 0) {
+            this.scheduleReclaim(entry);
           }
         }
-        if (options.shellSessionId) {
-          await this.clearActivePointer(options.shellSessionId);
-          await this.deleteSessionJwt(options.shellSessionId);
-        }
-        entry.refCount--;
-        if (entry.refCount === 0) {
-          this.scheduleReclaim(entry);
-        }
+        settle(runnerResult, primaryFailed);
       }
     }
+    // Reported OUTSIDE the finally block: the public classification is already
+    // delivered, and the first error stays the one the caller observes.
+    if (primaryFailed) {
+      if (releaseFailed) {
+        logger.error("Pool release path failed after a failed session: {error}", {
+          poolKey: options.poolKey,
+          error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+        });
+      }
+      throw primaryError;
+    }
+    if (releaseFailed) throw releaseError;
+  }
+
+  /**
+   * Wait (bounded) for the lease's tool children, then clear the pointer and the
+   * JWT file. Retains the workspace's cleanup protection for this bot lifetime
+   * whenever producer quiescence cannot be confirmed (design D2).
+   */
+  private async releaseEntry(entry: PoolEntry, options: PoolRunOptions): Promise<void> {
+    entry.lastActivity = Date.now();
+    // Refresh the tracked PID: the runner may have re-spawned the connector
+    // (session/load recovery), so the drain must target the CURRENT process.
+    const spawnPid = entry.processPid;
+    const currentPid = entry.connector.getProcessPid();
+    if (currentPid !== undefined) {
+      entry.processPid = currentPid;
+    }
+
+    let verdict: ChildQuiescenceVerdict = { status: "quiescent", drained: "no-child" };
+    if (currentPid === undefined && spawnPid !== undefined) {
+      // The wrapper this lease was spawned on is gone without an observed drain.
+      verdict = { status: "uncertain", reason: "wrapper-not-observable" };
+    } else if (currentPid !== undefined) {
+      verdict = await this.awaitProducerQuiescence(currentPid);
+      if (verdict.status === "quiescent" && spawnPid !== undefined && spawnPid !== currentPid) {
+        // A recovery re-spawn replaced the wrapper: the discarded generation's
+        // tool children were never drained, so the workspace stays protected.
+        verdict = { status: "uncertain", reason: "superseded-generation" };
+      }
+      if (verdict.status === "quiescent" && verdict.drained === "terminated") {
+        logger.info("Killed agent tool-child process tree after drain timeout", {
+          pid: currentPid,
+          timeoutMs: CHILD_DRAIN_TIMEOUT_MS,
+        });
+      }
+    }
+    if (verdict.status === "uncertain" && options.workspacePath) {
+      this.markWorkspaceTmpUncertain(options.workspacePath, verdict.reason);
+    }
+
+    if (options.shellSessionId) {
+      // The pointer clear and the JWT deletion are independent release steps:
+      // a failing pointer write must never leave the session's credential file
+      // behind. The FIRST failure is reported, and `deleteSessionJwt` already
+      // swallows its own errors (bounded warning), so this cannot mask it.
+      let releaseFailure: unknown;
+      let releaseFailed = false;
+      try {
+        await this.clearActivePointer(options.shellSessionId);
+      } catch (error) {
+        releaseFailed = true;
+        releaseFailure = error;
+      }
+      await this.deleteSessionJwt(options.shellSessionId);
+      if (releaseFailed) throw releaseFailure;
+    }
+  }
+
+  /**
+   * Confirm that a pooled producer's tool children stopped using the workspace.
+   * Overridable so a test can hold the drain open and observe what the caller
+   * can and cannot see while it runs (design D2).
+   */
+  protected awaitProducerQuiescence(wrapperPid: number): Promise<ChildQuiescenceVerdict> {
+    return awaitChildQuiescence(wrapperPid, { drainTimeoutMs: CHILD_DRAIN_TIMEOUT_MS });
+  }
+
+  /**
+   * Retain one workspace's cleanup protection for this bot lifetime because a
+   * pooled producer's quiescence could not be confirmed (design D2).
+   */
+  private markWorkspaceTmpUncertain(workspacePath: string, reason: string): void {
+    this.tmpOwnership?.markTmpUseUncertain(join(workspacePath, "tmp"), reason);
   }
 
   /** Lazy-spawn or reuse the pool key's live process (generation-checked). */
@@ -420,7 +524,16 @@ export class AgentProcessPool {
       options.permissionMode,
     );
     const connector = this.connectorFactory(options.connectorOptions);
-    await connector.connect();
+    try {
+      await connector.connect();
+    } catch (error) {
+      // A failed connect can still have spawned a wrapper generation whose tool
+      // children were never confirmed stopped. Retain the owning workspace's
+      // cleanup protection before the acquisition error propagates, so the
+      // caller's release can never reclaim files a survivor may hold.
+      await this.releaseFailedSpawn(connector, options);
+      throw error;
+    }
     entry = {
       entryKey,
       poolKey: options.poolKey,
@@ -441,6 +554,30 @@ export class AgentProcessPool {
       permissionMode: options.permissionMode,
     });
     return entry;
+  }
+
+  /**
+   * Best-effort teardown of a producer whose acquisition failed. A connector
+   * that never spawned needs no retained protection; a generation that actually
+   * started and was never drained keeps its workspace protected for this bot
+   * lifetime. The original connect failure stays the reported error.
+   */
+  private async releaseFailedSpawn(
+    connector: AgentConnector,
+    options: PoolRunOptions,
+  ): Promise<void> {
+    const evidence = connector.getProcessEvidence();
+    if (evidence.generations > 0 && options.workspacePath) {
+      // The connector's own initialization-failure cleanup is best-effort and
+      // cannot establish tool-child quiescence (killing the wrapper does not
+      // reap a SIGKILLed generation's orphaned tools).
+      this.markWorkspaceTmpUncertain(options.workspacePath, "connect-failed");
+    }
+    try {
+      await connector.disconnect();
+    } catch {
+      // Best effort: the acquisition error stays primary.
+    }
   }
 
   /** Schedule a refcount-based reclaim (re-checked under the pool lock on fire). */
@@ -571,50 +708,6 @@ export class AgentProcessPool {
     }
   }
 
-  /**
-   * Wait (bounded) for the agent's tool processes to exit; on timeout kill ONLY
-   * those tool processes (never the dumb-init wrapper or the long-lived agent).
-   *
-   * The dumb-init wrapper reparents orphans (tool scripts whose intermediate
-   * shell exited), so the tool set is: every child of the wrapper EXCEPT the
-   * agent itself (identified as the oldest child by process start time — the
-   * agent is spawned before any of its tools, while orphans re-parent later),
-   * plus all their descendants, plus the agent's own descendants.
-   * Returns "drained" or "killed".
-   */
-  private async waitForChildProcesses(
-    wrapperPid: number,
-    timeoutMs: number,
-  ): Promise<"drained" | "killed"> {
-    const wrapperChildren = await listChildPids(wrapperPid);
-    if (wrapperChildren.length === 0) return "drained";
-    const agentPid = await oldestChildPid(wrapperChildren);
-    if (agentPid === undefined) return "drained";
-
-    const deadline = Date.now() + timeoutMs;
-    let tools = await collectToolPids(wrapperPid, agentPid);
-    while (tools.length > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 50));
-      tools = await collectToolPids(wrapperPid, agentPid);
-    }
-    if (tools.length === 0) return "drained";
-    // Timeout: TERM the tools, then loop re-enumerating before every KILL so
-    // children forked between rounds (they reparent into the wrapper) cannot
-    // escape, and KILL only fires against PIDs just confirmed to exist.
-    await killPids(tools, "TERM");
-    const killDeadline = Date.now() + CHILD_KILL_WINDOW_MS;
-    let survivors = tools;
-    while (Date.now() < killDeadline) {
-      await new Promise((r) => setTimeout(r, 500));
-      survivors = await collectToolPids(wrapperPid, agentPid);
-      if (survivors.length === 0) return "drained";
-      await killPids(survivors, "KILL");
-    }
-    survivors = await collectToolPids(wrapperPid, agentPid);
-    if (survivors.length > 0) await killPids(survivors, "KILL");
-    return "killed";
-  }
-
   /** Cancel queued sessions that exceeded the queue deadline (single release path). */
   private sweepQueueDeadlines(): void {
     const now = Date.now();
@@ -665,103 +758,4 @@ export class AgentProcessPool {
       if (entry.reclaimTimer) clearTimeout(entry.reclaimTimer);
     }
   }
-}
-
-/** List the direct child PIDs of a process (via `pgrep -P`); empty when none. */
-async function listChildPids(pid: number): Promise<number[]> {
-  try {
-    const out = await new Deno.Command("pgrep", { args: ["-P", String(pid)] }).output();
-    if (!out.success) return [];
-    const text = new TextDecoder().decode(out.stdout);
-    return text
-      .trim()
-      .split("\n")
-      .filter((l) => l.trim() !== "")
-      .map((l) => parseInt(l.trim(), 10));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * The long-lived agent is the OLDEST direct child of the dumb-init wrapper:
- * it is spawned before any tool process, while orphaned tool processes
- * reparent into the wrapper only later. Start times come from /proc (Linux);
- * falls back to the first child when /proc is unavailable.
- */
-async function oldestChildPid(pids: number[]): Promise<number | undefined> {
-  let oldest: number | undefined;
-  let best = Number.POSITIVE_INFINITY;
-  for (const pid of pids) {
-    const start = await procStartTime(pid);
-    if (start !== undefined && start < best) {
-      best = start;
-      oldest = pid;
-    }
-  }
-  return oldest ?? pids[0];
-}
-
-/** Process start time (`/proc/<pid>/stat` field 22, clock ticks since boot). */
-async function procStartTime(pid: number): Promise<number | undefined> {
-  try {
-    const stat = await Deno.readTextFile(`/proc/${pid}/stat`);
-    const afterComm = stat.slice(stat.lastIndexOf(")") + 2);
-    const fields = afterComm.split(" ");
-    // fields[0] is the state (field 3); starttime is field 22 -> index 19.
-    const start = Number(fields[19]);
-    return Number.isFinite(start) ? start : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Tool processes to drain: every child of the wrapper EXCEPT the agent (i.e.
- * reparented orphans) plus all descendants of every wrapper child (the agent's
- * own tool subtree). The agent itself is never included.
- */
-async function collectToolPids(wrapperPid: number, agentPid: number): Promise<number[]> {
-  const children = await listChildPids(wrapperPid);
-  const tools: number[] = children.filter((p) => p !== agentPid);
-  for (const child of children) {
-    tools.push(...await collectDescendantPids(child));
-  }
-  return tools;
-}
-
-/** Whether a process is still alive (`kill -0`). */
-async function processAlive(pid: number): Promise<boolean> {
-  try {
-    const out = await new Deno.Command("kill", { args: ["-0", String(pid)] }).output();
-    return out.code === 0;
-  } catch {
-    return false;
-  }
-}
-
-/** Send a signal to an explicit PID set (best-effort, non-fatal). */
-async function killPids(pids: number[], signal: "TERM" | "KILL"): Promise<void> {
-  for (const p of pids) {
-    try {
-      await new Deno.Command("kill", { args: [`-${signal}`, String(p)] }).output();
-    } catch {
-      // Process already exited — fine.
-    }
-  }
-}
-
-/** Recursively collect all descendant PIDs of a process (BFS over direct children). */
-async function collectDescendantPids(pid: number): Promise<number[]> {
-  const all: number[] = [];
-  const queue = [pid];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const children = await listChildPids(current);
-    for (const child of children) {
-      all.push(child);
-      queue.push(child);
-    }
-  }
-  return all;
 }

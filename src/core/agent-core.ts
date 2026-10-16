@@ -136,6 +136,12 @@ export class AgentCore {
         config,
         this.sessionRegistry,
         this.skillApiSecret ?? "",
+        null, // connectorFactory: the real AgentConnector
+        undefined, // sweepIntervalMs: default
+        undefined, // jwtRenewalIntervalMs: default
+        // The workspace manager owns temporary-use protection: the pool marks a
+        // workspace unreclaimable when pooled producer quiescence is uncertain.
+        this.workspaceManager,
       );
     }
 
