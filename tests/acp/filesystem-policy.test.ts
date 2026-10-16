@@ -143,8 +143,14 @@ Deno.test("Filesystem Policy: Failure mapping completeness and correctness", () 
 });
 
 Deno.test("Filesystem Policy: every role combination selects one carried role without widening", () => {
-  const roles = ["workspace", "staging", "shared", "trusted-skills"] as const;
-  for (let mask = 0; mask < 16; mask++) {
+  const roles = [
+    "workspace",
+    "staging",
+    "shared",
+    "trusted-skills",
+    "omp-session-artifacts",
+  ] as const;
+  for (let mask = 0; mask < 32; mask++) {
     const carried = roles.filter((_role, index) => mask & (1 << index));
     for (const yolo of [false, true]) {
       const target = createMockTarget(carried, "/observed/file.MD", "prospective");
@@ -157,6 +163,11 @@ Deno.test("Filesystem Policy: every role combination selects one carried role wi
       if (carried.includes("trusted-skills")) {
         assertEquals(decision.ok, false);
         if (!decision.ok) assertEquals(decision.reason, "rejected_trusted_skills_read_only");
+      } else if (carried.includes("omp-session-artifacts")) {
+        // Reserved current-session OMP native state is read-only for callback
+        // mutations in EVERY mode, before the YOLO write branch.
+        assertEquals(decision.ok, false);
+        if (!decision.ok) assertEquals(decision.reason, "rejected_omp_native_state");
       } else if (
         carried.includes("staging") || carried.includes("shared") ||
         (yolo && carried.includes("workspace"))

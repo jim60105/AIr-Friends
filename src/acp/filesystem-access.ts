@@ -15,7 +15,12 @@ import {
   SessionContext,
   validateSessionContext,
 } from "./filesystem-roots.ts";
-import { type LinuxNativeCalls, performLinuxSecureAccess } from "./filesystem-access-linux.ts";
+import {
+  DEFAULT_READ_PREFIX_BYTES,
+  type LinuxNativeCalls,
+  performLinuxSecureAccess,
+  type ProtectedAccessAnchorGuard,
+} from "./filesystem-access-linux.ts";
 
 export type FilesystemAccessFailureReason =
   | "invalid_context"
@@ -52,6 +57,11 @@ export interface ReadCanonicalTextFileOptions {
   readonly roots: CanonicalSessionRoots;
   readonly target: CanonicalTarget;
   readonly selectedRole: RootRole;
+  /**
+   * Current-session OMP artifact reads re-verify the proven journal and its
+   * parent at the protected-opening boundary (D4, no-follow, descriptor-bound).
+   */
+  readonly ompAnchor?: ProtectedAccessAnchorGuard;
   /** Injectable native backend calls for testing */
   readonly nativeCalls?: LinuxNativeCalls;
 }
@@ -353,6 +363,100 @@ export function readCanonicalTextFile(
     relativePath: admission.value.relativePath,
     isNewFile: false,
     content: "",
+    anchorGuard: options.ompAnchor,
+    nativeCalls: options.nativeCalls,
+  });
+}
+
+export interface ReadOmpSessionHeaderPrefixOptions {
+  /**
+   * The connector's trusted lifecycle observation of the native sessions root
+   * (`<XDG_DATA_HOME>/omp/sessions`): canonical absolute path plus identity.
+   * This is not a callback `RootRole` and confers no callback authority.
+   */
+  readonly sessionsRoot: {
+    readonly canonicalPath: string;
+    readonly identity: ObservedIdentity;
+  };
+  /** Root-relative components of the candidate journal beneath that root. */
+  readonly relativePath: string;
+  /** Identity of that candidate, observed through the same metadata reader. */
+  readonly targetIdentity: ObservedIdentity;
+  /** Byte bound for the bounded prefix read (default 64 KiB). */
+  readonly maxBytes?: number;
+  /** Injectable native backend calls for testing */
+  readonly nativeCalls?: LinuxNativeCalls;
+}
+
+/**
+ * Read a bounded prefix of one candidate session-journal file for
+ * connector-internal lifecycle discovery (D1/D4).
+ *
+ * Authority is the connector's own trusted lifecycle root, never a requested
+ * path or a callback role: this helper does NOT call the callback role
+ * dispatcher and exposes no sessions-root grant. It reuses the same
+ * constrained-open backend as protected callback IO — link-free, root-relative,
+ * descriptor-bound and identity-checked — so a symlinked or replaced journal
+ * fails closed instead of being read.
+ */
+export function readOmpSessionHeaderPrefix(
+  options: ReadOmpSessionHeaderPrefixOptions,
+): FilesystemAccessResult<string> {
+  const { sessionsRoot, relativePath, targetIdentity } = options;
+  if (
+    typeof sessionsRoot.canonicalPath !== "string" || sessionsRoot.canonicalPath === "" ||
+    !isValidSafeIdentity(sessionsRoot.identity)
+  ) {
+    return {
+      ok: false,
+      reason: "invalid_context",
+      message: "Lifecycle discovery requires an identified sessions root.",
+    };
+  }
+  if (!isValidRelativeComponentPath(relativePath) || relativePath.includes("\\")) {
+    return {
+      ok: false,
+      reason: "unsafe_traversal",
+      message: "Lifecycle candidate path must be safe root-relative components.",
+    };
+  }
+  if (!isValidSafeIdentity(targetIdentity)) {
+    return {
+      ok: false,
+      reason: "identity_unavailable",
+      message: "Lifecycle candidate identity is unavailable.",
+    };
+  }
+
+  const root: CanonicalRootInfo = {
+    role: "omp-session-artifacts",
+    configuredPath: sessionsRoot.canonicalPath,
+    canonicalPath: sessionsRoot.canonicalPath,
+    identity: sessionsRoot.identity,
+    readOnly: true,
+  };
+  const canonicalTarget = `${sessionsRoot.canonicalPath.replace(/\/+$/, "")}/${relativePath}`;
+  const target: CanonicalTarget = {
+    acpSessionId: "omp-lifecycle-discovery",
+    sessionContextGeneration: "omp-lifecycle-discovery",
+    roles: [root.role],
+    rootIdentities: [root],
+    normalizedInput: canonicalTarget,
+    canonicalTarget,
+    rootRelativePath: relativePath,
+    targetType: "file",
+    targetIdentity,
+    observedSymlinks: [],
+  };
+
+  return performLinuxSecureAccess<string>({
+    operation: "read-prefix",
+    selectedRoot: root,
+    target,
+    relativePath,
+    isNewFile: false,
+    content: "",
+    maxBytes: options.maxBytes ?? DEFAULT_READ_PREFIX_BYTES,
     nativeCalls: options.nativeCalls,
   });
 }

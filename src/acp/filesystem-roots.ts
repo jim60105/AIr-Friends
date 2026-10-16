@@ -9,9 +9,21 @@
  * grant authorization tokens or guarantee race-free execution across later IO.
  */
 
-import { isAbsolute, normalize, resolve, SEPARATOR } from "@std/path";
+import { basename, dirname, isAbsolute, normalize, resolve, SEPARATOR } from "@std/path";
 
-export type RootRole = "workspace" | "staging" | "shared" | "trusted-skills";
+export type RootRole =
+  | "workspace"
+  | "staging"
+  | "shared"
+  | "trusted-skills"
+  | "omp-session-artifacts";
+
+/**
+ * The fixed root-relative file name a current-session OMP bash artifact must
+ * have: `<numeric-id>.bash.log`. The native artifact writer publishes exactly
+ * this shape, and the read-only artifact role admits nothing else.
+ */
+export const OMP_BASH_ARTIFACT_NAME_PATTERN = /^[0-9]+\.bash\.log$/;
 
 export type TargetExpectation =
   | "existing-file"
@@ -34,7 +46,8 @@ export type RootPathFailureReason =
   | "wrong_target_type"
   | "canonicalization_failed"
   | "path_changed"
-  | "trusted_identity_mismatch";
+  | "trusted_identity_mismatch"
+  | "reserved_native_state";
 
 export interface RootPathFailure {
   readonly ok: false;
@@ -57,6 +70,59 @@ export interface SessionContext {
   readonly explicitStagingPath: string; // Absolute path
   readonly sharedWorkspacePath?: string; // Optional absolute path
   readonly sessionContextGeneration: string;
+  /**
+   * OMP-only (D2/D3): the connector's lifecycle-derived reservation of this
+   * session's native state, plus the current-session artifact provenance when
+   * a unique persisted journal was proven. Absent for OpenCode callbacks and
+   * for unregistered contexts, in which case no reservation or artifact role
+   * exists.
+   */
+  readonly ompNativeState?: OmpNativeStateProvenance;
+}
+
+/**
+ * Lifecycle-proven location of the current ACP session's spilled bash
+ * artifacts. Every field is observed by the connector from factory-selected
+ * state; no model-supplied path or Skill API identity contributes.
+ *
+ * The expected artifact directory is exactly `journalPath` minus its `.jsonl`
+ * suffix, so it is derived (never stored) and cannot drift from the journal.
+ */
+export interface OmpArtifactProvenance {
+  /** The native ACP session UUID this journal was proven to belong to. */
+  readonly acpSessionId: string;
+  /** Absolute canonical persisted journal path. */
+  readonly journalPath: string;
+  /** Observed identity of that journal at discovery. */
+  readonly journalIdentity: ObservedIdentity;
+  /** Absolute canonical directory holding the journal (the anchor). */
+  readonly anchorDirectory: string;
+  /** Observed identity of the anchor directory at discovery. */
+  readonly anchorIdentity: ObservedIdentity;
+  /**
+   * Identity bound on the first observation of the (lazily created) artifact
+   * directory. Absent until that first binding; once present, a different
+   * directory identity at the same path denies.
+   */
+  readonly artifactDirectoryIdentity?: ObservedIdentity;
+}
+
+/**
+ * The connector's OMP native-state reservation for one ACP session.
+ *
+ * It exists independently of artifact discovery: an unavailable journal keeps
+ * the reservation (so sibling/mode state stays private) and only omits
+ * `artifacts`.
+ */
+export interface OmpNativeStateProvenance {
+  /** The ACP session cwd this reservation was derived for. */
+  readonly cwd: string;
+  /** Factory-selected native data root (`XDG_DATA_HOME`) when derivable. */
+  readonly nativeDataRoot?: string;
+  /** Observed identity of that data root at derivation. */
+  readonly dataRootIdentity?: ObservedIdentity;
+  /** Present only when a unique current-session journal was proven. */
+  readonly artifacts?: OmpArtifactProvenance;
 }
 
 export interface ResolvedSessionPath {
@@ -87,6 +153,12 @@ export interface CanonicalSessionRoots {
   readonly acpSessionId: string;
   readonly sessionContextGeneration: string;
   readonly roots: readonly CanonicalRootInfo[];
+  /**
+   * Absolute paths reserved as OMP native state for this context (D3). They
+   * confer no authority; every non-artifact role is suppressed for targets
+   * physically inside them. Empty for non-OMP contexts.
+   */
+  readonly reservedOmpState?: readonly string[];
 }
 
 export interface ObservedSymlink {
@@ -201,6 +273,46 @@ export function validateSessionContext(context: SessionContext): RootPathResult<
       message:
         `sharedWorkspacePath must be an absolute path when provided: '${context.sharedWorkspacePath}'`,
     };
+  }
+
+  // OMP native-state provenance is bound to exactly one session cwd. A
+  // provenance for another cwd is never accepted, and a malformed reservation
+  // is rejected here rather than silently widening or narrowing authorization.
+  const ompState = context.ompNativeState;
+  if (ompState !== undefined) {
+    if (ompState.cwd !== context.sessionCwd) {
+      return {
+        ok: false,
+        reason: "invalid_context",
+        message:
+          `OMP native-state provenance cwd '${ompState.cwd}' does not match session cwd '${context.sessionCwd}'`,
+      };
+    }
+    if (
+      ompState.nativeDataRoot !== undefined &&
+      (!isAbsolute(ompState.nativeDataRoot) || ompState.nativeDataRoot.trim() === "")
+    ) {
+      return {
+        ok: false,
+        reason: "invalid_context",
+        message:
+          `OMP native data root must be an absolute path when provided: '${ompState.nativeDataRoot}'`,
+      };
+    }
+    const artifacts = ompState.artifacts;
+    if (artifacts !== undefined) {
+      if (
+        !artifacts.acpSessionId ||
+        !isAbsolute(artifacts.journalPath) ||
+        !isAbsolute(artifacts.anchorDirectory)
+      ) {
+        return {
+          ok: false,
+          reason: "invalid_context",
+          message: "OMP artifact provenance is malformed",
+        };
+      }
+    }
   }
 
   return { ok: true, value: undefined };
@@ -649,12 +761,214 @@ export async function canonicalizeSessionRoots(
     }
   }
 
+  // 5. OMP native-state reservation and the optional current-session artifact
+  // root (D1/D2/D3). Evaluated last so the reservation can refuse overlaps with
+  // every already-observed shared/trusted root.
+  const ompState = await observeOmpNativeState(context, canonicalWorkspace, roots, reader);
+  if (!ompState.ok) return ompState;
+  if (ompState.value.artifactRoot !== undefined) roots.push(ompState.value.artifactRoot);
+
   return {
     ok: true,
     value: {
       acpSessionId: context.acpSessionId,
       sessionContextGeneration: context.sessionContextGeneration,
       roots,
+      reservedOmpState: ompState.value.reservedPaths,
+    },
+  };
+}
+
+/** Same observed device+inode pair, or both absent (never a partial match). */
+export function sameObservedIdentity(
+  observed: ObservedIdentity | undefined,
+  expected: ObservedIdentity | undefined,
+): boolean {
+  if (expected === undefined) return observed === undefined;
+  if (observed === undefined) return false;
+  return observed.dev === expected.dev && observed.ino === expected.ino;
+}
+
+/** A link-free existing directory whose identity is available. */
+async function observeLinkFreeDirectory(
+  path: string,
+  reader: MetadataReader,
+): Promise<{ canonicalPath: string; identity?: ObservedIdentity } | undefined> {
+  try {
+    const info = await reader.lstat(path);
+    if (!info.isDirectory || info.isSymlink) return undefined;
+    const canonicalPath = await reader.realPath(path);
+    if (canonicalPath !== path) return undefined;
+    const destInfo = await reader.lstat(canonicalPath);
+    if (!destInfo.isDirectory) return undefined;
+    return { canonicalPath, identity: extractIdentity(destInfo) };
+  } catch {
+    return undefined;
+  }
+}
+
+interface OmpNativeStateObservation {
+  readonly reservedPaths: readonly string[];
+  /**
+   * The current-session artifact root, real or prospective. Absent whenever the
+   * capability could not be fully proven — never a partial grant.
+   */
+  readonly artifactRoot?: CanonicalRootInfo;
+}
+
+/**
+ * Observe the OMP native-state reservation and, when fully proven, the
+ * current-session artifact root (D1/D2/D3).
+ *
+ * The reservation exists independently of artifact discovery: a missing,
+ * ambiguous or unsafe journal still reserves native state (so sibling journals,
+ * sibling modes and native auth/database files stay outside every broad
+ * callback role) and only omits the read-only artifact capability. A failed
+ * artifact observation never fails the context, so unrelated workspace
+ * operations keep their normal outcome.
+ */
+async function observeOmpNativeState(
+  context: SessionContext,
+  canonicalWorkspace: string,
+  roots: readonly CanonicalRootInfo[],
+  reader: MetadataReader,
+): Promise<RootPathResult<OmpNativeStateObservation>> {
+  const state = context.ompNativeState;
+  if (state === undefined || state.cwd !== context.sessionCwd) {
+    return { ok: true, value: { reservedPaths: [] } };
+  }
+
+  const reservedPaths: string[] = [];
+  // Both mode children (`<mode>/xdg-data/...`) live beneath `omp-agent`, so the
+  // per-spawn workspace native-state tree is reserved as one path.
+  const configuredState = resolve(context.sessionCwd, "tmp", "omp-agent");
+  reservedPaths.push(normalize(configuredState));
+  const canonicalState = resolve(canonicalWorkspace, "tmp", "omp-agent");
+  if (canonicalState !== normalize(configuredState)) reservedPaths.push(canonicalState);
+
+  let dataRootUsable = false;
+  if (state.nativeDataRoot !== undefined) {
+    const configuredDataRoot = normalize(state.nativeDataRoot);
+    reservedPaths.push(configuredDataRoot);
+    const observed = await observeLinkFreeDirectory(configuredDataRoot, reader);
+    if (observed !== undefined) {
+      if (observed.canonicalPath !== configuredDataRoot) reservedPaths.push(observed.canonicalPath);
+      dataRootUsable = sameObservedIdentity(observed.identity, state.dataRootIdentity) &&
+        state.dataRootIdentity !== undefined;
+    }
+  }
+
+  // A reservation overlapping a trusted read-only root or the shared writable
+  // root is a deployment contradiction: refuse rather than borrow those roles.
+  for (const reserved of reservedPaths) {
+    for (const root of roots) {
+      if (root.role !== "shared" && root.role !== "trusted-skills") continue;
+      if (
+        isWithinRoot(reserved, root.canonicalPath) || isWithinRoot(root.canonicalPath, reserved)
+      ) {
+        return {
+          ok: false,
+          reason: "root_overlap",
+          message:
+            `Reserved OMP native state '${reserved}' overlaps root '${root.canonicalPath}' (role: ${root.role})`,
+        };
+      }
+    }
+  }
+
+  const artifacts = state.artifacts;
+  if (
+    !dataRootUsable || artifacts === undefined || artifacts.acpSessionId !== context.acpSessionId
+  ) {
+    return { ok: true, value: { reservedPaths } };
+  }
+
+  // The anchor (journal parent) and the journal itself must still be the exact
+  // link-free objects the connector proved, inside the selected data root.
+  if (
+    !isWithinRoot(artifacts.anchorDirectory, state.nativeDataRoot!) ||
+    !isWithinRoot(artifacts.journalPath, state.nativeDataRoot!)
+  ) {
+    return { ok: true, value: { reservedPaths } };
+  }
+  const anchor = await observeLinkFreeDirectory(artifacts.anchorDirectory, reader);
+  if (
+    anchor === undefined || anchor.canonicalPath !== artifacts.anchorDirectory ||
+    !sameObservedIdentity(anchor.identity, artifacts.anchorIdentity)
+  ) {
+    return { ok: true, value: { reservedPaths } };
+  }
+  let journalInfo: Deno.FileInfo;
+  try {
+    journalInfo = await reader.lstat(artifacts.journalPath);
+  } catch {
+    return { ok: true, value: { reservedPaths } };
+  }
+  if (
+    !journalInfo.isFile || journalInfo.isSymlink ||
+    dirname(artifacts.journalPath) !== artifacts.anchorDirectory ||
+    !sameObservedIdentity(extractIdentity(journalInfo), artifacts.journalIdentity)
+  ) {
+    return { ok: true, value: { reservedPaths } };
+  }
+
+  const expectedArtifactDirectory = artifacts.journalPath.slice(0, -".jsonl".length);
+  if (
+    !artifacts.journalPath.endsWith(".jsonl") ||
+    !isWithinRoot(expectedArtifactDirectory, state.nativeDataRoot!)
+  ) {
+    return { ok: true, value: { reservedPaths } };
+  }
+
+  const observedArtifactDir = await observeLinkFreeDirectory(expectedArtifactDirectory, reader);
+  if (observedArtifactDir === undefined) {
+    // Lazily absent (or unusable) artifact directory: retain a prospective path
+    // anchored to the proven journal parent without creating anything.
+    let anchorExists = false;
+    try {
+      const anchorInfo = await reader.lstat(artifacts.anchorDirectory);
+      anchorExists = anchorInfo.isDirectory && !anchorInfo.isSymlink;
+    } catch {
+      anchorExists = false;
+    }
+    if (!anchorExists) return { ok: true, value: { reservedPaths } };
+    return {
+      ok: true,
+      value: {
+        reservedPaths,
+        artifactRoot: {
+          role: "omp-session-artifacts",
+          configuredPath: expectedArtifactDirectory,
+          canonicalPath: expectedArtifactDirectory,
+          isProspective: true,
+          prospectiveAncestor: artifacts.anchorDirectory,
+          prospectiveMissingSuffix: [basename(expectedArtifactDirectory)],
+          readOnly: true,
+        },
+      },
+    };
+  }
+
+  // A bound identity makes any later replacement at the same path deny; the
+  // first usable observation is bound by the client under a generation fence.
+  if (
+    artifacts.artifactDirectoryIdentity !== undefined &&
+    !sameObservedIdentity(observedArtifactDir.identity, artifacts.artifactDirectoryIdentity)
+  ) {
+    return { ok: true, value: { reservedPaths } };
+  }
+
+  return {
+    ok: true,
+    value: {
+      reservedPaths,
+      artifactRoot: {
+        role: "omp-session-artifacts",
+        configuredPath: expectedArtifactDirectory,
+        canonicalPath: expectedArtifactDirectory,
+        identity: observedArtifactDir.identity,
+        readOnly: true,
+      },
     },
   };
 }
@@ -885,6 +1199,14 @@ export async function resolveFilesystemTarget(
   // Evaluate candidate roots independently
   const admittedRoles: RootRole[] = [];
   const admittedRootInfos: CanonicalRootInfo[] = [];
+  // D3: reserved OMP native state dominates every broad workspace/staging/shared
+  // role for OMP callback contexts. A reserved target can be admitted only by
+  // the current artifact capability, so overlapping broad roots are dropped
+  // before any role/extension decision.
+  const reservedState = roots.reservedOmpState ?? [];
+  const inReservedState = (path: string): boolean =>
+    reservedState.some((reserved) => isWithinRoot(path, reserved));
+  let sawReservedState = false;
   let primarySuccess: {
     canonicalTarget: string;
     targetType: "file" | "directory" | "prospective";
@@ -933,6 +1255,14 @@ export async function resolveFilesystemTarget(
     }
 
     if (check.status === "missing") {
+      const prospectiveCanonical = resolve(check.prospectiveAncestor!, ...check.missingSuffix!);
+      if (
+        reservedState.length > 0 && root.role !== "omp-session-artifacts" &&
+        (inReservedState(check.prospectiveAncestor!) || inReservedState(prospectiveCanonical))
+      ) {
+        sawReservedState = true;
+        continue;
+      }
       if (expectation !== "file-or-new") {
         if (!firstFatalFailure) {
           firstFatalFailure = {
@@ -1003,6 +1333,13 @@ export async function resolveFilesystemTarget(
 
     if (check.status === "exists") {
       const canonicalDest = check.finalCanonicalPath!;
+      if (
+        reservedState.length > 0 && root.role !== "omp-session-artifacts" &&
+        inReservedState(canonicalDest)
+      ) {
+        sawReservedState = true;
+        continue;
+      }
       const fileInfo = check.fileInfo!;
       // For file-or-new, if target exists, it must be a regular file, NOT a directory
       if (expectation === "file-or-new" && !fileInfo.isFile) {
@@ -1085,6 +1422,14 @@ export async function resolveFilesystemTarget(
 
   if (admittedRoles.length === 0) {
     if (firstFatalFailure) return firstFatalFailure;
+    if (sawReservedState) {
+      return {
+        ok: false,
+        reason: "reserved_native_state",
+        message:
+          `Target '${resolvedPath.normalizedPath}' is reserved OMP native state and no current artifact capability admits it`,
+      };
+    }
     if (firstEscapeFailure) return firstEscapeFailure;
     return {
       ok: false,
