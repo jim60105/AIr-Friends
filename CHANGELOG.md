@@ -7,15 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-16
+
 ### Added
-- Two bundled skills: `chinese-traditional-conversion` converts Simplified Chinese text to Traditional Chinese using curated character and Taiwan-terminology tables, and `writing-style-guideline` lints prose against the project style rules with a bundled `lint.sh` checker
-- A `lint.sh` checker for the `chinese-content-writing-guideline` skill that flags full-width punctuation, spacing, and calque violations in zh-TW drafts
+
+- Two bundled skills: `chinese-traditional-conversion` converts Simplified Chinese text to Traditional Chinese using curated character and Taiwan-terminology tables, and `writing-style-guideline` lints prose against the project style rules with a bundled `lint.sh` checker.
+- A `lint.sh` checker for the `chinese-content-writing-guideline` skill that flags full-width punctuation, spacing, and calque violations in zh-TW drafts.
+- **One shared OMP native runtime.** The native addons OMP unpacks beside a session no longer multiply per mode, pool and per-spawn root: one prepared payload per pinned version and platform is shared by all of them. The stock image prepares it during build; a host or development deployment runs `deno task prepare:omp-natives`, which drives the checksum-verified pinned executable through one bounded initialization and publishes only the native subtree.
+- The data backup excludes the reserved OMP native-cache mount points from what it stages, so those large runtime bytes never reach a backup repository, while operator `.gitignore` files and ordinary data stay untouched.
 
 ### Changed
-- The `chinese-content-writing-guideline` skill now covers only language rules (script, full-width punctuation, spacing, forms of address, no-calque table, Taiwan terminology); general prose style guidance moved to the new `writing-style-guideline` skill
+
+- **BREAKING: OMP launches only with the prepared native cache.** A session whose shared native payload is missing, incomplete or inconsistent with the pinned executable now fails before launch with the preparation remedy, instead of letting the runtime extract a private copy. A real `omp/natives` directory left by an older version blocks launch until an operator removes it.
+- The `chinese-content-writing-guideline` skill now covers only language rules (script, full-width punctuation, spacing, forms of address, no-calque table, Taiwan terminology); general prose style guidance moved to the new `writing-style-guideline` skill.
+- Skill instructions were corrected. `react-message` passes the platform-provided reaction value exactly as the instance offers it, with separate Discord and Misskey examples; `send-file` sends an existing file under the session's staging folder in place, addressed relative to the workspace root, instead of copying it to the root first.
+- The bundled skills and the summary prompt no longer name a specific command-cancellation tool for a hung script, and a cancelled send is never taken as proof that nothing was delivered.
+- The reply prompt now lets the supplied context decide whether more information is gathered: when the given context and recent messages already answer the message, the bot replies directly in character, while missing history and an explicit recall request still trigger a memory search. The instruction to narrate reasoning out loud was removed from the reply, spontaneous-post and dashboard-chat prompts.
+- OMP sessions now receive shell-usage guidance among their capability instructions: one-shot commands omit the parameters that select service mode, and a command that continues in the background is handled through its completion notice.
 
 ### Fixed
+
 - External skills configured under `agent.externalSkills` install again. The image now ships the pinned Node.js 24 LTS runtime that the `skills` installer CLI and the bundled `agent-browser` helper require, instead of the distribution's Node 20, which made every configured skill fail at startup with a `fs/promises` import error.
+- OMP tool calls that provably never executed, and calls that started and were interrupted, are now logged as informational rather than as errors. Every other failed tool update keeps its error record and diagnostics.
+
 ## [0.33.0] - 2026-10-15
 
 ### Added
@@ -1187,7 +1201,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/jim60105/AIr-Friends/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/jim60105/AIr-Friends/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/jim60105/AIr-Friends/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/jim60105/AIr-Friends/compare/v0.31.0...v0.31.1
