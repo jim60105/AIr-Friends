@@ -91,6 +91,11 @@ for (const entry of ENTRY_TEMPLATES) {
         assertStringIncludes(rendered, "`> file`, `2>/dev/null`", label);
         assertStringIncludes(rendered, "newline separators", label);
         assertStringIncludes(rendered, "`git`, `echo`, `mkdir`, `curl`, and `rm`", label);
+        // `$TMPDIR` is the process-level temp root, NOT this session's staging
+        // directory (`{workspace}/tmp/{sessionId}`, named literally elsewhere in the
+        // prompt): the capability fragment must not equate the two.
+        assertStringIncludes(rendered, "workspace temporary directory (`$TMPDIR`)");
+        assertFalse(rendered.includes("staging directory (`$TMPDIR`)"), label);
       }
 
       if (agentType === "opencode") {
@@ -144,7 +149,11 @@ for (const canWriteAgentWorkspace of [false, true]) {
       const label = `shared-workspace writes authorized=${canWriteAgentWorkspace}`;
       assertFalse(rendered.includes("Only read-only operations"), label);
       // Staging writes are always permitted in restricted mode.
-      assertStringIncludes(rendered, "writes into this session's staging directory", label);
+      assertStringIncludes(
+        rendered,
+        "the write gate still accepts this session's staging directory",
+        label,
+      );
       if (canWriteAgentWorkspace) {
         assertStringIncludes(rendered, "Writes to the shared agent workspace are permitted", label);
         assertStringIncludes(rendered, "allowed-extension policy", label);

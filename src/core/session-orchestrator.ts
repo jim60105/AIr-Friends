@@ -464,8 +464,8 @@ export class SessionOrchestrator {
         "- Multi-command bash calls with `;`, `&&`, or `||` are allowed ONLY when every " +
           "command is individually allowed; the whole call is rejected otherwise.",
         "- Pipes `|`, backgrounding `&`, and file redirects such as `> file` or `2>/dev/null` " +
-          "are always rejected; redirecting one standard stream into another (`2>&1`, `1>&2`) " +
-          "writes no file and is tolerated.",
+          "are always rejected, as are newline separators; redirecting one standard stream " +
+          "into another (`2>&1`, `1>&2`) writes no file and is tolerated.",
       );
       if (agentType !== "omp") {
         bullets.push(
@@ -488,7 +488,8 @@ export class SessionOrchestrator {
       bullets.push(
         "- The OMP language-server (LSP) tool is denied in every mode; never attempt it. " +
           "One-shot commands omit `name`, `ready`, and `async`, and a command that continues in " +
-          "the background is handled through its completion notice.",
+          "the background is handled through its completion notice. OMP native state and bash " +
+          "artifacts stay read-only for file callbacks in every mode.",
       );
     }
     bullets.push(

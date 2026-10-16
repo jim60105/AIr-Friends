@@ -2177,6 +2177,10 @@ for (
             `${agentType} ${modeLabel}: no universal operator denial`,
           );
           assertFalse(
+            instructions.includes("newline separators"),
+            `${agentType} ${modeLabel}: no restricted operator restatement`,
+          );
+          assertFalse(
             instructions.includes("Commands OpenCode denies"),
             `${agentType} ${modeLabel}: no restricted command-denial list`,
           );
@@ -2185,6 +2189,7 @@ for (
           assertStringIncludes(instructions, "individually allowed");
           assertStringIncludes(instructions, "`2>&1`");
           assertStringIncludes(instructions, "tolerated");
+          assertStringIncludes(instructions, "newline separators");
           assertStringIncludes(instructions, "shell redirects");
           assertFalse(
             instructions.includes("callback filesystem limits still apply"),
@@ -2207,6 +2212,7 @@ for (
         if (agentType === "omp") {
           assertStringIncludes(instructions, "language-server (LSP) tool is denied");
           assertStringIncludes(instructions, "completion notice");
+          assertStringIncludes(instructions, "native state and bash artifacts stay read-only");
         }
 
         sessionRegistry.stop();
