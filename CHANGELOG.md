@@ -7,17 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-16
+
 ### Fixed
 
-- Interrupted or completed sessions no longer leave disposable workspace temporary data behind, and no longer destroy resumable engine state while reclaiming it. `{workspace}/tmp` is now reclaimed entry by entry instead of being removed whole: the `tmp` root itself and the reserved direct children `omp-agent` (per-spawn OMP state, both permission modes, including its `natives` link into the shared prepared runtime payload) and `opencode-data` (OpenCode tool output) keep their paths, bytes and identity for every engine and mode, while orphan Skill API staging directories, browser profiles/screenshots and attachment conversions are reclaimed. Reclamation runs once at startup — awaited after the agent core is constructed and before platform adapters, the dashboard or any scheduler can produce a session — and again when the last live producer releases its workspace; a workspace is protected from before its creation until its producer's teardown has been assessed, independently of Skill API registry expiry, so an ownership release never reclaims files while a tool child may still be reading them, and a workspace whose producer quiescence cannot be confirmed (unobservable wrapper, failed enumeration, surviving child or superseded generation) keeps that protection for the process lifetime with the reason logged. Cleanup is bounded per workspace per pass (2,048 attempted inspections, which stops that workspace's pass and hands the remainder to the next normal pass or restart; depth 64 below a workspace `tmp/` root, whose deeper content is intentionally retained while the pass continues with the remaining candidates) and skips linked, replaced or unreadable components, or an absent workspace root, with a diagnostic for everything except absence. Pooled/runtime roots, backups, channel memory files and the shared agent workspace are never visited. This relies on the existing single-owner deployment assumption: stop the previous bot/agent process tree before reusing the same workspace volume, since concurrent independent bots and hostile external filesystem mutation on that volume remain unsupported. Leftover files under one user's workspace are that user's own temporary data.
+- Sessions no longer leave throwaway working files behind, and cleaning them up no longer damages anything a later session needs. Cleanup now removes only disposable material; the bot's execution state, its prepared runtime and its saved tool output stay exactly where they are. It runs once at startup and again after the last conversation using a workspace has ended, and only once the related helper processes are confirmed to be done, so a file that is still being read is never deleted. If that cannot be confirmed, the workspace's temporary data is kept for the rest of the run and the reason is recorded instead of guessing.
+- This assumes one bot process owns the workspace volume. Stop the previous bot and agent processes before reusing the same volume; running two independent bots against it at once is still unsupported.
 
 ### Changed
 
-- Bundled permission guidance now matches the running engine and permission mode. `prompts/agent_permissions.md`, `prompts/browser_automation.md` and the new `prompts/omp_shell.md` state the command allow-list, the per-segment `;`/`&&`/`||` chaining rule and the rejected operators only in restricted mode, name the tolerated `2>&1`/`1>&2` standard-stream redirects as tolerated, keep OpenCode's pre-gate denied commands for OpenCode alone, keep OMP's LSP denial and one-shot/service/background tool advice in every mode, and describe shared-workspace writes through the session's `canWriteAgentWorkspace` value and the configured write-extension policy instead of calling restricted mode read-only. The self-research no-note corrective retry selects the same engine/mode wording from the session's own context, so YOLO no longer inherits restricted shell claims. Enforcement is unchanged: the command gate, ACP filesystem authorization, OMP mode files and the OpenCode permission maps are untouched. Operators who mount their own `prompts/agent_permissions.md`, `prompts/browser_automation.md` or `prompts/omp_shell.md` own that text and must re-mount or update it to receive the corrected wording.
+- The instructions the bot gives the agent about what it may do now match the backend and the permission mode actually in use. Restricted sessions are told which commands they may run and which operations are refused; unrestricted sessions no longer inherit those restrictions in their instructions. What is enforced has not changed — only the guidance the agent reads.
+- **If you mount your own prompt files**, you must re-mount or update `prompts/agent_permissions.md`, `prompts/browser_automation.md` and the new `prompts/omp_shell.md` to pick up the corrected wording; your mounted files keep replacing the shipped ones.
 
 ### Added
 
-- An OMP session can read the bash output OMP spills beside its own native session journal. The capability is bound to the current ACP session's native identity and factory-selected data root, admits only direct `<number>.bash.log` files in that session's artifact directory, and is read-only in both permission modes. Native state — the journal itself, sibling sessions' artifacts, mode siblings, auth and database files — stays outside every broad workspace callback grant, including when a native-state path is a link into the workspace, so it cannot be reached by file extension or by workspace membership; a permission request whose native-state reservation cannot be decided is denied instead of approved, and a request that offers no explicit reject option is cancelled. Restricted-mode generic `cat`/`rg` commands keep their existing workspace path grants.
+- On the OMP backend, the agent can now look back at the output of its own earlier shell commands instead of losing it. The access is limited to the current conversation's own output, is read-only in both permission modes, and never exposes other conversations' output or the bot's internal files.
 
 ## [0.34.1] - 2026-10-16
 
@@ -1224,7 +1228,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.34.1...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/jim60105/AIr-Friends/compare/v0.34.1...v0.35.0
 [0.34.1]: https://github.com/jim60105/AIr-Friends/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/jim60105/AIr-Friends/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/jim60105/AIr-Friends/compare/v0.32.0...v0.33.0
