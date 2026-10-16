@@ -3,7 +3,7 @@
 ## 1. Native provenance and lifecycle registration (2 hours)
 
 - [x] 1.1 Add the bounded persisted-journal resolver described in design D1, using factory XDG data, returned ACP UUID and registered cwd; cover title-slot metadata, unique candidate selection, bounds, mismatches and lazy artifact directories with temporary fixtures.
-- [ ] 1.2 Add connector-owned optional artifact provenance to session gate registration after OMP new-session and successful load; invalidate on disconnect/removal/replacement and bind to fresh client generations without changing OpenCode or session-creation availability.
+- [x] 1.2 Add connector-owned optional artifact provenance to session gate registration after OMP new-session and successful load; invalidate on disconnect/removal/replacement and bind to fresh client generations without changing OpenCode or session-creation availability.
 
 ## 2. Root-scoped protected authorization (2 hours)
 
