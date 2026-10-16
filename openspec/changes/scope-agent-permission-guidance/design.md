@@ -20,6 +20,8 @@ Do not change native YAML, OpenCode permission maps, command parsing, tool admis
 
 Use the existing `agentType` and `yolo` Vento inputs. Pass `{ agentType, yolo }` explicitly into `buildSelfResearchRetryMessage()` from the same local agent selection/effective `yoloDecision.enabled` used for the running connector. Never infer from a model name, process environment, global flag alone or process-pool defaults. No new config flag or permission-profile framework is needed.
 
+Existing reply, spontaneous and research render callsites already supply both values (`session-orchestrator.ts:633-637`, `1635-1639`, `2130-2133`). Delivered-prompt tests must assert their presence so production paths cannot silently use generic rendering defaults.
+
 For generic template rendering, absent `agentType` retains the current default OpenCode interpretation and absent `yolo` retains restricted wording. This is the existing optional-variable rendering behavior, with no new runtime shim or migration.
 
 ### D2. Keep a small, explicit wording matrix
