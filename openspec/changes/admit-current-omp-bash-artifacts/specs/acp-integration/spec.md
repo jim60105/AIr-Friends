@@ -44,6 +44,73 @@ The helpers SHALL expose the configured and canonical root identity for the requ
 - **THEN** observations SHALL carry the session/context generation and available filesystem identities
 - **AND** they SHALL NOT invent unavailable metadata
 
+### Requirement: Permission Handling — YOLO Mode
+
+In YOLO mode (global `--yolo` flag or per-channel `yolo: true`), the system SHALL auto-approve permission requests, including destructive-shaped requests, except OMP-context file operations targeting reserved OMP native state. Destructive normalization SHALL NOT introduce a restricted tool, extension, staging-only or target-count clamp. Reserved OMP state SHALL use its explicit callback read-only policy.
+
+#### Scenario: YOLO auto-approve
+- **GIVEN** YOLO mode is enabled (globally or per-channel)
+- **WHEN** a permission request is received, including a delete, move or multi-operation patch request, outside the OMP-context reserved-state exception
+- **THEN** it SHALL be auto-approved with reason `"yolo_mode"`
+- **AND** no restricted destructive completeness or target-scope denial SHALL be substituted for that approval
+
+#### Scenario: YOLO filesystem callback keeps broad containment without restricted clamps
+- **GIVEN** a YOLO session
+- **WHEN** it writes any extension to a path physically inside its user workspace or the shared Agent workspace, outside reserved OMP native state for an OMP callback context
+- **THEN** the write SHALL be authorized through the protected access operation under that broad root role
+- **AND** no restricted staging-only rule, extension allowlist or workspace-write authorization flag SHALL be applied
+
+#### Scenario: YOLO does not relax escape or read-only-root denial
+- **GIVEN** a YOLO session
+- **WHEN** it requests a write, a deletion or a move whose source or destination is external or sibling-workspace, whose containment observation escapes, or which lies inside the trusted read-only skills root or OMP-context reserved native state
+- **THEN** the operation SHALL be denied with the mapped bounded reason and no content IO
+
+#### Scenario: YOLO behavior is identical for both agents
+- **GIVEN** an OpenCode and an OMP session in YOLO mode
+- **WHEN** the same filesystem callback or destructive target outside OMP-context reserved native state is presented to each
+- **THEN** both SHALL receive the same authorization outcome, with no restricted-mode policy copied into YOLO
+- **AND** only OMP callback contexts SHALL apply the explicitly declared OMP native-state reservation; OpenCode's existing outcomes SHALL remain unchanged
+
+#### Scenario: YOLO callback authorization is broad physical containment including destructive targets
+- **WHEN** YOLO authorizes an ACP filesystem callback
+- **THEN** a target holding the requesting session's user-workspace or shared Agent workspace role SHALL be authorized with no staging-only restriction, write-extension filter, `canWriteAgentWorkspace` requirement or restricted tool/LSP/command clamp
+- **AND** targets outside those roots, replaced or escaping paths, the read-only trusted skills root and OMP-context reserved native state SHALL still be denied for ordinary writes and destructive sources/destinations
+
+#### Scenario: YOLO boundary constrains only ACP-delegated file operations
+- **GIVEN** a YOLO session
+- **WHEN** the authorization boundary is documented or tested
+- **THEN** it SHALL apply to ACP-delegated file operations only and SHALL NOT imply native-execution containment
+- **AND** a state file inside the permitted broad workspace SHALL remain eligible except for the explicitly reserved OMP native state in an OMP callback context
+
+### Requirement: Shared ACP Canonical Observation And Evidence Scope
+
+Shared context/root/target helpers SHALL return one complete observation or one specific failure, never a partial grant, empty root or lexical fallback. Observations SHALL remain operation- and shared-context-generation-scoped and SHALL not imply native OMP enforcement on paths that do not consume ACP callbacks.
+
+#### Scenario: Canonicalization failure
+- **WHEN** metadata observation fails other than confirmed absence permitted by existing new-file semantics
+- **THEN** the helper SHALL return a distinguished failure, no lexical grant and no protected content IO or mutation.
+
+#### Scenario: Detectable replacement
+- **WHEN** deterministic metadata observations detect a changed root, ancestor or final target
+- **THEN** the existing path-changed failure or newly observed containment decision SHALL apply, and the actual secure access consumer SHALL preserve containment through IO.
+
+#### Scenario: Broad YOLO observation
+- **WHEN** a YOLO consumer observes a target physically inside its broad user/shared Agent workspace
+- **THEN** it SHALL retain the broad role without restricted staging, command, extension or tool clamps; external escapes SHALL remain ineligible
+- **AND** OMP callback contexts SHALL exclude reserved OMP native state from broad grants and use only the explicit current-session bash-artifact read exception there
+
+#### Scenario: Distinguished shared failure categories
+- **WHEN** an observation fails
+- **THEN** invalid context/path/token, invalid/unavailable/overlapping root, outside-root/link escape, dangling/looping link, missing object, wrong type, canonicalization failure, changed path and shared trusted-root identity mismatch SHALL remain distinguished.
+
+#### Scenario: Observation lifetime
+- **WHEN** successful helper metadata is consumed
+- **THEN** it SHALL remain scoped to the exact shared session/context generation and SHALL not become a reusable permission or race-proof guarantee.
+
+#### Scenario: Consumer evidence limits
+- **WHEN** real helper logic with temporary filesystems or deterministic metadata mocks passes
+- **THEN** that evidence SHALL certify only the exercised helper/access behavior, not native parser/tool/proxy enforcement; real native claims SHALL require separately exercised native consumers.
+
 ## ADDED Requirements
 
 ### Requirement: Current Native OMP Artifact Provenance
@@ -95,7 +162,7 @@ ACP callbacks SHALL admit direct regular `<numeric-id>.bash.log` files in the cu
 
 ### Requirement: OMP Native State Callback Isolation
 
-OMP native state SHALL be excluded from broad callback workspace, staging and shared grants. Only the current bash-artifact read exception SHALL admit content in that state. Physical containment, no-follow access and identity/generation fences SHALL apply without broader-root fallback.
+For OMP callback contexts, native state SHALL be excluded from broad callback workspace, staging and shared grants. Only the current bash-artifact read exception SHALL admit callback content there. Physical containment, no-follow access and identity/generation fences SHALL apply without broader-root fallback. Connector-internal bounded metadata discovery SHALL confer no callback authority.
 
 #### Scenario: Same-user sibling and mode state remain private
 - **GIVEN** current and sibling sessions share a pooled root or have native state beneath the same user workspace
@@ -112,3 +179,14 @@ OMP native state SHALL be excluded from broad callback workspace, staging and sh
 - **WHEN** OpenCode uses its existing tool-output command path policy or either engine stages Skill API payloads
 - **THEN** those decisions SHALL retain their existing roots, command rules and literal session staging paths
 - **AND** an OMP artifact capability SHALL confer no command execution or payload-containment authority
+
+#### Scenario: Lifecycle metadata is distinct from callback access
+- **WHEN** connector-internal discovery reads bounded candidate journal metadata through a no-follow descriptor-bound operation
+- **THEN** that lifecycle-only operation SHALL NOT authorize model-requested journal reads or expose the metadata through callbacks
+- **AND** callback requests SHALL remain subject to the exact artifact-role and filename policy
+
+#### Scenario: Host-provisioned workspace aliases compare canonically
+- **GIVEN** the configured workspace cwd is a host-provisioned alias of its canonical directory
+- **WHEN** persisted journal provenance is checked
+- **THEN** both the header cwd and registered cwd SHALL be canonicalized through the same path rule before comparison
+- **AND** a valid alias SHALL remain usable without accepting a different workspace identity
