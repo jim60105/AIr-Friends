@@ -124,6 +124,17 @@ export type ReasoningEffortOutcome =
 export { KNOWN_REASONING_EFFORT_TOKENS };
 
 /**
+ * Wrapper-process evidence a connector reports for producer teardown.
+ * `generations` is the number of wrapper processes spawned in this connector's
+ * lifetime (0 when none ever started); `pid` is the current live wrapper, if
+ * any. See {@link AgentConnector.getProcessEvidence}.
+ */
+export interface AgentProcessEvidence {
+  generations: number;
+  pid: number | undefined;
+}
+
+/**
  * AgentConnector manages the lifecycle of ACP Agent connections
  * Handles spawning, connecting, and communicating with external ACP Agents
  */
@@ -166,6 +177,12 @@ export class AgentConnector {
    * still in flight must still unstick that prompt.
    */
   private intentionalShutdown = false;
+  /**
+   * How many wrapper processes this connector has spawned. Teardown evidence:
+   * a discarded generation's tool children were never drained, so cleanup must
+   * treat it as unconfirmed producer teardown (see {@link getProcessEvidence}).
+   */
+  private spawnGeneration = 0;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
@@ -225,6 +242,7 @@ export class AgentConnector {
     });
 
     this.process = command.spawn();
+    this.spawnGeneration++;
 
     // Reset shutdown-intent tracking and build a fresh crash signal tied to this
     // subprocess (not any stale signal from a previously disconnected one).
@@ -1115,6 +1133,18 @@ export class AgentConnector {
    */
   getProcessPid(): number | undefined {
     return this.process?.pid;
+  }
+
+  /**
+   * Wrapper-process evidence for producer teardown. Per-spawn drain and pooled
+   * release need more than the current PID: `generations` counts the wrappers
+   * this connector actually spawned (0 = no producer ever started, so no tool
+   * child can hold this session's files), while a wrapper that was spawned and
+   * is no longer observable — or a generation that was replaced — means its
+   * tool children were never drained and the workspace must stay protected.
+   */
+  getProcessEvidence(): AgentProcessEvidence {
+    return { generations: this.spawnGeneration, pid: this.process?.pid };
   }
 
   /**

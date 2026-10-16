@@ -3,6 +3,10 @@ import { isAbsolute, join, resolve } from "@std/path";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { AgentProcessPool, type PoolRunOptions } from "@core/agent-process-pool.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
+import type {
+  WorkspaceTmpCleanupOptions,
+  WorkspaceTmpCleanupOutcome,
+} from "@core/workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
@@ -18,6 +22,28 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditEntry } from "../../src/types/audit.ts";
 import { createAgentConfig } from "../../src/acp/agent-factory.ts";
 import { ompXdgDataHome } from "@utils/omp-paths.ts";
+
+/**
+ * Workspace manager that records temporary-use acquire/release calls, so the
+ * acquisition matrix can assert per-entrypoint exactly-once ownership
+ * (reap-orphan-workspace-staging D2) rather than only eventual cleanup.
+ */
+class RecordingWorkspaceManager extends WorkspaceManager {
+  readonly acquired: string[] = [];
+  readonly released: string[] = [];
+  override acquireTmpUse(tmpPath: string): void {
+    this.acquired.push(tmpPath);
+    super.acquireTmpUse(tmpPath);
+  }
+  override releaseTmpUse(
+    tmpPath: string,
+    options?: WorkspaceTmpCleanupOptions,
+  ): WorkspaceTmpCleanupOutcome | null {
+    this.released.push(tmpPath);
+    return super.releaseTmpUse(tmpPath, options);
+  }
+}
+
 import {
   OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
   OMP_NATIVE_CACHE_VERSION,
@@ -138,7 +164,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                       },
                       conversationSummary: { enabled: entry === "message" || entry === "lurk" },
                     };
-                    const wm = new WorkspaceManager(config.workspace);
+                    const wm = new RecordingWorkspaceManager(config.workspace);
                     const memory = new MemoryStore(wm, {});
                     const skills = new SkillRegistry(memory);
                     // ONE resolved root for the whole deployment shape — the
@@ -229,6 +255,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                         connect: () => Promise.resolve(),
                         disconnect: () => Promise.resolve(),
                         getProcessPid: () => undefined,
+                        getProcessEvidence: () => ({ generations: 0, pid: undefined }),
                         createSession: () => {
                           creates++;
                           checkOwnership();
@@ -387,6 +414,8 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                       minMemoryCount: 1,
                       intervalMs: 1000,
                     };
+                    const ownedBefore = wm.acquired.length;
+                    const releasedBefore = wm.released.length;
                     let response;
                     switch (entry) {
                       case "message":
@@ -452,6 +481,36 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                     assertEquals(creates, 1);
                     assertEquals(acquisitions, usesPool ? 1 : 0);
                     assertEquals(prompts, entry === "message" || entry === "lurk" ? 2 : 1);
+                    // Temporary-use ownership (reap-orphan-workspace-staging D2):
+                    // this entrypoint acquired once per owning root BEFORE
+                    // workspace creation and released each of those roots
+                    // exactly once from its outer finally — no other entrypoint
+                    // in this step touched them.
+                    const acquiredNow = wm.acquired.slice(ownedBefore);
+                    const releasedNow = wm.released.slice(releasedBefore);
+                    // Channel maintenance owns its synthetic per-user workspace
+                    // AND the channel workspace the agent process runs in.
+                    const expectedRoots = entry === "channel-memory" ? 2 : 1;
+                    assertEquals(acquiredNow.length, expectedRoots, `${entry}: acquire count`);
+                    assertEquals(releasedNow.length, expectedRoots, `${entry}: release count`);
+                    assertEquals(
+                      new Set(acquiredNow).size,
+                      expectedRoots,
+                      `${entry}: distinct owning roots`,
+                    );
+                    assertEquals(
+                      [...acquiredNow].sort(),
+                      [...releasedNow].sort(),
+                      `${entry}: the released roots are the acquired roots`,
+                    );
+                    for (const tmpPath of acquiredNow) {
+                      assert(tmpPath.endsWith("/tmp"), `${entry}: owns a tmp root`);
+                      assertEquals(
+                        wm.getTmpUseCount(tmpPath),
+                        0,
+                        `${entry}: no ownership leak for ${tmpPath}`,
+                      );
+                    }
                     assertExists(snapshot);
                     assertEquals(
                       registry.get(sessionId),
@@ -643,6 +702,7 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                       connect: () => Promise.resolve(),
                       disconnect: () => Promise.resolve(),
                       getProcessPid: () => undefined,
+                      getProcessEvidence: () => ({ generations: 0, pid: undefined }),
                       // Real createSession shape: ACP cwd = override ?? agentConfig.cwd,
                       // initial gate registered from clientConfig for that id.
                       createSession: (_servers?: unknown[], cwdOverride?: string) => {

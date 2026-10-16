@@ -4,8 +4,11 @@
 // deadline cancellation, and per-session JWT + active pointer file hygiene.
 
 import { assert, assertEquals } from "@std/assert";
+import { exists } from "@std/fs";
 import { AgentProcessPool } from "../../src/core/agent-process-pool.ts";
 import { poolEntryKey } from "../../src/core/agent-process-pool.ts";
+import type { ChildQuiescenceVerdict } from "../../src/utils/process-lifecycle.ts";
+import type { WorkspaceTmpUnreclaimableSink } from "../../src/core/workspace-manager.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
@@ -404,6 +407,7 @@ Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
 
   // A second interactive session stays queued past the 100ms deadline (config).
   const sidQueued = registerSession(registry, { channelId: "discord/2" });
+  let runnerCalled = false;
   const pQueued = pool.run(
     {
       poolKey: "discord:discord/2",
@@ -416,6 +420,7 @@ Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
       sessionCwd: "/tmp/test/workspaces/discord/2",
     },
     async () => {
+      runnerCalled = true;
       await Promise.resolve();
       throw new Error("should not run — cancelled by deadline");
     },
@@ -423,6 +428,9 @@ Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
 
   const [rBlocker, rQueued] = await Promise.all([pBlocker, pQueued]);
   assertEquals(rBlocker.acpSessionId, "acp-blocker");
+  // The classification alone cannot prove the runner never started: a runner
+  // error maps to the same deadline-cancelled result, so assert it directly.
+  assertEquals(runnerCalled, false);
   assertEquals(rQueued.cancelledByDeadline, true);
   assertEquals(rQueued.acpSessionId, null);
   // The cancelled session is removed from the registry.
@@ -481,26 +489,10 @@ Deno.test("pool - issues per-session JWT and writes the active pointer while the
   assertEquals(result.acpSessionId, "acp-1");
 
   // After the session ends: the JWT file is deleted and the pointer is cleared.
-  // The pool resolves `run()` when the session completes; the release/cleanup path
-  // (pointer clear + JWT delete + drain) runs in a `finally` right after, so poll
-  // for the deletion with a bounded wait.
-  const deadline = Date.now() + 2000;
-  while (Date.now() < deadline) {
-    try {
-      await Deno.stat(`${jwtDir}/${sid}.jwt`);
-      await new Promise((r) => setTimeout(r, 20));
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) break;
-      throw error;
-    }
-  }
-  try {
-    await Deno.stat(`${jwtDir}/${sid}.jwt`);
-    // If the file still exists, fail.
-    throw new Error("JWT file should be deleted at session end");
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
+  // The release path (drain + pointer clear + JWT delete) completes BEFORE the
+  // caller-visible result settles, so no polling is needed here — direct
+  // assertions after `await pool.run()` are the contract under test.
+  assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
   // The cleared pointer is an empty file (owner-validated clear writes "").
   const pointerRaw = await Deno.readTextFile(`${jwtDir}/active.json`);
   const pointer = pointerRaw.trim() ? (JSON.parse(pointerRaw) as { sessionId?: string }) : {};
@@ -933,4 +925,339 @@ Deno.test("pool - per-mode reclaim independence for OMP", async () => {
   assertEquals(disconnectedPids.includes("yolo"), false, "Leased YOLO entry must remain untouched");
 
   await stopPool(pool);
+});
+
+/**
+ * A pool whose child drain is held open by the test, so the ordering between the
+ * drain, the caller-visible result and the next queued session is observable
+ * without racing a real process tree (design D2 "pooled completion waits for
+ * child release").
+ */
+class BlockingDrainPool extends AgentProcessPool {
+  readonly drainEntered = Promise.withResolvers<void>();
+  readonly allowDrain = Promise.withResolvers<void>();
+  drainCalls = 0;
+  protected override async awaitProducerQuiescence(
+    _wrapperPid: number,
+  ): Promise<ChildQuiescenceVerdict> {
+    this.drainCalls++;
+    this.drainEntered.resolve();
+    await this.allowDrain.promise;
+    return { status: "quiescent", drained: "no-child" };
+  }
+}
+
+/**
+ * A stub connector that reports a live wrapper PID, so the lease's release path
+ * takes the drain branch (an absent PID means "no producer", which never drains).
+ */
+class PidStubConnector extends StubConnector {
+  constructor(private readonly pid: number) {
+    super();
+  }
+  override getProcessPid(): number | undefined {
+    return this.pid;
+  }
+}
+
+/** A pool-level workspace sink that records every retained workspace. */
+class RecordingTmpSink implements WorkspaceTmpUnreclaimableSink {
+  readonly marks: { tmpPath: string; reason: string }[] = [];
+  markTmpUseUncertain(tmpPath: string, reason: string): void {
+    this.marks.push({ tmpPath, reason });
+  }
+}
+
+/** Run options for one pooled session on the given channel. */
+function poolRunOptions(overrides: {
+  channelId: string;
+  shellSessionId: string;
+  workspacePath?: string;
+}): Parameters<AgentProcessPool["run"]>[0] {
+  return {
+    poolKey: `discord:${overrides.channelId}`,
+    agentType: "opencode",
+    permissionMode: "restricted",
+    sessionType: "message",
+    shellSessionId: overrides.shellSessionId,
+    priority: "interactive",
+    connectorOptions: makeConnectorOptions(),
+    sessionCwd: `/tmp/test/workspaces/${overrides.channelId}`,
+    workspacePath: overrides.workspacePath,
+  };
+}
+
+Deno.test({
+  name: "pool - the caller-visible result and the next queued session wait for the child drain",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const config = makeConfig();
+    const jwtDir = await Deno.makeTempDir();
+    config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+    const registry = new SessionRegistry(1000);
+    const pool = new BlockingDrainPool(
+      config,
+      registry,
+      "test-secret-0123456789abcdef0123456789",
+      // The drain seam is only reached for a lease whose wrapper PID is
+      // observable; the seam replaces the observation entirely.
+      () => new PidStubConnector(123_456) as unknown as AgentConnector,
+    );
+    const events: string[] = [];
+    let settled = false;
+    try {
+      const sidA = registerSession(registry, { channelId: "discord/1" });
+      const runA = pool.run(
+        poolRunOptions({ channelId: "discord/1", shellSessionId: sidA }),
+        () => {
+          events.push("A:runner-end");
+          return Promise.resolve("acp-A");
+        },
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+
+      // The release path is now blocked inside the drain, holding the lease.
+      await pool.drainEntered.promise;
+      const pointerWhileDraining = JSON.parse(
+        await Deno.readTextFile(`${jwtDir}/active.json`),
+      ) as { sessionId?: string };
+
+      // While the drain runs: this session's own pointer and JWT must still be
+      // present (a late tool child still needs them), the public result must not
+      // have settled, and the workspace's staged files are untouched.
+      assertEquals(pointerWhileDraining.sessionId, sidA);
+      assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), true);
+      assertEquals(settled, false, "the result must not settle during the drain");
+
+      // A queued sibling must not start while the first session still holds the
+      // lease (global serialization survives the new settlement order).
+      const sidB = registerSession(registry, { channelId: "discord/2" });
+      const runB = pool.run(
+        poolRunOptions({ channelId: "discord/2", shellSessionId: sidB }),
+        () => {
+          events.push("B:start");
+          return Promise.resolve("acp-B");
+        },
+      );
+      await Promise.resolve();
+      assertEquals(events.includes("A:runner-end"), true);
+      assertEquals(events.includes("B:start"), false, "the queued session must not start early");
+
+      pool.allowDrain.resolve();
+      const resultA = await runA;
+
+      assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
+      assertEquals(settled, true);
+      // The release completed BEFORE the result became visible to the caller.
+      assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
+      assertEquals((await Deno.readTextFile(`${jwtDir}/active.json`)).trim(), "");
+
+      const resultB = await runB;
+      assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
+      assertEquals(events, ["A:runner-end", "B:start"]);
+      assertEquals(pool.drainCalls, 2);
+    } finally {
+      pool.allowDrain.resolve();
+      await stopPool(pool);
+      await Deno.remove(jwtDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "pool - a pointer-clear failure still deletes the JWT, keeps the result and frees the queue",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const config = makeConfig();
+    const jwtDir = await Deno.makeTempDir();
+    config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+    const registry = new SessionRegistry(1000);
+    const pool = new AgentProcessPool(
+      config,
+      registry,
+      "test-secret-0123456789abcdef0123456789",
+      () => new StubConnector() as unknown as AgentConnector,
+    );
+    const originalRename = Deno.rename;
+    try {
+      const sidA = registerSession(registry, { channelId: "discord/7" });
+      const resultA = await pool.run(
+        poolRunOptions({ channelId: "discord/7", shellSessionId: sidA }),
+        () => {
+          // Acquisition already wrote the pointer: from here on, fail only the
+          // owner-validated CLEAR (the release step), never the acquire write.
+          Deno.rename = ((from: string | URL, to: string | URL) => {
+            if (String(to).endsWith("/active.json")) {
+              return Promise.reject(new Deno.errors.PermissionDenied("mock pointer clear failure"));
+            }
+            return originalRename(from, to);
+          }) as typeof Deno.rename;
+          return Promise.resolve("acp-A");
+        },
+      );
+      Deno.rename = originalRename;
+
+      // The computed result is unchanged by the release failure …
+      assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
+      // … the JWT deletion still ran (the failing pointer clear never skipped it) …
+      assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
+
+      // … and the refcount was released: the queued sibling still runs.
+      const sidB = registerSession(registry, { channelId: "discord/8" });
+      const resultB = await pool.run(
+        poolRunOptions({ channelId: "discord/8", shellSessionId: sidB }),
+        () => Promise.resolve("acp-B"),
+      );
+      assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
+    } finally {
+      Deno.rename = originalRename;
+      await stopPool(pool);
+      await Deno.remove(jwtDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "pool - a failed run plus a failed release keeps the primary classification and still deletes the JWT",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const config = makeConfig();
+    const jwtDir = await Deno.makeTempDir();
+    config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+    const registry = new SessionRegistry(1000);
+    const pool = new AgentProcessPool(
+      config,
+      registry,
+      "test-secret-0123456789abcdef0123456789",
+      () => new StubConnector() as unknown as AgentConnector,
+    );
+    const originalRename = Deno.rename;
+    try {
+      const sid = registerSession(registry, { channelId: "discord/9" });
+      const result = await pool.run(
+        poolRunOptions({ channelId: "discord/9", shellSessionId: sid }),
+        () => {
+          Deno.rename = ((from: string | URL, to: string | URL) => {
+            if (String(to).endsWith("/active.json")) {
+              return Promise.reject(new Deno.errors.PermissionDenied("mock pointer clear failure"));
+            }
+            return originalRename(from, to);
+          }) as typeof Deno.rename;
+          throw new Error("runner failed");
+        },
+      );
+      Deno.rename = originalRename;
+
+      // The runner failure stays the reported classification (never the release
+      // failure), and the session's credential file is still removed.
+      assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
+      assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
+    } finally {
+      Deno.rename = originalRename;
+      await stopPool(pool);
+      await Deno.remove(jwtDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "pool - a runner rejecting with `undefined` is still classified as a failed session",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const registry = new SessionRegistry(1000);
+    const pool = new AgentProcessPool(
+      makeConfig(),
+      registry,
+      "test-secret-0123456789abcdef0123456789",
+      () => new StubConnector() as unknown as AgentConnector,
+    );
+    try {
+      const sid = registerSession(registry, { channelId: "discord/3" });
+      const result = await pool.run(
+        poolRunOptions({ channelId: "discord/3", shellSessionId: sid }),
+        // `undefined` is a valid rejection reason, so it must never double as
+        // the "no failure" sentinel.
+        () => Promise.reject(undefined),
+      );
+      assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
+    } finally {
+      await stopPool(pool);
+      registry.stop();
+    }
+  },
+});
+
+Deno.test({
+  name: "pool - a failed acquisition retains the workspace only once a producer generation started",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const registry = new SessionRegistry(1000);
+    const sink = new RecordingTmpSink();
+    let disconnectCalls = 0;
+    try {
+      for (const generations of [0, 1]) {
+        sink.marks.length = 0;
+        const connector = {
+          isConnected: false,
+          connect: () => Promise.reject(new Error("connect failed")),
+          disconnect: () => {
+            disconnectCalls++;
+            return Promise.resolve();
+          },
+          getProcessPid: () => undefined,
+          getProcessEvidence: () => ({ generations, pid: undefined }),
+        };
+        const pool = new AgentProcessPool(
+          makeConfig(),
+          registry,
+          "test-secret-0123456789abcdef0123456789",
+          () => connector as unknown as AgentConnector,
+          30_000,
+          undefined,
+          sink,
+        );
+        try {
+          const workspacePath = "/tmp/test/workspaces/discord/9";
+          const sid = registerSession(registry, { channelId: "discord/9" });
+          const result = await pool.run(
+            poolRunOptions({
+              channelId: "discord/9",
+              shellSessionId: sid,
+              workspacePath,
+            }),
+            () => Promise.reject(new Error("the runner must never start")),
+          );
+
+          // The acquisition failure keeps the existing caller classification.
+          assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
+          if (generations === 0) {
+            // No producer ever started: nothing may be retained.
+            assertEquals(sink.marks, []);
+          } else {
+            // A wrapper generation started and was never drained: the owning
+            // workspace keeps its cleanup protection for this bot lifetime.
+            assertEquals(sink.marks, [{
+              tmpPath: `${workspacePath}/tmp`,
+              reason: "connect-failed",
+            }]);
+          }
+          // Best-effort teardown was still attempted without masking the error.
+          assertEquals(disconnectCalls > 0, true);
+        } finally {
+          await stopPool(pool);
+        }
+      }
+    } finally {
+      registry.stop();
+    }
+  },
 });

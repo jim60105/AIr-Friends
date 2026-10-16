@@ -260,6 +260,26 @@ export async function bootstrap(
   logger.info("Initializing agent core");
   const agentCore = new AgentCore(config, yolo, skillApiSecret);
 
+  // Reclaim orphaned workspace temporary data BEFORE any session-producing
+  // ingress exists (design D3). The awaited pass visits the recognized
+  // workspace layout once, keeps reserved `omp-agent`/`opencode-data` engine
+  // state, and finishes (or reports its bounded failures) before platform
+  // adapters, the dashboard or any scheduler can create work. AgentCore's Skill
+  // API listener already exists, but its registry is empty and it has no
+  // session-creation endpoint, so it admits no authenticated session work and
+  // is not session-producing ingress; nothing else can produce a session yet.
+  // `isWorkspaceBusy` is honest startup-only evidence: with no registered
+  // sessions and no producer running, no workspace can be live.
+  const startupReclamation = await agentCore.getWorkspaceManager().reclaimOrphanTmpDirs({
+    isWorkspaceBusy: () => false,
+  });
+  logger.info("Startup workspace reclamation completed", {
+    workspaces: startupReclamation.workspaces,
+    removed: startupReclamation.removed,
+    retained: startupReclamation.retained,
+    skipped: startupReclamation.skipped,
+  });
+
   // Initialize platform registry
   logger.info("Initializing platform registry");
   const platformRegistry = getPlatformRegistry();

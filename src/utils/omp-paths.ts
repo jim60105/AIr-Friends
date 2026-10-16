@@ -147,6 +147,13 @@ function defaultExists(path: string): boolean {
 }
 
 /**
+ * Reserved direct-child name of a workspace `tmp/` directory that holds the
+ * mode-scoped native OMP state. Workspace temporary cleanup preserves this
+ * entry verbatim (without enumerating it) for every engine and mode.
+ */
+export const OMP_AGENT_TMP_ENTRY = "omp-agent";
+
+/**
  * Mode-distinct native `XDG_DATA_HOME` root
  * ({baseRoot}/omp-agent/{mode}/xdg-data).
  *
@@ -156,5 +163,5 @@ function defaultExists(path: string): boolean {
  * native-yolo never share one mutable native data root.
  */
 export function ompXdgDataHome(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(baseRoot, "omp-agent", mode, "xdg-data"));
+  return resolve(join(baseRoot, OMP_AGENT_TMP_ENTRY, mode, "xdg-data"));
 }

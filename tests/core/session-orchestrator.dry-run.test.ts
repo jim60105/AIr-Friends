@@ -1,12 +1,16 @@
-import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
+import type {
+  WorkspaceTmpCleanupOptions,
+  WorkspaceTmpCleanupOutcome,
+} from "@core/workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
-import type { AgentConnector } from "../../src/acp/agent-connector.ts";
+import type { AgentConnector, AgentProcessEvidence } from "../../src/acp/agent-connector.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -66,6 +70,11 @@ class MockAgentConnector {
     this.disconnected = true;
     return Promise.resolve();
   }
+  /** Producer-teardown evidence; no wrapper is ever spawned by this stub. */
+  processEvidence: AgentProcessEvidence = { generations: 0, pid: undefined };
+  getProcessEvidence(): AgentProcessEvidence {
+    return this.processEvidence;
+  }
 }
 
 class TestableSessionOrchestrator extends SessionOrchestrator {
@@ -73,6 +82,26 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
   protected override createConnector(options: AgentConnectorOptions): AgentConnector {
     this.mockConnector = new MockAgentConnector(options);
     return this.mockConnector as unknown as AgentConnector;
+  }
+}
+
+/**
+ * Workspace manager that records temporary-use acquire/release calls, so a
+ * dry-run entrypoint's exactly-once ownership can be asserted directly.
+ */
+class RecordingWorkspaceManager extends WorkspaceManager {
+  readonly acquired: string[] = [];
+  readonly released: string[] = [];
+  override acquireTmpUse(tmpPath: string): void {
+    this.acquired.push(tmpPath);
+    super.acquireTmpUse(tmpPath);
+  }
+  override releaseTmpUse(
+    tmpPath: string,
+    options?: WorkspaceTmpCleanupOptions,
+  ): WorkspaceTmpCleanupOutcome | null {
+    this.released.push(tmpPath);
+    return super.releaseTmpUse(tmpPath, options);
   }
 }
 
@@ -157,12 +186,18 @@ function createTestEvent(): NormalizedEvent {
   };
 }
 
-async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFileEnabled = false) {
+async function createOrchestrator(
+  tempDir: string,
+  dryRunEnabled = true,
+  sendFileEnabled = false,
+  workspaceManagerOverride?: WorkspaceManager,
+) {
   const config = createTestConfig(tempDir, dryRunEnabled);
-  const workspaceManager = new WorkspaceManager({
-    repoPath: tempDir,
-    workspacesDir: "workspaces",
-  });
+  const workspaceManager = workspaceManagerOverride ??
+    new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
   const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(
     memoryStore,
@@ -506,6 +541,72 @@ Deno.test("Dry run — file naming includes timestamp and session type", async (
       assertEquals(pattern.test(entry.name), true, `Filename should match pattern: ${entry.name}`);
       assertStringIncludes(entry.name, ".md");
     }
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Dry run — lurk and channel maintenance release their ownership exactly once", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const manager = new RecordingWorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const { orchestrator, sessionRegistry } = await createOrchestrator(
+      tempDir,
+      true,
+      false,
+      manager,
+    );
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    // Channel lurk owns one root (the trigger user's workspace).
+    const lurkBefore = { acquired: manager.acquired.length, released: manager.released.length };
+    const lurkResponse = await orchestrator.processChannelLurkMessage(
+      createTestEvent(),
+      platformAdapter,
+    );
+    assertEquals(lurkResponse.success, true);
+    assertEquals(orchestrator.mockConnector, null, "dry run never builds a connector");
+    const lurkAcquired = manager.acquired.slice(lurkBefore.acquired);
+    const lurkReleased = manager.released.slice(lurkBefore.released);
+    assertEquals(lurkAcquired.length, 1);
+    assertEquals(lurkReleased, lurkAcquired);
+    for (const tmpPath of lurkAcquired) {
+      assertEquals(manager.getTmpUseCount(tmpPath), 0);
+    }
+
+    // Channel memory maintenance owns TWO roots: its synthetic per-user
+    // workspace and the channel workspace the agent process runs in.
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace(
+      "discord",
+      "test_channel",
+    );
+    const maintenanceBefore = {
+      acquired: manager.acquired.length,
+      released: manager.released.length,
+    };
+    const channelResponse = await orchestrator.processChannelMemoryMaintenance(
+      "discord/test_channel",
+      channelWorkspace,
+      { enabled: true, model: "gpt-4", minMemoryCount: 50, intervalMs: 604800000 },
+    );
+    assertEquals(channelResponse.success, true);
+    const maintenanceAcquired = manager.acquired.slice(maintenanceBefore.acquired);
+    const maintenanceReleased = manager.released.slice(maintenanceBefore.released);
+    assertEquals(maintenanceAcquired.length, 2);
+    assertEquals(new Set(maintenanceAcquired).size, 2, "both owning roots are distinct");
+    assertEquals([...maintenanceAcquired].sort(), [...maintenanceReleased].sort());
+    for (const tmpPath of maintenanceAcquired) {
+      assertEquals(manager.getTmpUseCount(tmpPath), 0);
+    }
+    assert(
+      maintenanceAcquired.includes(join(channelWorkspace.path, "tmp")),
+      "the channel workspace the agent runs in is owned",
+    );
 
     sessionRegistry.stop();
   } finally {

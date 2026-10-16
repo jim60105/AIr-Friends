@@ -48,6 +48,8 @@ Validate the configured root once against its canonical host-provisioned path. R
 
 Use a synchronous depth-first iterator bounded to 2,048 examined disposable filesystem nodes per workspace per invocation and depth 64. Stop that workspace's pass when a bound is reached; retain unvisited entries for its next teardown/startup. Do not use unbounded recursive `Deno.removeSync(..., { recursive: true })`. This limits main-thread work per workspace and prevents an unexpectedly deep browser tree from producing unbounded recursion. Startup can await between workspace passes while ingress remains disabled; it walks the finite recognized workspace layout once and creates no periodic service.
 
+The node bound is per invocation, so a later pass (or restart) has a fresh one and reclaims the remainder. The DEPTH bound is a fixed root-relative limit: content deeper than 64 ordinary directories below a workspace `tmp/` root is intentionally ineligible and retained indefinitely, because a bounded synchronous traversal that removed it would have to recurse past the limit it exists to enforce. The bound counts ATTEMPTED inspections, not only successful ones, and reaching it stops the whole workspace pass — a directory that fails every `inspect` costs the same as one that succeeds.
+
 A missing entry is harmless. Permission, replacement or IO failures warn and skip the affected candidate while other safe candidates continue within budget. No retry loop runs during a pass. Same-process exclusion and completed child teardown prevent producer races; this design does not claim descriptor-relative protection against an independent hostile process racing the filesystem. Existing secure ACP content-access guarantees are unchanged.
 
 ## Risks / Trade-offs

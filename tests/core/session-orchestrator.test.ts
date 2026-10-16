@@ -7,6 +7,7 @@ import { activeSessionsGauge, selfResearchNoNoteTotal, sessionsTotal } from "@ut
 import type { AgentProcessPool } from "@core/agent-process-pool.ts";
 import type { CompletedSessionStore } from "../../src/dashboard/completed-session-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
+import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { SkillRegistry } from "@skills/registry.ts";
@@ -23,7 +24,11 @@ import type { PermissionRejection } from "../../src/acp/types.ts";
 import type { AgentType } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import { mockOmpNativeCache } from "../mocks/omp-mock-session.ts";
-import { GateContextRestoreError, RecoveryHookError } from "../../src/acp/agent-connector.ts";
+import {
+  type AgentProcessEvidence,
+  GateContextRestoreError,
+  RecoveryHookError,
+} from "../../src/acp/agent-connector.ts";
 import { RecoveryOwnershipError } from "../../src/acp/recovery-ownership.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { dirname, join, resolve } from "@std/path";
@@ -341,6 +346,450 @@ Deno.test({
   },
 });
 
+// === Workspace temporary-use ownership (reap-orphan-workspace-staging D2) ===
+
+/**
+ * Wait (bounded) until a wrapper has at least `expected` direct children. A
+ * readiness barrier for a REAL process tree: deterministic time control cannot
+ * make a spawned child observable, so this polls the kernel's own answer.
+ */
+async function waitForChildCount(pid: number, expected: number): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const out = await new Deno.Command("pgrep", { args: ["-P", String(pid)] }).output();
+    const count = new TextDecoder().decode(out.stdout).trim().split("\n")
+      .filter((line) => line.trim() !== "").length;
+    if (out.success && count >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`wrapper ${pid} never reached ${expected} children`);
+}
+
+/** A workspace manager whose workspace creation is gated for a barrier test. */
+class GatedWorkspaceManager extends WorkspaceManager {
+  readonly entered = Promise.withResolvers<void>();
+  readonly gate = Promise.withResolvers<void>();
+  override async getOrCreateWorkspace(event: NormalizedEvent): Promise<WorkspaceInfo> {
+    this.entered.resolve();
+    await this.gate.promise;
+    return await super.getOrCreateWorkspace(event);
+  }
+}
+
+Deno.test({
+  name:
+    "workspace temporary-use ownership precedes registration: a peer completion cannot reclaim a mid-setup workspace",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const gated = new GatedWorkspaceManager({
+        repoPath: tempDir,
+        workspacesDir: "workspaces",
+      });
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir, { workspaceManager: gated });
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(
+        workspaceManager.getWorkspaceKeyFromEvent(event),
+      );
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          const key = `${workspaceManager.getWorkspaceKeyFromEvent(event)}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      const pending = orchestrator.processMessage(event, platformAdapter);
+      // Suspended INSIDE workspace creation, i.e. before Skill API registration.
+      await gated.entered.promise;
+      assertEquals(sessionRegistry.activeCount, 0);
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 1);
+
+      // A peer completion path sees the workspace as busy and reclaims nothing.
+      const peer = workspaceManager.cleanupTmpIfIdle(tmpPath);
+      assertEquals(peer.status, "skipped");
+      assertEquals(peer.reason, "live-temporary-use");
+
+      gated.gate.resolve();
+      const response = await pending;
+
+      assertEquals(response.success, true);
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "workspace temporary-use ownership is released exactly once when workspace setup fails",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      class FailingWorkspaceManager extends WorkspaceManager {
+        override getOrCreateWorkspace(): Promise<WorkspaceInfo> {
+          return Promise.reject(new Error("workspace creation failed"));
+        }
+      }
+      const failing = new FailingWorkspaceManager({
+        repoPath: tempDir,
+        workspacesDir: "workspaces",
+      });
+      const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+        tempDir,
+        { workspaceManager: failing },
+      );
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(
+        workspaceManager.getWorkspaceKeyFromEvent(event),
+      );
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "workspace creation failed");
+      // Exactly once: the count is back to zero and nothing stays marked busy.
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      assertEquals(sessionRegistry.activeCount, 0);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "workspace temporary-use ownership is released when post-registration staging fails",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+        tempDir,
+      );
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(
+        workspaceManager.getWorkspaceKeyFromEvent(event),
+      );
+
+      // Fail the pre-created staging directory AFTER the session is registered.
+      const originalMkdir = Deno.mkdir;
+      Deno.mkdir = ((path: string | URL, options?: Deno.MkdirOptions) => {
+        if (String(path).includes("/tmp/sess_")) {
+          return Promise.reject(new Deno.errors.PermissionDenied("mock staging failure"));
+        }
+        return originalMkdir(path, options);
+      }) as typeof Deno.mkdir;
+      let response;
+      try {
+        response = await orchestrator.processMessage(event, platformAdapter);
+      } finally {
+        Deno.mkdir = originalMkdir;
+      }
+
+      assertEquals(response.success, false);
+      assertStringIncludes(response.error ?? "", "mock staging failure");
+      // The leaked registration is rolled back, so the workspace stays reclaimable.
+      assertEquals(sessionRegistry.activeCount, 0);
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "workspace cleanup waits for a per-spawn background tool child before reclaiming staged files",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    // A holder (not a `let`): the process is assigned inside the connector hook.
+    const wrapper: { child: Deno.ChildProcess | null } = { child: null };
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir);
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+      const staged = join(tmpPath, "owner-session", "staged-payload.json");
+      const toolObservation = join(tempDir, "tool-observation.txt");
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = async () => {
+          await Deno.mkdir(dirname(staged), { recursive: true });
+          await Deno.writeTextFile(staged, "staged payload");
+          // Production-shaped tree: the OLDEST child is the long-lived agent,
+          // the younger one is the tool that reads the staged file 0.3 s later.
+          // Cleanup must wait for it, so the file is still there when it reads.
+          wrapper.child = new Deno.Command("sh", {
+            args: [
+              "-c",
+              `sleep 5 & sh -c "sleep 0.3; test -f '${staged}' && echo present > '${toolObservation}'" & wait`,
+            ],
+            stdout: "null",
+            stderr: "null",
+          }).spawn();
+          await waitForChildCount(wrapper.child.pid, 2);
+          connector.processEvidence = { generations: 1, pid: wrapper.child.pid };
+          connector.connected = true;
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      // The tool child saw its staged file while the drain was still waiting …
+      assertEquals(Deno.readTextFileSync(toolObservation), "present\n");
+      // … and only after the drain did the final release reclaim the entry.
+      assertEquals(await pathExists(staged), false);
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      assertEquals(workspaceManager.isTmpUseUncertain(tmpPath), false);
+      sessionRegistry.stop();
+    } finally {
+      if (wrapper.child) {
+        try {
+          wrapper.child.kill("SIGTERM");
+        } catch {
+          // Already gone.
+        }
+        await wrapper.child.status;
+      }
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "workspace cleanup retains staged files when per-spawn teardown is uncertain",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir);
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+      const staged = join(tmpPath, "owner-session", "staged-payload.json");
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = async () => {
+          await Deno.mkdir(dirname(staged), { recursive: true });
+          await Deno.writeTextFile(staged, "staged payload");
+          // A wrapper was spawned (one generation) but is no longer observable:
+          // producer quiescence cannot be established.
+          connector.processEvidence = { generations: 1, pid: undefined };
+          connector.connected = true;
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(workspaceManager.isTmpUseUncertain(tmpPath), true);
+      assertEquals(await pathExists(staged), true);
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      // Even with the registry empty, the retained marker still blocks cleanup.
+      assertEquals(sessionRegistry.hasActiveSessionsForWorkspace(workspaceKey), false);
+      assertEquals(workspaceManager.cleanupTmpIfIdle(tmpPath).reason, "uncertain-teardown");
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "workspace cleanup retains staged files when a re-spawn superseded the drained wrapper",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    const wrapper: { child: Deno.ChildProcess | null } = { child: null };
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir);
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+      const staged = join(tmpPath, "owner-session", "staged-payload.json");
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = async () => {
+          await Deno.mkdir(dirname(staged), { recursive: true });
+          await Deno.writeTextFile(staged, "staged payload");
+          // A live, childless wrapper is drained, but this connector spawned TWO
+          // generations: the superseded one's children were never drained.
+          wrapper.child = new Deno.Command("sleep", {
+            args: ["5"],
+            stdout: "null",
+            stderr: "null",
+          }).spawn();
+          connector.processEvidence = { generations: 2, pid: wrapper.child.pid };
+          connector.connected = true;
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(workspaceManager.isTmpUseUncertain(tmpPath), true);
+      assertEquals(await pathExists(staged), true);
+      sessionRegistry.stop();
+    } finally {
+      if (wrapper.child) {
+        try {
+          wrapper.child.kill("SIGKILL");
+        } catch {
+          // Already gone.
+        }
+        await wrapper.child.status;
+      }
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "workspace cleanup never visits another workspace's active temporary data",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir);
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const ownTmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+      // Dashboard chat owns its separate workspace without orchestrator ownership.
+      const liveChatFile = join(tempDir, "workspaces", "dashboard", "web-chat", "tmp", "chat.json");
+      await Deno.mkdir(dirname(liveChatFile), { recursive: true });
+      await Deno.writeTextFile(liveChatFile, "live chat state");
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = async () => {
+          await Deno.mkdir(join(ownTmpPath, "own-session"), { recursive: true });
+          await Deno.writeTextFile(join(ownTmpPath, "own-session", "staged.json"), "own payload");
+          connector.connected = true;
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      // Its own workspace was reclaimed …
+      assertEquals(await pathExists(join(ownTmpPath, "own-session")), false);
+      // … and the unrelated dashboard workspace keeps every byte.
+      assertEquals(Deno.readTextFileSync(liveChatFile), "live chat state");
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "workspace cleanup failure never replaces the computed session response",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir);
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = async () => {
+          await Deno.mkdir(join(tmpPath, "own-session"), { recursive: true });
+          await Deno.writeTextFile(join(tmpPath, "own-session", "staged.json"), "own payload");
+          connector.connected = true;
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+        };
+      });
+
+      // Every disposable-entry removal fails: the session must still report the
+      // computed success and release its ownership exactly once.
+      const originalRemoveSync = Deno.removeSync;
+      Deno.removeSync = ((path: string | URL, options?: Deno.RemoveOptions) => {
+        if (String(path).startsWith(tmpPath)) {
+          throw new Deno.errors.PermissionDenied("mock cleanup failure");
+        }
+        return originalRemoveSync(path, options);
+      }) as typeof Deno.removeSync;
+      let response;
+      try {
+        response = await orchestrator.processMessage(event, platformAdapter);
+      } finally {
+        Deno.removeSync = originalRemoveSync;
+      }
+
+      assertEquals(response.success, true);
+      assertEquals(response.replySent, true);
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      assertEquals(await pathExists(join(tmpPath, "own-session", "staged.json")), true);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
 Deno.test("SessionOrchestrator - skips agent execution for /clear command", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
@@ -651,6 +1100,16 @@ class MockAgentConnector {
     return undefined;
   }
 
+  /**
+   * Producer-teardown evidence (mirrors `AgentConnector.getProcessEvidence`).
+   * Defaults to "no wrapper was ever spawned"; tests override it to model a
+   * live, discarded or superseded wrapper.
+   */
+  processEvidence: AgentProcessEvidence = { generations: 0, pid: undefined };
+  getProcessEvidence(): AgentProcessEvidence {
+    return this.processEvidence;
+  }
+
   reconnectResult = false;
   /** Every recovery call with its trailing options (row 11 capture seam). */
   reconnectCalls: { sessionId: string; cwd: string; mcpServers: unknown[]; opts: unknown }[] = [];
@@ -745,6 +1204,8 @@ async function createTestableOrchestrator(
     agentType?: AgentType;
     /** Effective session mode; defaults to the fixture's restricted (`false`) mode. */
     yolo?: boolean;
+    /** Override the workspace manager (barriers around workspace creation). */
+    workspaceManager?: WorkspaceManager;
   },
 ) {
   const config = createTestConfig(tempDir);
@@ -756,10 +1217,11 @@ async function createTestableOrchestrator(
       host: "127.0.0.1",
     };
   }
-  const workspaceManager = new WorkspaceManager({
-    repoPath: config.workspace.repoPath,
-    workspacesDir: config.workspace.workspacesDir,
-  });
+  const workspaceManager = options?.workspaceManager ??
+    new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
   const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
 
@@ -1105,10 +1567,15 @@ Deno.test("SessionOrchestrator - no retry when initial prompt has reply sent", a
 Deno.test("SessionOrchestrator - no retry when initial stop reason is cancelled", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
 
     const event = createTestEvent();
     const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const tmpPath = workspaceManager.getWorkspaceTmpPath(
+      workspaceManager.getWorkspaceKeyFromEvent(event),
+    );
 
     orchestrator.setConnectorSetup((connector) => {
       // Initial prompt returns cancelled -> no retry should happen
@@ -1124,6 +1591,10 @@ Deno.test("SessionOrchestrator - no retry when initial stop reason is cancelled"
     assertEquals(response.error, "Session was cancelled");
     // Should have called prompt only once
     assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+    // A cancelled session still releases its temporary-use ownership exactly
+    // once, so the workspace stays reclaimable (design D2).
+    assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+    assertEquals(workspaceManager.isTmpUseUncertain(tmpPath), false);
 
     sessionRegistry.stop();
   } finally {
@@ -3602,7 +4073,8 @@ Deno.test({
 // --- processMessage tmp cleanup regression tests ---
 
 Deno.test({
-  name: "SessionOrchestrator - processMessage success cleans tmp without removing workspace",
+  name:
+    "SessionOrchestrator - processMessage success removes disposable tmp entries and preserves tmp root + engine state",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -3618,11 +4090,21 @@ Deno.test({
       const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
       const tmpPath = `${workspacePath}/tmp`;
       const tmpSentinel = `${tmpPath}/success-sentinel.txt`;
+      // Reserved engine-state entries must survive the same pass in every mode:
+      // native OMP state (both modes), the OpenCode data area, and the native
+      // `natives` runtime link inside the reserved subtree.
+      const ompRestrictedState = `${tmpPath}/omp-agent/restricted/xdg-data/omp/sessions-db`;
+      const ompYoloState = `${tmpPath}/omp-agent/native-yolo/xdg-data/omp/sessions-db`;
+      const opencodeState = `${tmpPath}/opencode-data/sess_mock/tool-output/output.txt`;
       const observedSessionIds: string[] = [];
 
       orchestrator.setConnectorSetup((connector) => {
         connector.connect = () => {
           Deno.writeTextFileSync(tmpSentinel, "temporary data");
+          for (const path of [ompRestrictedState, ompYoloState, opencodeState]) {
+            Deno.mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+            Deno.writeTextFileSync(path, "engine state");
+          }
           return Promise.resolve();
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
@@ -3641,7 +4123,12 @@ Deno.test({
       assertEquals(observedSessionIds.length, 1);
       assertEquals(observedSessionIds[0].startsWith("sess_"), true);
       assertEquals(Deno.env.get("SESSION_ID"), undefined);
-      assertEquals(await pathExists(tmpPath), false);
+      // The disposable entry is gone; the tmp root and reserved engine state stay.
+      assertEquals(await pathExists(tmpSentinel), false);
+      assertEquals(await pathExists(tmpPath), true);
+      assertEquals(await Deno.readTextFile(ompRestrictedState), "engine state");
+      assertEquals(await Deno.readTextFile(ompYoloState), "engine state");
+      assertEquals(await Deno.readTextFile(opencodeState), "engine state");
 
       const workspaceStat = await Deno.stat(workspacePath);
       assertEquals(workspaceStat.isDirectory, true);
@@ -3693,7 +4180,9 @@ Deno.test({
       assertEquals(response.replySent, true);
       assertEquals(orchestrator.mockConnector, null);
       assertEquals(Deno.env.get("SESSION_ID"), undefined);
-      assertEquals(await pathExists(tmpPath), false);
+      // Entry-level cleanup: the disposable entry is gone, the tmp root stays.
+      assertEquals(await pathExists(tmpSentinel), false);
+      assertEquals(await pathExists(tmpPath), true);
 
       const dryRunFiles: string[] = [];
       for await (const entry of Deno.readDir(config.agent.dryRun.outputPath)) {
@@ -3811,7 +4300,11 @@ Deno.test({
       assertEquals(response.replySent, false);
       assertEquals(response.error, "Connection failed");
       assertEquals(Deno.env.get("SESSION_ID"), undefined);
-      assertEquals(await pathExists(tmpPath), false);
+      // Entry-level cleanup after a failed producer start: the disposable entry
+      // is gone and the tmp root stays (no wrapper was ever spawned, so nothing
+      // can still be using it).
+      assertEquals(await pathExists(tmpSentinel), false);
+      assertEquals(await pathExists(tmpPath), true);
 
       const workspaceStat = await Deno.stat(workspacePath);
       assertEquals(workspaceStat.isDirectory, true);
@@ -3829,7 +4322,8 @@ Deno.test({
 // === cleanupWorkspaceTmp tests ===
 
 Deno.test({
-  name: "cleanupWorkspaceTmp - removes tmp when no other sessions",
+  name:
+    "cleanupWorkspaceTmp - removes disposable entries and preserves the tmp root + engine state",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -3843,6 +4337,11 @@ Deno.test({
       await Deno.mkdir(tmpPath, { recursive: true });
       // Put a file in tmp to verify it gets cleaned up
       await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
+      // A reserved native-state subtree must be preserved verbatim.
+      await Deno.mkdir(`${tmpPath}/omp-agent/restricted/xdg-data`, { recursive: true });
+      await Deno.writeTextFile(`${tmpPath}/omp-agent/restricted/xdg-data/state`, "native state");
+      await Deno.mkdir(`${tmpPath}/opencode-data`, { recursive: true });
+      await Deno.writeTextFile(`${tmpPath}/opencode-data/tool-output`, "opencode state");
 
       const workspace = {
         key: "discord/u1",
@@ -3855,20 +4354,22 @@ Deno.test({
       const { createLogger } = await import("@utils/logger.ts");
       const logger = createLogger("test");
 
-      // No active sessions exist, so tmp should be removed
+      // No active sessions exist, so the disposable entry is removed
       // deno-lint-ignore no-explicit-any
       await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
 
-      // Verify tmp directory was removed
-      let exists = true;
-      try {
-        await Deno.stat(tmpPath);
-      } catch (error) {
-        if (error instanceof Deno.errors.NotFound) {
-          exists = false;
-        }
-      }
-      assertEquals(exists, false);
+      // The disposable entry is gone; the tmp root and the reserved
+      // engine-state entries keep their paths and bytes.
+      assertEquals(await pathExists(`${tmpPath}/test-file.txt`), false);
+      assertEquals(await pathExists(tmpPath), true);
+      assertEquals(
+        await Deno.readTextFile(`${tmpPath}/omp-agent/restricted/xdg-data/state`),
+        "native state",
+      );
+      assertEquals(
+        await Deno.readTextFile(`${tmpPath}/opencode-data/tool-output`),
+        "opencode state",
+      );
 
       sessionRegistry.stop();
     } finally {
@@ -3966,7 +4467,7 @@ Deno.test({
 });
 
 Deno.test({
-  name: "cleanupWorkspaceTmp - handles other errors gracefully",
+  name: "cleanupWorkspaceTmp - retains the affected entry and continues on non-NotFound errors",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -3974,11 +4475,16 @@ Deno.test({
     try {
       const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
 
+      const workspacePath = `${tempDir}/workspaces/discord/erroruser`;
+      const tmpPath = `${workspacePath}/tmp`;
+      await Deno.mkdir(tmpPath, { recursive: true });
+      await Deno.writeTextFile(`${tmpPath}/blocked.txt`, "retained on failure");
+
       const workspace = {
         key: "discord/erroruser",
         components: { platform: "discord" as const, userId: "erroruser" },
-        path: `${tempDir}/workspaces/discord/erroruser`,
-        tmpPath: `${tempDir}/workspaces/discord/erroruser/tmp`,
+        path: workspacePath,
+        tmpPath,
         isDm: false,
       };
 
@@ -4004,6 +4510,9 @@ Deno.test({
         // deno-lint-ignore no-explicit-any
         (Deno as any).removeSync = originalRemoveSync;
       }
+      // The failed entry is retained (and reported), and the tmp root survives.
+      assertEquals(await pathExists(`${tmpPath}/blocked.txt`), true);
+      assertEquals(await pathExists(tmpPath), true);
 
       sessionRegistry.stop();
     } finally {
@@ -4252,6 +4761,74 @@ Deno.test("SessionOrchestrator - setupSession pre-creates session payload stagin
 });
 
 // === Pooled (shared-process) session result regression tests (fix-pool-mode-session-result-crash) ===
+
+Deno.test({
+  name:
+    "SessionOrchestrator - a pooled session stays owned with its staged files present until the pool run settles",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      // A pool whose `run()` returns only when the test releases it: exactly the
+      // window in which a tool child of this session may still need its files.
+      const runnerDone = Promise.withResolvers<void>();
+      const releaseRun = Promise.withResolvers<void>();
+      const blockingPool = {
+        run: async (
+          options: unknown,
+          runner: (c: unknown, o: unknown) => Promise<string | undefined>,
+        ) => {
+          await runner(fakeConnector, options);
+          runnerDone.resolve();
+          await releaseRun.promise;
+          return { acpSessionId: "ses_fake", cancelledByDeadline: false };
+        },
+      } as unknown as AgentProcessPool;
+      const { orchestrator, workspaceManager, sessionRegistry, skillRegistry } =
+        await createTestableOrchestrator(tempDir, { processPool: blockingPool });
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler() as unknown as {
+        replySentMap: Map<string, boolean>;
+      };
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const tmpPath = workspaceManager.getWorkspaceTmpPath(workspaceKey);
+      const staged = join(tmpPath, "owner-session", "staged.json");
+      fakeConnector.createSession = async () => {
+        await Deno.mkdir(dirname(staged), { recursive: true });
+        await Deno.writeTextFile(staged, "staged payload");
+        return fakeConnector.sessionId;
+      };
+      fakeConnector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      fakeConnector.onPrompt = () => {
+        replyHandler.replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
+      };
+
+      const pending = orchestrator.processMessage(event, platformAdapter);
+      await runnerDone.promise;
+
+      // The pool has NOT settled yet: ownership is still live and the session's
+      // staged payload is untouched, so a slow tool child can still read it.
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 1);
+      assertEquals(await pathExists(staged), true);
+
+      releaseRun.resolve();
+      const response = await pending;
+
+      assertEquals(response.success, true);
+      // Only now — after the pool's release path and this session's final
+      // release — is the disposable entry reclaimed.
+      assertEquals(workspaceManager.getTmpUseCount(tmpPath), 0);
+      assertEquals(await pathExists(staged), false);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
 
 /**
  * Stub shared-process pool: `run()` synchronously invokes the runner with a fake

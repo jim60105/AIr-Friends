@@ -6,7 +6,7 @@ import { SkillRegistry } from "@skills/registry.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
-import type { AgentConnector } from "../../src/acp/agent-connector.ts";
+import type { AgentConnector, AgentProcessEvidence } from "../../src/acp/agent-connector.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { ResolvedReminder } from "../../src/types/reminder.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
@@ -34,6 +34,11 @@ class MockAgentConnector {
   onPrompt?: (callCount: number) => void;
 
   constructor(_options: AgentConnectorOptions) {}
+  /** Producer-teardown evidence; no wrapper is ever spawned by this stub. */
+  processEvidence: AgentProcessEvidence = { generations: 0, pid: undefined };
+  getProcessEvidence(): AgentProcessEvidence {
+    return this.processEvidence;
+  }
   connect(): Promise<void> {
     this.connected = true;
     return Promise.resolve();

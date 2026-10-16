@@ -32,11 +32,18 @@ import {
 } from "./json-source.ts";
 
 /**
+ * Reserved direct-child name of a workspace `tmp/` directory that holds the
+ * session-scoped OpenCode data area. Workspace temporary cleanup preserves this
+ * entry verbatim (without enumerating it).
+ */
+export const OPENCODE_DATA_TMP_ENTRY = "opencode-data";
+
+/**
  * Root of the session-scoped OpenCode data area: a directory under the session TMPDIR,
  * derived deterministically from the session workspace path alone.
  */
 export function opencodeDataRoot(workingDir: string): string {
-  return join(workingDir, "tmp", "opencode-data");
+  return join(workingDir, "tmp", OPENCODE_DATA_TMP_ENTRY);
 }
 
 /**
