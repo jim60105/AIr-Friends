@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Image builds finish again. The pinned OMP executable carries the executable bit inside the build stage that prepares the shared native runtime payload, so that preparation can run the binary and publish the payload instead of failing with `reports no parseable version`.
+
 ## [0.34.0] - 2026-10-16
 
 ### Added

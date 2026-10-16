@@ -191,6 +191,12 @@ RUN case "${TARGETARCH}" in \
     echo "${OMP_SHA256}  /tmp/omp.bin" | sha256sum -c - && \
     echo "${OMP_LICENSE_SHA256}  /tmp/LICENSE" | sha256sum -c - && \
     echo "${OMP_NOTICES_SHA256}  /tmp/THIRD-PARTY-NOTICES.txt" | sha256sum -c - && \
+    # The next step RUNS this executable in-stage (the native-runtime preparation drives a
+    # real, bounded `omp acp` initialize against it), but the download arrives mode 0644 and
+    # `mv` preserves that mode. The final stage's `COPY --chmod=775` is what the DEPLOYED
+    # runtime gets; this bit is what makes the in-stage preparation possible at all. Placed
+    # after the checksum line above so unverified bytes are never marked executable.
+    chmod 755 /tmp/omp.bin && \
     mv /tmp/omp.bin /omp/out/omp && \
     mv /tmp/LICENSE /omp/licenses/LICENSE && \
     mv /tmp/THIRD-PARTY-NOTICES.txt /omp/licenses/THIRD-PARTY-NOTICES.txt
