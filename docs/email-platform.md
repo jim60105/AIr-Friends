@@ -90,3 +90,47 @@ Acceptance requirements and test scenarios defined in `specs/email-durable-files
 - `readJournal<T>(rootPath: string, relativePath: string, options?: DurableFileOptions): Promise<JournalIntegrityResult<T>>`
 - `assertSafePath(canonicalRoot: string, relativePath: string): Promise<string>`
 - `ensureDurableDir(canonicalRoot: string, dirPath: string): Promise<void>`
+
+## Durable Mailbox Processing Journal (Owned by `email-mailbox-journal`)
+
+Mailbox progress, discovery boundaries, and per-entry processing lifecycle states are durably tracked under the email state directory (`data/email/`) via `MailboxStore` in `src/platforms/email/mailbox-store.ts`.
+
+### Files & Layout
+
+- **`mailbox.json`**: Atomic JSON snapshot containing mailbox identity, first-activation boundary, IMAP `uidValidity`, and the current scan cursor.
+- **`processing.jsonl`**: Append-only transition journal containing state changes for individual email entries.
+
+### Invariants & Semantics
+
+- **Cursor Meaning**: The scan cursor represents durable discovery coverage—the UID up to which the remote mailbox has been inspected and durably recorded. It does NOT represent agent session completion.
+- **Coverage Invariant**: The cursor cannot advance past any entry currently in the `discovered` state. All discovered messages up to the new cursor position must reach `accepted`, `ignored`, `failed`, or `review-required` before checkpointing.
+- **Pre-acceptance Terminal Isolation**: Malformed messages, authentication rejections, or ambiguous records can transition directly from `discovered` to terminal states (`failed`, `ignored`, `review-required`). They do not block subsequent valid UIDs from being processed.
+- **Startup-Only Recovery**: `MailboxStore.recover()` is strictly a startup-only lifecycle method. Calling `recover()` while the store is active or live work is running is rejected (`INVALID_TRANSITION`) to prevent accidental quarantine of executing sessions.
+- **Uncertain Receive Recovery**: Entries left in the `started` state without terminal evidence upon crash or restart are automatically and durably transitioned to `review-required` during `recover()`. They are never blindly re-executed by a new agent.
+- **Resumable Accepted Queue**: Entries in `accepted` state that have not yet started execution are returned in the `unstarted` recovery queue and resume processing.
+- **Single-Owner Mutex & Damaged Fencing**: All mutations and recovery actions are serialized through an in-memory lock. A persistence or sync failure immediately marks the instance damaged (`STORE_DAMAGED_APPEND_REFUSED`), rejecting all queued and future mutations.
+- **Identity Validation**: A mismatch between configured mailbox fingerprint (`host=...;account=...;folder=...` preserving account case) and the persisted snapshot fails closed immediately (`FINGERPRINT_MISMATCH`), preventing cross-mailbox data corruption.
+
+### Acceptance Scenarios
+
+Detailed acceptance requirements and scenarios are defined in `specs/email-mailbox-state/spec.md`:
+- **First activation boundary**: The initial position is durably recorded; downtime and restarts exclude pre-activation inbox messages.
+- **Discovery and processing durability**: Progress never drops accepted unstarted work; each entry retains its lifecycle state independently of the cursor.
+- **Uncertain receive recovery**: Work left in started state without terminal evidence requires manual review rather than automatic replay.
+
+### Exported API
+
+- `MailboxKey`: `{ fingerprint: string, uidValidity: number, uid: number }`
+- `ProcessingState`: `"discovered" | "accepted" | "started" | "completed" | "ignored" | "failed" | "review-required"`
+- `MailboxSnapshot`: `{ version: number, fingerprint: string, initializedBoundary: number, uidValidity: number, cursor: number, updatedAt: string }`
+- `MailboxStore`:
+  - `initialize(boundary: number, uidValidity: number): Promise<void>`
+  - `checkpoint(newCursor: number): Promise<void>`
+  - `discover(key: MailboxKey): Promise<void>`
+  - `accept(key: MailboxKey, sourceRecordId: string): Promise<void>`
+  - `start(key: MailboxKey, workId: string): Promise<void>`
+  - `finish(key: MailboxKey, outcome: "completed" | "ignored" | "failed" | "review-required", options?: { workId?: string; detail?: string }): Promise<void>`
+  - `recover(): Promise<MailboxRecoveryResult>`
+  - `getSnapshot(): MailboxSnapshot | null`
+  - `getEntry(key: MailboxKey): MailboxEntrySnapshot | undefined`
+  - `close(): void`
