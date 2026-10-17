@@ -23,9 +23,19 @@ export interface RawMimePart {
   body: string;
 }
 
-/** Byte-preserving latin1 view of one wire message (one character per byte). */
+/**
+ * Byte-preserving view of one wire message: one character per byte, for every byte.
+ *
+ * Deliberately NOT `TextDecoder("latin1")`: the WHATWG `latin1` label decodes as windows-1252, so
+ * bytes 0x80–0x9F would come back as unrelated code points and a comparison would report a byte
+ * difference that the wire does not have. This mapping is exact and invertible.
+ */
 export function latin1Decode(bytes: Uint8Array): string {
-  return new TextDecoder("latin1").decode(bytes);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 8192)));
+  }
+  return chunks.join("");
 }
 
 /** Encode a latin1 view back to the exact bytes it came from. */

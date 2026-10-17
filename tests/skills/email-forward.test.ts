@@ -88,6 +88,11 @@ const SOURCE_DATE = "2026-10-15T09:00:00.000Z";
 const SOURCE_OWN_SIGNATURE = "-- \nOld Signature Line";
 /** The same signature in the archive fixture's wire form: the raw `.eml` is pure CRLF. */
 const SOURCE_OWN_SIGNATURE_CRLF = SOURCE_OWN_SIGNATURE.replaceAll("\n", "\r\n");
+/**
+ * Raw 8-bit bytes the original carries (0x80–0x9F included, where the WHATWG `latin1` label is
+ * not a byte view): the forwarded part must reproduce them, so the walker cannot pass by accident.
+ */
+const SOURCE_HIGH_BYTES = new Uint8Array([0x80, 0x9f, 0xff, 0xfe, 0xc3, 0xa9]);
 const TEXT_ATTACHMENT_NAME = "../../evil name.txt";
 const TEXT_ATTACHMENT_BYTES = new TextEncoder().encode("attachment-one-bytes-9f2b\n");
 const BINARY_ATTACHMENT_NAME = "report.pdf";
@@ -129,6 +134,8 @@ function sourceEmlBytes(): Uint8Array {
   const parts = [
     head,
     textPart,
+    SOURCE_HIGH_BYTES,
+    new TextEncoder().encode("\r\n"),
     new TextEncoder().encode(
       `\r\n--src-boundary\r\n` +
         `Content-Type: text/plain; name="${TEXT_ATTACHMENT_NAME}"\r\n` +
@@ -227,6 +234,19 @@ function forwardGrant(
     sourceRecordId: source.recordId,
     requestDigest: "c".repeat(64),
     ...overrides,
+  };
+}
+
+/** One immutable COMPOSE grant of this session, for the row-20 compatibility assertions. */
+function composeGrant(): DestinationGrant {
+  return {
+    grantId: GRANT_ID,
+    sessionId: SESSION_ID,
+    workId: WORK_ID,
+    owner: OWNER,
+    action: "compose",
+    canonicalRecipient: RECIPIENT_CANONICAL,
+    requestDigest: "e".repeat(64),
   };
 }
 
@@ -692,8 +712,21 @@ Deno.test("forward - request shape, duplicate references and empty commentary", 
   await withSeededSource(async ({ base, store, source, stagingDir }) => {
     const addedPath = join(stagingDir, "added.txt");
     Deno.writeTextFileSync(addedPath, "added-file-bytes");
+    // A staging-internal symlink alias of the SAME file: two spellings, one reference.
+    const aliasPath = join(stagingDir, "alias.txt");
+    Deno.symlinkSync(addedPath, aliasPath);
+    // An identifier-shaped extension the refusal must NOT echo back (the sentinel is private text
+    // that the shape heuristic cannot tell apart from an extension name).
+    const sentinelExtensionPath = join(stagingDir, `report.${SOURCE_BODY_SENTINEL}`);
+    Deno.writeTextFileSync(sentinelExtensionPath, "sentinel-extension-bytes");
 
-    const rejected: Array<{ label: string; request: Record<string, unknown>; code: string }> = [
+    const rejected: Array<{
+      label: string;
+      request: Record<string, unknown>;
+      code: string;
+      limits?: { allowedExtensions?: string[] };
+      hidden?: string;
+    }> = [
       {
         label: "Cc",
         request: forwardRequest(source, { cc: INJECTED_RECIPIENT }),
@@ -725,11 +758,33 @@ Deno.test("forward - request shape, duplicate references and empty commentary", 
         request: forwardRequest(source, { attachments: [addedPath, addedPath] }),
         code: EMAIL_COMPOSE_CODES.ATTACHMENT,
       },
+      {
+        label: "symlink alias of one staged file",
+        request: forwardRequest(source, { attachments: [addedPath, aliasPath] }),
+        code: EMAIL_COMPOSE_CODES.ATTACHMENT,
+      },
+      {
+        label: "identifier-shaped unknown key is not echoed",
+        request: forwardRequest(source, { [SOURCE_BODY_SENTINEL]: 1 }),
+        code: EMAIL_COMPOSE_CODES.REQUEST,
+        hidden: SOURCE_BODY_SENTINEL,
+      },
+      {
+        label: "identifier-shaped extension is not echoed",
+        request: forwardRequest(source, { attachments: [sentinelExtensionPath] }),
+        code: EMAIL_COMPOSE_CODES.ATTACHMENT,
+        limits: { allowedExtensions: [".pdf"] },
+        hidden: SOURCE_BODY_SENTINEL,
+      },
     ];
 
     for (const testCase of rejected) {
       const mailService = new RecordingMailService();
-      const handler = new EmailComposeHandler({ mailService, forwardSourceStore: store });
+      const handler = new EmailComposeHandler({
+        mailService,
+        forwardSourceStore: store,
+        ...(testCase.limits === undefined ? {} : { limits: testCase.limits }),
+      });
       const result = await handler.handleSendEmail(
         { grantId: GRANT_ID, request: testCase.request },
         emailContext(base, { emailDestinationGrants: [forwardGrant(source)] }),
@@ -738,6 +793,12 @@ Deno.test("forward - request shape, duplicate references and empty commentary", 
       assertEquals(result.success, false, testCase.label);
       assertEquals(result.code, testCase.code, testCase.label);
       assertEquals(mailService.drafts.length, 0, testCase.label);
+      if (testCase.hidden !== undefined) {
+        assert(
+          !(result.error ?? "").toLowerCase().includes(testCase.hidden.toLowerCase()),
+          `${testCase.label}: the refusal must not echo model-supplied text`,
+        );
+      }
     }
 
     // Empty commentary is a valid PURE forward: the designated original is the material.
@@ -1192,6 +1253,54 @@ Deno.test("compose - the row-20 path is unchanged: no forward source, its own sl
 
     // A compose request never reaches the source store, even when it is wired.
     assertEquals(source.recordId.length > 0, true);
+  } finally {
+    await Deno.remove(base, { recursive: true });
+  }
+});
+
+Deno.test("compose - the row-20 result guidance and aggregate refusal text are unchanged", async () => {
+  const base = await Deno.makeTempDir();
+  try {
+    const store = new EmailMessageStore({ workspacesRoot: join(base, "workspaces") });
+    const stagingDir = join(base, "tmp", SESSION_ID);
+    Deno.mkdirSync(stagingDir, { recursive: true });
+    const addedPath = join(stagingDir, "report.txt");
+    Deno.writeTextFileSync(addedPath, "compose-attachment-bytes");
+
+    const mailService = new RecordingMailService();
+    const handler = new EmailComposeHandler({ mailService, forwardSourceStore: store });
+    const result = await handler.handleSendEmail(
+      {
+        grantId: GRANT_ID,
+        request: { to: RECIPIENT, subject: "Status", body: "All good." },
+      },
+      emailContext(base, { emailDestinationGrants: [composeGrant()] }),
+    );
+
+    assertEquals(result.success, true, result.error);
+    // The compose guidance stays exactly the row-20 sentence: the forward warning is NOT added.
+    assertEquals(
+      resultData(result).nextAction,
+      "The message is submitted. Exit immediately; do not send it again — a repeated call " +
+        "returns this recorded result instead of resubmitting.",
+    );
+
+    // The compose aggregate refusal keeps its original wording (a forward names the wider set).
+    const limited = new EmailComposeHandler({
+      mailService: new RecordingMailService(),
+      forwardSourceStore: store,
+      limits: { maxTotalSizeMb: 0.000001 },
+    });
+    const refused = await limited.handleSendEmail(
+      {
+        grantId: GRANT_ID,
+        request: { to: RECIPIENT, subject: "Status", body: "All good.", attachments: [addedPath] },
+      },
+      emailContext(base, { emailDestinationGrants: [composeGrant()] }),
+    );
+    assertEquals(refused.success, false);
+    assertEquals(refused.code, EMAIL_COMPOSE_CODES.ATTACHMENT);
+    assertStringIncludes(String(refused.error), "The attachments total");
   } finally {
     await Deno.remove(base, { recursive: true });
   }

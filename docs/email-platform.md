@@ -2099,15 +2099,19 @@ canonical `to` → immutable grant), and a forward then adds:
 2. The source is resolved ONLY through the injected owner-scoped store
    (`EmailForwardSourceStore`, structurally `EmailMessageStore`): `getByOwnerRecord(owner, id)`
    cannot return another owner's record, so a foreign source is simply not found. `getSourceBytes`
-   and `attachment` read the immutable archive, and EVERY source-side failure — absent store,
-   absent/foreign record, missing bytes, unreadable bytes, a throwing store, or archived bytes that
-   no longer match the recorded `rawSize`/`size` — is the same content-free
-   `SKILL_EMAIL_FORWARD_SOURCE` refusal with zero SMTP activity. A forward is complete or it does
-   not happen; nothing is truncated, dropped or partially sent.
+   and `attachment` read the immutable archive, and EVERY source-side failure — absent/foreign
+   record, missing bytes, unreadable bytes, a throwing store, or archived bytes whose LENGTH no
+   longer matches the recorded `rawSize`/`size` — is one content-free `SKILL_EMAIL_FORWARD_SOURCE`
+   refusal with zero SMTP activity (a deployment with no source store wired at all refuses with
+   `SKILL_EMAIL_FORWARD_UNAVAILABLE`). Length identity is what the archive contract offers: an
+   equal-length byte replacement inside the archive is not detected here. A forward is complete or
+   it does not happen; nothing is truncated, dropped or partially sent.
 3. Source content never authorizes anything. The original's addresses, body, attachments and
-   instructions are only quoted material: the envelope recipient comes from the matched grant, the
-   published header chain carries no address from the source, and a request that asks for a
-   source-named address is refused like any other ungranted destination.
+   instructions are only quoted material: the envelope recipient and the routing headers come from
+   the matched grant alone, nothing the source names can become a recipient or a destination, and
+   a request that asks for a source-named address is refused like any other ungranted destination.
+   The only source values that reach the outgoing top-level headers are the source's own bracketed
+   wire identifiers in `References` (a fresh header chain that threads the forward to the original).
 
 ### Byte preservation, signature order and combined limits
 
@@ -2115,7 +2119,11 @@ canonical `to` → immutable grant), and a forward then adds:
   `message/*` parts unencoded, so the original headers, its own signature and its encoded parts
   survive byte-for-byte; a source containing bare LF is refused by the builder instead of being
   rewritten). Every original attachment is attached as itself with the stored bytes and the stored
-  media type, and its display filename is sanitized like any other attachment name.
+  media type, and its display filename is sanitized like any other attachment name. The composer's
+  disposition for a `message/*` part is `inline`, so some clients present the original inline rather
+  than offering it as a downloadable attachment; the body text and every decoded attachment are
+  forwarded explicitly as well, so no client is required to unpack the raw part to read the
+  message.
 - The labelled `---------- Forwarded message ---------` section is built by the shared
   `buildForwardSection` from the stored body text, and the builder places the centrally applied
   signature AFTER the commentary and BEFORE that section — exactly once.
@@ -2126,8 +2134,12 @@ canonical `to` → immutable grant), and a forward then adds:
   the per-file bound) are `SKILL_EMAIL_FORWARD_SOURCE`; a combined count/aggregate failure is
   `SKILL_EMAIL_COMPOSE_ATTACHMENT`. All of it is decided from recorded sizes and stats BEFORE any
   payload byte is read, and the actual loaded sizes are re-checked against the recorded ones, so an
-  archived file that grew, shrank or was replaced cannot smuggle an oversized or truncated part
-  into a "successful" forward.
+  archived file whose size changed cannot smuggle an oversized or truncated part into a
+  "successful" forward.
+- Two references that resolve — including through a staging-internal symlink alias — to ONE staged
+  file are one duplicate: a forward refuses them instead of serializing the same material twice.
+  Original attachments are not subject to the added-file extension whitelist: they are preserved
+  whatever their media type.
 - Forwarding does not re-encode the original: the decoded originals are copies of the archive
   bytes, and the raw part is the archive's own `.eml`.
 
@@ -2147,6 +2159,11 @@ canonical `to` → immutable grant), and a forward then adds:
   the same identifier-or-hash rule (verbatim only when identifier-shaped, otherwise a SHA-256
   `…Hash`); the destination, subject, body, attachment paths and every source byte stay out of the
   audit, whatever the content-hashing setting is.
+- A FORWARD refusal echoes no model-supplied value at all — not even an identifier-shaped request
+  key or file extension, which the row-20 compose wording names when the shape heuristic accepts
+  it. A quoted source can legitimately contain identifier-shaped private text, so the shape
+  heuristic is not applied in forward mode. (The compose wording is deliberately unchanged, for
+  row-20 response compatibility.)
 
 ### Exported API (consumers: `email-response-accounting`, `email-tool-guidance`, `email-activation`)
 

@@ -173,6 +173,7 @@ The result JSON carries `emailSubmission` metadata: `operationId`, `phase`
   the configured per-file size limit and the aggregate size limit, restricted to the configured
   extension whitelist when one is set. A forward counts the original message itself and every one of
   its attachments against the same limits, so the whole forward is refused when the combined set
-  does not fit.
+  does not fit. The extension whitelist applies only to files YOU stage: the original attachments
+  are preserved whatever their media type.
 - A repeated call with the same grant reuses the recorded operation result: it never submits a
   second message.

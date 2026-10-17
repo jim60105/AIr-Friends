@@ -10,16 +10,22 @@ Total estimate: **6.75 engineering hours**, strictly below 8 hours. Estimates in
 - [x] 1.4 (0.5h) Document designated-source behavior, attachment accounting and clarification for ambiguous source selection. Verify the documented fields, outcomes and commands match the implemented interface and link this slice's acceptance scenarios in `docs/email-platform.md`; add its scoped CHANGELOG entry.
 - [x] 1.5 (0.75h contingency) Resolve bounded integration defects in the owned interfaces/tests only; verify the same acceptance cases after fixes, or record unused contingency without inventing extra features.
 
-Contingency used, not unused: the pre-implementation review found three bounded defects inside this
+Contingency used, not unused: the pre- and post-implementation reviews found bounded defects inside this
 responsibility's own interfaces, all fixed in the owned handler/tests. (1) The forwarded set now
 proves the ACTUAL archived lengths (`sourceBytes.byteLength === record.rawSize` and every
-attachment's length against its recorded size) before submission, so an archive file that grew,
-shrank or was replaced cannot pass a metadata-only preflight. (2) Every source read is inside one
+attachment's length against its recorded size) before submission, so an archive file whose size
+changed cannot pass a metadata-only preflight (an equal-length replacement is outside what the
+archive contract can detect). (2) Every source read is inside one
 content-free `SKILL_EMAIL_FORWARD_SOURCE` boundary, so a throwing or missing store and an unreadable
 archive produce the incomplete-source result instead of an escaped exception. (3) The documented
 idempotency contract is the durable one: changed commentary under the same grant returns the
 RECORDED result (`reused: true`, zero new SMTP transactions) and the result text says that the new
-commentary was not sent — no second slot is invented. No new feature was added.
+commentary was not sent — no second slot is invented. (4) The duplicate-reference rule is enforced
+on the RESOLVED real paths, so a staging-internal symlink alias of one staged file counts as the
+same reference. A follow-up review also tightened two row-20 compatibility details (the compose
+success guidance and the compose aggregate-refusal wording are byte-identical to the compose
+contract again) and made forward refusals echo no model-supplied value at all. No new feature was
+added.
 
 ## 2. Controlled integration smoke
 

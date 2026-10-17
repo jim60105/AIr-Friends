@@ -132,6 +132,18 @@ const FORWARD_SOURCE_CONTENT_TYPE = "message/rfc822";
 /** One bracketed RFC 5322 wire identifier, as `OutgoingMimeBuilder` requires for references. */
 const WIRE_ID_REGEX = /^<[^<>\s]+>$/;
 
+/** Success guidance of the row-20 compose contract; a forward extends it (see below). */
+const EMAIL_NEXT_ACTION =
+  "The message is submitted. Exit immediately; do not send it again — a repeated call " +
+  "returns this recorded result instead of resubmitting.";
+
+/**
+ * The same guidance for a forward, which additionally warns that the recorded operation — not the
+ * newly written text — is what a repeated call answers with.
+ */
+const FORWARD_NEXT_ACTION = `${EMAIL_NEXT_ACTION} A repeated call with different commentary does ` +
+  "NOT send that commentary: one grant is one send.";
+
 /**
  * Display media type for an outgoing attachment filename. The wire builder only echoes this
  * value as the part's Content-Type; an unknown extension stays `application/octet-stream`.
@@ -293,7 +305,9 @@ export class EmailComposeHandler {
     if (unknownKeys.length > 0) {
       // Only identifier-shaped names are named: a JSON key is model-supplied and could itself
       // carry an address, a path or a sentence, and this text is written to the audit verbatim.
-      const named = unknownKeys.filter(isOpaqueIdentifierToken);
+      // A forward names NOTHING: a forwarded source's private text can be identifier-shaped too,
+      // so the shape heuristic is not applied to the forward mode at all.
+      const named = isForward ? [] : unknownKeys.filter(isOpaqueIdentifierToken);
       return refuse(
         EMAIL_COMPOSE_CODES.REQUEST,
         `The ${isForward ? "forward" : "compose"} request carries ${unknownKeys.length} ` +
@@ -363,15 +377,8 @@ export class EmailComposeHandler {
       );
     }
     // A forwarded message carries the designated original, so empty commentary is a valid pure
-    // forward; the attachment set of a forward must still reference an added file at most once.
-    if (isForward && firstDuplicatePath(attachmentPaths, context) !== undefined) {
-      return refuse(
-        EMAIL_COMPOSE_CODES.ATTACHMENT,
-        "The forward request references the same staged attachment file more than once, so the " +
-          "forwarded set would duplicate material. Reference each staged file at most once. " +
-          "Nothing was sent.",
-      );
-    }
+    // forward. Its attachment set is checked for duplicated references below, on the RESOLVED real
+    // paths, so a staging-internal symlink alias of one file counts as the same reference.
 
     // 4. Canonical destination + immutable-grant authorization, before any file read.
     let canonicalTo: string;
@@ -442,7 +449,11 @@ export class EmailComposeHandler {
       return refuse(source.code, source.error);
     }
     const reserved = source?.ok
-      ? { count: source.value.record.attachments.length + 1, bytes: source.value.reservedBytes }
+      ? {
+        count: source.value.record.attachments.length + 1,
+        bytes: source.value.reservedBytes,
+        forward: true,
+      }
       : undefined;
     const attachments = await this.loadAttachments(attachmentPaths, context, sessionId, reserved);
     if (!attachments.ok) {
@@ -510,11 +521,21 @@ export class EmailComposeHandler {
       ...(draftAttachments.length === 0 ? {} : { attachments: draftAttachments }),
     };
 
-    return await this.submitDraft(mailService, draft, context, {
-      attachmentsCount: draftAttachments.length +
-        (sourcePayload?.ok ? sourcePayload.value.attachments.length : 0),
-      ...(sourcePayload?.ok ? { forwardSourceRecordId: sourcePayload.value.record.recordId } : {}),
-    });
+    return await this.submitDraft(
+      mailService,
+      draft,
+      context,
+      {
+        attachmentsCount: draftAttachments.length +
+          (sourcePayload?.ok ? sourcePayload.value.attachments.length : 0),
+        ...(sourcePayload?.ok
+          ? { forwardSourceRecordId: sourcePayload.value.record.recordId }
+          : {}),
+      },
+      // A forward additionally warns that a repeated call never sends changed commentary; the
+      // compose guidance stays byte-identical to the row-20 contract.
+      sourcePayload?.ok === true ? FORWARD_NEXT_ACTION : EMAIL_NEXT_ACTION,
+    );
   };
 
   /**
@@ -527,6 +548,7 @@ export class EmailComposeHandler {
     draft: EmailDraft,
     context: SkillContext,
     data: Record<string, unknown>,
+    nextAction: string,
   ): Promise<SkillResult> {
     let outcome: EmailSendOutcome;
     try {
@@ -578,10 +600,7 @@ export class EmailComposeHandler {
         phase: outcome.phase,
         reused: outcome.reused,
         ...data,
-        nextAction:
-          "The message is submitted. Exit immediately; do not send it again — a repeated call " +
-          "returns this recorded result instead of resubmitting, and a repeated call with " +
-          "different commentary does NOT send that commentary.",
+        nextAction,
       },
       emailSubmission: outcome,
     };
@@ -782,15 +801,17 @@ export class EmailComposeHandler {
    * per-file size, aggregate size, extension whitelist) are applied before any byte is read.
    *
    * `reserved` is the count and byte total a forward already holds for the designated source
-   * (its raw `.eml` reference plus every original attachment). It is folded into the SAME count
-   * and aggregate checks, and it is checked even when no added file was requested, so a forward's
-   * limits are decided over the complete outgoing set.
+   * (its raw `.eml` reference plus every original attachment) plus the `forward` mode flag. The
+   * reserved accounting is folded into the SAME count and aggregate checks and is applied even
+   * when no added file was requested, so a forward's limits are decided over the complete outgoing
+   * set. Forward mode additionally refuses two references that resolve (through a symlink alias)
+   * to one staged file, and names the whole outgoing set in its aggregate refusal.
    */
   private async loadAttachments(
     paths: readonly string[],
     context: SkillContext,
     sessionId: string,
-    reserved?: { count: number; bytes: number },
+    reserved?: { count: number; bytes: number; forward: boolean },
   ): Promise<
     { ok: true; value: EmailOutgoingAttachment[] } | { ok: false; error: string }
   > {
@@ -798,6 +819,9 @@ export class EmailComposeHandler {
     const maxFiles = limits?.maxFilesPerInvocation ?? DEFAULT_MAX_FILES;
     const reservedCount = reserved?.count ?? 0;
     const reservedBytes = reserved?.bytes ?? 0;
+    // A forward is the mode that serializes additional source material, so only it refuses a
+    // duplicated reference and only it names the whole outgoing set in the aggregate refusal.
+    const isForward = reserved?.forward === true;
     const maxTotalSizeMb = limits?.maxTotalSizeMb ?? DEFAULT_MAX_TOTAL_SIZE_MB;
     if (paths.length + reservedCount > maxFiles) {
       return {
@@ -828,6 +852,7 @@ export class EmailComposeHandler {
     const maxFileSizeMb = limits?.maxFileSizeMb ?? DEFAULT_MAX_FILE_SIZE_MB;
 
     const validated: Array<{ fullPath: string; fileName: string; size: number }> = [];
+    const seenRealPaths = new Set<string>();
     let totalBytes = 0;
     for (const attachmentPath of paths) {
       const lexical = isAbsolute(attachmentPath)
@@ -852,8 +877,12 @@ export class EmailComposeHandler {
         !configuredExtensions.some((allowed) => allowed.toLowerCase() === extension)
       ) {
         // Only an identifier-shaped extension is echoed: a file name is model-supplied and must
-        // never travel through the (audited) refusal text verbatim.
-        const named = isOpaqueIdentifierToken(extension.slice(1)) ? ` "${extension}"` : "";
+        // never travel through the (audited) refusal text verbatim. A forward echoes NOTHING here,
+        // because a forwarded source may legitimately contain identifier-shaped private text that
+        // no shape heuristic can tell apart from an extension name.
+        const named = !isForward && isOpaqueIdentifierToken(extension.slice(1))
+          ? ` "${extension}"`
+          : "";
         return {
           ok: false,
           error: `The attachment extension${named} is not allowed. Allowed: ` +
@@ -891,6 +920,19 @@ export class EmailComposeHandler {
             "directory. Nothing was sent.",
         };
       }
+      // Two spellings (including a staging-internal symlink alias) of ONE file are one reference:
+      // a forward refuses the duplicate instead of serializing the same material twice.
+      if (isForward) {
+        if (seenRealPaths.has(realPath)) {
+          return {
+            ok: false,
+            error: "The forward request references the same staged attachment file more than " +
+              "once, so the forwarded set would duplicate material. Reference each staged file " +
+              "at most once. Nothing was sent.",
+          };
+        }
+        seenRealPaths.add(realPath);
+      }
 
       const size = info.size;
       const fileSizeMb = size / (1024 * 1024);
@@ -910,9 +952,11 @@ export class EmailComposeHandler {
     if (maxTotalSizeMb > 0 && totalSizeMb > maxTotalSizeMb) {
       return {
         ok: false,
-        error: `The outgoing attachments total ${totalSizeMb.toFixed(2)} MB, over the ` +
-          `${maxTotalSizeMb} MB ` +
-          "aggregate limit. Nothing was sent.",
+        error: isForward
+          ? `The outgoing attachments total ${totalSizeMb.toFixed(2)} MB, over the ` +
+            `${maxTotalSizeMb} MB aggregate limit. Nothing was sent.`
+          : `The attachments total ${totalSizeMb.toFixed(2)} MB, over the ${maxTotalSizeMb} MB ` +
+            "aggregate limit. Nothing was sent.",
       };
     }
 
@@ -1230,28 +1274,6 @@ function readAttachmentPaths(value: unknown): string[] | null {
     paths.push(path);
   }
   return paths;
-}
-
-/**
- * The first path of an attachment list that names the same file as an earlier entry, or
- * `undefined` when every reference is distinct.
- *
- * Resolution mirrors the preflight's own lexical resolution (absolute stays absolute, relative
- * resolves against the workspace), so two spellings of one staged file are one duplicate. A
- * forward refuses a duplicated reference instead of serializing the same material twice.
- */
-function firstDuplicatePath(
-  paths: readonly string[],
-  context: SkillContext,
-): string | undefined {
-  const workspacePath = context.workspace?.path;
-  const seen = new Set<string>();
-  for (const path of paths) {
-    const resolved = isAbsolute(path) ? resolve(path) : resolve(workspacePath ?? ".", path);
-    if (seen.has(resolved)) return resolved;
-    seen.add(resolved);
-  }
-  return undefined;
 }
 
 /** Boundary-safe containment: equal to `base` or prefixed by `base` + separator. */
