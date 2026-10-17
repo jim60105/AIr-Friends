@@ -1769,3 +1769,128 @@ incomplete output, refused profiles, mode/model pinning, stderr and capture priv
 reclamation, and the unchanged ordinary connector path. The subprocess-backed cases self-skip when
 `dumb-init` is unavailable. No provider, credential or network is contacted, and no real
 `opencode`/`omp` executable or model judgment is claimed.
+
+## Immutable Session Destination Grants (Owned by `email-destination-grants`)
+
+`src/core/email-intent-preflight.ts` owns pre-send third-party destination authorization. A
+third-party email (compose or forward) belongs to the authenticated user's CURRENT session and is
+authorized by exactly one thing: an explicit instruction in the request that user wrote in this
+message. The producer derives that authorization before the sending agent starts; the sending tool
+may USE a grant and can never create or enlarge one.
+
+### The producer is separate from the sending model
+
+- The orchestrator consults the producer only for an authenticated email request session that
+  carries its typed durable work receipt (`EmailWorkReceipt`) AND its current authored request
+  (`NormalizedEvent.emailAuthoredRequest`, populated by the email adapter from the MIME provenance
+  parser's authored segment plus its authorship verdict). Discord, Misskey, reminders, spontaneous
+  posts and every triggerless session are never consulted and no registry state is written for them.
+- The interpretation runs through the predecessor `EmailIntentRuntime` on a fixed host instruction
+  envelope: the strict decision schema plus the current authored text, delimited and labeled as
+  data. No history, thread, attachment or quoted material is included, and the runtime keeps its
+  isolated deny-all, bounded (30 s / 8 KiB) contract.
+- The producer owns the strict JSON validation, the recipient/source checks and the session/work
+  binding. The sending model receives grants read-only; there is no API — no skill endpoint, no tool
+  parameter, no dashboard field — that adds, replaces or widens one.
+
+### Fail-closed decisions
+
+`derive()` returns one of:
+
+| Outcome   | When                                                                                                                                                             |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none`    | the session is not an authenticated email request session, or the request did not ask for a third-party delivery                                                 |
+| `clarify` | ambiguous authorship, blank/oversized authored text, an unavailable or invalid interpretation, an address absent from the authored text, or an unprovable forward source |
+| `grant`   | every requested action was validated; the grants are frozen records the caller can only record or read                                                           |
+
+Only a `"clean"` provenance verdict is even interpreted: an ambiguous authorship boundary asks the
+user instead of guessing. A `clarify` outcome also prefixes ONE fixed host directive to the session
+prompt, so the normal agent asks the user to confirm the destination, the action and — for a
+forward — the source message, without sending anything. The authorization boundary is the absent
+grant, never that sentence.
+
+### Grant records and their lifetime
+
+A `DestinationGrant` is `{ grantId, sessionId, workId, owner, action: "compose" | "forward",
+canonicalRecipient, sourceRecordId?, requestDigest }`:
+
+- `grantId` is host-assigned; multiple explicitly requested actions receive separately identified
+  grants (identical action/recipient/source duplicates collapse into one).
+- `canonicalRecipient` is the deployment's own `normalizeEmailMailbox` form of an address that
+  occurs as a COMPLETE mailbox token in the current authored text. Domain case and IDNA form are
+  equivalent; local-part case and plus tags stay distinct, exactly like the deployment's mailbox
+  identity. A substring of a larger address never qualifies.
+- `sourceRecordId` is present for `forward` only, and only after an injected resolver proves the
+  record belongs to the owner's accessible history. Without that proof — or with a resolver that
+  fails — no grant is produced.
+- `requestDigest` is SHA-256 over the exact request binding, so a grant cannot be replayed for a
+  different session, work item, owner, provenance verdict or authored text.
+
+Grants live on `ActiveSession.emailDestinationGrants`, written exactly once by
+`SessionRegistry.recordEmailDestinationGrants(sessionId, grants)` before the agent starts. An empty
+array latches "this session may not send to any third party", so a later derivation, retry or tool
+parameter can never widen it. The verdict dies with the registry entry (session end, removal or idle
+expiry); nothing is persisted, and no later session, reminder or spontaneous post inherits it.
+`SkillContext.emailDestinationGrants` exposes the recorded set to handlers READ-ONLY.
+
+### Accepted limitation (model judgment)
+
+Interpretation remains model judgment. The host enforces the authorship boundary, the destination
+occurrence and the grant binding, so the sending model cannot choose a destination outside the
+user's own written instruction — but an authorized destination can still receive inappropriate
+generated content if the model misreads the request, and this is NOT model-proof authorization
+against prompt injection. This residual risk was explicitly accepted by the platform design.
+
+### Exported API (consumers: `email-compose-skill`, `email-forward-skill`, `email-response-accounting`)
+
+- `EmailDestinationGrantPreflight` with options
+  `{ interpreter, selection, select?, resolveForwardSource?, newGrantId?, digest? }`
+  - `derive(request) -> Promise<EmailDestinationGrantOutcome>` where `request` is
+    `{ sessionId, workId, owner, origin, authoredText, provenanceStatus, selectionContext }`
+  - `EmailDestinationGrantOutcome`: `{ decision: "none" } | { decision: "clarify", reason } |
+    { decision: "grant", grants }`
+- `DestinationGrant`, `EmailIntentAction`, `EmailIntentDecision`, `EmailIntentActionRequest`
+- `EmailDestinationClarificationReason` (bounded, content-free enum)
+- `parseDecision(text)`, `extractAuthoredMailboxes(text)` (strict validation seams), and the bounds
+  `EMAIL_DESTINATION_GRANT_MAX_AUTHORED_BYTES` (8 KiB) / `EMAIL_DESTINATION_GRANT_MAX_ACTIONS` (8)
+- `SessionRegistry.recordEmailDestinationGrants(sessionId, grants): boolean` (host-only, one-shot)
+  and `SessionRegistry.emailDestinationGrantsOf(sessionId): readonly DestinationGrant[]`
+- `SessionOrchestrator.setEmailDestinationGrantPreflight(preflight | null)`
+
+The module is an internal host API and is NOT wired into production bootstrap until
+`email-activation`.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-destination-grants/specs/email-destination-authorization/spec.md`:
+
+- **Quoted destination only**: an address that appears only in forwarded/quoted content or
+  attachments produces no grant.
+- **Preflight invalid**: a timeout, invalid JSON, a tool attempt or ambiguous authorship leaves no
+  grant and instructs the normal agent to clarify without sending.
+- **Stale or altered request**: a later session or tool supplying a different recipient, source or
+  action cannot use the original grant to authorize that delivery.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/core/email-destination-preflight.test.ts tests/core/email-destination-grants-runtime.test.ts
+```
+
+`tests/core/email-destination-preflight.test.ts` drives the real preflight, the real `SessionRegistry`
+and the real `SessionOrchestrator` lifecycle with a scripted interpreter and connector stub:
+authored-only grants, quoted-only and substring addresses, canonicalization boundaries (domain case
+and IDNA equivalence versus local case and plus tags), ambiguity and oversized-text refusal without
+an interpretation, an unavailable/throwing interpreter, invalid decision JSON, forward source
+proof and refusal, all-or-nothing multi-action validation, frozen and one-shot recording, session
+death and idle expiry, the prompt directive for a clarification, and the untouched
+Discord/Misskey/no-authored-request paths. `tests/core/email-destination-grants-runtime.test.ts`
+runs the SAME preflight against the REAL `EmailIntentRuntime` for BOTH engines with an in-process
+stub engine answering through the intent-capture seam, proving the envelope reaches the real
+profile, a tool attempt fails the grant closed, and non-JSON output never grants. No provider,
+credential, real engine executable or model judgment is claimed.

@@ -350,6 +350,14 @@ export class EmailAdapter extends PlatformAdapter {
       timestamp: message.timestamp,
       attachments: message.attachments,
       emailWork: receipt,
+      // The current authored request only (row 19): the provenance parser's own
+      // authored segment plus its authorship verdict. Quoted and forwarded
+      // material is deliberately NOT carried, so no consumer can widen the
+      // authorship boundary, and this value is never logged or persisted.
+      emailAuthoredRequest: {
+        authoredText: work.provenance.authoredText,
+        provenanceStatus: work.provenance.status,
+      },
     };
 
     await this.emitEvent(event);

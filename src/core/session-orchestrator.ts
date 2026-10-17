@@ -46,6 +46,11 @@ import type {
 import { emailWorkReceiptOf, isValidPlatform } from "../types/events.ts";
 import type { EmailWorkReceipt, NormalizedEvent, Platform } from "../types/events.ts";
 import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
+import type {
+  EmailDestinationGrantOutcome,
+  EmailDestinationGrantPreflight,
+  EmailDestinationGrantSelectionContext,
+} from "./email-intent-preflight.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type {
   AgentConnectorOptions,
@@ -156,6 +161,20 @@ const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 const IMAGE_FETCH_TIMEOUT_MS = 10_000;
 
 /**
+ * Fixed host directive prefixed to the user message when this email session's
+ * third-party destination could not be authorized (row 19). It is HOST text
+ * with no interpolated model output, and it is behavioral guidance only: the
+ * authorization boundary is the absent grant, not this sentence.
+ */
+const EMAIL_DESTINATION_CLARIFICATION_DIRECTIVE =
+  "Host note: this request appears to ask for an email to a third-party " +
+  "destination, which could not be authorized from the current message. Do NOT " +
+  "send mail to anyone other than this conversation's verified sender. Ask the " +
+  "user to confirm the exact destination address, whether they want a new " +
+  "message or a forward, and — for a forward — which of their stored messages " +
+  "to forward, then stop and wait for their reply.";
+
+/**
  * Response from a session
  */
 export interface SessionResponse {
@@ -217,6 +236,12 @@ export class SessionOrchestrator {
    * is taken, so Discord/Misskey lifecycle behavior is untouched.
    */
   private emailSessionReceipts: EmailSessionReceipts | null = null;
+  /**
+   * Destination-grant producer (owned by `email-destination-grants`). Null until
+   * email ingress is wired; while null no interpretation is ever started, so
+   * Discord/Misskey lifecycle behavior is untouched.
+   */
+  private emailDestinationGrantPreflight: EmailDestinationGrantPreflight | null = null;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -293,6 +318,88 @@ export class SessionOrchestrator {
    */
   setEmailSessionReceipts(receipts: EmailSessionReceipts | null): void {
     this.emailSessionReceipts = receipts;
+  }
+
+  /**
+   * Install (or clear) the third-party destination-grant producer.
+   *
+   * Email ingress wires this before its first poll, together with its approved
+   * interpretation selection. The producer is consulted ONLY for an
+   * authenticated email request session that carries its current authored
+   * request, before the sending agent starts; every other session and platform
+   * skips it entirely.
+   */
+  setEmailDestinationGrantPreflight(preflight: EmailDestinationGrantPreflight | null): void {
+    this.emailDestinationGrantPreflight = preflight;
+  }
+
+  /**
+   * Derive and record this session's destination authorization (row 19).
+   *
+   * Applies ONLY to an authenticated email request session: an email event with
+   * its typed durable work receipt and its current authored request. Every
+   * other event returns immediately, so no interpretation is started and no
+   * registry state is written for Discord, Misskey, reminders, spontaneous
+   * posts or any triggerless session.
+   *
+   * The verdict is recorded EXACTLY ONCE, before the agent starts (grants on a
+   * grant outcome, an empty set otherwise), and the returned string is the
+   * fixed host clarification directive for a `clarify` outcome — empty for
+   * `none` and `grant`. A producer that throws is itself unprovable, so it
+   * fails closed to the same clarification path.
+   */
+  private async deriveEmailDestinationGrants(params: {
+    event: NormalizedEvent;
+    shellSessionId: string | null;
+    routingContext: ModelRoutingContext;
+    sessionLogger: Logger;
+  }): Promise<string> {
+    const preflight = this.emailDestinationGrantPreflight;
+    const authoredRequest = params.event.emailAuthoredRequest;
+    const receipt = emailWorkReceiptOf(params.event);
+    const sessionId = params.shellSessionId;
+    if (
+      preflight === null || params.event.platform !== "email" ||
+      authoredRequest === undefined || receipt === undefined || sessionId === null
+    ) {
+      return "";
+    }
+
+    const selectionContext: EmailDestinationGrantSelectionContext = {
+      sessionType: params.routingContext.sessionType,
+      platform: params.routingContext.platform ?? params.event.platform,
+      userId: params.routingContext.userId ?? params.event.userId,
+      channelId: params.routingContext.channelId ?? params.event.channelId,
+      messageContent: params.routingContext.messageContent ?? params.event.content,
+    };
+    let outcome: EmailDestinationGrantOutcome;
+    try {
+      outcome = await preflight.derive({
+        sessionId,
+        workId: receipt.workId,
+        owner: params.event.userId,
+        origin: "email-request",
+        authoredText: authoredRequest.authoredText,
+        provenanceStatus: authoredRequest.provenanceStatus,
+        selectionContext,
+      });
+    } catch (error) {
+      params.sessionLogger.error("Email destination preflight failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      outcome = { decision: "clarify", reason: "intent_unavailable" };
+    }
+
+    const grants = outcome.decision === "grant" ? outcome.grants : [];
+    const recorded = this.sessionRegistry.recordEmailDestinationGrants(sessionId, grants);
+    if (!recorded) {
+      // The registry already holds this session's verdict: keep the recorded
+      // authorization and never replace it with this later derivation.
+      params.sessionLogger.warn("Destination grants already recorded for this session", {
+        sessionId,
+      });
+    }
+    return outcome.decision === "clarify" ? EMAIL_DESTINATION_CLARIFICATION_DIRECTIVE : "";
   }
 
   /**
@@ -763,6 +870,18 @@ export class SessionOrchestrator {
       // Message / channelLurk sessions have no section reasoning effort -> global fallback only.
       const resolvedReasoningEffort = this.resolveSessionReasoningEffort(routingContext);
 
+      // Row 19: derive this session's immutable third-party destination
+      // authorization BEFORE the sending agent starts. The producer is
+      // consulted only for an authenticated email request session carrying its
+      // current authored request; for every other event this is a no-op that
+      // writes no state.
+      const grantClarification = await this.deriveEmailDestinationGrants({
+        event,
+        shellSessionId,
+        routingContext,
+        sessionLogger,
+      });
+
       // Compute YOLO decision early so it's available for context assembly and prompt rendering
       const yoloDecision = this.getEffectiveYolo(
         event.platform,
@@ -832,7 +951,12 @@ export class SessionOrchestrator {
       const fullPrompt = await this.contextAssembler.renderFullPrompt(
         event,
         this.skillSessionId(shellSessionId),
-        formattedContext.userMessage,
+        // A clarification outcome prefixes ONE fixed host directive; every
+        // other session (and every other outcome) passes the assembled user
+        // message through byte-for-byte.
+        grantClarification === ""
+          ? formattedContext.userMessage
+          : `${grantClarification}\n\n${formattedContext.userMessage}`,
         resolvedModel,
         yoloDecision.enabled,
         workspace,

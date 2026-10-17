@@ -603,6 +603,9 @@ export class SkillAPIServer {
       workspaceManager: session.workspaceManager,
       canWriteChannelMemory: session.canWriteChannelMemory,
       emailWorkId: session.emailWorkId,
+      // Row 19: the session's immutable grants, exactly as the host recorded
+      // them. Read-only for handlers; no request parameter can reach this field.
+      emailDestinationGrants: session.emailDestinationGrants,
     };
 
     // Execute skill
