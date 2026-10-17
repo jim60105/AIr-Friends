@@ -716,3 +716,130 @@ deno check src/main.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/smtp-client.test.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/smtp-transport-smoke.test.ts
 ```
+
+## Common Durable Send Service (Owned by `email-submission-service`)
+
+`src/platforms/email/mail-service.ts` owns every outbound email path. Model- and skill-facing
+callers (rows 15/20/21) hand one `EmailDraft` plus its logical operation key to
+`EmailMailService.send()`; nothing else submits mail. The module is intentionally NOT
+registered in production bootstrap, and the activation guard is untouched.
+
+### Effect Order (the contract)
+
+1. Construct the message once (`OutgoingMimeBuilder`) with the literal startup signature.
+2. Publish fsynced evidence: `outbound/<operationId>.eml` (exact wire bytes) and
+   `outbound/<operationId>.meta.json` (construction metadata).
+3. Reserve the logical operation durably (`SubmissionStore.prepare`).
+4. Durably mark `submitting`, gated on the evidence digest (missing or tampered evidence is
+   refused, and automatic submission is blocked). Every consumer of stored evidence — prepared
+   resume, history repair, sent-copy repair — re-hashes the actual `.eml` bytes and requires
+   them to match the digest recorded in the journal, so a damaged or replaced file is reported
+   rather than submitted, appended or rebuilt into history.
+5. Submit over SMTP (`SmtpTransport.submit`); only a positive final DATA acknowledgement is
+   `submitted`.
+6. Persist the terminal outcome before reporting anything.
+7. For `submitted`: record local sent history (`EmailMessageStore.putSent`), then APPEND the
+   identical bytes to `platforms.email.sentFolder`.
+
+The single recipient allowlist for `targetKind: "user"` is rechecked immediately before SMTP
+(`email/account/<userId>` must be present and enabled). Third-party destinations are
+authorized by the owning compose/forward handler; this service never interprets or creates
+grants. A constructed message exceeding `platforms.email.maxMessageBytes` is refused before
+any socket is opened rather than truncated.
+
+One process-wide operation lock (keyed by the resolved state root, owner and logical key)
+serializes the whole lookup/publication/submission sequence across every `EmailMailService`
+instance in the process, so two instances sharing a state root can never replace the evidence
+of an operation that is already submitting or submitted. Cross-process ownership is still the
+single-process assumption of the platform; no lock service is introduced.
+
+Sent-folder copies are serialized across instances by the injected IMAP transport's identity,
+because one transport owns one mutable connection. That transport must not be driven outside
+this service's copy lane; SMTP deduplication and accepted state never depend on the copy lane.
+
+### Durable Evidence & Safe Inspection
+
+Evidence lives under the email state root (`data/email/outbound/`) with directory mode `0700`
+and file mode `0600`. It contains private message bytes, so it is inspected only by the
+operator who owns the mailbox volume; diagnostics and logs never include bodies, recipients or
+credentials, only operation ids and safe codes.
+
+```sh
+# Recorded operation state and phase history (append-only journal, one envelope per line)
+jq -r '.data | [.operationId, .transition, .phase, (.sentCopy // "pending")] | @tsv' \
+  data/email/submissions.jsonl
+
+# Evidence for one operation (bytes are private)
+ls -l data/email/outbound/op_<operationId>.eml data/email/outbound/op_<operationId>.meta.json
+sha256sum data/email/outbound/op_<operationId>.eml   # compare with meta.json "digest"
+
+# Local history and remote sent copy for the same operation
+ls -l data/workspaces/email/<ownerId>/email/source/
+```
+
+`meta.json` carries the generated wire `messageId`, the signed `historyBody`, the SMTP
+`envelope`, the evidence `digest`, and — once recorded — the local history reference
+(`history.recordId`).
+
+### Outcomes, Uncertainty and Operator Duties
+
+| Phase       | Meaning                                                                             | Caller action                                                        |
+| ----------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `submitted` | Positive final DATA acknowledgement; `sentCopy` reports the remote copy separately.  | None.                                                                |
+| `failed`    | Definite rejection before acceptance (transport safe code).                          | No automatic retry; a new, explicitly authorized logical action only. |
+| `unknown`   | Crash, lost acknowledgement, or an acceptance that could not be persisted.           | Manual operator review; automatic resend is suppressed.               |
+
+- **Manual review of `unknown`**: the call returns `unknown` with the operation id and the
+  persisted evidence, and a repeated request for the same key returns the recorded result with
+  **zero** SMTP transactions. Nothing ever moves from `failed`/`unknown` back to a resubmit.
+- **Sent-copy errors are separate**: after acceptance, a failing APPEND (or a failing history
+  write) is recorded — `sentCopy: "failed"` / `historyError` — while the operation stays
+  `submitted` and local history is preserved. It never triggers another SMTP submission.
+- **Create the sent-folder copy later**: `appendPendingCopies()` APPENDs stored evidence bytes
+  for every accepted operation whose copy is not yet recorded; it never contacts SMTP and is
+  idempotent for operations already recorded as `appended`.
+- **Recover after restart**: `recover()` is a startup step. Unclosed `submitting` operations
+  become absorbing `unknown` (never resubmitted), `prepared` operations are reported for
+  explicit caller action only, and missing local history is reconstructed from the stored
+  evidence and already-signed body without applying the signature twice.
+- A remote sent copy may be duplicated if the APPEND succeeds but its status write does not
+  (at-least-once outside SMTP); this never causes a second SMTP submission.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-submission-service/specs/email-submission/spec.md`:
+
+- **Repeated accepted request**: the recorded result is returned after a restart with zero
+  additional SMTP transactions.
+- **APPEND fails**: the result reports `submitted` with a sent-copy failure while signed local
+  history exists.
+- **Accept then persist fails**: the caller sees `unknown` with the operation id and automatic
+  replay is suppressed.
+
+### Exported API
+
+- `EmailMailService` with options
+  `{ config, emailRoot, submissionStore, messageStore, smtp, imap, channels, builder?, durableOptions? }`
+  - `send(draft: EmailDraft): Promise<EmailSendOutcome>`
+  - `lookup(owner: string, operationKey: EmailOperationKey): EmailSendOutcome | undefined`
+  - `recover(): Promise<EmailSubmissionRecovery>`
+  - `appendPendingCopies(): Promise<EmailCopyRepairResult>`
+- `EmailSendOutcome` (`EmailSubmissionMetadata` plus `messageId?`, `recordId?`, `reused`,
+  `historyError?`) is directly usable as the `emailSubmission` field of reply/file/skill
+  results.
+- `EmailSubmissionDiagnosticCode`, `EmailMailServiceError`, `OutboundEvidenceMeta`,
+  `outboundEvidenceRef(operationId)`, `outboundEvidenceMetaRef(operationId)`,
+  `OUTBOUND_EVIDENCE_SUBDIR`, `OUTBOUND_EVIDENCE_VERSION`
+- Note: `lookup` takes the owner as well as the key because durable operation state is
+  owner-scoped.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/mail-service.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/submission-service-smoke.test.ts
+```

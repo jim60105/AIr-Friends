@@ -30,6 +30,8 @@ export interface ImapFixtureOptions {
   omitStartTlsCapability?: boolean;
   rejectStartTlsCommand?: boolean;
   corruptCert?: boolean;
+  /** Refuse APPEND with a tagged NO so callers can exercise sent-copy failure. */
+  rejectAppend?: boolean;
 }
 
 export interface GeneratedTlsCert {
@@ -93,6 +95,8 @@ export class EmailImapTestService {
   public authAttempts: Array<{ user: string; pass: string; secure: boolean }> = [];
   public executedCommands: string[] = [];
   public appendedMessages: Array<{ folder: string; content: Uint8Array }> = [];
+  /** Live APPEND fault switch; defaults from the fixture options. */
+  public rejectAppend: boolean;
 
   private messages: Map<number, ImapFixtureMessage> = new Map();
   private uidValidity: number;
@@ -104,6 +108,7 @@ export class EmailImapTestService {
     this.host = options.host || "127.0.0.1";
     this.uidValidity = options.uidValidity ?? 12345;
     this.uidNext = options.uidNext ?? 100;
+    this.rejectAppend = options.rejectAppend ?? false;
 
     const certData = getOrCreateFixtureCert();
     this.caCert = options.corruptCert ? certData.cert.replace("MII", "XXX") : certData.cert;
@@ -535,6 +540,12 @@ export class EmailImapTestService {
               /^"|"$/g,
               "",
             );
+          }
+
+          if (this.rejectAppend) {
+            // The literal is already consumed by the reader; refuse with a tagged NO.
+            send(`${tag} NO [TRYCREATE] APPEND refused by fixture`);
+            break;
           }
 
           this.appendedMessages.push({
