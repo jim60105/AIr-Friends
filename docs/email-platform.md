@@ -136,6 +136,63 @@ Detailed acceptance requirements and scenarios are defined in `specs/email-mailb
   - `getEntry(key: MailboxKey): MailboxEntrySnapshot | undefined`
   - `close(): void`
 
+## Inbound Email Authentication & Allowlist Admission (Owned by `email-incoming-auth`)
+
+Inbound email authentication and allowlist admission are implemented in `src/platforms/email/incoming-auth.ts`.
+
+### Invariants & Semantics
+
+- **Authoritative Receiving Prerequisite & Operator Attestation**:
+  - Trusting `Authentication-Results` headers is predicated strictly on operator attestation that the receiving MTA strips or removes attacker-supplied `Authentication-Results` headers claiming the configured `authservId` (`platforms.email.receivingAuth.attestedStripping: true`).
+  - If `attestedStripping` is not `true` or `authservId` is empty, automatic admission fails closed (`REJECTED_UNATTESTED_STRIPPING`).
+  - Never trust textual `authserv-id` alone without attested MTA stripping.
+- **Strict Authentication-Results Parsing (RFC 7601 / RFC 8601)**:
+  - Filters `Authentication-Results` headers matching the configured `authservId` (case-insensitive).
+  - Strips RFC 5322 / RFC 7601 comments and quoted strings before parsing so commentary cannot masquerade as authentication evidence.
+  - Rejects multiple headers claiming the trusted `authservId` (`REJECTED_MULTIPLE_AUTHSERV_RESULTS`) to fail closed on injected or conflicting MTA evidence.
+  - Requires exactly one authoritative `dmarc` outcome in the trusted header. Duplicate DMARC clauses fail closed (`REJECTED_MULTIPLE_DMARC_RESULTS`).
+  - The DMARC outcome must be `pass` (`REJECTED_DMARC_FAILED`).
+  - The evaluated `header.from` domain declared in the DMARC clause must match the sender's From domain exactly (`REJECTED_DMARC_ALIGNMENT_FAILED`).
+- **DMARC Domain-Only Limitation & Accepted Residual Risk**:
+  - DMARC proves domain-level authorization and control only, NOT exclusivity or authorization of a particular local-part (e.g. `another-user@allowed-domain.org` vs `allowed-user@allowed-domain.org`).
+  - Both DMARC domain alignment and sender allowlist membership (`email/account/<userId>`) are required independently.
+  - VerifiedSender acknowledges this domain control limitation (`domainControlLimitationAcknowledged: true`).
+- **Sender Allowlist Validation**:
+  - Evaluates independently of global `replyPolicy` (`all`, `public`, `channels`). Email admission strictly requires an enabled channel entry `email/account/<userId>`.
+  - Senders not present or disabled in channels are rejected (`REJECTED_SENDER_NOT_ALLOWED`).
+- **Loop & Destination Protection**:
+  - **Self-Originated**: Mail from the bot's own address (`platforms.email.address`) is silently ignored (`IGNORED_SELF_ORIGINATED`).
+  - **Auto-Submitted**: Mail carrying an `Auto-Submitted` header (RFC 3834) whose primary keyword is not `no` (e.g. `auto-generated`, `auto-replied`) is silently ignored (`IGNORED_AUTO_SUBMITTED`).
+  - **Delivery Failures / DSN**: Bounces and delivery failure notifications (`Return-Path: <>`, `multipart/report` with `report-type=delivery-status`, `X-Failed-Recipients`, bounce subjects) are silently ignored (`IGNORED_DELIVERY_FAILURE`).
+  - **Zero Session / Zero Reply**: Ignored and rejected messages never initiate agent sessions and NEVER trigger rejection or error emails, preventing amplification loops and backscatter.
+  - **Strict Reply Destination**: `verifiedSender.replyDestination` is strictly bound to `canonicalAddress`. Unrelated `Reply-To`, `Cc`, or `Bcc` headers never override the reply destination.
+
+### Deployment & MTA Stripping Verification Procedure
+
+To verify that your receiving MTA safely strips untrusted `Authentication-Results` headers before setting `receivingAuth.attestedStripping: true`:
+
+1. Send a controlled test message from an external host directly to your receiving MTA with a forged header:
+   ```
+   Authentication-Results: <configured-authservId>; dmarc=pass header.from=<your-allowed-domain>
+   ```
+2. Inspect the message received in the IMAP inbox.
+3. Verify that the receiving MTA either removed the untrusted header or renamed it (e.g. `X-Injected-Authentication-Results`), ensuring that only the MTA's own locally generated `Authentication-Results` header contains your `<configured-authservId>`.
+4. Only after this test passes should `receivingAuth.attestedStripping` be set to `true`.
+
+### Exported API
+
+- `AdmissionStatus`: `"admit" | "ignore" | "reject"`
+- `AdmissionReason`: Safe reason enum (`ADMITTED`, `IGNORED_SELF_ORIGINATED`, `IGNORED_AUTO_SUBMITTED`, `IGNORED_DELIVERY_FAILURE`, `REJECTED_UNATTESTED_STRIPPING`, `REJECTED_MISSING_AUTH_RESULTS`, `REJECTED_MULTIPLE_AUTHSERV_RESULTS`, `REJECTED_MISSING_DMARC`, `REJECTED_MULTIPLE_DMARC_RESULTS`, `REJECTED_DMARC_FAILED`, `REJECTED_DMARC_ALIGNMENT_FAILED`, `REJECTED_MISSING_FROM_HEADER`, `REJECTED_INVALID_FROM`, `REJECTED_SENDER_NOT_ALLOWED`)
+- `VerifiedSender`:
+  - `canonicalAddress: string`
+  - `userId: string`
+  - `authservId: string`
+  - `alignedDomain: string`
+  - `provenance: EmailProvenance`
+  - `replyDestination: string`
+  - `domainControlLimitationAcknowledged: true`
+- `authenticateInbound(parsed: ParsedEmail, rawHeaders: RawHeadersInput, receiverConfig: InboundAuthReceiverConfig, channels: ChannelConfig[]): AdmissionDecision`
+
 ## Bounded Incoming MIME Parsing & Content Provenance (Owned by `email-incoming-mime`)
 
 Bounded MIME parsing and provenance extraction are implemented in `src/platforms/email/incoming-mime.ts`:
