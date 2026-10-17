@@ -9,7 +9,11 @@ import { ReactionHandler } from "./reaction-handler.ts";
 import { ContextHandler } from "./context-handler.ts";
 import { ReminderHandler } from "./reminder-handler.ts";
 import { FileHandler } from "./file-handler.ts";
-import { EmailComposeHandler, type EmailComposeMailService } from "./email-handler.ts";
+import {
+  EmailComposeHandler,
+  type EmailComposeMailService,
+  type EmailForwardSourceStore,
+} from "./email-handler.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
@@ -37,6 +41,12 @@ export class SkillRegistry {
   private readonly sendFileConfig?: SendFileSkillConfig;
   /** Durable email submission service; absent until email activation wires it. */
   private readonly emailComposeMailService?: EmailComposeMailService;
+  /**
+   * Owner-scoped message store a forward reads its designated source from (row 21). Absent
+   * leaves composing available and forwarding failing closed, because no source may be read
+   * through any other seam.
+   */
+  private readonly emailForwardSourceStore?: EmailForwardSourceStore;
 
   constructor(
     memoryStore: MemoryStore,
@@ -44,7 +54,10 @@ export class SkillRegistry {
     reminderStore?: ReminderStore,
     sendFileConfig?: SendFileSkillConfig,
     recallConfig?: MemoryRecallConfig,
-    emailCompose?: { mailService: EmailComposeMailService },
+    emailCompose?: {
+      mailService: EmailComposeMailService;
+      forwardSourceStore?: EmailForwardSourceStore;
+    },
   ) {
     // One retriever per process: every session shares its snapshot cache.
     this.memoryRetriever = new MemoryRetriever(memoryStore, recallConfig ?? DEFAULT_RECALL_CONFIG);
@@ -54,6 +67,7 @@ export class SkillRegistry {
     this.contextHandler = new ContextHandler();
     this.sendFileConfig = sendFileConfig;
     this.emailComposeMailService = emailCompose?.mailService;
+    this.emailForwardSourceStore = emailCompose?.forwardSourceStore;
 
     if (remindersConfig?.enabled && reminderStore) {
       this.reminderHandler = new ReminderHandler(reminderStore, remindersConfig);
@@ -106,6 +120,9 @@ export class SkillRegistry {
     if (this.emailComposeMailService) {
       const handler = new EmailComposeHandler({
         mailService: this.emailComposeMailService,
+        ...(this.emailForwardSourceStore === undefined
+          ? {}
+          : { forwardSourceStore: this.emailForwardSourceStore }),
         limits: this.sendFileConfig,
       });
       this.handlers.set("send-email", handler.handleSendEmail);

@@ -1994,7 +1994,7 @@ stat'ed or read:
 
 ### Exported API (consumers: `email-forward-skill`, `email-response-accounting`, `email-activation`)
 
-- `EmailComposeHandler` with options `{ mailService?: EmailComposeMailService; limits?: SendFileSkillConfig }`
+- `EmailComposeHandler` with options `{ mailService?: EmailComposeMailService; forwardSourceStore?: EmailForwardSourceStore; limits?: SendFileSkillConfig }`
   - `handleSendEmail` (the `send-email` skill handler); `EmailComposeMailService` is the structural
     seam `{ send(draft: EmailDraft): Promise<EmailSendOutcome> }` the real `EmailMailService` satisfies
   - `EMAIL_COMPOSE_ACTION_SLOT = "compose"`, `EMAIL_COMPOSE_CODES`
@@ -2046,4 +2046,175 @@ scripts.test.ts` runs the REAL script against a mock Skill API (verbatim request
 `--to`/`--subject`/`--body` refusals, out-of-bounds payload, malformed JSON, the owning-session
 binding in both process shapes, missing payload flag), and `tests/skills/payload.test.ts` pins the
 shared helper's opt-in extra-flag rejection. No provider, credential, production mailbox or model
+judgment is claimed.
+
+## Source-Preserving Forwarding (Owned by `email-forward-skill`)
+
+`skills/send-email/*` and `src/skills/email-handler.ts` also own FORWARDING: the agent forwards a
+HISTORICAL message the user designated to a destination the same current request authorized. The
+endpoint, the request file, the destination matching and the submission path are row 20's; this row
+adds the designated source and its all-or-nothing preservation.
+
+### The forward request extension
+
+The same session-contained `compose.json` carries two additional keys:
+
+```json
+{
+  "action": "forward",
+  "sourceRecordId": "<opaque stored record id from this session's grant>",
+  "to": "someone@example.org",
+  "subject": "Fwd: Subject of the original",
+  "body": "See the original below.",
+  "attachments": ["<absolute staging directory>/notes.pdf"]
+}
+```
+
+- `action` is a MODE, never an authorization: it selects the forward contract, and the destination
+  still comes from the immutable grant alone. Any other action is refused with
+  `SKILL_EMAIL_COMPOSE_REQUEST`, and an absent action keeps the row-20 compose contract.
+- `sourceRecordId` is an opaque host identifier — the record id the host's `forward` grant already
+  names. A filesystem path and a wire Message-ID are NOT authorization: neither equals the granted
+  record id, so both are refused.
+- The commentary `body` MAY be empty for a pure forward (the designated original is the material);
+  `to` and a non-empty single-line `subject` are always required, and Cc/Bcc/arbitrary headers have
+  no representation in either mode.
+- An added attachment is referenced at most once: a duplicated staged path is refused with
+  `SKILL_EMAIL_COMPOSE_ATTACHMENT` instead of serializing the same material twice.
+- The script validates the mode BEFORE its API call: an unsupported action, or a forward without a
+  non-empty string `sourceRecordId`, fails locally with `SKILL_FORWARD_REQUEST_INVALID` and the
+  request object still travels verbatim — the request file stays the only carrier of free text, and
+  `--source-record-id` does not exist as a flag.
+
+### Host authorization and source access (fail closed, before any byte is read)
+
+`EmailComposeHandler` decides the destination first, exactly as for a compose (request shape →
+canonical `to` → immutable grant), and a forward then adds:
+
+1. A forward ALWAYS needs a grant. The grant must exist, be a `forward` grant, belong to exactly
+   this session, work item and owner, name the requested canonical destination AND name exactly the
+   requested `sourceRecordId`. A `compose` grant, a grant for another source, a grant for another
+   session/owner/work item and an absent grant id all fail closed with `SKILL_EMAIL_COMPOSE_GRANT`;
+   there is no self-address shortcut for forwarding and no API that creates or widens a grant.
+2. The source is resolved ONLY through the injected owner-scoped store
+   (`EmailForwardSourceStore`, structurally `EmailMessageStore`): `getByOwnerRecord(owner, id)`
+   cannot return another owner's record, so a foreign source is simply not found. `getSourceBytes`
+   and `attachment` read the immutable archive, and EVERY source-side failure — absent/foreign
+   record, missing bytes, unreadable bytes, a throwing store, or archived bytes whose LENGTH no
+   longer matches the recorded `rawSize`/`size` — is one content-free `SKILL_EMAIL_FORWARD_SOURCE`
+   refusal with zero SMTP activity (a deployment with no source store wired at all refuses with
+   `SKILL_EMAIL_FORWARD_UNAVAILABLE`). Length identity is what the archive contract offers: an
+   equal-length byte replacement inside the archive is not detected here. A forward is complete or
+   it does not happen; nothing is truncated, dropped or partially sent.
+3. Source content never authorizes anything. The original's addresses, body, attachments and
+   instructions are only quoted material: the envelope recipient and the routing headers come from
+   the matched grant alone, nothing the source names can become a recipient or a destination, and
+   a request that asks for a source-named address is refused like any other ungranted destination.
+   The only source values that reach the outgoing top-level headers are the source's own bracketed
+   wire identifiers in `References` (a fresh header chain that threads the forward to the original).
+
+### Byte preservation, signature order and combined limits
+
+- The immutable `.eml` of the source is attached as `message/rfc822` (the composer emits
+  `message/*` parts unencoded, so the original headers, its own signature and its encoded parts
+  survive byte-for-byte; a source containing bare LF is refused by the builder instead of being
+  rewritten). Every original attachment is attached as itself with the stored bytes and the stored
+  media type, and its display filename is sanitized like any other attachment name. The composer's
+  disposition for a `message/*` part is `inline`, so some clients present the original inline rather
+  than offering it as a downloadable attachment; the body text and every decoded attachment are
+  forwarded explicitly as well, so no client is required to unpack the raw part to read the
+  message.
+- The labelled `---------- Forwarded message ---------` section is built by the shared
+  `buildForwardSection` from the stored body text, and the builder places the centrally applied
+  signature AFTER the commentary and BEFORE that section — exactly once.
+- Accounting is all-or-nothing and includes the source: the `.eml` reference counts as one
+  outgoing part and its bytes count toward the aggregate, and every original attachment counts
+  toward the same reused send-file limits (`maxFilesPerInvocation`, `maxFileSizeMb`,
+  `maxTotalSizeMb`) as the added files. Source-side size failures (the 25 MiB raw-message bound and
+  the per-file bound) are `SKILL_EMAIL_FORWARD_SOURCE`; a combined count/aggregate failure is
+  `SKILL_EMAIL_COMPOSE_ATTACHMENT`. All of it is decided from recorded sizes and stats BEFORE any
+  payload byte is read, and the actual loaded sizes are re-checked against the recorded ones, so an
+  archived file whose size changed cannot smuggle an oversized or truncated part into a
+  "successful" forward.
+- Two references that resolve — including through a staging-internal symlink alias — to ONE staged
+  file are one duplicate: a forward refuses them instead of serializing the same material twice.
+  Original attachments are not subject to the added-file extension whitelist: they are preserved
+  whatever their media type.
+- Forwarding does not re-encode the original: the decoded originals are copies of the archive
+  bytes, and the raw part is the archive's own `.eml`.
+
+### Durability, idempotency and audit
+
+- The operation slot stays `third-party:<grantId>` (the row-20 granted-operation vocabulary). A
+  forward grant id is unique per action + recipient + source, so a forward and a compose can never
+  share one operation key, and a repeated identical forward returns the RECORDED journal result
+  (`emailSubmission.reused: true`) with zero additional SMTP transactions. Changed commentary
+  submitted under the same grant does NOT replace the recorded operation: the recorded result is
+  returned and the result's `nextAction` says so explicitly, so a successful replay is never a
+  claim that newly written text was delivered.
+- `send-email` keeps its row-20 side-effect posture: recovery-fenced sessions are rejected (409),
+  the in-flight lease covers recovery, and results are excluded from the response cache so a replay
+  is answered by the durable journal (including an `unknown` phase).
+- `emailComposeAuditParams` additionally records the forward `action` and `sourceRecordId` under
+  the same identifier-or-hash rule (verbatim only when identifier-shaped, otherwise a SHA-256
+  `…Hash`); the destination, subject, body, attachment paths and every source byte stay out of the
+  audit, whatever the content-hashing setting is.
+- A FORWARD refusal echoes no model-supplied value at all — not even an identifier-shaped request
+  key or file extension, which the row-20 compose wording names when the shape heuristic accepts
+  it. A quoted source can legitimately contain identifier-shaped private text, so the shape
+  heuristic is not applied in forward mode. (The compose wording is deliberately unchanged, for
+  row-20 response compatibility.)
+
+### Exported API (consumers: `email-response-accounting`, `email-tool-guidance`, `email-activation`)
+
+- `EmailComposeHandler` options gain `forwardSourceStore?: EmailForwardSourceStore`
+  (`{ getByOwnerRecord, getSourceBytes, attachment }`, owner-scoped by contract). Absent leaves
+  composing available and forwarding failing closed with `SKILL_EMAIL_FORWARD_UNAVAILABLE`.
+  `SkillRegistry`'s optional `emailCompose` argument gains the same field.
+- `EMAIL_FORWARD_REQUEST_ACTION = "forward"` and `EMAIL_FORWARD_CODES` (`UNAVAILABLE`, `SOURCE`) in
+  `src/skills/email-handler.ts`; a forward result additionally carries
+  `data.forwardSourceRecordId` and counts every wire part in `data.attachmentsCount`.
+- `SendEmailRequest` in `src/skills/types.ts` gains `action?: "forward"` and `sourceRecordId?: string`.
+- The raw source part is named `original-message.eml` with media type `message/rfc822`.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-forward-skill/specs/email-forwarding/spec.md`:
+
+- **Accessible designated source**: a valid recipient grant paired with another user's
+  `sourceRecordId` is denied with no source content disclosed.
+- **Complete forward or explicit failure**: a source with an unavailable archived attachment
+  produces no SMTP send and an incomplete-source safe error, and an over-limit forward is rejected
+  as a whole.
+- **Source does not authorize delivery**: an original that names a second recipient and asks to
+  redirect only ever reaches the current user's granted destination.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/skills/email-forward.test.ts tests/skills/email-forward-smoke.test.ts \
+  tests/skills/email-handler.test.ts tests/skills/email-compose-smoke.test.ts \
+  tests/skills/scripts.test.ts tests/skills/registry.test.ts
+```
+
+`tests/skills/email-forward.test.ts` drives the REAL handler with the REAL owner-scoped
+`EmailMessageStore` (a real archived source written by `putSource`) through a recording mail-service
+double — the grant action/session/owner/work/destination/source matrix, a foreign-owner and an
+unknown source, missing and changed archive material, a throwing store, an unwired store, the
+combined count/per-file/aggregate limits with and without added files, duplicate references, the
+empty-commentary pure forward, and the content-safe audit projection — and then runs the whole path
+through the REAL `EmailMailService`, `SubmissionStore`, `EmailMessageStore` and `OutgoingMimeBuilder`
+behind scripted SMTP/IMAP doubles, walking the CAPTURED wire bytes part by part to prove the
+`message/rfc822` part and every original attachment equal the archived originals byte-for-byte, the
+signature precedes the labelled original section exactly once, the header chain is fresh with
+References to the source, the granted operation is idempotent, injected source instructions reach
+no other destination, an attachment-only source is forwarded completely, and a missing part sends
+nothing. `tests/skills/email-forward-smoke.test.ts` runs the same boundary with a real
+`EmailSmtpClient` over a real TLS socket to the local SMTP fixture and asserts the peer-received
+original bytes and the rejected-peer outcome. No provider, credential, production mailbox or model
 judgment is claimed.

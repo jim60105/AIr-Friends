@@ -2,7 +2,8 @@
 
 // skills/send-email/scripts/send-email.ts
 //
-// Compose a NEW email through the Skill API (`email-compose-skill`, row 20).
+// Compose a NEW email (`email-compose-skill`, row 20) or forward a designated stored message
+// (`email-forward-skill`, row 21) through the Skill API.
 //
 // Contract:
 // - All free text (the destination mailbox, the subject and the body) is read from ONE
@@ -11,9 +12,15 @@
 // - The lab invocation sets the script's identity from the OWNING session, not from the
 //   `--session-id` literal: a value naming another session is refused before any file is
 //   read, so a sibling session's staged request can neither be read nor deleted.
-// - The payload is the strict JSON object `{ "to", "subject", "body", "attachments"? }`.
-//   The server re-validates every field and matches the destination against the session's
-//   immutable destination grants; `--grant-id` names the grant the send is authorized by.
+// - The payload is the strict JSON object `{ "to", "subject", "body", "attachments"? }` for a
+//   compose, extended with `{ "action": "forward", "sourceRecordId": "<stored source id>" }`
+//   for a forward. The server re-validates every field and matches the destination (and, for
+//   a forward, the designated source) against the session's immutable destination grants;
+//   `--grant-id` names the grant the send is authorized by.
+// - The forward shape is validated here TOO, before any API call: an unknown action or a
+//   forward without a designated source record is a local, instructive failure, exactly like a
+//   malformed request file. The request object itself is still forwarded verbatim — the request
+//   file stays the ONLY carrier of free text.
 
 import {
   callSkillApi,
@@ -32,12 +39,19 @@ const SKILL_SESSION_MISMATCH = "SKILL_SESSION_MISMATCH";
 /** Stable code for a request file that is not the expected JSON object. */
 const SKILL_COMPOSE_REQUEST_INVALID = "SKILL_COMPOSE_REQUEST_INVALID";
 
+/** Stable code for a request file that asks for the forward operation without a source. */
+const SKILL_FORWARD_REQUEST_INVALID = "SKILL_FORWARD_REQUEST_INVALID";
+
 const REQUEST_FILE_NAME = "compose.json";
 
 const EXAMPLE = `Use the literal skill-script root rendered in your system prompt for the script ` +
   `path below (never a $HOME expression): <skill root rendered in your system prompt>/send-email/scripts/send-email.ts ` +
   `--session-id "<session id rendered in your system prompt>" --grant-id "<grant id from your session context>" ` +
   `--request-file "<absolute staging directory rendered in your system prompt>/${REQUEST_FILE_NAME}"`;
+
+const FORWARD_EXAMPLE = `{"action":"forward","sourceRecordId":"<source record id rendered in ` +
+  `your grant>","to":"someone@example.org","subject":"Fwd: Subject","body":"See below.",` +
+  `"attachments":["<absolute staging directory rendered in your system prompt>/notes.pdf"]}`;
 
 /** Read the JSON object of the request file, or fail with an instructive typed error. */
 function parseRequestBody(text: string): Record<string, unknown> {
@@ -63,6 +77,35 @@ function parseRequestBody(text: string): Record<string, unknown> {
     );
   }
   return parsed as Record<string, unknown>;
+}
+
+/**
+ * Reject a request that names an unsupported operation, or the forward operation without the
+ * stored source record it must designate, BEFORE the Skill API call.
+ *
+ * `sourceRecordId` is an opaque host identifier the user's own current message already selected:
+ * it is never derived from the staged paths, from a wire Message-ID or from a command-line value,
+ * and the server still binds it to the session's immutable grant.
+ */
+function assertRequestOperation(request: Record<string, unknown>): void {
+  const action = request.action;
+  if (action === undefined) return;
+  if (action !== "forward") {
+    throw new PayloadError(
+      SKILL_FORWARD_REQUEST_INVALID,
+      `The request file ${REQUEST_FILE_NAME} names an unsupported "action". The only operation ` +
+        `beyond composing a new message is "forward". Nothing was sent.`,
+    );
+  }
+  const sourceRecordId = request.sourceRecordId;
+  if (typeof sourceRecordId !== "string" || sourceRecordId.trim() === "") {
+    throw new PayloadError(
+      SKILL_FORWARD_REQUEST_INVALID,
+      `The request file ${REQUEST_FILE_NAME} asks to forward without a "sourceRecordId". A ` +
+        `forward must designate the stored message it quotes, as the host published that ` +
+        `record in this session's grant, for example: ${FORWARD_EXAMPLE}. Nothing was sent.`,
+    );
+  }
 }
 
 async function main() {
@@ -94,6 +137,7 @@ async function main() {
       example: EXAMPLE,
     });
     const request = parseRequestBody(requestText ?? "");
+    assertRequestOperation(request);
 
     const parsedArgs = parse(Deno.args, {
       string: ["grant-id"],

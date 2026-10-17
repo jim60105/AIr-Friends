@@ -767,3 +767,114 @@ Deno.test("scripts - send-email without a request file names the flag it needs",
     Deno.removeSync(ws, { recursive: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// send-email forward extension (`email-forward-skill`, row 21): the SAME request file carries
+// the operation and the designated stored source, still never as a command-line value.
+// ---------------------------------------------------------------------------
+
+const FORWARD_SOURCE_RECORD_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+/** A representative forward request: the action, the designated source and the commentary. */
+function forwardRequestFile(): string {
+  return JSON.stringify({
+    action: "forward",
+    sourceRecordId: FORWARD_SOURCE_RECORD_ID,
+    to: "alice@example.org",
+    subject: "Fwd: Pricing $0.435",
+    body: "Forwarding the original:\n\nSee below.\n",
+  });
+}
+
+Deno.test("scripts - send-email passes a forward request through verbatim with its grant id", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const payload = join(ws, "tmp", "sess_own", "compose.json");
+    Deno.writeTextFileSync(payload, forwardRequestFile());
+
+    const result = await runScript(
+      SEND_EMAIL,
+      [
+        "--session-id",
+        "sess_own",
+        "--api-url",
+        api.url,
+        "--grant-id",
+        "grant-forward-7",
+        "--request-file",
+        payload,
+      ],
+      ws,
+      { SESSION_ID: "sess_own" },
+    );
+
+    assertEquals(result.code, 0, result.stderr);
+    assertEquals(api.requests.length, 1);
+    assertEquals(api.requests[0].skillName, "send-email");
+    assertEquals(api.requests[0].parameters.grantId, "grant-forward-7");
+    assertEquals(api.requests[0].parameters.request, JSON.parse(forwardRequestFile()));
+    assertEquals(fileExists(payload), false, "the consumed request file is removed");
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-email refuses an unsupported or source-less forward request locally", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const payload = join(ws, "tmp", "sess_own", "compose.json");
+    const cases: Array<{ label: string; request: Record<string, unknown> }> = [
+      {
+        label: "unsupported action",
+        request: { ...JSON.parse(forwardRequestFile()), action: "redirect" },
+      },
+      {
+        label: "compose as an action",
+        request: { ...JSON.parse(forwardRequestFile()), action: "compose" },
+      },
+      {
+        label: "missing source record",
+        request: { ...JSON.parse(forwardRequestFile()), sourceRecordId: undefined },
+      },
+      {
+        label: "blank source record",
+        request: { ...JSON.parse(forwardRequestFile()), sourceRecordId: "   " },
+      },
+      {
+        label: "non-string source record",
+        request: { ...JSON.parse(forwardRequestFile()), sourceRecordId: 42 },
+      },
+    ];
+
+    for (const testCase of cases) {
+      Deno.writeTextFileSync(payload, JSON.stringify(testCase.request));
+      const result = await runScript(
+        SEND_EMAIL,
+        [
+          "--session-id",
+          "sess_own",
+          "--api-url",
+          api.url,
+          "--grant-id",
+          "grant-forward-7",
+          "--request-file",
+          payload,
+        ],
+        ws,
+        { SESSION_ID: "sess_own" },
+      );
+
+      assertEquals(result.code !== 0, true, testCase.label);
+      const err = parseStderrJson(result.stderr);
+      assertEquals(err.code, "SKILL_FORWARD_REQUEST_INVALID", testCase.label);
+      assertStringIncludes(String(err.error ?? ""), "compose.json", testCase.label);
+      assertEquals(api.requests.length, 0, testCase.label);
+    }
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
