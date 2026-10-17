@@ -14,6 +14,19 @@ Total **7 engineering hours**, strictly below 8 hours; an estimate, not a guaran
 
 - [ ] 2.1 (0.75h) Exercise the completed boundary with real predecessor implementations and isolated scripted local services/native executable or scheduler. Verify zero unauthorized effects and unchanged non-email behavior, recording native versus mock evidence explicitly. (BLOCKED on a host with the pinned OMP 18.6.1 executable: without it the leg refuses to claim native success by design. Everything reachable here — deterministic refusals, the delivered-bundle wiring, the ordinary-launch regression — is exercised and green.)
 
+### Disposition at archive (2.1 stays unchecked)
+
+The change's delta spec states the profile's required BEHAVIOR — every native tool name blocked at the pinned
+pre-dispatch hook, and authored isolated native assets — and derives its two scenarios from that behavior. It
+does not make the native-leg evidence itself an unconditional requirement, and the design records an
+unavailable pinned executable as an explicit unverified/failed gate rather than a claim. The native leg
+(`tests/integration/email-intent/omp-native.test.ts`) therefore stays flag-gated on
+`EMAIL_INTENT_OMP_ACCEPTANCE=1` and its first real run on a host carrying the pinned OMP 18.6.1 executable is
+the evidence. Every leg reachable without that host is exercised and green: the deterministic native-denial
+and marker contracts, the private-HOME model copy and provider catalog, the Containerfile install assertion,
+the delivered-bundle smoke, and the ordinary-launch regression. 2.1 remains unchecked so the archive records
+the unexercised leg honestly instead of asserting a native success that was never observed.
+
 ## Handoff note (row 18 `email-intent-runtime`)
 
 The profile returns its child environment and mount metadata but applies no sandbox of its own. The
