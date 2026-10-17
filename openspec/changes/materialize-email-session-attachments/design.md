@@ -34,8 +34,14 @@ If a requested attachment cannot be safely staged, fail that preparation/retriev
 
 Staging included history adds bounded file I/O; retain existing message/count limits and avoid staging the whole archive. Session metadata copying prevents cross-session mutation at a small per-returned-message cost. Failure of one required attachment prevents that context result, making incomplete access visible rather than silently omitting files.
 
-The helper's path checks must be exercised through production wiring with hostile filenames and symlinked destination components. This change reuses its containment model and grants no direct archive read permission to the agent.
+Before canonicalizing or creating destinations, validate all existing staging-root ancestors against the trusted workspace/session boundary and reject symlink escapes. Canonicalization alone cannot authorize a root. Reuse the lexical-boundary/real-path comparison pattern in `src/skills/email-handler.ts`; strengthen the existing materializer's ordering so destination checks precede directory creation and archive reads. Grant no direct archive read permission to the agent.
+
+Both prompt callers must pass the validated email session staging directory to image conversion. GIF input scratch files and derived WebP outputs belong inside that same boundary, never the shared workspace tmp root. Keep existing image eligibility policy. Newly reachable conversion diagnostics must omit filenames, raw converter stderr and private paths.
 
 ## Verification and rollout
 
 During apply, add focused production-path tests covering trigger/history and both prompt callers, fetch-context/get-message, per-session isolation, unsafe destinations, missing source and cleanup. Confirm only trigger images become image blocks and backend forwarding still reads unchanged archived bytes. Update `docs/email-platform.md` for session paths and failures. No data migration or compatibility shim is required; existing archive references are materialized on demand.
+
+## Batch review dispositions
+
+Adopted the final whole-batch review's root-containment and GIF-copy blockers. Tests must reject a symlinked workspace/tmp ancestor with an existing session child before any outside write or archive read. Concurrent same-owner sessions must retain separate GIF intermediates and paths. Adopted the shared/frozen-event suggestion, including stale sessionPath, to demonstrate source metadata remains unchanged.

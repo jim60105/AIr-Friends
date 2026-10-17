@@ -29,6 +29,11 @@ Accepted email attachments exposed to an agent SHALL have readable copies inside
 - **WHEN** session temporary copies are reclaimed
 - **THEN** durable source and attachment bytes remain available for later authorized retrieval and backend forwarding
 
+#### Scenario: Escaping staging ancestor
+
+- **WHEN** an existing staging-root ancestor redirects outside the trusted current-session boundary through a symlink
+- **THEN** preparation refuses before any outside directory creation, file write or archive-byte read
+
 ### Requirement: Trigger-only inline email images
 
 Only eligible image attachments on the current email trigger SHALL produce ACP image content blocks, subject to existing image capability and size policies. Included history or alternate retrieval SHALL expose staged file references without implicitly adding image blocks to the prompt.
@@ -43,3 +48,8 @@ Only eligible image attachments on the current email trigger SHALL produce ACP i
 
 - **WHEN** either normal or alternate production prompt construction handles an eligible email trigger image
 - **THEN** staging completes before image block construction and the trigger is not skipped for lacking a session path
+
+#### Scenario: Converted image copies stay isolated
+
+- **WHEN** two same-owner sessions process the same eligible trigger GIF
+- **THEN** conversion inputs and derived outputs stay inside each calling session's validated staging boundary without shared filenames outside those boundaries
