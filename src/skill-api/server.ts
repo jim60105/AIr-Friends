@@ -1,10 +1,17 @@
 // src/skill-api/server.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { SessionRegistry } from "./session-registry.ts";
+import { type ActiveSession, SessionRegistry } from "./session-registry.ts";
 import { SkillRegistry } from "@skills/registry.ts";
-import type { SkillContext } from "@skills/types.ts";
+import type { SkillContext, SkillResult } from "@skills/types.ts";
 import { emailComposeAuditParams } from "@skills/email-handler.ts";
+import {
+  EMAIL_HOST_SKILL_SLOTS,
+  emailResponseSlots,
+  emailSessionOwner,
+  type EmailSubmissionEvidenceSource,
+} from "@core/email-response-accounting.ts";
+import type { EmailSendContext } from "../types/platform.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
@@ -90,6 +97,13 @@ export class SkillAPIServer {
   private requestCache: Map<string, RequestCacheEntry> = new Map();
   private readonly CACHE_TTL_MS = 1000; // 1 second cache for duplicate detection
   private cleanupInterval?: ReturnType<typeof setInterval>;
+  /**
+   * Durable email submission evidence (row 13 `lookup`), injected by the email
+   * ingress wiring. Null until then: without it the server accounts only the
+   * metadata an executed skill actually reported, which is exactly the
+   * pre-activation behavior.
+   */
+  private emailSubmissionEvidence: EmailSubmissionEvidenceSource | null = null;
 
   constructor(
     sessionRegistry: SessionRegistry,
@@ -101,6 +115,101 @@ export class SkillAPIServer {
     this.skillRegistry = skillRegistry;
     this.config = config;
     this.skillApiSecret = skillApiSecret;
+  }
+
+  /**
+   * Install (or clear) the durable email submission evidence source (row 13
+   * `lookup`). Email ingress wires it before its first poll; while it is null
+   * an email skill whose handler reports no metadata simply falls back to the
+   * existing rollback behavior.
+   */
+  setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
+    this.emailSubmissionEvidence = source;
+  }
+
+  /**
+   * Host-assigned email operation context of this call (row 15 contract).
+   *
+   * It is derived from the SESSION alone — the work id the host recorded before
+   * the agent ran, the mailbox owner of the session's own user id, and the
+   * ordinary slot of the skill whose send goes through the adapter. No request
+   * parameter can reach it, so a model can never choose the logical operation
+   * its mail is bound to. When the session carries no owner or work id, the
+   * context is omitted entirely and the adapter refuses the send (fail closed)
+   * instead of guessing one.
+   */
+  private hostEmailSendContext(
+    session: ActiveSession,
+    skillName: string,
+  ): EmailSendContext | undefined {
+    const owner = emailSessionOwner(session);
+    const workId = session.emailWorkId;
+    if (owner === undefined || workId === undefined || workId.trim() === "") return undefined;
+    const actionSlot = EMAIL_HOST_SKILL_SLOTS[skillName];
+    return {
+      workId,
+      owner,
+      ...(actionSlot === undefined ? {} : { actionSlot }),
+    };
+  }
+
+  /**
+   * Record one executed email-capable skill result into the session's explicit
+   * response accounting (row 22) and report whether the pre-execution
+   * reservation is consumed.
+   *
+   * Returns true only for a CONFIRMED submission: its logical slot may not be
+   * rolled back, because the mail is already out of the process. Unresolved
+   * evidence (`unknown`, or an unclosed `submitting` slot) is latched into the
+   * accounting as well — that latch is what suppresses every automatic retry
+   * and escalates the work to review-required — but it leaves the in-memory
+   * delivery flags and counters to the existing rollback, since no delivery was
+   * confirmed and a later same-slot attempt is answered from the durable
+   * journal instead of reaching SMTP twice.
+   *
+   * A failing email send that reported no metadata at all is looked up in the
+   * durable journal (row 13) BEFORE the caller rolls anything back: the journal,
+   * not a boolean, is the authority on whether mail left the process.
+   */
+  private accountEmailSkillOutcome(
+    session: ActiveSession,
+    skillName: string,
+    result: SkillResult,
+  ): boolean {
+    if (session.platform !== "email") return false;
+    const actionSlot = EMAIL_HOST_SKILL_SLOTS[skillName];
+    const metadata = result.emailSubmission;
+    if (metadata) {
+      this.sessionRegistry.recordEmailSubmission(session.id, metadata, actionSlot);
+      return metadata.phase === "submitted";
+    }
+    // No metadata: only a failure needs the durable second opinion (a success
+    // that reported nothing recorded no email effect).
+    if (result.success) return false;
+    return this.reconcileDurableEmailEvidence(session);
+  }
+
+  /**
+   * Read this session's durable email evidence for its own logical slots — the
+   * ordinary slots plus one partition per immutable grant — and record every
+   * result that is not a recorded non-delivery. Returns true when a CONFIRMED
+   * submission was found.
+   */
+  private reconcileDurableEmailEvidence(session: ActiveSession): boolean {
+    const evidence = this.emailSubmissionEvidence;
+    const owner = emailSessionOwner(session);
+    const workId = session.emailWorkId;
+    if (!evidence || owner === undefined || workId === undefined || workId.trim() === "") {
+      return false;
+    }
+    let submitted = false;
+    for (const actionSlot of emailResponseSlots(session.emailDestinationGrants)) {
+      const recorded = evidence.lookup(owner, { workId, actionSlot });
+      if (!recorded || recorded.phase === "prepared" || recorded.phase === "failed") continue;
+      this.sessionRegistry.recordEmailSubmission(session.id, recorded, actionSlot);
+      if (recorded.phase === "submitted") submitted = true;
+    }
+    return submitted;
   }
 
   /**
@@ -620,6 +729,12 @@ export class SkillAPIServer {
       // Row 19: the session's immutable grants, exactly as the host recorded
       // them. Read-only for handlers; no request parameter can reach this field.
       emailDestinationGrants: session.emailDestinationGrants,
+      // Row 22: the host side of the row-15 `EmailSendContext`, derived from this
+      // session alone. Omitted (and therefore refused by the email adapter)
+      // whenever the host did not bind the session's work item.
+      emailSend: session.platform === "email"
+        ? this.hostEmailSendContext(session, skillName)
+        : undefined,
     };
 
     // Execute skill
@@ -659,8 +774,15 @@ export class SkillAPIServer {
     });
     auditWriter?.incrementSkillCalls();
 
+    // Row 22: classify this result into the session's explicit email response
+    // accounting before anything is rolled back. `emailSlotConsumed` is true only
+    // for a confirmed submission, whose reservation must survive the rollback;
+    // unresolved evidence keeps its `unknown` latch (which suppresses automatic
+    // retry) while the existing rollback still clears unconfirmed delivery state.
+    const emailSlotConsumed = this.accountEmailSkillOutcome(session, skillName, result);
+
     // Rollback if send-reply failed
-    if (skillName === "send-reply" && !result.success) {
+    if (skillName === "send-reply" && !result.success && !emailSlotConsumed) {
       this.sessionRegistry.unmarkReplySent(body.sessionId);
       logger.warn("Send-reply failed, unmarked session", {
         sessionId: body.sessionId,
@@ -729,11 +851,18 @@ export class SkillAPIServer {
         : deliveredMessageIds[deliveredMessageIds.length - 1];
 
       if (!filesDelivered) {
-        this.sessionRegistry.decrementFileSendCount(body.sessionId);
-        logger.warn("Send-file failed with no delivery, file-send slot rolled back", {
-          sessionId: body.sessionId,
-          error: result.error,
-        });
+        if (emailSlotConsumed) {
+          logger.warn(
+            "Send-file failed with no delivery, but a recorded submission keeps the file-send slot",
+            { sessionId: body.sessionId, error: result.error },
+          );
+        } else {
+          this.sessionRegistry.decrementFileSendCount(body.sessionId);
+          logger.warn("Send-file failed with no delivery, file-send slot rolled back", {
+            sessionId: body.sessionId,
+            error: result.error,
+          });
+        }
       } else {
         this.sessionRegistry.markFileSent(body.sessionId);
         if (deliveredMessageId) {

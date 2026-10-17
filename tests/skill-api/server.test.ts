@@ -1,6 +1,6 @@
 // tests/skill-api/server.test.ts
 
-import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SkillAPIServer } from "../../src/skill-api/server.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { SkillRegistry } from "../../src/skills/registry.ts";
@@ -9,6 +9,9 @@ import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import type { PlatformAdapter } from "../../src/platforms/platform-adapter.ts";
 import type { PlatformMessage, QuotedNote } from "../../src/types/events.ts";
+import type { ReplyResult, SendFileResult } from "../../src/types/platform.ts";
+import type { EmailComposeMailService } from "../../src/skills/email-handler.ts";
+import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 
 // Build request headers, optionally with the per-session caller token (F13).
 function jsonHeaders(token?: string): Record<string, string> {
@@ -3553,5 +3556,322 @@ Deno.test("SkillAPIServer - fetch-context preserves quoted references in recent 
     }
   } finally {
     await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// --- Row 22: email response accounting over the real API path ---------------------
+
+/** The session's verified sender, and the owner identity derived from it. */
+const EMAIL_ADDRESS = "user@example.com";
+const EMAIL_OWNER = normalizeEmailMailbox(EMAIL_ADDRESS).userId;
+const EMAIL_WORK_ID = "11111111-2222-3333-4444-555555555555";
+const EMAIL_CHANNEL = `mail:${EMAIL_OWNER}:00000000-1111-2222-3333-444444444444`;
+
+/** Records the options of every adapter send, so the host context is observable. */
+interface CapturingAdapter {
+  platform: "email" | "discord";
+  replies: { channelId: string; options?: Record<string, unknown> }[];
+  files: { channelId: string; options?: Record<string, unknown> }[];
+  replyResult: ReplyResult;
+  fileResult: SendFileResult;
+  sendReply: (
+    channelId: string,
+    _content: string,
+    options?: Record<string, unknown>,
+  ) => Promise<ReplyResult>;
+  sendFile: (
+    channelId: string,
+    _files: unknown,
+    options?: Record<string, unknown>,
+  ) => Promise<SendFileResult>;
+}
+
+function capturingAdapter(
+  platform: "email" | "discord",
+  overrides: { reply?: Partial<ReplyResult>; file?: Partial<SendFileResult> } = {},
+): CapturingAdapter {
+  const adapter: CapturingAdapter = {
+    platform,
+    replies: [],
+    files: [],
+    replyResult: { success: true, messageId: "reply-1" },
+    fileResult: { success: true, messageId: "file-1" },
+    sendReply: (channelId, _content, options) => {
+      adapter.replies.push({ channelId, options });
+      return Promise.resolve(adapter.replyResult);
+    },
+    sendFile: (channelId, _files, options) => {
+      adapter.files.push({ channelId, options });
+      return Promise.resolve(adapter.fileResult);
+    },
+  };
+  if (overrides.reply) adapter.replyResult = { ...adapter.replyResult, ...overrides.reply };
+  if (overrides.file) adapter.fileResult = { ...adapter.fileResult, ...overrides.file };
+  return adapter;
+}
+
+interface EmailServerHarness {
+  sessionRegistry: SessionRegistry;
+  server: SkillAPIServer;
+  sessionId: string;
+  adapter: CapturingAdapter;
+  tempDir: string;
+  post(skill: string, parameters: Record<string, unknown>): Promise<Response>;
+  dispose(): Promise<void>;
+}
+
+async function createEmailServerHarness(
+  options: {
+    platform?: "email" | "discord";
+    reply?: Partial<ReplyResult>;
+    file?: Partial<SendFileResult>;
+    mailService?: EmailComposeMailService;
+    port: number;
+  },
+): Promise<EmailServerHarness> {
+  const tempDir = await Deno.makeTempDir();
+  const platform = options.platform ?? "email";
+  const sessionRegistry = new SessionRegistry();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
+  const skillRegistry = new SkillRegistry(
+    memoryStore,
+    undefined,
+    undefined,
+    {
+      enabled: true,
+      maxFilesPerInvocation: 10,
+      maxTotalSizeMb: 50,
+      maxFileSizeMb: 25,
+      allowedExtensions: ["txt"],
+    } as never,
+    undefined,
+    options.mailService === undefined ? undefined : { mailService: options.mailService },
+  );
+  const adapter = capturingAdapter(platform, { reply: options.reply, file: options.file });
+  const workspace = {
+    key: platform === "email" ? "email/account" : "test/123",
+    components: { platform, userId: platform === "email" ? EMAIL_OWNER : "123" },
+    path: tempDir,
+    tmpPath: `${tempDir}/tmp`,
+    isDm: true,
+  };
+  const sessionId = sessionRegistry.register({
+    platform,
+    channelId: platform === "email" ? EMAIL_CHANNEL : "456",
+    userId: platform === "email" ? EMAIL_OWNER : "123",
+    isDm: platform === "email",
+    workspace: workspace as never,
+    platformAdapter: adapter as unknown as PlatformAdapter,
+    agentWorkspacePath: tempDir,
+    ...(platform === "email" ? { emailWorkId: EMAIL_WORK_ID } : {}),
+    triggerEvent: {
+      platform,
+      channelId: platform === "email" ? EMAIL_CHANNEL : "456",
+      userId: platform === "email" ? EMAIL_OWNER : "123",
+      messageId: "msg_trigger",
+      isDm: platform === "email",
+      guildId: "",
+      content: "",
+      timestamp: new Date(),
+    },
+  });
+
+  const server = new SkillAPIServer(
+    sessionRegistry,
+    skillRegistry,
+    { port: options.port, host: "127.0.0.1" },
+    TEST_SKILL_SECRET,
+  );
+  server.start();
+  await waitForServer(options.port);
+
+  return {
+    sessionRegistry,
+    server,
+    sessionId,
+    adapter,
+    tempDir,
+    post: async (skill, parameters) => {
+      return await fetch(`http://localhost:${options.port}/api/skill/${skill}`, {
+        method: "POST",
+        headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
+        body: JSON.stringify({ sessionId, parameters }),
+      });
+    },
+    dispose: async () => {
+      await server.stop();
+      sessionRegistry.stop();
+      await Deno.remove(tempDir, { recursive: true });
+    },
+  };
+}
+
+Deno.test("SkillAPIServer - email session sends with the host operation context and records accounting", async () => {
+  const harness = await createEmailServerHarness({
+    port: 3061,
+    reply: {
+      success: true,
+      messageId: "reply-1",
+      emailSubmission: { operationId: "op-1", phase: "submitted", targetKind: "user" },
+    },
+  });
+  try {
+    const response = await harness.post("send-reply", { message: "hello" });
+    const body = await response.json() as { success: boolean };
+    assertEquals(response.status, 200);
+    assertEquals(body.success, true);
+
+    // The host context is bound by the session alone — same work id, owner and
+    // ordinary reply slot the durable journal uses.
+    assertEquals(harness.adapter.replies.length, 1);
+    assertEquals(harness.adapter.replies[0].options?.emailSend, {
+      workId: EMAIL_WORK_ID,
+      owner: EMAIL_OWNER,
+      actionSlot: "reply",
+    });
+
+    const accounting = harness.sessionRegistry.emailResponseOf(harness.sessionId);
+    assertEquals(accounting.submittedToUser, true);
+    assertEquals(accounting.submittedToThirdParty, false);
+    assertEquals(accounting.unknown, false);
+    assertEquals(accounting.operations, [
+      { operationId: "op-1", phase: "submitted", targetKind: "user", actionSlot: "reply" },
+    ]);
+    assertEquals(harness.sessionRegistry.hasEmailSubmitted(harness.sessionId), true);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - an unknown send-reply rolls back the reply flag but latches uncertainty", async () => {
+  const harness = await createEmailServerHarness({
+    port: 3062,
+    reply: {
+      success: false,
+      error: "submission outcome unknown",
+      emailSubmission: { operationId: "op-u", phase: "unknown", targetKind: "user" },
+    },
+  });
+  try {
+    const response = await harness.post("send-reply", { message: "hello" });
+    await response.json();
+    assertEquals(response.status, 400);
+
+    // No delivery was confirmed, so the delivery flag is rolled back ...
+    assertEquals(harness.sessionRegistry.hasReplySent(harness.sessionId), false);
+    // ... while the unresolved submission forbids any automatic retry.
+    const accounting = harness.sessionRegistry.emailResponseOf(harness.sessionId);
+    assertEquals(accounting.unknown, true);
+    assertEquals(harness.sessionRegistry.hasEmailSubmitted(harness.sessionId), false);
+    assertEquals(harness.sessionRegistry.hasEmailResponseOrUncertainty(harness.sessionId), true);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - a recorded submission keeps the reserved reply slot", async () => {
+  const harness = await createEmailServerHarness({
+    port: 3063,
+    reply: {
+      success: false,
+      error: "response lost after acceptance",
+      emailSubmission: { operationId: "op-s", phase: "submitted", targetKind: "user" },
+    },
+  });
+  try {
+    const response = await harness.post("send-reply", { message: "hello" });
+    await response.json();
+    assertEquals(response.status, 400);
+
+    // The mail is out: the reservation must survive the rollback, and the
+    // accounting reports the session as responded.
+    assertEquals(harness.sessionRegistry.hasReplySent(harness.sessionId), true);
+    assertEquals(harness.sessionRegistry.emailResponseOf(harness.sessionId).submittedToUser, true);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - a failing email send with no metadata consults the durable journal", async () => {
+  const harness = await createEmailServerHarness({
+    port: 3064,
+    reply: { success: false, error: "transport error with no recorded result" },
+  });
+  try {
+    const lookedUp: { owner: string; workId: string; actionSlot: string }[] = [];
+    harness.server.setEmailSubmissionEvidence({
+      lookup: (owner, key) => {
+        lookedUp.push({ owner, workId: key.workId, actionSlot: key.actionSlot as string });
+        return key.actionSlot === "reply"
+          ? { operationId: "op-durable", phase: "submitted", targetKind: "user", reused: true }
+          : undefined;
+      },
+    });
+
+    const response = await harness.post("send-reply", { message: "hello" });
+    await response.json();
+    assertEquals(response.status, 400);
+
+    assert(lookedUp.some((l) => l.actionSlot === "reply"), "the reply slot was looked up");
+    for (const entry of lookedUp) {
+      assertEquals(entry.owner, EMAIL_OWNER);
+      assertEquals(entry.workId, EMAIL_WORK_ID);
+    }
+    assertEquals(harness.sessionRegistry.hasReplySent(harness.sessionId), true);
+    assertEquals(harness.sessionRegistry.emailResponseOf(harness.sessionId).submittedToUser, true);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - a composed email is accounted on the host work item", async () => {
+  const drafts: { workId: string; actionSlot: string }[] = [];
+  const mailService: EmailComposeMailService = {
+    send: (draft) => {
+      drafts.push(draft.operationKey);
+      return Promise.resolve({
+        operationId: "op-c",
+        phase: "submitted" as const,
+        targetKind: "user" as const,
+        reused: false,
+      });
+    },
+  };
+  const harness = await createEmailServerHarness({ port: 3066, mailService });
+  try {
+    const response = await harness.post("send-email", {
+      request: { to: EMAIL_ADDRESS, subject: "Hi", body: "Body" },
+    });
+    const body = await response.json() as { success: boolean };
+    assertEquals(body.success, true);
+    // The host supplies the work id and owner; the row-20 handler binds the
+    // ordinary compose slot itself (never a model-supplied key).
+    assertEquals(drafts, [{ workId: EMAIL_WORK_ID, actionSlot: "compose" }]);
+    const accounting = harness.sessionRegistry.emailResponseOf(harness.sessionId);
+    assertEquals(accounting.submittedToUser, true);
+    assertEquals(accounting.operations[0].operationId, "op-c");
+    assertEquals(accounting.operations[0].actionSlot, undefined);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - a Discord session carries no email context or accounting", async () => {
+  const harness = await createEmailServerHarness({ port: 3067, platform: "discord" });
+  try {
+    const response = await harness.post("send-reply", { message: "hello" });
+    await response.json();
+    assertEquals(response.status, 200);
+
+    assertEquals(harness.adapter.replies.length, 1);
+    assertEquals(harness.adapter.replies[0].options?.emailSend, undefined);
+    assertEquals(harness.sessionRegistry.emailResponseOf(harness.sessionId).operations.length, 0);
+    assertEquals(harness.sessionRegistry.hasEmailSubmitted(harness.sessionId), false);
+  } finally {
+    await harness.dispose();
   }
 });
