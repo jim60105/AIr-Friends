@@ -1,5 +1,9 @@
 import { assertEquals } from "@std/assert";
-import { ReminderStore } from "@core/reminder-store.ts";
+import {
+  reminderOperationKey,
+  ReminderStore,
+  sessionEmailOperation,
+} from "@core/reminder-store.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { ReminderEntry } from "../../src/types/reminder.ts";
 
@@ -244,4 +248,113 @@ Deno.test("ReminderStore - empty file returns empty array", async () => {
   } finally {
     await Deno.remove(tmp, { recursive: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Row 23: email reminder origin replay (restart-safe, additive JSONL schema)
+// ---------------------------------------------------------------------------
+
+const EMAIL_OWNER_ID = `e_${"ab".repeat(32)}`;
+const EMAIL_ORIGIN = {
+  channelId: `mail:${EMAIL_OWNER_ID}:33333333-3333-4333-8333-333333333333`,
+  replyAnchorRecordId: "44444444-4444-4444-8444-444444444444",
+};
+
+Deno.test("ReminderStore - email reminder origin round-trips through replay", async () => {
+  const tmp = await Deno.makeTempDir();
+  try {
+    const store = new ReminderStore("reminders.jsonl");
+    const ws = makeWorkspace(tmp);
+    const entry = makeEntry({
+      id: "rem_email",
+      platform: "email",
+      userId: EMAIL_OWNER_ID,
+      origin: EMAIL_ORIGIN,
+    });
+    await store.addReminder(ws, entry);
+    await store.cancelReminder(ws, entry.id);
+
+    const reminders = await store.loadReminders(ws);
+    assertEquals(reminders.length, 1);
+    assertEquals(reminders[0].origin, EMAIL_ORIGIN);
+    assertEquals(reminders[0].enabled, false);
+  } finally {
+    await Deno.remove(tmp, { recursive: true });
+  }
+});
+
+Deno.test("ReminderStore - legacy records without origin resolve unchanged", async () => {
+  const tmp = await Deno.makeTempDir();
+  try {
+    const store = new ReminderStore("reminders.jsonl");
+    const ws = makeWorkspace(tmp);
+    await store.addReminder(ws, makeEntry({ id: "rem_legacy", platform: "misskey" }));
+
+    const reminders = await store.loadReminders(ws);
+    assertEquals(reminders.length, 1);
+    assertEquals(reminders[0].origin, undefined);
+    assertEquals("origin" in reminders[0], false);
+  } finally {
+    await Deno.remove(tmp, { recursive: true });
+  }
+});
+
+Deno.test("ReminderStore - a malformed origin is replayed as absent, never guessed", async () => {
+  const tmp = await Deno.makeTempDir();
+  try {
+    const file = `${tmp}/reminders.jsonl`;
+    const base = {
+      type: "reminder",
+      id: "rem_bad",
+      createdAt: new Date().toISOString(),
+      scheduledAt: new Date().toISOString(),
+      message: "x",
+      platform: "email",
+      userId: EMAIL_OWNER_ID,
+      enabled: true,
+    };
+    await Deno.writeTextFile(
+      file,
+      [
+        JSON.stringify({ ...base, id: "rem_null", origin: null }),
+        JSON.stringify({
+          ...base,
+          id: "rem_partial",
+          origin: { channelId: EMAIL_ORIGIN.channelId },
+        }),
+        JSON.stringify({
+          ...base,
+          id: "rem_typed",
+          origin: { channelId: 7, replyAnchorRecordId: "" },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const reminders = await new ReminderStore("reminders.jsonl").loadReminders(makeWorkspace(tmp));
+    assertEquals(reminders.length, 3);
+    for (const reminder of reminders) {
+      assertEquals(reminder.origin, undefined);
+    }
+  } finally {
+    await Deno.remove(tmp, { recursive: true });
+  }
+});
+
+Deno.test("reminderOperationKey - stable logical operation of one reminder", () => {
+  assertEquals(reminderOperationKey("rem_1"), {
+    workId: "rem_1",
+    actionSlot: "reminder:rem_1",
+  });
+});
+
+Deno.test("sessionEmailOperation - reminder sessions bind their own slot only", () => {
+  assertEquals(
+    sessionEmailOperation({ emailReminder: { reminderId: "rem_9" } }),
+    { workId: "rem_9", slots: ["reminder:rem_9"] },
+  );
+  assertEquals(sessionEmailOperation({}), undefined);
+  const ordinary = sessionEmailOperation({ emailWorkId: "work-1" });
+  assertEquals(ordinary?.workId, "work-1");
+  assertEquals(ordinary?.slots.includes("reply"), true);
+  assertEquals(ordinary?.slots.includes("reminder:work-1"), false);
 });

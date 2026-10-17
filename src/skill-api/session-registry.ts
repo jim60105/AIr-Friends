@@ -16,6 +16,7 @@ import {
   recordEmailUncertainty,
 } from "@core/email-response-accounting.ts";
 import type { EmailSubmissionMetadata } from "../types/platform.ts";
+import type { EmailReminderSession } from "../types/reminder.ts";
 
 const logger = createLogger("SessionRegistry");
 
@@ -135,6 +136,15 @@ export interface ActiveSession {
    * through the skill context. Undefined for every non-email session.
    */
   emailWorkId?: string;
+  /**
+   * Host-bound identity of a scheduled email reminder session (row 23):
+   * `{ reminderId, origin }`, written by the host scheduler before the agent
+   * starts and never derived from a skill call. The reminder's email operation
+   * is the stable `reminder:<id>` slot keyed by its reminder id, so a restarted
+   * reminder reuses the durable journal operation instead of submitting again.
+   * Undefined for every other session.
+   */
+  emailReminder?: EmailReminderSession;
   /**
    * Immutable third-party destination grants of this session (row 19). Written
    * exactly ONCE by the host, before the sending agent starts, through

@@ -2345,3 +2345,142 @@ the submitted/unresolved/non-delivery matrices, the third-party-anchor guarantee
 the review-required escalation, the summary skip and the Discord regression are asserted there. The
 SMTP transport itself is NOT exercised by this suite (row 13's own fixtures own wire-level DATA
 counts); no model and no production credential is involved.
+
+## Scheduled Email Reminders (Owned by `email-reminder-threads`)
+
+`src/types/reminder.ts`, `src/core/reminder-store.ts` and `src/skills/reminder-handler.ts` own the
+origin of a scheduled email reminder, and `src/core/session-orchestrator.ts` owns its restart-safe,
+thread-preserving delivery. Discord and Misskey reminders are untouched: they never gain an origin,
+their persisted records and delivery behavior are byte-for-byte unchanged, and no migration,
+compatibility alias or backfill exists.
+
+### The persisted origin (additive JSONL)
+
+An EMAIL reminder entry gains ONE optional field:
+
+```jsonc
+{
+  "type": "reminder",
+  // …existing fields unchanged…
+  "origin": { "channelId": "mail:<owner>:<threadId>", "replyAnchorRecordId": "<record uuid>" },
+}
+```
+
+- **Required on creation, host-resolved.** `set-reminder` refuses an email reminder unless
+  `SkillContext.emailReminderOrigin` is present and owner-valid: the channel must be a valid
+  `mail:<owner>:<threadId>` id whose encoded owner IS the reminder's owner, and the anchor must be a
+  non-empty record id. The value is derived by the host from the session it established (the
+  session's own channel and reply anchor) — never from tool parameters or platform-specific request
+  data, so a model cannot choose the thread a reminder will later be delivered into.
+- **Optional on replay, never synthesized.** `ReminderStore` replays the origin only when the
+  stored value is a structurally usable origin. A legacy line without the field, or a malformed one
+  (`null`, a missing field, a wrong type), resolves as absent — the scheduler then refuses the send
+  instead of guessing a thread. Existing records therefore parse unchanged.
+
+### Restart-safe, thread-preserving delivery
+
+Every delivery re-reads the persisted origin and re-checks the CURRENT configuration:
+
+1. **Origin shape and ownership.** The channel must parse, its owner must equal the reminder's
+   owner, and the anchor must be non-empty. Anything else is review-required.
+2. **Current allowlist.** `isSenderAllowed(owner, channels)` must still find an ENABLED
+   `email/account/<owner>` entry. Removing or disabling the account prevents every later delivery;
+   the mail service re-checks the same allowlist immediately before submission.
+3. **Durable operation, not a fresh one.** The reminder's logical operation is
+   `{ workId: <reminder id>, actionSlot: "reminder:<id>" }` (`reminderOperationKey`), stable across
+   restarts. Before generating anything, the scheduler consults the durable submission evidence for
+   that exact operation: a `submitted` record disables the reminder WITHOUT sending again, and an
+   unresolved record (`unknown`/`submitting`) is review-required WITHOUT sending. (With no evidence
+   source wired, the mail service's own operation key still answers a repeated send from its
+   journal, so a second SMTP transaction is impossible either way.)
+4. **Origin anchor usable for delivery.** The persisted anchor must appear in the SAME bounded
+   owner-thread history the adapter resolves an explicitly supplied anchor from
+   (`PlatformAdapter.fetchRecentMessages`), so an anchor the adapter could never thread to is
+   review-required instead of being retried on every tick. Another anchor is never chosen.
+5. **Never a new thread.** Email delivery never calls `getDmChannelId` (which allocates a NEW
+   internal thread). The session is bound to the origin channel, and the Skill API resolves its
+   reply anchor from the persisted origin, so the reply threads to the message the user originally
+   asked about.
+6. **No inherited destination grant and no composition.** A reminder session stays triggerless and
+   holds no destination grant; `send-email` is refused at the host boundary (only a reply into the
+   reminder's own thread is authorized), and `send-file` keeps its existing triggerless refusal.
+7. **Its own evidence decides completion.** An email reminder is disabled only when ITS OWN
+   operation submitted mail. The shared reply-state map is keyed by workspace+channel, so another
+   session replying into the same owner thread can never mark the reminder delivered.
+
+A reminder that cannot be delivered automatically (missing/corrupt origin, unusable anchor) or
+whose account was revoked is disabled and reported as review-required. Cancelling the reminder is
+best-effort: a failed write is logged as its own persistence error and never rewrites the verdict,
+because the durable operation evidence — not the reminder record — is what prevents a resend.
+
+### Operator notes
+
+- The reminder anchor must remain inside the adapter's bounded thread scan; an anchor that has
+  aged out of that window fails closed (no SMTP, no guessed thread, review-required). The bound
+  itself is owned by `email-adapter`.
+- Review-required reminders are disabled, so a re-added account does not automatically resume an
+  earlier reminder; this is the stated scope (no recovery policy is invented here).
+- No mailbox credential or message body is involved: reminders use opaque owner/record/thread ids
+  only.
+
+### Exported API
+
+```ts
+// src/types/reminder.ts
+export interface ReminderOrigin { channelId: string; replyAnchorRecordId: string; }
+export interface EmailReminderSession { reminderId: string; origin: ReminderOrigin; }
+// ReminderEntry.origin?: ReminderOrigin;  ResolvedReminder.origin?: ReminderOrigin
+
+// src/core/reminder-store.ts
+export function reminderOperationKey(reminderId: string): EmailOperationKey; // {reminderId, "reminder:<id>"}
+export function sessionEmailOperation(session): { workId: string; slots: readonly string[] } | undefined;
+
+// src/skills/reminder-handler.ts
+export const EMAIL_REMINDER_ORIGIN_ERROR: string;
+export function buildEmailReminderOrigin(channelId: string, replyAnchorRecordId?: string): ReminderOrigin | undefined;
+export function validateEmailReminderOrigin(origin: ReminderOrigin | undefined, userId: string): ReminderOrigin | undefined;
+
+// src/skills/types.ts
+// SkillContext.emailReminderOrigin?: ReminderOrigin      (host-supplied only)
+
+// src/skill-api/session-registry.ts
+// ActiveSession.emailReminder?: EmailReminderSession
+// SessionOrchestrator.setupSession({ …, emailReminder? })
+```
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-reminder-threads/specs/scheduled-reminders/spec.md`:
+
+- **Restart due reminder** — a stored email reminder that became due during downtime delivers one
+  signed email into the initiating user's original thread after the origin is replayed from disk.
+- **User removed** — a reminder due after its owner was removed from (or disabled in) channels
+  performs no SMTP submission; the reminder is disabled for review.
+- **Reminder patch fails** — SMTP acceptance is followed by a failed reminder disable; the next
+  scheduler tick consults the stable `reminder:<id>` operation and does not send again.
+- **Missing / corrupt origin** — no usable origin, an anchor from another thread, or an anchor no
+  longer present in its owner thread is review-required; no thread is guessed and no mail is sent.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/core/reminder-store.test.ts tests/core/reminder-scheduler.test.ts \
+  tests/skills/reminder-handler.test.ts tests/core/session-orchestrator.reminder.test.ts \
+  tests/core/email-reminder-threads.test.ts \
+  tests/platforms/email/email-adapter.test.ts tests/platforms/email/mail-service.test.ts
+```
+
+`tests/core/session-orchestrator.reminder.test.ts` drives the REAL orchestrator with a scripted
+connector and asserts the email branch: origin binding, the refusal of `getDmChannelId` for email,
+review-required on a missing/corrupt origin or a revoked account, the durable preflight for a
+submitted/unresolved reminder operation, the "foreign reply never delivers" rule, and the unchanged
+Discord path. `tests/core/email-reminder-threads.test.ts` wires the REAL handler, file-backed store,
+adapter, mail service, submission journal and MIME builder over isolated temporary state, and its
+smoke leg uses the local `EmailSmtpTestService` fixture to assert exactly ONE live DATA transaction,
+the origin thread linkage, one signature and the owner recipient — with the restart replay
+performing none. A model is involved nowhere, and no production credential or mailbox is used.

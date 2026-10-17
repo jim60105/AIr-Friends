@@ -5,9 +5,65 @@ import { remindersCancelledTotal, remindersSetTotal } from "@utils/metrics.ts";
 import type { SkillContext, SkillResult } from "./types.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { RemindersConfig } from "../types/config.ts";
-import type { ReminderEntry } from "../types/reminder.ts";
+import type { ReminderEntry, ReminderOrigin } from "../types/reminder.ts";
+import { parseEmailChannelId } from "@platforms/email/message-store.ts";
 
 const logger = createLogger("ReminderHandler");
+
+/** Refusal text for an email reminder whose host-resolved origin is missing or invalid. */
+export const EMAIL_REMINDER_ORIGIN_ERROR =
+  "Email reminders require the host-resolved originating thread and reply anchor; none was supplied.";
+
+/**
+ * Build the origin of an EMAIL session from its channel id and reply anchor
+ * (row 23). Returns undefined unless the channel is a valid
+ * `mail:<owner>:<threadId>` id and the anchor is a non-empty record id.
+ *
+ * Only the HOST calls this: the value is derived from the session the host
+ * established, never from a skill parameter, so a model cannot choose the
+ * thread a reminder will later be delivered into.
+ */
+export function buildEmailReminderOrigin(
+  channelId: string,
+  replyAnchorRecordId: string | undefined,
+): ReminderOrigin | undefined {
+  const anchor = typeof replyAnchorRecordId === "string" ? replyAnchorRecordId.trim() : "";
+  if (anchor === "") return undefined;
+  try {
+    const { owner, threadId } = parseEmailChannelId(channelId);
+    return { channelId: `mail:${owner}:${threadId}`, replyAnchorRecordId: anchor };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Validate a host-supplied origin against the reminder's owner before an EMAIL
+ * reminder is created: the channel must parse, its encoded owner must BE this
+ * reminder's owner, and the anchor record id must be non-empty.
+ */
+export function validateEmailReminderOrigin(
+  origin: ReminderOrigin | undefined,
+  userId: string,
+): ReminderOrigin | undefined {
+  if (
+    !origin || typeof origin.channelId !== "string" ||
+    typeof origin.replyAnchorRecordId !== "string"
+  ) {
+    return undefined;
+  }
+  const expectedOwner = typeof userId === "string" ? userId.trim().toLowerCase() : "";
+  if (expectedOwner === "") return undefined;
+  const anchor = origin.replyAnchorRecordId.trim();
+  if (anchor === "") return undefined;
+  try {
+    const { owner, threadId } = parseEmailChannelId(origin.channelId);
+    if (owner !== expectedOwner) return undefined;
+    return { channelId: `mail:${owner}:${threadId}`, replyAnchorRecordId: anchor };
+  } catch {
+    return undefined;
+  }
+}
 
 export class ReminderHandler {
   private reminderSetSessions: Set<string> = new Set();
@@ -82,6 +138,18 @@ export class ReminderHandler {
       };
     }
 
+    // Row 23: an email reminder MUST carry the host-resolved origin of the
+    // session it was created in. Discord/Misskey records never gain the field,
+    // so their persisted shape and delivery behavior are unchanged.
+    const platform = context.workspace.components.platform;
+    let origin: ReminderOrigin | undefined;
+    if (platform === "email") {
+      origin = validateEmailReminderOrigin(context.emailReminderOrigin, context.userId);
+      if (!origin) {
+        return { success: false, error: EMAIL_REMINDER_ORIGIN_ERROR };
+      }
+    }
+
     // Create reminder entry
     const entry: ReminderEntry = {
       type: "reminder",
@@ -89,9 +157,10 @@ export class ReminderHandler {
       createdAt: new Date().toISOString(),
       scheduledAt: scheduledDate.toISOString(),
       message: message.trim(),
-      platform: context.workspace.components.platform,
+      platform,
       userId: context.userId,
       enabled: true,
+      ...(origin === undefined ? {} : { origin }),
     };
 
     await this.reminderStore.addReminder(context.workspace, entry);
@@ -100,7 +169,7 @@ export class ReminderHandler {
     this.reminderSetSessions.add(sessionKey);
 
     // Metrics
-    remindersSetTotal.labels(context.workspace.components.platform).inc();
+    remindersSetTotal.labels(platform).inc();
 
     logger.info("Reminder {reminderId} set for {scheduledAt}", {
       reminderId: entry.id,

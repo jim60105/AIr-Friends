@@ -7,6 +7,7 @@ import type { PlatformMessage } from "../types/events.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { DestinationGrant } from "@core/email-intent-preflight.ts";
 import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platform.ts";
+import type { ReminderOrigin } from "../types/reminder.ts";
 
 /**
  * Skill call parameters (from external Agent)
@@ -98,6 +99,16 @@ export interface SkillContext {
    * not bound (the email adapter then refuses to send).
    */
   emailSend?: EmailSendContext;
+  /**
+   * Host-resolved origin of the email reminder this session may set (row 23):
+   * the originating owner thread and reply anchor record of THIS session.
+   *
+   * Populated by the host for an email session only, derived from the session
+   * the host established — never from tool parameters or platform-specific
+   * request data. An email `set-reminder` without it is refused, because a
+   * reminder that cannot name its thread could only guess one later.
+   */
+  emailReminderOrigin?: ReminderOrigin;
   /**
    * Immutable third-party destination grants of this session (row 19), exactly
    * as the host recorded them before the agent started. READ-ONLY: a handler
