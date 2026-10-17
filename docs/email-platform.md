@@ -136,6 +136,65 @@ Detailed acceptance requirements and scenarios are defined in `specs/email-mailb
   - `getEntry(key: MailboxKey): MailboxEntrySnapshot | undefined`
   - `close(): void`
 
+## Bounded Incoming MIME Parsing & Content Provenance (Owned by `email-incoming-mime`)
+
+Bounded MIME parsing and provenance extraction are implemented in `src/platforms/email/incoming-mime.ts`:
+
+### Invariants & Semantics
+
+- **Inert Content Conversion**: Incoming mail prefers `text/plain`. HTML-only bodies are converted to inert plain text using `html-to-text` with images, scripts, styles, iframes, and objects disabled. No network calls or code execution occur during conversion.
+- **Pre-Byte Message Size Bound**: Raw message size is bounded (default `25 MiB` / `26,214,400 bytes`). Declared sizes exceeding the limit and actual streaming bytes exceeding the limit are rejected immediately (`MESSAGE_EXCEEDS_SIZE_LIMIT`) before buffering full contents into memory.
+- **Pre-Byte Attachment Count Limit**: Incoming attachments are counted on stream discovery (default limit `10`). Discovery of an eleventh attachment terminates processing immediately (`ATTACHMENT_LIMIT_EXCEEDED`) without materializing excessive attachment bytes or leaving partial accepted messages.
+- **Provenance Separation & Conservative Ambiguity**:
+  - Distinguishes `authoredText`, `quotedText`, and `forwardedText`.
+  - Line-anchored quote markers (`> ...`), standard quote attributions (`On ... wrote:`, `At ..., ... wrote:`), original message dividers (`-----Original Message-----`), and forward dividers (`---------- Forwarded message ---------`) are separated.
+  - Status is set to `"clean"` when clear separation exists.
+  - Status is marked `"ambiguous"` whenever HTML-only conversion, mixed quoting (e.g. text following quote blocks), or uncertain boundaries occur. Downstream authorization enforces that ambiguous provenance NEVER grants third-party destinations.
+- **Attachment-Only Requests**: Valid MIME messages with empty body text and bounded attachments are accepted as valid requests with empty `authoredText` and `clean` provenance without inventing fake body text.
+- **Header Strictness**: Rejects multiple `From` header lines or multiple mailbox addresses in `From` (`INVALID_FROM_HEADER`). Sender address is normalized via `normalizeEmailMailbox`. Validates bracketed RFC 5322 wire identifiers (`Message-ID`, `In-Reply-To`, `References`). Malformed or duplicate routing headers reject parsing (`INVALID_ROUTING_HEADER`).
+- **Display-Only Attachment Metadata**: Attachment filenames are treated as display metadata only: path separators, parent traversals (`..`), control characters, and leading dots/spaces are stripped. Fallback filenames (`attachment-{index}.dat`) are used if missing or unsafe. Attachments receive random UUIDv4 identifiers.
+- **Privacy in Diagnostics**: Diagnostic error codes (`MESSAGE_EXCEEDS_SIZE_LIMIT`, `ATTACHMENT_LIMIT_EXCEEDED`, `INVALID_FROM_HEADER`, `INVALID_ROUTING_HEADER`, `STREAM_ABORTED`, `PARSE_ERROR`) and error messages omit private message bodies, recipients, and credentials.
+
+### Acceptance Scenarios
+
+Acceptance requirements and test scenarios defined in `specs/email-incoming-content/spec.md`:
+
+- **Oversized or excessive MIME**: When declared size exceeds limit or streaming parsing discovers an eleventh attachment, processing terminates explicitly without a partial accepted message.
+- **Ambiguous quoted command**: When HTML-only conversion or mixed quoting makes new authorship uncertain, the body remains available as reference data with ambiguous authorization provenance.
+- **Empty body with attachment**: When a valid MIME message has no body text and one bounded attachment, its normalized content includes attachment metadata without inventing authored text.
+
+### Exported API
+
+- `DEFAULT_MAX_MESSAGE_BYTES`: `26214400` (25 MiB)
+- `DEFAULT_MAX_INCOMING_ATTACHMENTS`: `10`
+- `IncomingMimeDiagnosticCode`: Safe enum diagnostic codes (`CLEAN`, `MESSAGE_EXCEEDS_SIZE_LIMIT`, `ATTACHMENT_LIMIT_EXCEEDED`, `INVALID_FROM_HEADER`, `INVALID_ROUTING_HEADER`, `PARSE_ERROR`, `STREAM_ABORTED`)
+- `IncomingMimeError`: `BaseError` subclass with safe diagnostic code
+- `ParsedEmailAttachment`:
+  - `id: string`
+  - `displayName?: string`
+  - `mimeType: string`
+  - `size: number`
+  - `content: Uint8Array`
+- `ParsedEmail`:
+  - `from: string`
+  - `subject?: string`
+  - `wireIds: EmailMessageIdentifiers`
+  - `plainBody: string`
+  - `provenance: EmailProvenance`
+  - `attachments: ParsedEmailAttachment[]`
+  - `sourceRef?: string`
+  - `date?: Date`
+- `ParseIncomingMimeOptions`:
+  - `maxMessageBytes?: number`
+  - `maxIncomingAttachments?: number`
+  - `declaredSize?: number`
+  - `sourceRef?: string`
+- `parseIncomingMime(source: Uint8Array | string | ReadableStream<Uint8Array>, options?: ParseIncomingMimeOptions): Promise<ParsedEmail>`
+- `convertHtmlToInertText(html: string): string`
+- `extractProvenance(body: string, options?: { isHtmlOnly?: boolean }): EmailProvenance`
+- `sanitizeAttachmentDisplayName(rawFilename: string | undefined, index: number): string`
+- `toMessageStoreParsedEmail(parsed: ParsedEmail): ParsedEmailData & { attachmentPayloads: StoreAttachmentPayload[] }`
+
 ## Sender-Scoped Message & Thread History Store (Owned by `email-message-history`)
 
 Private correspondence archives, immutable source/attachment bytes, and RFC 5322 thread derivations are durably managed under each user's workspace directory (`<userWorkspace>/email/`) via `EmailMessageStore` in `src/platforms/email/message-store.ts`.
