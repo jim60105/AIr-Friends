@@ -1221,6 +1221,11 @@ function selectEmailIntentProvider(
     );
   }
   const models = entry["models"];
+  if (models !== undefined && !isProfileObject(models)) {
+    refuseEmailIntentProfile(
+      `the "${selection.providerID}" entry of "${catalogPath}" declares a non-object model catalog`,
+    );
+  }
   if (isProfileObject(models) && Object.keys(models).length > 0 && !(selection.modelID in models)) {
     refuseEmailIntentProfile(
       `the selected model "${selection.modelID}" is not in the "${selection.providerID}" ` +
