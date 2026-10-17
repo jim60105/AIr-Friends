@@ -19,7 +19,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import * as acp from "@agentclientprotocol/sdk";
-import { SessionAuditWriter, projectEmailAuditData } from "../../src/core/audit-logger.ts";
+import { projectEmailAuditData, SessionAuditWriter } from "../../src/core/audit-logger.ts";
 import type { AuditConfig } from "../../src/types/config.ts";
 import type { AuditPhase, SessionAuditEntry } from "../../src/types/audit.ts";
 import { Logger, LogLevel, runWithPrivateEmailScope } from "../../src/utils/logger.ts";
@@ -184,7 +184,11 @@ function phasePayloads(): Array<[AuditPhase, Record<string, unknown>]> {
           attachmentsCount: 1,
           smuggledSubject: SUBJECT_SENTINEL,
         },
-        skillResult: { success: false, error: `provider refused: ${PASSWORD_SENTINEL}`, code: "SKILL_EMAIL_COMPOSE_REQUEST" },
+        skillResult: {
+          success: false,
+          error: `provider refused: ${PASSWORD_SENTINEL}`,
+          code: "SKILL_EMAIL_COMPOSE_REQUEST",
+        },
         skillDurationMs: 12,
       },
     ],
@@ -330,7 +334,10 @@ Deno.test("email audit - projection is idempotent and a canonical digest always 
   assertEquals(first.messageLength, 8);
   assertEquals(first.count, 2);
   assertEquals(first.toolNameHash, `sha256:${await sha256Hash(FILENAME_SENTINEL)}`);
-  assertEquals(first.commandHash, `sha256:${await sha256Hash(`cat /staging/${FILENAME_SENTINEL}`)}`);
+  assertEquals(
+    first.commandHash,
+    `sha256:${await sha256Hash(`cat /staging/${FILENAME_SENTINEL}`)}`,
+  );
   assertEquals(first.filePathsCount, 2);
   assertStringIncludes(String(first.filePathsHash), "sha256:");
   assertEquals(first.sessionId, SESSION_ID);
@@ -391,7 +398,7 @@ Deno.test("email audit - the forward projection keeps only opaque ids and digest
 // ---------------------------------------------------------------------------
 
 Deno.test("logger - email module loggers and email session loggers are private", async () => {
-  const { logs } = await capturingLogs(async () => {
+  const { logs } = await capturingLogs(() => {
     const compose = new Logger("EmailComposeHandler", { level: LogLevel.DEBUG });
     compose.info("Email submitted ({TargetKind}, {Attachments} attachments)", {
       TargetKind: "third-party",
@@ -415,15 +422,18 @@ Deno.test("logger - email module loggers and email session loggers are private",
     new Logger("SkillAPIServer", { level: LogLevel.DEBUG })
       .withPrivateEmail()
       .info("private context", { message: BODY_SENTINEL });
+    return Promise.resolve();
   });
 
   const joined = logs.join("\n");
   assertNoSentinel(joined, "the private log stream");
-  const entries = logs.map((line) => JSON.parse(line) as {
-    module: string;
-    message: string;
-    context?: Record<string, unknown>;
-  });
+  const entries = logs.map((line) =>
+    JSON.parse(line) as {
+      module: string;
+      message: string;
+      context?: Record<string, unknown>;
+    }
+  );
   // Operational identifiers survive; the placeholder is redacted, not leaked.
   assertEquals(entries[0].context?.TargetKind, "third-party");
   assertEquals(entries[0].context?.OperationId, `op_${"b".repeat(24)}`);
@@ -440,9 +450,10 @@ Deno.test("logger - email module loggers and email session loggers are private",
 });
 
 Deno.test("logger - a non-email logger keeps its ordinary context", async () => {
-  const { logs } = await capturingLogs(async () => {
+  const { logs } = await capturingLogs(() => {
     new Logger("SkillAPIServer", { level: LogLevel.DEBUG })
       .info("ordinary context", { message: BODY_SENTINEL, sessionId: SESSION_ID });
+    return Promise.resolve();
   });
   const entry = JSON.parse(logs[0]) as { message: string; context?: Record<string, unknown> };
   assertStringIncludes(entry.message, "ordinary context");
@@ -467,10 +478,12 @@ Deno.test("logger - the ambient private scope covers an unrelated module logger"
     });
   });
 
-  const entries = logs.map((line) => JSON.parse(line) as {
-    message: string;
-    context?: Record<string, unknown>;
-  });
+  const entries = logs.map((line) =>
+    JSON.parse(line) as {
+      message: string;
+      context?: Record<string, unknown>;
+    }
+  );
   assertEquals(entries.length, 2);
   assertStringIncludes(String(entries[0].context?.error), PASSWORD_SENTINEL);
   assertEquals(entries[1].context?.error, undefined);
@@ -490,12 +503,12 @@ function allowList() {
   });
 }
 
-async function acpClient(
+function acpClient(
   dir: string,
   platform: "email" | "discord",
   logger: Logger,
   auditWriter?: SessionAuditWriter,
-): Promise<ChatbotClient> {
+): ChatbotClient {
   const config: ClientConfig = {
     workingDir: dir,
     platform,
@@ -518,7 +531,7 @@ Deno.test("acp client - an email session logs metadata only and hashes agent tex
   const dir = await Deno.makeTempDir();
   try {
     const writer = new SessionAuditWriter(dir, "email", OWNER, SESSION_ID, auditConfig(false));
-    const client = await acpClient(
+    const client = acpClient(
       dir,
       "email",
       new Logger("test", { level: LogLevel.DEBUG }),
@@ -591,7 +604,7 @@ Deno.test("acp client - a discord session keeps its raw content and command", as
   const dir = await Deno.makeTempDir();
   try {
     const writer = new SessionAuditWriter(dir, "discord", "123", "sess_d", auditConfig(false));
-    const client = await acpClient(
+    const client = acpClient(
       dir,
       "discord",
       new Logger("test", { level: LogLevel.DEBUG }),
@@ -841,101 +854,105 @@ async function postSkill(
 
 Deno.test("skill API - every email phase stays content-free under hashContent=false", async () => {
   const port = 34771;
-  await withEmailEndpoint(port, { mailService: mailServiceDouble(), failFileSend: true }, async (h) => {
-    const { logs } = await capturingLogs(async () => {
-      // Compose with every private field, including a staged attachment.
-      const compose = await postSkill(port, h.registry, h.sessionId, "send-email", {
-        request: {
-          to: ADDRESS_SENTINEL,
-          subject: SUBJECT_SENTINEL,
-          body: BODY_SENTINEL,
-          attachments: [h.attachmentPath],
-        },
+  await withEmailEndpoint(
+    port,
+    { mailService: mailServiceDouble(), failFileSend: true },
+    async (h) => {
+      const { logs } = await capturingLogs(async () => {
+        // Compose with every private field, including a staged attachment.
+        const compose = await postSkill(port, h.registry, h.sessionId, "send-email", {
+          request: {
+            to: ADDRESS_SENTINEL,
+            subject: SUBJECT_SENTINEL,
+            body: BODY_SENTINEL,
+            attachments: [h.attachmentPath],
+          },
+        });
+        assertEquals(compose.status, 200);
+
+        // A denied forward (no grant) is a failure branch with the same material.
+        const forward = await postSkill(port, h.registry, h.sessionId, "send-email", {
+          request: {
+            action: "forward",
+            sourceRecordId: THREAD_ID,
+            to: ADDRESS_SENTINEL,
+            subject: SUBJECT_SENTINEL,
+            body: BODY_SENTINEL,
+          },
+        });
+        assertEquals(forward.status, 400);
+
+        // A reply carrying the private body.
+        const reply = await postSkill(port, h.registry, h.sessionId, "send-reply", {
+          message: BODY_SENTINEL,
+        });
+        assertEquals(reply.status, 200);
+
+        // A file send whose adapter throws a password-bearing exception: the throw
+        // crosses the skill registry's own logger.
+        const files = await postSkill(port, h.registry, h.sessionId, "send-file", {
+          filePaths: [FILENAME_SENTINEL],
+        });
+        assertEquals(files.status, 400);
       });
-      assertEquals(compose.status, 200);
+      assertNoSentinel(logs.join("\n"), "the email skill-API log stream");
 
-      // A denied forward (no grant) is a failure branch with the same material.
-      const forward = await postSkill(port, h.registry, h.sessionId, "send-email", {
-        request: {
-          action: "forward",
-          sourceRecordId: THREAD_ID,
-          to: ADDRESS_SENTINEL,
-          subject: SUBJECT_SENTINEL,
-          body: BODY_SENTINEL,
-        },
-      });
-      assertEquals(forward.status, 400);
+      const auditFile = join(h.auditPath, "email", OWNER, `${SESSION_ID}.jsonl`);
+      const raw = await Deno.readTextFile(auditFile);
+      assertNoSentinel(raw, "the email skill-API audit file");
+      const entries = await readEntries(auditFile);
 
-      // A reply carrying the private body.
-      const reply = await postSkill(port, h.registry, h.sessionId, "send-reply", {
-        message: BODY_SENTINEL,
-      });
-      assertEquals(reply.status, 200);
+      // Compose: skill params are identifiers, counts and digests.
+      const composeCall = entries.find((entry) =>
+        entry.phase === "skill_call" && entry.data.skillName === "send-email" &&
+        (entry.data.skillParams as Record<string, unknown>)?.destinationHash !== undefined
+      );
+      assert(composeCall, "the compose skill call was audited");
+      const params = composeCall.data.skillParams as Record<string, unknown>;
+      assertStringIncludes(String(params.destinationHash), "sha256:");
+      assertStringIncludes(String(params.subjectHash), "sha256:");
+      assertStringIncludes(String(params.bodyHash), "sha256:");
+      assertEquals(params.bodyLength, BODY_SENTINEL.length);
+      assertEquals(params.attachmentsCount, 1);
+      assertEquals(params.to, undefined);
+      assertEquals(params.subject, undefined);
+      assertEquals(params.body, undefined);
 
-      // A file send whose adapter throws a password-bearing exception: the throw
-      // crosses the skill registry's own logger.
-      const files = await postSkill(port, h.registry, h.sessionId, "send-file", {
-        filePaths: [FILENAME_SENTINEL],
-      });
-      assertEquals(files.status, 400);
-    });
-    assertNoSentinel(logs.join("\n"), "the email skill-API log stream");
+      // Operator visibility: the accepted mail whose sent-copy failed.
+      const operation = entries.find((entry) => entry.phase === "email_operation");
+      assert(operation, "the email operation was audited");
+      assertEquals(operation.data.operationId, `op_${"c".repeat(24)}`);
+      assertEquals(operation.data.workId, WORK_ID);
+      assertEquals(operation.data.phase, "submitted");
+      assertEquals(operation.data.sentCopy, "failed");
+      assertEquals(operation.data.safeCode, "APPEND_FAILED");
+      assertEquals(operation.data.targetKind, "user");
 
-    const auditFile = join(h.auditPath, "email", OWNER, `${SESSION_ID}.jsonl`);
-    const raw = await Deno.readTextFile(auditFile);
-    assertNoSentinel(raw, "the email skill-API audit file");
-    const entries = await readEntries(auditFile);
+      // The denied forward records its typed code, never the refusal text or body.
+      const forwardCall = entries.find((entry) =>
+        entry.phase === "skill_call" &&
+        (entry.data.skillParams as Record<string, unknown>)?.action === "forward"
+      );
+      assert(forwardCall, "the refused forward was audited");
+      assertEquals((forwardCall.data.skillResult as Record<string, unknown>).success, false);
 
-    // Compose: skill params are identifiers, counts and digests.
-    const composeCall = entries.find((entry) =>
-      entry.phase === "skill_call" && entry.data.skillName === "send-email" &&
-      (entry.data.skillParams as Record<string, unknown>)?.destinationHash !== undefined
-    );
-    assert(composeCall, "the compose skill call was audited");
-    const params = composeCall.data.skillParams as Record<string, unknown>;
-    assertStringIncludes(String(params.destinationHash), "sha256:");
-    assertStringIncludes(String(params.subjectHash), "sha256:");
-    assertStringIncludes(String(params.bodyHash), "sha256:");
-    assertEquals(params.bodyLength, BODY_SENTINEL.length);
-    assertEquals(params.attachmentsCount, 1);
-    assertEquals(params.to, undefined);
-    assertEquals(params.subject, undefined);
-    assertEquals(params.body, undefined);
+      // The reply body is hashed even though hashContent is false.
+      const replyEntry = entries.find((entry) => entry.phase === "reply_sent");
+      assert(replyEntry, "the email reply was audited");
+      assertEquals(
+        replyEntry.data.replyContentHash,
+        `sha256:${await sha256Hash(BODY_SENTINEL)}`,
+      );
 
-    // Operator visibility: the accepted mail whose sent-copy failed.
-    const operation = entries.find((entry) => entry.phase === "email_operation");
-    assert(operation, "the email operation was audited");
-    assertEquals(operation.data.operationId, `op_${"c".repeat(24)}`);
-    assertEquals(operation.data.workId, WORK_ID);
-    assertEquals(operation.data.phase, "submitted");
-    assertEquals(operation.data.sentCopy, "failed");
-    assertEquals(operation.data.safeCode, "APPEND_FAILED");
-    assertEquals(operation.data.targetKind, "user");
+      // The file send recorded the count and never the attachment name.
+      const fileEntry = entries.find((entry) => entry.phase === "file_sent");
+      assertEquals(fileEntry, undefined, "a thrown email file send records no file_sent entry");
 
-    // The denied forward records its typed code, never the refusal text or body.
-    const forwardCall = entries.find((entry) =>
-      entry.phase === "skill_call" &&
-      (entry.data.skillParams as Record<string, unknown>)?.action === "forward"
-    );
-    assert(forwardCall, "the refused forward was audited");
-    assertEquals((forwardCall.data.skillResult as Record<string, unknown>).success, false);
-
-    // The reply body is hashed even though hashContent is false.
-    const replyEntry = entries.find((entry) => entry.phase === "reply_sent");
-    assert(replyEntry, "the email reply was audited");
-    assertEquals(
-      replyEntry.data.replyContentHash,
-      `sha256:${await sha256Hash(BODY_SENTINEL)}`,
-    );
-
-    // The file send recorded the count and never the attachment name.
-    const fileEntry = entries.find((entry) => entry.phase === "file_sent");
-    assertEquals(fileEntry, undefined, "a thrown email file send records no file_sent entry");
-
-    // Metrics carry the platform/skill labels only.
-    const metrics = await metricsRegistry.metrics();
-    assertNoSentinel(metrics, "the metrics output");
-  });
+      // Metrics carry the platform/skill labels only.
+      const metrics = await metricsRegistry.metrics();
+      assertNoSentinel(metrics, "the metrics output");
+    },
+  );
 });
 
 Deno.test("skill API - a malformed email request body is reported without its content", async () => {
@@ -945,7 +962,8 @@ Deno.test("skill API - a malformed email request body is reported without its co
       const response = await fetch(`http://127.0.0.1:${port}/api/skill/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer nope" },
-        body: `{"sessionId": "${h.sessionId}", "parameters": {"request": {"body": "${BODY_SENTINEL}"`,
+        body:
+          `{"sessionId": "${h.sessionId}", "parameters": {"request": {"body": "${BODY_SENTINEL}"`,
       });
       assertEquals(response.status, 400);
       await response.json();
