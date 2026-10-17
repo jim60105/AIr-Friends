@@ -275,6 +275,7 @@ Deno.test("composition - registration status, preexisting-mail exclusion and shu
       assert(runtime.services.submissionStore === runtime.submissionStore);
       assert(runtime.services.submissionEvidence === runtime.mailService);
       assert(runtime.services.forwardSourceStore === runtime.messageStore);
+      assert(runtime.services.replyEligibility);
       assert(runtime.services.preflight);
 
       // Registration is visible through the existing connection-status surface.

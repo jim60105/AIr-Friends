@@ -11,6 +11,11 @@ import type { ChannelConfig, Config } from "../../src/types/config.ts";
 import type { ResolvedReminder } from "../../src/types/reminder.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type {
+  EmailReplyAnchor,
+  EmailReplyEligibilityResolver,
+  EmailReplyEligibilityResult,
+} from "../../src/platforms/email/reply-eligibility.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { resolve } from "@std/path";
 
@@ -395,19 +400,46 @@ const EMAIL_ANCHOR = "22222222-2222-4222-8222-222222222222";
 const REMINDER_SLOT = "reminder:re1";
 
 /**
- * Email adapter double: allocation of a NEW thread is an immediate failure, and
- * the owner-thread recent history reports the anchor the reminder stored
- * (`recentIds`, empty for an unusable anchor).
+ * Email adapter double: allocation of a NEW thread is an immediate failure.
+ * Eligibility itself is asserted through the installed resolver stub, never
+ * through a bounded recent-history view.
  */
-function makeEmailAdapter(options: { recentIds?: string[] } = {}): PlatformAdapter {
-  const recentIds = options.recentIds ?? [EMAIL_ANCHOR];
+function makeEmailAdapter(): PlatformAdapter {
   return {
     platform: "email",
     getDmChannelId: () =>
       Promise.reject(new Error("email reminder must not allocate a new thread")),
-    fetchRecentMessages: () => Promise.resolve(recentIds.map((id) => ({ messageId: id }))),
     sendReply: () => Promise.resolve({ success: false, error: "not used" }),
   } as unknown as PlatformAdapter;
+}
+
+/** A host-owned eligibility answer for the reminder's retained anchor. */
+const ELIGIBLE_ANCHOR: EmailReplyEligibilityResult = {
+  ok: true,
+  value: {
+    thread: { wireMessageId: "<anchor-wire@allowed-domain.org>" },
+    recipient: "alice@allowed-domain.org",
+    subject: "When do I pay rent?",
+  },
+};
+
+/**
+ * Eligibility stub that records every anchor it is asked about, so a test can
+ * prove a refusal happened BEFORE (or instead of) the anchor lookup.
+ */
+function makeEmailEligibility(
+  answer: (anchor: EmailReplyAnchor) => EmailReplyEligibilityResult = () => ELIGIBLE_ANCHOR,
+): { resolver: EmailReplyEligibilityResolver; calls: EmailReplyAnchor[] } {
+  const calls: EmailReplyAnchor[] = [];
+  return {
+    calls,
+    resolver: {
+      resolve: (anchor) => {
+        calls.push(anchor);
+        return Promise.resolve(answer(anchor));
+      },
+    },
+  };
 }
 
 function makeEmailReminder(overrides: Partial<ResolvedReminder> = {}): ResolvedReminder {
@@ -434,6 +466,8 @@ Deno.test("processReminder - email reminder delivers into its persisted thread a
       tempDir,
     );
     enableEmailAccount(config);
+    const eligibility = makeEmailEligibility();
+    orchestrator.setEmailReplyEligibility(eligibility.resolver);
 
     const cancelledIds: string[] = [];
     const reminderStore = makeMockReminderStore((id) => cancelledIds.push(id));
@@ -471,6 +505,12 @@ Deno.test("processReminder - email reminder delivers into its persisted thread a
     assertEquals(res.emailSubmitted, true);
     assertExists(boundSessionId);
     assertEquals(cancelledIds, ["re1"]);
+    // The retained anchor was resolved by durable owner/thread/record identity.
+    assertEquals(eligibility.calls, [{
+      owner: EMAIL_OWNER,
+      threadId: EMAIL_THREAD,
+      recordId: EMAIL_ANCHOR,
+    }]);
 
     sessionRegistry.stop();
   } finally {
@@ -484,6 +524,7 @@ Deno.test("processReminder - a foreign reply on the same thread never delivers t
     const { orchestrator, skillRegistry, sessionRegistry, config } =
       await createReminderTestOrchestrator(tempDir);
     enableEmailAccount(config);
+    orchestrator.setEmailReplyEligibility(makeEmailEligibility().resolver);
 
     const cancelledIds: string[] = [];
     const reminderStore = makeMockReminderStore((id) => cancelledIds.push(id));
@@ -507,6 +548,9 @@ Deno.test("processReminder - a foreign reply on the same thread never delivers t
     assertEquals(res.success, false);
     assertEquals(res.replySent, false);
     assertEquals(cancelledIds.length, 0);
+    // The anchor was eligible and the session RAN: the failure comes from the
+    // reminder's own missing submission evidence, not from the preflight.
+    assertExists(orchestrator.mockConnector);
 
     sessionRegistry.stop();
   } finally {
@@ -548,11 +592,14 @@ Deno.test("processReminder - a corrupt email origin never gets a guessed thread"
       tempDir,
     );
     enableEmailAccount(config);
-    const reminderStore = makeMockReminderStore();
 
-    // Another owner's thread, and a valid-shaped anchor the adapter can never
-    // thread to (outside its owner-thread window): both are review-required,
-    // and neither reaches a session.
+    const cancelledIds: string[] = [];
+    const reminderStore = makeMockReminderStore((id) => cancelledIds.push(id));
+    const eligibility = makeEmailEligibility();
+    orchestrator.setEmailReplyEligibility(eligibility.resolver);
+
+    // Another owner's thread is rejected by origin ownership BEFORE eligibility
+    // is consulted; it never reaches a session.
     const foreign = makeEmailReminder({
       origin: {
         channelId: `mail:e_${"cd".repeat(32)}:${EMAIL_THREAD}`,
@@ -562,14 +609,40 @@ Deno.test("processReminder - a corrupt email origin never gets a guessed thread"
     let res = await orchestrator.processReminder(foreign, makeEmailAdapter(), reminderStore);
     assertEquals(res.success, false);
     assertEquals(orchestrator.mockConnector, null);
+    assertEquals(eligibility.calls, [], "a foreign origin is refused before any lookup");
 
+    // A valid-shaped anchor the durable resolver refuses (missing/corrupt/
+    // cross-thread/unthreadable) is review-required and never reaches a session.
+    const refusing = makeEmailEligibility(() => ({
+      ok: false,
+      error: "The reply anchor is not a retained record of this owner thread; nothing was sent.",
+    }));
+    orchestrator.setEmailReplyEligibility(refusing.resolver);
     res = await orchestrator.processReminder(
       makeEmailReminder(),
-      makeEmailAdapter({ recentIds: [] }),
+      makeEmailAdapter(),
       reminderStore,
     );
     assertEquals(res.success, false);
     assertEquals(orchestrator.mockConnector, null);
+    assertEquals(refusing.calls, [{
+      owner: EMAIL_OWNER,
+      threadId: EMAIL_THREAD,
+      recordId: EMAIL_ANCHOR,
+    }]);
+
+    // An unreadable eligibility capability fails closed too.
+    orchestrator.setEmailReplyEligibility({
+      resolve: () => Promise.reject(new Error("archive unavailable")),
+    });
+    res = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      reminderStore,
+    );
+    assertEquals(res.success, false);
+    assertEquals(orchestrator.mockConnector, null);
+    assertEquals(cancelledIds, ["re1", "re1", "re1"]);
 
     sessionRegistry.stop();
   } finally {
@@ -583,6 +656,8 @@ Deno.test("processReminder - a disabled or removed email account prevents remind
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
     );
+    const eligibility = makeEmailEligibility();
+    orchestrator.setEmailReplyEligibility(eligibility.resolver);
 
     // Disabled entry, then the entry removed entirely: neither ever sends.
     const cases: ChannelConfig[][] = [
@@ -604,6 +679,8 @@ Deno.test("processReminder - a disabled or removed email account prevents remind
       assertEquals(cancelledIds, ["re1"]);
       assertEquals(orchestrator.mockConnector, null);
     }
+    // The allowlist refusal precedes any anchor lookup.
+    assertEquals(eligibility.calls, []);
 
     sessionRegistry.stop();
   } finally {
@@ -620,9 +697,16 @@ Deno.test("processReminder - a submitted reminder operation is not resubmitted a
     enableEmailAccount(config);
     // The durable journal records the reminder's own operation as submitted —
     // exactly the state left behind when disabling the reminder record failed.
+    let eligibilityCalls = 0;
+    orchestrator.setEmailReplyEligibility({
+      resolve: () => {
+        eligibilityCalls++;
+        return Promise.reject(new Error("evidence suppression must precede eligibility"));
+      },
+    });
     orchestrator.setEmailSubmissionEvidence({
       lookup: (_owner, key) =>
-        key.actionSlot === REMINDER_SLOT
+        key.workId === "re1" && key.actionSlot === REMINDER_SLOT
           ? {
             operationId: "op_reminder_1",
             phase: "submitted",
@@ -646,6 +730,7 @@ Deno.test("processReminder - a submitted reminder operation is not resubmitted a
     assertEquals(cancelledIds, ["re1"]);
     // No session was started for the already-submitted operation.
     assertEquals(orchestrator.mockConnector, null);
+    assertEquals(eligibilityCalls, 0);
 
     sessionRegistry.stop();
   } finally {
@@ -660,9 +745,16 @@ Deno.test("processReminder - an unresolved reminder operation is review-required
       tempDir,
     );
     enableEmailAccount(config);
+    let eligibilityCalls = 0;
+    orchestrator.setEmailReplyEligibility({
+      resolve: () => {
+        eligibilityCalls++;
+        return Promise.reject(new Error("evidence suppression must precede eligibility"));
+      },
+    });
     orchestrator.setEmailSubmissionEvidence({
       lookup: (_owner, key) =>
-        key.actionSlot === REMINDER_SLOT
+        key.workId === "re1" && key.actionSlot === REMINDER_SLOT
           ? { operationId: "op_reminder_1", phase: "unknown", reused: false }
           : undefined,
     });
@@ -678,6 +770,76 @@ Deno.test("processReminder - an unresolved reminder operation is review-required
 
     assertEquals(res.success, false);
     assertEquals(res.emailUnknown, true);
+    assertEquals(cancelledIds, ["re1"]);
+    assertEquals(orchestrator.mockConnector, null);
+    assertEquals(eligibilityCalls, 0);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("processReminder - an in-flight reminder operation is review-required, never replayed", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
+      tempDir,
+    );
+    enableEmailAccount(config);
+    // An unclosed `submitting` journal slot may already have been accepted, so it
+    // suppresses every automatic retry before any generation or anchor lookup.
+    let eligibilityCalls = 0;
+    orchestrator.setEmailReplyEligibility({
+      resolve: () => {
+        eligibilityCalls++;
+        return Promise.reject(new Error("evidence suppression must precede eligibility"));
+      },
+    });
+    orchestrator.setEmailSubmissionEvidence({
+      lookup: (_owner, key) =>
+        key.workId === "re1" && key.actionSlot === REMINDER_SLOT
+          ? { operationId: "op_reminder_s", phase: "submitting", reused: false }
+          : undefined,
+    });
+
+    const cancelledIds: string[] = [];
+    const res = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      makeMockReminderStore((id) => cancelledIds.push(id)),
+    );
+
+    assertEquals(res.success, false);
+    assertEquals(res.emailUnknown, true);
+    assertEquals(cancelledIds, ["re1"]);
+    assertEquals(orchestrator.mockConnector, null);
+    assertEquals(eligibilityCalls, 0);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("processReminder - email without an eligibility capability fails closed", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
+      tempDir,
+    );
+    enableEmailAccount(config);
+    // No resolver installed: the anchor cannot be proven usable, so the reminder
+    // is review-required with no session instead of being retried every tick.
+    const cancelledIds: string[] = [];
+    const res = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      makeMockReminderStore((id) => cancelledIds.push(id)),
+    );
+
+    assertEquals(res.success, false);
+    assertEquals(res.error, "email_reminder_origin_review_required");
     assertEquals(cancelledIds, ["re1"]);
     assertEquals(orchestrator.mockConnector, null);
 
@@ -741,6 +903,7 @@ Deno.test("processReminder - a failed reminder patch never resends a submitted e
     );
     enableEmailAccount(config);
     const patchFailure = makeFailingReminderStore();
+    orchestrator.setEmailReplyEligibility(makeEmailEligibility().resolver);
 
     orchestrator.setConnectorSetup((connector) => {
       connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
@@ -769,7 +932,7 @@ Deno.test("processReminder - a failed reminder patch never resends a submitted e
     orchestrator.mockConnector = null;
     orchestrator.setEmailSubmissionEvidence({
       lookup: (_owner, key) =>
-        key.actionSlot === REMINDER_SLOT
+        key.workId === "re1" && key.actionSlot === REMINDER_SLOT
           ? {
             operationId: "op_reminder_1",
             phase: "submitted",
@@ -802,6 +965,7 @@ Deno.test("processReminder - a failed reminder patch never replays an unresolved
     enableEmailAccount(config);
     const patchFailure = makeFailingReminderStore();
     const cancelledIds: string[] = [];
+    orchestrator.setEmailReplyEligibility(makeEmailEligibility().resolver);
 
     orchestrator.setConnectorSetup((connector) => {
       connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
@@ -827,7 +991,7 @@ Deno.test("processReminder - a failed reminder patch never replays an unresolved
     orchestrator.mockConnector = null;
     orchestrator.setEmailSubmissionEvidence({
       lookup: (_owner, key) =>
-        key.actionSlot === REMINDER_SLOT
+        key.workId === "re1" && key.actionSlot === REMINDER_SLOT
           ? { operationId: "op_reminder_u", phase: "unknown", reused: false }
           : undefined,
     });
