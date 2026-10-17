@@ -61,6 +61,17 @@ function encodeQuotedData(value: Record<string, unknown>): string {
 
 /** The quoted attachment metadata rendered inside the boundary. */
 function quotedAttachmentData(attachment: Attachment): Record<string, unknown> {
+  if (attachment.kind === "email-local") {
+    return {
+      id: attachment.id,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      ...(attachment.size === undefined ? {} : { size: attachment.size }),
+      ...(attachment.width === undefined ? {} : { width: attachment.width }),
+      ...(attachment.height === undefined ? {} : { height: attachment.height }),
+      ...(attachment.sessionPath ? { sessionPath: attachment.sessionPath } : {}),
+    };
+  }
   return {
     id: attachment.id,
     url: attachment.url,
@@ -946,6 +957,11 @@ export class ContextAssembler {
   private formatAttachmentDescriptions(attachments: readonly Attachment[]): string {
     return attachments.map((att) => {
       const sizeStr = att.size ? ` ${formatFileSize(att.size)}` : "";
+      if (att.kind === "email-local") {
+        const location = att.sessionPath ??
+          `[local:${att.owner}/${att.recordId}/${att.attachmentId}]`;
+        return `📎 ${att.filename} (${att.mimeType}${sizeStr}) ${location}`;
+      }
       return `📎 ${att.filename} (${att.mimeType}${sizeStr}) ${att.url}`;
     }).join(" | ");
   }

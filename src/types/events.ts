@@ -16,19 +16,16 @@ export function isValidPlatform(value: string): value is Platform {
 }
 
 /**
- * Attachment from a message (image, file, sticker, etc.)
+ * Common properties shared across all attachment variants
  */
-export interface Attachment {
-  /** Unique identifier for this attachment (platform-specific) */
+export interface BaseAttachment {
+  /** Unique identifier for this attachment */
   id: string;
-
-  /** URL to access the attachment */
-  url: string;
 
   /** MIME type (e.g., "image/png", "application/pdf") */
   mimeType: string;
 
-  /** Original filename */
+  /** Original or sanitized filename */
   filename: string;
 
   /** File size in bytes (if available) */
@@ -42,6 +39,50 @@ export interface Attachment {
 
   /** Whether this is an image type that could be sent as ContentBlock::Image */
   isImage: boolean;
+}
+
+/**
+ * Remote network attachment (Discord, Misskey, etc.)
+ */
+export interface NetworkAttachment extends BaseAttachment {
+  kind?: "network";
+  /** URL to access the attachment */
+  url: string;
+}
+
+/**
+ * Stored local email attachment reference (opaque owner/record/attachment IDs)
+ */
+export interface LocalEmailAttachment extends BaseAttachment {
+  kind: "email-local";
+  /** Owner userId whose mailbox stores this attachment */
+  owner: string;
+  /** Stored record ID within owner's mailbox */
+  recordId: string;
+  /** Attachment UUID within the stored email record */
+  attachmentId: string;
+  /** Materialized session path if prepared for the current session */
+  sessionPath?: string;
+}
+
+/**
+ * Attachment from a message (image, file, sticker, etc.)
+ * Discriminated union between network attachments and local email attachments.
+ */
+export type Attachment = NetworkAttachment | LocalEmailAttachment;
+
+/**
+ * Type guard for LocalEmailAttachment
+ */
+export function isLocalEmailAttachment(att: Attachment): att is LocalEmailAttachment {
+  return (att as LocalEmailAttachment).kind === "email-local";
+}
+
+/**
+ * Type guard for NetworkAttachment
+ */
+export function isNetworkAttachment(att: Attachment): att is NetworkAttachment {
+  return att.kind !== "email-local" && typeof (att as NetworkAttachment).url === "string";
 }
 
 /**
