@@ -84,7 +84,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - email enabled triggers validation and activation guard", async () => {
+Deno.test("loadConfig - email enabled is a complete platform on its own", async () => {
   const validEmailConfig = `
 platforms:
   discord:
@@ -117,12 +117,15 @@ workspace:
 `;
 
   await withTestConfig(validEmailConfig, async (dir) => {
-    // The config above is otherwise valid, so the production activation guard fires.
-    await assertRejects(
-      () => loadConfig(dir),
-      ConfigError,
-      "Email platform activation is unavailable in this release",
-    );
+    // Email is the only enabled platform: no Discord token is required, and the complete
+    // transport/trust configuration loads instead of being rejected by an activation guard.
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.email?.enabled, true);
+    assertEquals(result.platforms.email?.address, "bot@example.com");
+    assertEquals(result.platforms.email?.imap.tlsMode, "tls");
+    assertEquals(result.platforms.email?.imap.port, 993);
+    assertEquals(result.platforms.email?.smtp.port, 465);
+    assertEquals(result.platforms.email?.receivingAuth.attestedStripping, true);
   });
 });
 
