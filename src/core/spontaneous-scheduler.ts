@@ -69,6 +69,17 @@ export class SpontaneousScheduler extends BaseScheduler {
   private occurrenceStore: EmailSpontaneousStore | null = null;
   private startupPromise: Promise<void> = Promise.resolve();
   private generation = 0;
+  /**
+   * Serializes every durable occurrence-lane step (startup restore/persist/arm and each
+   * dispatch with its finalizing write) in one process-wide queue.
+   *
+   * `stop()` cannot cancel a dispatch that is already running, and a later `start()` builds
+   * fresh per-platform state. Chaining through this queue makes a new lifecycle wait for the
+   * previous lifecycle's startup and in-flight occurrence to finish before it restores or
+   * arms the lane, so one occurrence can never be dispatched by two lifecycles at once and a
+   * startup can never race another startup for the first persisted occurrence.
+   */
+  private durableQueue: Promise<void> = Promise.resolve();
 
   constructor(config: Config) {
     super();
@@ -185,7 +196,9 @@ export class SpontaneousScheduler extends BaseScheduler {
       });
     }
 
-    this.startupPromise = this.startDurableLanes(durableLanes, generation);
+    this.startupPromise = this.enqueueDurableWork(() =>
+      this.startDurableLanes(durableLanes, generation)
+    );
   }
 
   /**
@@ -265,6 +278,18 @@ export class SpontaneousScheduler extends BaseScheduler {
     state.timerId = setTimeout(() => {
       this.executeForPlatform(platform);
     }, interval);
+  }
+
+  /**
+   * Run one durable lane step after every earlier durable lane step has settled.
+   */
+  private enqueueDurableWork<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.durableQueue.then(fn, fn);
+    this.durableQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
   }
 
   /**
@@ -367,7 +392,21 @@ export class SpontaneousScheduler extends BaseScheduler {
   private async executeForPlatform(platform: Platform): Promise<void> {
     const occurrenceStore = this.occurrenceStore;
     if (occurrenceStore && platform === DURABLE_OCCURRENCE_PLATFORM) {
-      await this.executeDurablePlatform(platform, occurrenceStore);
+      const platformState = this.states.get(platform);
+      const pending = platformState?.occurrence;
+      if (!platformState || !this.callback || !pending) return;
+      if (platformState.isRunning) {
+        // The running invocation owns finalization and successor arming for this occurrence.
+        this.logger.warn("Previous spontaneous post still running on {platform}, skipping", {
+          platform,
+        });
+        return;
+      }
+      platformState.isRunning = true;
+      platformState.timerId = null;
+      await this.enqueueDurableWork(() =>
+        this.executeDurablePlatform(platform, occurrenceStore, platformState, pending)
+      );
       return;
     }
 
@@ -418,22 +457,15 @@ export class SpontaneousScheduler extends BaseScheduler {
   private async executeDurablePlatform(
     platform: Platform,
     store: EmailSpontaneousStore,
+    platformState: PlatformSchedulerState,
+    occurrence: SpontaneousOccurrence,
   ): Promise<void> {
-    const state = this.states.get(platform);
-    const occurrence = state?.occurrence;
-    if (!state || !this.callback || !occurrence) return;
-
-    if (state.isRunning) {
-      // The running invocation owns finalization and successor arming for this occurrence.
-      this.logger.warn("Previous spontaneous post still running on {platform}, skipping", {
-        platform,
-      });
+    const callback = this.callback;
+    if (!callback) {
+      platformState.isRunning = false;
       return;
     }
-
     const generation = this.generation;
-    state.isRunning = true;
-    state.timerId = null;
     let outcome: SpontaneousDispatchOutcome = "completed";
 
     try {
@@ -441,8 +473,8 @@ export class SpontaneousScheduler extends BaseScheduler {
         platform,
         occurrenceId: occurrence.occurrenceId,
       });
-      await this.callback(platform, occurrence);
-      state.lastExecutedAt = new Date();
+      await callback(platform, occurrence);
+      platformState.lastExecutedAt = new Date();
       this.logger.info("Spontaneous post completed on {platform}", {
         platform,
         occurrenceId: occurrence.occurrenceId,
@@ -456,7 +488,7 @@ export class SpontaneousScheduler extends BaseScheduler {
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      state.isRunning = false;
+      platformState.isRunning = false;
     }
 
     try {

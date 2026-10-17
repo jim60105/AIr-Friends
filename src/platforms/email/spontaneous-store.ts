@@ -299,7 +299,7 @@ export class EmailSpontaneousStore {
         dueAt,
         status: "scheduled",
       };
-      await this.writeState(shared, canonicalRoot, { occurrence, previous: null });
+      await this.writeState(canonicalRoot, { occurrence, previous: null });
       return occurrence;
     });
   }
@@ -333,7 +333,7 @@ export class EmailSpontaneousStore {
         );
       }
       const selected: SpontaneousOccurrence = { ...active, status: "selected", target };
-      await this.writeState(shared, canonicalRoot, {
+      await this.writeState(canonicalRoot, {
         occurrence: selected,
         previous: state.previous,
       });
@@ -362,7 +362,7 @@ export class EmailSpontaneousStore {
         );
       }
       const started: SpontaneousOccurrence = { ...active, status: "started" };
-      await this.writeState(shared, canonicalRoot, {
+      await this.writeState(canonicalRoot, {
         occurrence: started,
         previous: state.previous,
       });
@@ -441,7 +441,7 @@ export class EmailSpontaneousStore {
         dueAt: nextDueAt,
         status: "scheduled",
       };
-      await this.writeState(shared, canonicalRoot, {
+      await this.writeState(canonicalRoot, {
         occurrence: successor,
         previous: { ...active, status },
       });
@@ -463,6 +463,15 @@ export class EmailSpontaneousStore {
     return active;
   }
 
+  /**
+   * Serialize one state-root mutation and fence the root when the durable state cannot be
+   * trusted.
+   *
+   * A rejected write (`WRITE_FAILED`) is an uncertain commit, and an unreadable or invalid
+   * snapshot (`STORE_CORRUPT`) means the lane cannot be inspected at all; both fence the root
+   * (`STORE_BLOCKED`) so no later caller can allocate a replacement identity. Refusals that
+   * merely reject an illegal transition leave the durable state trustworthy and do not fence.
+   */
   private async withLock<R>(
     shared: SharedRootState,
     fn: () => Promise<R>,
@@ -485,6 +494,15 @@ export class EmailSpontaneousStore {
         );
       }
       return await fn();
+    } catch (error) {
+      if (
+        error instanceof EmailSpontaneousStoreError &&
+        (error.diagnosticCode === SpontaneousDiagnosticCode.WRITE_FAILED ||
+          error.diagnosticCode === SpontaneousDiagnosticCode.STORE_CORRUPT)
+      ) {
+        shared.blocked = true;
+      }
+      throw error;
     } finally {
       release();
     }
@@ -508,7 +526,6 @@ export class EmailSpontaneousStore {
   }
 
   private async writeState(
-    shared: SharedRootState,
     canonicalRoot: string,
     state: SpontaneousScheduleState,
   ): Promise<void> {
@@ -525,7 +542,6 @@ export class EmailSpontaneousStore {
         this.durableOptions,
       );
     } catch (error) {
-      shared.blocked = true;
       const durableCode = error instanceof DurableFileError ? error.diagnosticCode : undefined;
       logger.error("Spontaneous schedule snapshot write failed; lane fenced", {
         durableCode: durableCode ?? DurableDiagnosticCode.WRITE_FAILED,
@@ -579,6 +595,14 @@ function parseSnapshot(text: string): SpontaneousScheduleState {
     throw new EmailSpontaneousStoreError(
       SpontaneousDiagnosticCode.STORE_CORRUPT,
       "Spontaneous schedule snapshot has an unsupported envelope",
+    );
+  }
+  // Both slots must be present; `null` is the explicit empty slot. An envelope that simply
+  // omits them is an incomplete document, not a pristine lane, and must never be overwritten.
+  if (!("occurrence" in parsed) || !("previous" in parsed)) {
+    throw new EmailSpontaneousStoreError(
+      SpontaneousDiagnosticCode.STORE_CORRUPT,
+      "Spontaneous schedule snapshot envelope is incomplete",
     );
   }
   const occurrence = parseRecord(parsed.occurrence, "occurrence");

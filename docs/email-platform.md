@@ -783,11 +783,11 @@ ls -l data/workspaces/email/<ownerId>/email/source/
 
 ### Outcomes, Uncertainty and Operator Duties
 
-| Phase       | Meaning                                                                             | Caller action                                                        |
-| ----------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `submitted` | Positive final DATA acknowledgement; `sentCopy` reports the remote copy separately.  | None.                                                                |
-| `failed`    | Definite rejection before acceptance (transport safe code).                          | No automatic retry; a new, explicitly authorized logical action only. |
-| `unknown`   | Crash, lost acknowledgement, or an acceptance that could not be persisted.           | Manual operator review; automatic resend is suppressed.               |
+| Phase       | Meaning                                                                             | Caller action                                                         |
+| ----------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `submitted` | Positive final DATA acknowledgement; `sentCopy` reports the remote copy separately. | None.                                                                 |
+| `failed`    | Definite rejection before acceptance (transport safe code).                         | No automatic retry; a new, explicitly authorized logical action only. |
+| `unknown`   | Crash, lost acknowledgement, or an acceptance that could not be persisted.          | Manual operator review; automatic resend is suppressed.               |
 
 - **Manual review of `unknown`**: the call returns `unknown` with the operation id and the
   persisted evidence, and a repeated request for the same key returns the recorded result with
@@ -1019,7 +1019,10 @@ all, so a stale `spontaneous:email` key there has no effect.
 ### Schedule Invariants
 
 - **Persist before any timer**: a scheduled occurrence is written and fsynced before the
-  scheduler arms a `setTimeout`. A failed initial persistence arms nothing and writes no file.
+  scheduler arms a `setTimeout`, so no dispatch can ever run for an occurrence that is not
+  durable. A failed initial persistence arms no timer and fences the lane; because a rejection
+  can arrive after the rename, the snapshot may already have been replaced, so the file must be
+  inspected rather than assumed absent.
 - **Overdue identity**: on restore the original `occurrenceId` and `dueAt` are retained even
   when overdue; the delay simply becomes zero. The persisted due time is authoritative and is
   never rewritten to `now` (unlike `resolveScheduleTime`, which is used only for the non-email
@@ -1059,10 +1062,15 @@ all, so a stale `spontaneous:email` key there has no effect.
   write, with zero callback invocations — no replacement selection and no additional DATA
   transaction for it. When the delivery is unresolved (`prepared`/`failed`/absent) the same
   occurrence is resumed with its identity and target intact.
-- **Fenced lane**: a rejected snapshot write fences the state root for the remaining process
-  lifetime (`STORE_BLOCKED`), so selection, dispatch and successor scheduling all stop instead
-  of allocating a replacement identity. Automatic work resumes only after a restart re-reads
-  the durable state.
+- **Fenced lane**: a rejected snapshot write (`WRITE_FAILED`) or an unreadable/invalid snapshot
+  (`STORE_CORRUPT`) fences the state root for the remaining process lifetime (`STORE_BLOCKED`),
+  so selection, dispatch and successor scheduling all stop instead of allocating a replacement
+  identity. Refusals that only reject an illegal transition leave the state trustworthy and do
+  not fence. Automatic work resumes only after a restart re-reads the durable state.
+- **Serialized lane steps**: every durable lane step (startup restore/persist/arming and each
+  dispatch with its finalizing write) runs in one serialized queue, so a scheduler
+  `stop()`/`start()` cycle cannot dispatch the same occurrence twice, cannot race two startups
+  for the first persisted occurrence, and cannot leave a durable successor unarmed.
 - **Corruption blocks the lane**: malformed, semantically invalid, or unsupported snapshots
   fail closed (`STORE_CORRUPT`); the file is never repaired, rewritten, or trimmed, and the
   lane arms no timer. Inspect the file directly and restart to resume.

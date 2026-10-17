@@ -128,10 +128,11 @@ function createCallback(handler?: (occurrence?: SpontaneousOccurrence) => void):
   occurrences: Array<SpontaneousOccurrence | undefined>;
 } {
   const occurrences: Array<SpontaneousOccurrence | undefined> = [];
-  const callback: SpontaneousPostCallback = (_platform, occurrence) => {
+  const callback: SpontaneousPostCallback = async (_platform, occurrence) => {
     occurrences.push(occurrence);
-    handler?.(occurrence);
-    return Promise.resolve();
+    // The dispatched work must be awaited: the scheduler finalizes the occurrence only after
+    // the callback settles, exactly like the real dispatch path.
+    await handler?.(occurrence);
   };
   return { callback, occurrences };
 }
@@ -741,5 +742,249 @@ Deno.test("email spontaneous - diagnostic codes remain safe and typed", async ()
     assert(error instanceof EmailSpontaneousStoreError);
     assertEquals(error.diagnosticCode, SpontaneousDiagnosticCode.INVALID_DUE_AT);
     assert(error.message.includes("INVALID_DUE_AT"));
+  });
+});
+
+Deno.test("email spontaneous - an incomplete snapshot envelope blocks the lane and is preserved", async () => {
+  await withTempDir(async (dir) => {
+    const incomplete = `{"v":1}`;
+    await Deno.writeTextFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), incomplete);
+
+    const store = new EmailSpontaneousStore({ emailRoot: dir });
+    const failure = await assertRejects(
+      () => store.restore(),
+      EmailSpontaneousStoreError,
+      "incomplete",
+    );
+    assertEquals(
+      (failure as EmailSpontaneousStoreError).diagnosticCode,
+      SpontaneousDiagnosticCode.STORE_CORRUPT,
+    );
+
+    const scheduler = new SpontaneousScheduler(
+      makeConfig({
+        emailEnabled: true,
+        emailSpontaneous: true,
+        minIntervalMs: 30,
+        maxIntervalMs: 40,
+      }),
+    );
+    const { callback, occurrences } = createCallback();
+    scheduler.setOccurrenceStore(new EmailSpontaneousStore({ emailRoot: dir }));
+    scheduler.setCallback(callback);
+
+    scheduler.start();
+    await scheduler.whenReady();
+    await observationWindow();
+
+    assertEquals(scheduler.getStatus().email?.nextScheduledAt ?? null, null);
+    assertEquals(occurrences.length, 0);
+    assertEquals(await Deno.readTextFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)), incomplete);
+    scheduler.stop();
+  });
+});
+
+Deno.test("email spontaneous - an unreadable snapshot fences the lane instead of allocating a successor", async () => {
+  await withTempDir(async (dir) => {
+    // A snapshot path that cannot be read as a file is an integrity failure, not an empty lane.
+    await Deno.mkdir(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME));
+
+    const store = new EmailSpontaneousStore({ emailRoot: dir });
+    await assertRejects(() => store.restore(), EmailSpontaneousStoreError, "Failed to read");
+
+    // The read failure fences the root, so no later caller can allocate a replacement identity.
+    await assertRejects(
+      () => store.schedule(new Date(Date.now() + 1000)),
+      EmailSpontaneousStoreError,
+      "fenced",
+    );
+
+    const scheduler = new SpontaneousScheduler(
+      makeConfig({
+        emailEnabled: true,
+        emailSpontaneous: true,
+        minIntervalMs: 30,
+        maxIntervalMs: 40,
+      }),
+    );
+    const { callback, occurrences } = createCallback();
+    scheduler.setOccurrenceStore(new EmailSpontaneousStore({ emailRoot: dir }));
+    scheduler.setCallback(callback);
+
+    scheduler.start();
+    await scheduler.whenReady();
+    await observationWindow();
+    assertEquals(scheduler.getStatus().email?.nextScheduledAt ?? null, null);
+    assertEquals(occurrences.length, 0);
+    scheduler.stop();
+  });
+});
+
+Deno.test("email spontaneous - an interrupted occurrence without recorded evidence resumes identically", async () => {
+  await withTempDir(async (dir) => {
+    const dueAt = new Date(Date.now() - 60000);
+    const seeding = new EmailSpontaneousStore({ emailRoot: dir });
+    const seeded = await seeding.schedule(dueAt);
+    await seeding.select(seeded.occurrenceId, { owner: OWNER, threadId: THREAD_ONE });
+    await seeding.begin(seeded.occurrenceId);
+
+    const scheduler = new SpontaneousScheduler(
+      makeConfig({
+        emailEnabled: true,
+        emailSpontaneous: true,
+        minIntervalMs: 3600000,
+        maxIntervalMs: 3600000,
+      }),
+    );
+    const { callback, occurrences } = createCallback();
+    // The provider reports no recorded operation, so the interrupted attempt is unresolved.
+    scheduler.setOccurrenceStore(
+      new EmailSpontaneousStore({ emailRoot: dir, evidence: { lookup: () => undefined } }),
+    );
+    scheduler.setCallback(callback);
+
+    scheduler.start();
+    await scheduler.whenReady();
+    await waitFor(() => occurrences.length > 0);
+
+    const resumed = occurrences[0];
+    assertEquals(resumed?.occurrenceId, seeded.occurrenceId);
+    assertEquals(resumed?.dueAt.toISOString(), dueAt.toISOString());
+    assertEquals(resumed?.status, "started");
+    assertEquals(resumed?.target?.owner, OWNER);
+    assertEquals(resumed?.target?.threadId, THREAD_ONE);
+    scheduler.stop();
+  });
+});
+
+Deno.test("email spontaneous - a prepared attempt is unresolved and resumes the same occurrence", async () => {
+  await withTempDir(async (dir) => {
+    const seeding = new EmailSpontaneousStore({ emailRoot: dir });
+    const seeded = await seeding.schedule(new Date(Date.now() - 60000));
+    await seeding.select(seeded.occurrenceId, { owner: OWNER, threadId: THREAD_ONE });
+    await seeding.begin(seeded.occurrenceId);
+
+    const key = spontaneousOperationKey(seeded.occurrenceId);
+    _resetSharedRegistryForTesting();
+    const writer = new SubmissionStore(dir);
+    await writer.recover();
+    await writer.prepare(OWNER, key, "digest-prepared", "outbound/op_prepared.eml");
+
+    _resetSharedRegistryForTesting();
+    const recovered = new SubmissionStore(dir);
+    await recovered.recover();
+    assertEquals(recovered.lookup(OWNER, key)?.phase, "prepared");
+
+    const scheduler = new SpontaneousScheduler(
+      makeConfig({
+        emailEnabled: true,
+        emailSpontaneous: true,
+        minIntervalMs: 3600000,
+        maxIntervalMs: 3600000,
+      }),
+    );
+    const { callback, occurrences } = createCallback();
+    scheduler.setOccurrenceStore(
+      new EmailSpontaneousStore({ emailRoot: dir, evidence: recovered }),
+    );
+    scheduler.setCallback(callback);
+
+    scheduler.start();
+    await scheduler.whenReady();
+    await waitFor(() => occurrences.length > 0);
+    assertEquals(occurrences[0]?.occurrenceId, seeded.occurrenceId);
+    assertEquals(occurrences[0]?.target?.threadId, THREAD_ONE);
+    scheduler.stop();
+  });
+});
+
+Deno.test("email spontaneous - a real dispatch binds the target durably before it runs", async () => {
+  await withTempDir(async (dir) => {
+    const store = new EmailSpontaneousStore({ emailRoot: dir });
+    const occurrence = await store.schedule(new Date(Date.now() - 1000));
+
+    const observed: string[] = [];
+    const { callback, occurrences } = createCallback(async (pending) => {
+      assert(pending);
+      // The consumer is responsible for binding the target before any session or send work.
+      await store.select(pending.occurrenceId, { owner: OWNER, threadId: THREAD_ONE });
+      await store.begin(pending.occurrenceId);
+      // Only after the binding is durable does the consumer perform the dispatched work.
+      const durable = await new EmailSpontaneousStore({ emailRoot: dir }).restore();
+      observed.push(durable.occurrence?.status ?? "missing");
+    });
+
+    const scheduler = new SpontaneousScheduler(
+      makeConfig({
+        emailEnabled: true,
+        emailSpontaneous: true,
+        minIntervalMs: 3600000,
+        maxIntervalMs: 3600000,
+      }),
+    );
+    scheduler.setOccurrenceStore(store);
+    scheduler.setCallback(callback);
+
+    scheduler.start();
+    await scheduler.whenReady();
+    await waitFor(() => occurrences.length > 0);
+
+    assertEquals(occurrences[0]?.occurrenceId, occurrence.occurrenceId);
+    assertEquals(observed, ["started"]);
+
+    // A bound-but-unresolved dispatch is recorded for review with a distinct successor.
+    await waitFor(async () => (await readSnapshot(dir)).previous !== null);
+    const snapshot = await readSnapshot(dir);
+    assertEquals(snapshot.previous?.occurrenceId, occurrence.occurrenceId);
+    assertEquals(snapshot.previous?.target?.threadId, THREAD_ONE);
+    assertNotEquals(snapshot.occurrence?.occurrenceId, occurrence.occurrenceId);
+    scheduler.stop();
+  });
+});
+
+Deno.test("email spontaneous - a scheduler restart never dispatches one occurrence twice", async () => {
+  await withTempDir(async (dir) => {
+    const store = new EmailSpontaneousStore({ emailRoot: dir });
+    const occurrence = await store.schedule(new Date(Date.now() - 1000));
+
+    const gate = Promise.withResolvers<void>();
+    const dispatched: string[] = [];
+    const { callback } = createCallback(async (pending) => {
+      dispatched.push(pending?.occurrenceId ?? "unknown");
+      await gate.promise;
+    });
+    const scheduler = new SpontaneousScheduler(
+      makeConfig({
+        emailEnabled: true,
+        emailSpontaneous: true,
+        minIntervalMs: 3600000,
+        maxIntervalMs: 3600000,
+      }),
+    );
+    scheduler.setOccurrenceStore(store);
+    scheduler.setCallback(callback);
+
+    scheduler.start();
+    await scheduler.whenReady();
+    await waitFor(() => dispatched.length === 1);
+
+    // Restart while the first dispatch is still in flight: the new lifecycle must wait for it
+    // instead of dispatching the same durable occurrence a second time.
+    scheduler.stop();
+    scheduler.start();
+    await observationWindow();
+    assertEquals(dispatched, [occurrence.occurrenceId]);
+
+    gate.resolve();
+    await waitFor(async () => (await readSnapshot(dir)).previous !== null);
+    // The current lifecycle finishes arming only after the interrupted dispatch finalizes.
+    await scheduler.whenReady();
+    assertEquals(dispatched, [occurrence.occurrenceId]);
+    assertNotEquals(
+      scheduler.getStatus().email?.nextScheduledAt ?? null,
+      null,
+      "the successor successor must still be armed by the current lifecycle",
+    );
+    scheduler.stop();
   });
 });
