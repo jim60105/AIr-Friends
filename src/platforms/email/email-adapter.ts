@@ -185,6 +185,10 @@ export class EmailAdapter extends PlatformAdapter {
   private readonly poller: EmailMailboxPoller;
   private readonly botOwnerId: string;
 
+  /** In-flight `connect()`, shared by concurrent callers so the poller starts exactly once. */
+  private startPromise: Promise<void> | null = null;
+  /** Set while a `disconnect()` is in flight, so a start that is still running stops instead. */
+  private stopping = false;
   private started = false;
 
   constructor(options: EmailAdapterOptions) {
@@ -224,41 +228,74 @@ export class EmailAdapter extends PlatformAdapter {
   // ============ Lifecycle ============
 
   /**
-   * Start receiving: recovery first, then the poller's own serialized rounds. Idempotent, so a
-   * repeated connect never arms a second round timer.
+   * Start receiving: recovery first, then the poller's own serialized rounds.
+   *
+   * Concurrent callers share one start, so a repeated connect never arms a second round timer.
+   * A `disconnect()` that lands while the first round is still in flight wins: the poller is
+   * stopped instead of arming the repeating timer behind the caller's back.
    */
   async connect(): Promise<void> {
     if (this.started) return;
+    if (this.startPromise) return await this.startPromise;
+
+    this.stopping = false;
     this.updateConnectionState(ConnectionState.CONNECTING);
-    try {
-      await this.poller.start();
-    } catch (error) {
-      this.updateConnectionState(
-        ConnectionState.ERROR,
-        error instanceof Error ? error.message : String(error),
-      );
-      throw error;
-    }
-    this.started = true;
-    this.updateConnectionState(ConnectionState.CONNECTED);
+    const start = (async () => {
+      try {
+        await this.poller.start();
+      } catch (error) {
+        this.updateConnectionState(
+          ConnectionState.ERROR,
+          error instanceof Error ? error.message : String(error),
+        );
+        throw error;
+      }
+      if (this.stopping) {
+        // The caller asked to stop while the first round was running.
+        await this.poller.stop();
+        this.updateConnectionState(ConnectionState.DISCONNECTED);
+        return;
+      }
+      this.started = true;
+      this.updateConnectionState(ConnectionState.CONNECTED);
+    })().finally(() => {
+      this.startPromise = null;
+    });
+    this.startPromise = start;
+    return await start;
   }
 
   /**
    * Stop receiving: no new work is accepted, the in-flight round (and its hand-off) settles, the
    * round timer is cleared and the transport is disconnected.
+   *
+   * A start that is still running is awaited and then stopped, so no polling loop survives a
+   * disconnect that arrived mid-start.
    */
   async disconnect(): Promise<void> {
-    if (!this.started) return;
-    this.started = false;
-    await this.poller.stop();
-    this.updateConnectionState(ConnectionState.DISCONNECTED);
+    this.stopping = true;
+    const pending = this.startPromise;
+    if (pending) {
+      try {
+        await pending;
+      } catch {
+        // A failed start left nothing running.
+      }
+    }
+    if (this.started) {
+      this.started = false;
+      await this.poller.stop();
+      this.updateConnectionState(ConnectionState.DISCONNECTED);
+    }
+    this.stopping = false;
   }
 
   /**
    * Run exactly one poll round through the owned poller.
    *
    * Exposed for the controlled smoke checks and deterministic tests that must not wait for the
-   * configured interval; rounds still never overlap and still honour `stop()`.
+   * configured interval; rounds still never overlap, may also be driven before `connect()`, and
+   * still honour `disconnect()`.
    */
   poll(): Promise<PollCycleResult> {
     return this.poller.poll();
@@ -270,9 +307,10 @@ export class EmailAdapter extends PlatformAdapter {
    * Normalize one accepted mailbox work item into the common event entry point.
    *
    * The event carries the durable work receipt so the session lifecycle fences the same work id
-   * the poller accepted; a work item whose stored record is unreadable emits NOTHING (the poller
-   * logs the hand-off failure and keeps the durable acceptance for the next round) rather than
-   * fabricating an empty message.
+   * the poller accepted; a work item whose stored record is unreadable emits NOTHING rather than
+   * fabricating an empty message. The poller logs the failed hand-off and the entry stays
+   * accepted-unstarted, so the retry boundary is the next startup recovery — an empty event would
+   * instead fence the receipt on fabricated content and consume real mail.
    */
   private async onIncomingWork(work: IncomingWork): Promise<void> {
     const record = await this.messageStore.getByOwnerRecord(work.owner, work.recordId);
@@ -669,6 +707,10 @@ export class EmailAdapter extends PlatformAdapter {
    * The owner id must be a canonical mailbox id and must currently be an enabled email account
    * channel; anything else yields `null`. The thread id is allocated by the message store, so it
    * becomes durable when the first record of the thread is written.
+   *
+   * A brand-new thread has no source message, so an ORDINARY reply into it is refused by
+   * {@link sendReply}; the new-thread delivery for scheduled/spontaneous use is owned by
+   * `email-spontaneous-targets`, which supplies the operation context and the draft for it.
    */
   async getDmChannelId(userId: string): Promise<string | null> {
     const owner = typeof userId === "string" ? userId.trim().toLowerCase() : "";
@@ -738,6 +780,14 @@ export class EmailAdapter extends PlatformAdapter {
 function operationSlot(hostSlot: string | undefined, kind: EmailSendKind): string {
   const candidate = typeof hostSlot === "string" ? hostSlot.trim() : "";
   if (PARTITIONED_SLOT_PREFIXES.some((prefix) => candidate.startsWith(prefix))) return candidate;
+  if (candidate !== "") {
+    // A host-supplied value that is not a partitioned operation is almost certainly a host bug:
+    // the kind slot is bound instead, so the send still happens under its own operation key.
+    logger.warn(
+      "Ignoring unrecognized email action slot {Slot}; binding the {Kind} slot instead",
+      { Slot: candidate, Kind: kind },
+    );
+  }
   return kind;
 }
 
