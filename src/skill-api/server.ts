@@ -4,6 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import type { SkillContext } from "@skills/types.ts";
+import { emailComposeAuditParams } from "@skills/email-handler.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
@@ -39,6 +40,10 @@ const SIDE_EFFECT_SKILLS = new Set([
   "send-reply",
   "edit-reply",
   "send-file",
+  // Outbound email is an irreversible external effect (and its durable result must
+  // survive the session): a recovery-fenced session may not compose, and crash
+  // recovery waits on the in-flight lease this membership grants.
+  "send-email",
   "react-message",
   "memory-save",
   "memory-patch",
@@ -298,11 +303,16 @@ export class SkillAPIServer {
         // (1 successful call per session with doom-loop termination), so serving
         // a cached success or rejection would let the agent bypass the quota gate
         // and starve doom-loop detection. Concurrent in-flight duplicates still
-        // deduplicate via the pending-promise path above.
+        // deduplicate via the pending-promise path above. send-email results are
+        // never cached either: a repeated call is answered by the DURABLE journal
+        // (same operation key returns the recorded result), and a cached response
+        // would hide that recorded phase — including an `unknown` outcome the agent
+        // must not retry blindly — behind a stale `submitted`.
         if (
           result.statusCode === 401 ||
           result.statusCode === 403 ||
-          skillName === "send-file"
+          skillName === "send-file" ||
+          skillName === "send-email"
         ) {
           this.requestCache.delete(cacheKey);
         } else {
@@ -590,6 +600,10 @@ export class SkillAPIServer {
     // (`lastReplyAnchorMessageId`) when a send-reply succeeds.
     const replyAnchor = session.lastFileMessageId ?? session.triggerEvent?.messageId;
     const skillContext: SkillContext = {
+      // The Skill API session id IS the literal the session prompt renders as
+      // `--session-id`, and it keys the payload staging directory; handlers that
+      // must resolve staged files read it here rather than re-deriving an id.
+      sessionId: session.id,
       workspace: session.workspace,
       channelId: session.channelId,
       userId: session.userId,
@@ -617,10 +631,15 @@ export class SkillAPIServer {
     const auditWriter = session.auditWriter;
     const skillStartTime = Date.now();
 
-    // Sanitize params for audit before execution (fire-and-forget safe)
+    // Sanitize params for audit before execution (fire-and-forget safe). A composed
+    // message is private correspondence, so `send-email` is projected to digests and
+    // lengths FIRST — its recipient, subject and body are never recorded, whatever
+    // the configured content-hashing setting is.
     const sanitizedParams = auditWriter
       ? await sanitizeSkillParams(
-        body.parameters ?? {},
+        skillName === "send-email"
+          ? await emailComposeAuditParams(body.parameters ?? {})
+          : body.parameters ?? {},
         auditWriter.getConfig().hashContent,
       )
       : undefined;

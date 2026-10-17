@@ -39,6 +39,7 @@ export const BUNDLED_SKILLS: readonly string[] = Object.freeze(
     "memory-stats",
     "react-message",
     "self-research",
+    "send-email",
     "send-file",
     "send-reply",
     "set-reminder",

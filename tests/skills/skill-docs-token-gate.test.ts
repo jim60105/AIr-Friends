@@ -318,6 +318,7 @@ const CANCELLATION_DOCS = [
   "skills/memory-search/SKILL.md",
   "skills/memory-stats/SKILL.md",
   "skills/react-message/SKILL.md",
+  "skills/send-email/SKILL.md",
   "skills/send-file/SKILL.md",
   "skills/send-reply/SKILL.md",
   "skills/set-reminder/SKILL.md",

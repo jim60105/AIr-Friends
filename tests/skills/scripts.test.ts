@@ -542,3 +542,228 @@ Deno.test("scripts - missing required payload flag rejected with SKILL_MISSING_P
     Deno.removeSync(ws, { recursive: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// send-email compose contract (`email-compose-skill`): the request file is the
+// ONLY carrier of recipient/subject/body, and the script's payload boundary is
+// bound to the invocation's OWNING session, never to the CLI literal.
+// ---------------------------------------------------------------------------
+
+const SEND_EMAIL = "skills/send-email/scripts/send-email.ts";
+
+/** A representative compose request: literal `$`, Unicode and a paragraph break. */
+function composeRequestFile(): string {
+  return JSON.stringify({
+    to: "alice@example.org",
+    subject: "Pricing $0.435",
+    body: "Dear team,\n\nThe price is $0.435 — 你好\n",
+  });
+}
+
+function fileExists(path: string): boolean {
+  try {
+    Deno.statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+Deno.test("scripts - send-email delivers the staged request verbatim with its grant id", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const payload = join(ws, "tmp", "sess_own", "compose.json");
+    Deno.writeTextFileSync(payload, composeRequestFile());
+
+    const result = await runScript(
+      SEND_EMAIL,
+      [
+        "--session-id",
+        "sess_own",
+        "--api-url",
+        api.url,
+        "--grant-id",
+        "grant-7",
+        "--request-file",
+        payload,
+      ],
+      ws,
+      { SESSION_ID: "sess_own" },
+    );
+
+    assertEquals(result.code, 0, result.stderr);
+    assertEquals(api.requests.length, 1);
+    assertEquals(api.requests[0].skillName, "send-email");
+    assertEquals(api.requests[0].sessionId, "sess_own");
+    assertEquals(api.requests[0].parameters.grantId, "grant-7");
+    assertEquals(api.requests[0].parameters.request, JSON.parse(composeRequestFile()));
+    assertEquals(fileExists(payload), false, "the consumed request file is removed");
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-email refuses recipient/subject/body on the command line", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const payload = join(ws, "tmp", "sess_own", "compose.json");
+    const cases: string[][] = [
+      ["--to", "someone@example.org"],
+      ["--to=someone@example.org"],
+      ["--subject", "Injected"],
+      ["--subject=Injected"],
+      ["--body", "text"],
+      ["--body=text"],
+    ];
+
+    for (const freeTextFlag of cases) {
+      Deno.writeTextFileSync(payload, composeRequestFile());
+      const result = await runScript(
+        SEND_EMAIL,
+        [
+          "--session-id",
+          "sess_own",
+          "--api-url",
+          api.url,
+          "--grant-id",
+          "grant-7",
+          ...freeTextFlag,
+          "--request-file",
+          payload,
+        ],
+        ws,
+        { SESSION_ID: "sess_own" },
+      );
+
+      assertEquals(result.code !== 0, true, freeTextFlag.join(" "));
+      const err = parseStderrJson(result.stderr);
+      assertEquals(err.code, "SKILL_LEGACY_FLAG", freeTextFlag.join(" "));
+      assertStringIncludes(String(err.error ?? ""), "containment boundary");
+      assertStringIncludes(String(err.error ?? ""), "--request-file");
+      // Rejected before any read: the staged request is untouched and nothing reached the API.
+      assertEquals(fileExists(payload), true, freeTextFlag.join(" "));
+      assertEquals(api.requests.length, 0, freeTextFlag.join(" "));
+    }
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-email refuses a request file outside the session staging dir", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const outside = join(ws, "compose.json");
+    Deno.writeTextFileSync(outside, composeRequestFile());
+
+    const result = await runScript(
+      SEND_EMAIL,
+      ["--session-id", "sess_own", "--api-url", api.url, "--request-file", outside],
+      ws,
+      { SESSION_ID: "sess_own" },
+    );
+
+    assertEquals(result.code !== 0, true);
+    assertEquals(parseStderrJson(result.stderr).code, "SKILL_PAYLOAD_OUT_OF_BOUNDS");
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-email refuses a request file that is not one JSON object", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const payload = join(ws, "tmp", "sess_own", "compose.json");
+    for (const text of ["not json at all", "[1,2,3]", '"a string"', "42"]) {
+      Deno.writeTextFileSync(payload, text);
+      const result = await runScript(
+        SEND_EMAIL,
+        ["--session-id", "sess_own", "--api-url", api.url, "--request-file", payload],
+        ws,
+        { SESSION_ID: "sess_own" },
+      );
+
+      assertEquals(result.code !== 0, true, text);
+      const err = parseStderrJson(result.stderr);
+      assertEquals(err.code, "SKILL_COMPOSE_REQUEST_INVALID", text);
+      assertStringIncludes(String(err.error ?? ""), "compose.json");
+      assertEquals(api.requests.length, 0, text);
+    }
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-email binds the payload boundary to the owning session", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  const jwtDir = Deno.makeTempDirSync();
+  try {
+    // Shared mode: the pointer names sess_B while the CLI literal says sess_A (a stale value).
+    // The compose script must refuse instead of reading — and deleting — sess_B's request.
+    await Deno.writeTextFile(
+      join(jwtDir, "active.json"),
+      JSON.stringify({ sessionId: "sess_own", staging: join(ws, "tmp") }),
+    );
+    await Deno.writeTextFile(join(jwtDir, "sess_own.jwt"), "test-jwt\n");
+    Deno.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
+    const sibling = join(ws, "tmp", "sess_other", "compose.json");
+    Deno.writeTextFileSync(sibling, composeRequestFile());
+
+    const shared = await runScript(
+      SEND_EMAIL,
+      ["--session-id", "sess_other", "--api-url", api.url, "--request-file", sibling],
+      ws,
+      { SKILL_SHARED_PROCESS: "1", SKILL_JWT_DIR: jwtDir },
+    );
+    assertEquals(parseStderrJson(shared.stderr).code, "SKILL_SESSION_MISMATCH");
+
+    // Per-spawn mode: $SESSION_ID is authoritative over the CLI literal.
+    const perSpawn = await runScript(
+      SEND_EMAIL,
+      ["--session-id", "sess_other", "--api-url", api.url, "--request-file", sibling],
+      ws,
+      { SESSION_ID: "sess_own" },
+    );
+    assertEquals(parseStderrJson(perSpawn.stderr).code, "SKILL_SESSION_MISMATCH");
+
+    // Neither shape read or deleted the sibling session's staged request.
+    assertEquals(fileExists(sibling), true);
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    await Deno.remove(jwtDir, { recursive: true });
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-email without a request file names the flag it needs", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const result = await runScript(
+      SEND_EMAIL,
+      ["--session-id", "sess_own", "--api-url", api.url],
+      ws,
+      { SESSION_ID: "sess_own" },
+    );
+
+    assertEquals(result.code !== 0, true);
+    const err = parseStderrJson(result.stderr);
+    assertEquals(err.code, "SKILL_MISSING_PAYLOAD");
+    assertStringIncludes(String(err.error ?? ""), "--request-file");
+    assertStringIncludes(String(err.error ?? ""), "compose.json");
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});

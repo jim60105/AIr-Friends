@@ -1894,3 +1894,156 @@ runs the SAME preflight against the REAL `EmailIntentRuntime` for BOTH engines w
 stub engine answering through the intent-capture seam, proving the envelope reaches the real
 profile, a tool attempt fails the grant closed, and non-JSON output never grants. No provider,
 credential, real engine executable or model judgment is claimed.
+
+## User-Directed Email Composition (Owned by `email-compose-skill`)
+
+`skills/send-email/*` and `src/skills/email-handler.ts` own third-party composition: the agent asks
+to send a NEW message to a destination the user explicitly named in the current request, and the
+host handler is the authorization producer that turns that request into exactly one
+`EmailMailService.send` call.
+
+### The request-file contract
+
+Recipient, subject and body are never shell arguments. The script accepts only `--session-id`,
+`--grant-id` and `--request-file`; the request file is a strict JSON object inside the session
+staging directory (`{workspace}/tmp/{sessionId}`):
+
+```json
+{
+  "to": "someone@example.org",
+  "subject": "Subject of the new message",
+  "body": "The message text.",
+  "attachments": ["<absolute staging directory>/report.pdf"]
+}
+```
+
+- `--to`, `--subject` and `--body` are refused with `SKILL_LEGACY_FLAG` (both `--flag value` and
+  `--flag=value`), before any file is read, so a shell-expanded `$` value cannot corrupt the
+  message, leak the subprocess environment, or bypass the containment boundary. The rejection is
+  opt-in per script (`readPayloadArg({ extraFreeTextFlags })`), so every other skill's behavior is
+  byte-for-byte unchanged.
+- The script resolves the invocation's OWNING session (`resolveOwningSessionId`) FIRST and refuses a
+  `--session-id` that names another session with `SKILL_SESSION_MISMATCH`: a sibling session's
+  staged request can neither be read nor deleted, and nothing reaches the API in that case.
+- A request file that is not one JSON object fails with `SKILL_COMPOSE_REQUEST_INVALID`; a payload
+  outside the staging boundary fails with `SKILL_PAYLOAD_OUT_OF_BOUNDS` /`SKILL_PAYLOAD_NOT_FOUND`
+  exactly like every other payload skill.
+
+### Host authorization (fail closed, before any file read)
+
+`EmailComposeHandler` re-validates every field and decides the destination BEFORE any attachment is
+stat'ed or read:
+
+1. Only an authenticated, user-triggered email session may compose: the platform must be `email`,
+   the Skill API session id must be present, and the durable email work id must come from the host
+   (`emailWorkId`, or a consistent `emailSend` context). A host context that disagrees with the
+   session's own owner or work item is refused rather than overridden.
+2. The request must carry EXACTLY `to`, `subject`, `body` and optional `attachments`. `Cc`, `Bcc`
+   and arbitrary headers have no representation, so an unknown key is refused with
+   `SKILL_EMAIL_COMPOSE_REQUEST`, as are a multiline/invalid `to` or `subject`, a non-string body,
+   and a message with neither body text nor an attachment.
+3. The destination is matched against the session's IMMUTABLE grants (`SkillContext
+   .emailDestinationGrants`, row 19): with `--grant-id`, the grant must exist, be a `compose` grant
+   of exactly this session, work item and owner, and its `canonicalRecipient` must equal the
+   canonical form of the requested `to`. The operation slot becomes `third-party:<grantId>` and the
+   draft uses `targetKind: "third-party"` (the grant is the authority; the mail service's allowlist
+   recheck applies to user targets only).
+4. Without a grant id, the ONLY allowed destination is the session's own verified sender (the
+   ordinary reply target, whose canonical user id equals the session owner). It binds the ordinary
+   `compose` slot and `targetKind: "user"`, so the mail service's current-allowlist recheck applies.
+   Any other address is refused with `SKILL_EMAIL_COMPOSE_GRANT` and a message teaching the grant
+   flow; no request parameter can create or widen a grant.
+5. Attachments are opt-in and session-staging-contained: the boundary is the LEXICAL staging root
+   `{workspace}/tmp/{sessionId}`, and both the requested path and its symlink-resolved real path must
+   stay inside it, so a symlinked staging root or intermediate component fails closed instead of
+   becoming the authorized base. Only regular files are accepted, the reused send-file limits
+   (`maxFilesPerInvocation`, `maxFileSizeMb`, `maxTotalSizeMb`, `allowedExtensions`) are enforced in
+   two passes so a refused batch reads nothing, and the read itself is bounded by the preflighted
+   size — a file that changed (grown, shrunk or replaced by an escaping symlink) between preflight
+   and read is refused instead of attached. Nothing in the workspace (memories, notes, history) is
+   ever attached automatically, and `sendFile.enabled` is irrelevant to composing. Residual risk:
+   like the shared payload contract, a concurrent process could still swap a validated file for a
+   same-size one inside the window between the post-read realpath check and the read itself; the
+   session's own agent already owns that directory, so this is not a destination-grant bypass.
+6. The configured signature is applied centrally by the MIME builder, exactly once. The skill
+   document states explicitly that the model must not add one.
+
+### Durability, idempotency and audit
+
+- The operation key is host-derived (`{workId, actionSlot}`): `third-party:<grantId>` for a granted
+  destination, `compose` for the session's own sender. A repeated call for the same logical
+  operation therefore returns the RECORDED journal result (`emailSubmission.reused: true`) with zero
+  additional SMTP transactions; two different grants are two distinct operations. A second
+  self-compose inside one work item reuses the first one by design.
+- `send-email` is a side-effect skill for the Skill API: a recovery-fenced session is rejected (409)
+  and crash recovery waits on the same in-flight lease as reply/file sends. Session expiry after
+  admission does not cancel the durable result.
+- The result carries `EmailSubmissionMetadata` (`operationId`, `phase`, `reused`, `safeCode`) to the
+  skill output, and a non-`submitted` phase is reported as a failure with the recorded phase —
+  `unknown` is explicitly "NOT confirmed delivered" and must not be retried blindly.
+- Because the generic `skill_call` audit writes the error text and parameters verbatim,
+  `emailComposeAuditParams` projects the invocation first: only the opaque `grantId`, SHA-256
+  digests of the destination/subject/body, their lengths and the attachment count are recorded —
+  never the address, the subject or the body, whatever the content-hashing setting is. `send-email`
+  results are also excluded from the Skill API response cache so a replay is answered by the durable
+  journal (including an `unknown` phase) instead of a stale `submitted`.
+- Refusals obey the same rule: no message interpolates a model-supplied value verbatim. An
+  unsupported request field is named only when it is identifier-shaped, an attachment extension is
+  derived from the file NAME and echoed only when identifier-shaped, and a `grantId` that is not
+  identifier-shaped is recorded as `grantIdHash` instead of plaintext.
+
+### Exported API (consumers: `email-forward-skill`, `email-response-accounting`, `email-activation`)
+
+- `EmailComposeHandler` with options `{ mailService?: EmailComposeMailService; limits?: SendFileSkillConfig }`
+  - `handleSendEmail` (the `send-email` skill handler); `EmailComposeMailService` is the structural
+    seam `{ send(draft: EmailDraft): Promise<EmailSendOutcome> }` the real `EmailMailService` satisfies
+  - `EMAIL_COMPOSE_ACTION_SLOT = "compose"`, `EMAIL_COMPOSE_CODES`
+  - `emailComposeAuditParams(parameters)` — the content-safe `skill_call` projection
+- `SkillRegistry` constructor gains an optional `emailCompose?: { mailService: EmailComposeMailService }`;
+  `send-email` is registered ONLY when it is supplied, so production has no email send path until
+  `email-activation` wires the service.
+- `SkillContext.sessionId` (the Skill API session id that keys the staging directory) and
+  `SendEmailParams` / `SendEmailRequest` in `src/skills/types.ts`
+- Skill script `skills/send-email/scripts/send-email.ts` (`--session-id`, `--grant-id`, `--request-file`)
+  and `readPayloadArg`'s `extraFreeTextFlags` option in `skills/lib/payload.ts`
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-compose-skill/specs/email-outbound-composition/spec.md`:
+
+- **New destination**: a valid compose grant naming an address absent from channels gets one
+  immediate submission, and incoming mail from that address stays denied.
+- **Grant bypass attempt**: a request adding Cc/Bcc, changing the recipient or using a sibling
+  payload file sends no bytes.
+- **Private workspace data**: a compose request without attachments never attaches a memory file or
+  unrelated history.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/skills/email-handler.test.ts tests/skills/email-compose-smoke.test.ts \
+  tests/skills/scripts.test.ts tests/skills/payload.test.ts
+```
+
+`tests/skills/email-handler.test.ts` drives the REAL handler, the REAL `EmailMailService` /
+`SubmissionStore` / `EmailMessageStore` / `OutgoingMimeBuilder` with scripted SMTP and IMAP doubles,
+and the REAL `SkillAPIServer` over HTTP (real `SessionRegistry`, grant recording, JWT verification
+including an expired token, recovery fence, in-flight lease, audit writer and metrics): a granted
+send, the destination-mutation/forward/foreign-session/owner/work/unknown-grant refusals, the
+reply-to-sender path, Cc/Bcc/header and malformed-field refusals, attachment containment (memory
+file, symlink escape, sibling staging dir, missing file, extension/size/count limits), the
+content-safe audit projection, operation reuse, distinct-grant slots, a failed submission, the
+fenced 409, the retained lease across session removal and the uncached `unknown` replay.
+`tests/skills/email-compose-smoke.test.ts` runs one compose through the REAL `EmailSmtpClient` over
+a real TLS socket to the local SMTP fixture and asserts the exact envelope recipient, the centrally
+applied signature (once), the attachment part and the rejected-peer outcome. `tests/skills/
+scripts.test.ts` runs the REAL script against a mock Skill API (verbatim request JSON, the
+`--to`/`--subject`/`--body` refusals, out-of-bounds payload, malformed JSON, the owning-session
+binding in both process shapes, missing payload flag), and `tests/skills/payload.test.ts` pins the
+shared helper's opt-in extra-flag rejection. No provider, credential, production mailbox or model
+judgment is claimed.

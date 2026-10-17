@@ -4,6 +4,7 @@
 import { assertEquals } from "@std/assert";
 import { join, resolve } from "@std/path";
 import {
+  EMAIL_COMPOSE_FREE_TEXT_FLAGS,
   isWithinDir,
   LEGACY_FREE_TEXT_FLAG_PATTERN,
   PayloadError,
@@ -23,6 +24,7 @@ interface PayloadOpts {
   alias?: string;
   required?: boolean;
   cwd?: string;
+  extraFreeTextFlags?: readonly string[];
 }
 
 function opts(
@@ -531,6 +533,86 @@ Deno.test("readPayloadArg - missing payload file raises SKILL_PAYLOAD_NOT_FOUND"
       "SKILL_PAYLOAD_NOT_FOUND",
       "written FIRST",
     );
+  } finally {
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Compose request contract (`email-compose-skill`): the recipient, subject and
+// body of a composed message are forbidden as shell arguments for the scripts
+// that opt in — and every other script's behavior is untouched.
+// ---------------------------------------------------------------------------
+
+Deno.test("readPayloadArg - compose extra free-text flags are rejected in both forms", async () => {
+  const ws = setupWorkspace();
+  try {
+    const staged = join(ws, "tmp", "sess_own", "compose.json");
+    Deno.writeTextFileSync(staged, '{"to":"a@example.org"}');
+    const composeOpts = opts(ws, "sess_own", {
+      fileName: "compose.json",
+      alias: "r",
+      extraFreeTextFlags: EMAIL_COMPOSE_FREE_TEXT_FLAGS,
+    });
+
+    const cases: Array<string[]> = [
+      ["--to", "someone@example.org", "--request-file", staged],
+      ["--to=someone@example.org", "--request-file", staged],
+      ["--subject", "Hi", "--request-file", staged],
+      ["--subject=Hi", "--request-file", staged],
+      ["--body", "text", "--request-file", staged],
+      ["--body=text", "--request-file", staged],
+    ];
+    for (const args of cases) {
+      await expectPayloadError(
+        () => readPayloadArg(args, "request", composeOpts),
+        "SKILL_LEGACY_FLAG",
+        "the shell expands",
+        "containment boundary",
+        "--request-file",
+        "--session-id",
+      );
+    }
+
+    // The rejection happens before any file is read, so the staged payload survives.
+    assertEquals(Deno.readTextFileSync(staged), '{"to":"a@example.org"}');
+  } finally {
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("readPayloadArg - compose extra free-text flags apply only where opted in", async () => {
+  const ws = setupWorkspace();
+  try {
+    const staged = join(ws, "tmp", "sess_own", "reply.md");
+    Deno.writeTextFileSync(staged, "body-like payload text");
+
+    // Default (no opt-in): a script that never declares these flags is unaffected — the legacy
+    // pattern still governs and `--body`/`--to`/`--subject` are ordinary unknown tokens.
+    assertEquals(
+      await readPayloadArg(
+        ["--to", "someone@example.org", "--message-file", staged],
+        "message",
+        opts(ws),
+      ),
+      "body-like payload text",
+    );
+
+    // Bare-string flags such as `--to-file` are not the free-text flags.
+    Deno.writeTextFileSync(staged, "not rejected");
+    assertEquals(
+      await readPayloadArg(
+        ["--to-file", "ignored", "--message-file", staged],
+        "message",
+        opts(ws, "sess_own", {
+          extraFreeTextFlags: EMAIL_COMPOSE_FREE_TEXT_FLAGS,
+        }),
+      ),
+      "not rejected",
+    );
+
+    // The opted-in flag list is exactly the compose free-text surface.
+    assertEquals([...EMAIL_COMPOSE_FREE_TEXT_FLAGS], ["--to", "--subject", "--body"]);
   } finally {
     Deno.removeSync(ws, { recursive: true });
   }
