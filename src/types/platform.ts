@@ -66,12 +66,31 @@ export interface ReplyOptions {
 }
 
 /**
+ * Submission lifecycle phases for durable email operations.
+ */
+export type EmailSubmissionPhase =
+  | "prepared"
+  | "submitting"
+  | "submitted"
+  | "failed"
+  | "unknown";
+
+export interface EmailSubmissionMetadata {
+  operationId: string;
+  phase: EmailSubmissionPhase;
+  targetKind?: "user" | "third-party";
+  sentCopy?: "pending" | "appended" | "failed";
+  safeCode?: string;
+}
+
+/**
  * Result of sending a reply
  */
 export interface ReplyResult {
   success: boolean;
   messageId?: string;
   error?: string;
+  emailSubmission?: EmailSubmissionMetadata;
 }
 
 /**
@@ -156,6 +175,7 @@ export interface SendFileResult {
   /** All delivered message IDs, in send order (multi-file/partial delivery) */
   messageIds?: string[];
   error?: string;
+  emailSubmission?: EmailSubmissionMetadata;
 }
 
 /**
