@@ -600,3 +600,119 @@ deno check src/main.ts
 deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/email/outgoing-mime.test.ts
 deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/email/outgoing-mime-smoke.test.ts
 ```
+
+## Certificate-Validated SMTP Submission (Owned by `email-smtp-transport`)
+
+`src/platforms/email/smtp-client.ts` owns every outbound SMTP submission. It is
+intentionally NOT registered in production bootstrap, it writes no state, and it holds no
+retry policy: it submits one constructed message and reports exactly one classified
+outcome. Durable submission bookkeeping belongs to `submission-store.ts` (row 04), and the
+submission service (row 13) owns preparing an operation before invoking this transport.
+
+### Submission Outcome Taxonomy
+
+Every `submit` call reports `phase: "submitted" | "failed" | "unknown"` plus a safe
+`safeCode`, an optional numeric `responseCode`, the envelope recipients the server
+`accepted`/`rejected`, the exact `sizeBytes`, and `durationMs`. Recipient metadata is always
+the transport-owned envelope: a rejected recipient is reported from our own binding, never
+echoed from server text.
+
+- **`submitted`** requires a syntactically valid positive final DATA acknowledgement (2xx)
+  from the server. This means the provider **accepted** the message for delivery; it never
+  means the recipient received it, and it is not an exactly-once guarantee. A success reply
+  that cannot be validated as a 2xx acknowledgement (for example `2500`, or non-numeric
+  text) yields `unknown`, never an unconfirmed `submitted`.
+- **`failed`** is definite rejection and carries no delivery uncertainty: an explicit
+  4xx/5xx server reply (authentication, `MAIL FROM`, `RCPT TO`, the DATA command, or the
+  final response), a local envelope or payload refusal, an advertised provider size
+  refusal, or a failure before message submission began (DNS, connection, TLS handshake,
+  certificate validation, greeting, EHLO, mandatory STARTTLS, authentication).
+- **`unknown`** means the acknowledgement was lost or unusable once the DATA transaction
+  may have begun: socket loss or timeout during submission, or a truncated/malformed final
+  reply that cannot be confirmed as acceptance. An unknown outcome requires manual review
+  and MUST NOT be automatically resubmitted.
+
+The transport NEVER retries, reconnects, or resubmits. DNS, connection, greeting, and socket
+phases are bounded by 30-second deadlines, and once the connection is established the whole
+submission is additionally bounded by a 30-second overall deadline; when a deadline elapses
+after the DATA transaction began the result is `unknown`, never a second attempt. The
+connection and its socket are torn down before `submit` returns.
+
+### Pre-Submit Size Bounds
+
+Two independent bounds exist, both applied before message bytes reach the wire:
+
+- `platforms.email.maxMessageBytes` (default 25 MiB / `26,214,400` bytes) is checked against
+  the constructed byte length before any socket is opened; exceeding it returns
+  `MESSAGE_TOO_LARGE` (`failed`) with zero bytes and zero commands submitted. The supplied
+  bytes are authoritative, so stale or optimistic size metadata cannot bypass the bound.
+- A provider advertising `SIZE <n>` in its EHLO response rejects a larger message as
+  `PROVIDER_SIZE_REJECTED` (`failed`) before the payload is transmitted.
+
+### TLS & Credential Invariants
+
+- **Fail-Closed TLS Only**: certificate-validated direct TLS (default port 465) or mandatory
+  STARTTLS (default port 587) selected by `platforms.email.smtp.tlsMode`. Plaintext,
+  opportunistic downgrade, `ignoreTLS`, and disabled certificate verification
+  (`rejectUnauthorized`) are strictly refused; the TLS floor is `TLSv1.2`.
+- **Zero Credentials Before Encryption**: authentication runs only after the TLS session is
+  established and validated. With STARTTLS required, a server that cannot upgrade (missing
+  capability or refused command) receives **no** authentication, `MAIL FROM`, `RCPT TO`, or
+  DATA bytes; the outcome is a definite `failed`.
+- **Explicit Envelope**: submission uses the envelope produced by construction
+  (`envelope.from` plus exactly one recipient). Zero or multiple recipients, empty
+  addresses, or CR/LF/`<>` injection are refused before connecting
+  (`INVALID_ENVELOPE`); recipients are never derived from message headers.
+- **No Re-Serialization**: the constructed RFC 5322 bytes are written verbatim into the DATA
+  transaction with an explicit envelope, so the wire copy, the stored `.eml`, and the
+  recorded digest describe the same message.
+- **Credential Redaction**: credentials, message bodies/headers, and raw library error text
+  never appear in logs, thrown errors, or returned results. Diagnostics contain only the
+  host, port, TLS mode, phase, safe code, numeric response code, sizes, and timings.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-smtp-transport/specs/email-smtp-transport/spec.md`:
+
+- **Unsafe server**: missing STARTTLS or failed certificate validation submits no
+  credentials and no message bytes.
+- **Lost final reply**: a server that consumes DATA and closes before acceptance yields
+  `unknown` with no retry and exactly one DATA transaction.
+- **Accepted and rejected envelopes**: real client submissions through a local TLS SMTP
+  service show one envelope recipient, one DATA transaction per call, and distinct
+  accepted/rejected results.
+
+### Test Fixture
+
+`tests/helpers/email-smtp-service.ts` provides the deterministic in-process ESMTP service
+(greeting, EHLO with `AUTH`/`STARTTLS`/`SIZE`, STARTTLS upgrade, AUTH PLAIN/LOGIN, MAIL,
+RCPT, DATA with dot-unstuffing, QUIT) plus scripted fault modes: refused STARTTLS, rejected
+authentication, rejected sender/recipient/DATA command, explicit final response codes,
+socket close or stall after the payload, truncated or unparseable final replies, an
+advertised `SIZE` limit, raw final response text (including deliberately malformed codes),
+and an immediate greeting refusal. It records received commands,
+authentication attempts, and each decoded DATA transaction so tests can assert the exact
+wire behaviour.
+
+### Exported API
+
+- `SmtpOutcome`: `"submitted" | "failed" | "unknown"`
+- `SmtpTransport.submit(input: SmtpSubmission): Promise<SmtpSubmitResult>`; a
+  `ConstructedOutgoingEmail` is directly assignable to `SmtpSubmission`
+- `SmtpSubmission`: `{ emlBytes, envelope: { from, to }, sizeBytes? }`
+- `SmtpSubmitResult`: `{ phase, safeCode, responseCode?, accepted, rejected, sizeBytes, durationMs }`
+- `EmailSmtpClient` with options `{ config, maxMessageBytes?, timeoutMs?, tlsCa? }` and
+  `messageSizeLimit`
+- `SmtpDiagnosticCode`, `SmtpTransportError`, `DEFAULT_SMTP_TIMEOUT_MS`,
+  `DEFAULT_MAX_MESSAGE_BYTES`, `SMTP_TLS_MIN_VERSION`
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/smtp-client.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/smtp-transport-smoke.test.ts
+```
