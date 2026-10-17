@@ -14,7 +14,13 @@ The system SHALL use Deno 2.x as the runtime environment with explicit permissio
 
 - **GIVEN** the application is started via `deno run` or `deno task start`
 - **WHEN** the process launches
-- **THEN** the following permission flags SHALL be declared: `--allow-net`, `--allow-read`, `--allow-write`, `--allow-env`, `--allow-run`, `--allow-ffi`
+- **THEN** the following permission flags SHALL be declared: `--allow-net`, `--allow-read`, `--allow-write`, `--allow-env`, `--allow-run`, `--allow-ffi`, `--allow-sys`
+
+#### Scenario: Eagerly loaded dependency requires its OS permission
+
+- **GIVEN** a module reached by a static import from the application entry point calls an OS API that Deno gates behind system permission at module initialization, such as `os.hostname()`
+- **WHEN** the process launches
+- **THEN** `--allow-sys` SHALL be declared even when the platform that owns that dependency is disabled
 
 #### Scenario: Development Mode with Hot Reload
 
