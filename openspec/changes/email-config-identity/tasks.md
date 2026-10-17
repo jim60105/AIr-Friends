@@ -4,7 +4,7 @@ Total estimate: **6.75 engineering hours**, strictly below 8 hours. Estimates in
 
 ## 1. Owned behavior and its regression coverage
 
-- [ ] 1.1 (2h) Implement canonical mailbox parsing, safe identifiers and channel/account normalization; verify case, alias, invalid/multiple address and path-character fixtures.
+- [ ] 1.1 (2h) Implement canonical mailbox parsing, safe identifiers and channel/account normalization; verify case, alias, invalid/multiple address and path-character fixtures. Include a literal multiline signature containing `${DISCORD_TOKEN}` with that environment variable set, proving expansion is excluded.
 - [ ] 1.2 (2h) Add typed defaults, conditional enabled-platform validation, startup guard and ENV_MAPPINGS; verify disabled legacy configurations and unsafe TLS rejection.
 - [ ] 1.3 (1.25h) Add and run this responsibility's deterministic regression cases. Verify: Extend tests/core/config-loader.test.ts and tests/utils/env.test.ts; add table-driven email field parity tests using tests/utils/config-trio-sync.test.ts patterns. Include literal multiline signature containing ${...} that MUST NOT undergo generic environment expansion.
 - [ ] 1.4 (0.5h) Update the config trio with the exact table in the batch index, trust prerequisite and restart-only literal signature semantics. Verify the documented fields, outcomes and commands match the implemented interface and link this slice's acceptance scenarios in `docs/email-platform.md`; add its scoped CHANGELOG entry.
