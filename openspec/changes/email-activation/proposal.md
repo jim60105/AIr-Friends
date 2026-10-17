@@ -30,6 +30,7 @@ Total: **6.75 engineering hours**, strictly below 8 hours. See tasks.md for item
 
 ## Batch:
 
+- code-conflict: email-spontaneous-occurrences (src/bootstrap.ts)
 - depends-on: email-poll-recovery
 - depends-on: email-submission-service
 - depends-on: email-adapter
