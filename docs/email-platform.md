@@ -416,3 +416,89 @@ Acceptance requirements and test scenarios defined in `specs/email-submission-st
   - `lookupById(operationId: string): SubmissionEntrySnapshot | undefined`
   - `recover(): Promise<SubmissionRecoveryResult>`
   - `close(): void`
+
+## Serialized IMAP Polling & Crash Recovery (Owned by `email-poll-recovery`)
+
+The poll-cycle orchestrator wires the IMAP transport to MIME parsing, inbound authentication, the
+durable mailbox journal, and the owner message store in `src/platforms/email/mailbox-poller.ts`
+(`EmailMailboxPoller`). It is intentionally NOT registered in production bootstrap; email ingress
+stays unavailable until the `email-activation` change removes the configuration guard.
+
+### Invariants & Semantics
+
+- **Transport reports, store decides**: the poller never invents durable state. Each round connects,
+  observes `position()` (`uidValidity`/`uidNext`), and drives the mailbox journal's own transitions
+  rather than a parallel record.
+- **First activation excludes preexisting mail**: an uninitialized mailbox is initialized at
+  `uidNext - 1`, so only messages arriving afterwards are discovered.
+- **Read-independent discovery**: `listAfter(cursor)` uses UIDs and ignores `\Seen`; mail arriving
+  during downtime is admitted on restart exactly once into the durable queue.
+- **Durable discovery before effect**: each UID is `discover()`ed (durably) before it is fetched,
+  parsed, or authenticated.
+- **Checkpoint after durable store**: on admit the poller stores the source in `EmailMessageStore`,
+  appends the immutable `accept(sourceRecordId)` receipt, hands off the accepted work, and only then
+  advances the checkpoint. Delivery is at-least-once: a crash may re-deliver a UID, so downstream
+  consumers must be idempotent.
+- **Per-message failure isolation**: a malformed or size-limited message becomes terminal
+  (`failed`) or `review-required` without blocking later UIDs. Deterministic per-message transport
+  failures (oversized, or a UID positively confirmed absent from the folder) are terminal too; a
+  durable discovery found expunged after a crash is terminalized so later checkpoints are never
+  blocked.
+- **Serialization & fail-safe connection handling**: rounds never overlap (a concurrent `poll()`
+  shares the in-flight round). A connection-level failure aborts the round with the checkpoint
+  unchanged and retries on the next interval.
+- **Interval excludes latency**: `start()` schedules the next round only after the current round
+  settles, so the default 300-second interval (`pollIntervalMs`) measures wall-clock between rounds
+  and excludes server/agent processing time. Timer reconnects are IMAP-only, never SMTP retry.
+- **Startup recovery**: `recover()` is startup-only. Accepted-but-unstarted work resumes
+  (re-emitted with its original durable `recordId`) and is retried on later rounds after a
+  transient failure; work that was `started` without a terminal receipt is quarantined as
+  `review-required` by the mailbox journal and is never auto-replayed.
+
+### UIDVALIDITY Replacement & Manual Review
+
+When the server reports a changed `uidValidity`, the poller does not replay the mailbox. It
+reconciles every message of the replacement mailbox against durable message evidence (wire
+`Message-ID` plus raw-source SHA-256 digest):
+
+- an identical known source is provably not new work and is skipped silently;
+- this requires both the archived source to be identical AND its record to be bound to a durable
+  acceptance/terminal receipt; an archived source that was never accepted is not treated as
+  processing evidence;
+- conflicting content under the same identifier, ambiguous/multiple matches, an unaccepted
+  archived source, or unmatched replacement content stops automatic work and is reported for
+  manual review;
+- the checkpoint is left unchanged, so no message is admitted under an unverified mailbox identity.
+
+Because a changed `UIDVALIDITY` is a security-relevant mailbox replacement, an operator must review
+the reported entries and re-establish the mailbox identity before automatic processing resumes.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-poll-recovery/specs/email-mailbox-polling/spec.md`:
+
+- **Restart smoke**: Seen mail added while the bot is stopped is admitted once on restart.
+- **Mailbox replacement**: matching evidence prevents replay and ambiguous entries require review.
+- **Mixed failures**: malformed mail becomes terminal while later entries stay eligible, and a
+  connection drop resumes from durable evidence.
+
+### Exported API
+
+- `IncomingWork`: `{ workId, mailboxKey, owner, threadId, recordId, verifiedSender, provenance }`
+- `PollCycleResult`: per-round counters plus `replacementDetected`, `halted`, and a safe `error` code.
+- `ReviewItem`: `{ mailboxKey, reason, recordId? }`
+- `EmailMailboxPoller`:
+  - `recover(): Promise<MailboxRecoveryResult>`
+  - `poll(): Promise<PollCycleResult>`
+  - `start(): Promise<void>`
+  - `stop(): Promise<void>`
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/email/mailbox-poller.test.ts
+```
