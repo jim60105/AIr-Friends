@@ -1656,3 +1656,116 @@ requires the real pinned executable (`omp` 18.6.1), the generated extension bund
 native payload, uses a test-owned loopback provider plus the tracked loopback model fixture, and
 never contacts a paid or public model. Production email remains unavailable until the final
 activation change.
+
+## Isolated Intent Interpretation Runtime (Owned by `email-intent-runtime`)
+
+`src/core/email-intent-runtime.ts` runs ONE interpretation of the current authored request on an
+isolated private launch of either engine. It consumes the two completed native deny-all profiles
+(`email-opencode-intent-profile`, `email-omp-intent-profile`) and adds the ACP callback layer, the
+bounded capture and the teardown; it implements no native policy of its own.
+
+### What an interpretation gets
+
+- Only the current authored text. No history, no thread, no attachments, no quoted material.
+- A FRESH private HOME and an empty working directory per interpretation, allocated beneath one
+  exclusively-owned base directory (`email-intent-runtime-*`) that this runtime reclaims itself.
+- Exactly the selected model provider's authentication, and nothing else: the profile factory
+  refuses or omits the mailbox credentials, the Skill API material (token, pointer, JWT), bot
+  platform tokens, external MCP servers and every ordinary engine/config selector. The runtime
+  additionally never hands the session a skill registry, a trusted skill root or a Skill session id.
+- An EMPTY script inventory and a DENY-ALL callback layer: a permission request, a filesystem
+  read/write callback and a `tool_call`/`tool_call_update` notification are all observed and refused
+  before any ordinary approval path (YOLO, registered-skill, read admission, edit/write) can run.
+- A content-blind ACP client. Final agent text reaches the runtime's in-memory bounded capture; the
+  engine's stream chunks, tool notifications, thoughts and stderr never reach a log, an audit entry
+  or a file.
+- A capture bound to ONE prompt turn: only text that arrives on the interpretation's own session
+  while its authored prompt is in flight can become the answer. Setup chatter, another session's
+  text and post-turn noise are dropped, while a tool attempt made at ANY point (including during
+  setup) still fails the interpretation closed.
+
+### Hard failure behavior (fail closed)
+
+`EmailIntentRuntime.interpret({ authoredText, model, backend })` always resolves; it never throws
+and it never returns partial output. Its result is either
+`{ status: "complete", text }` or `{ status: "unavailable", reason }` with one of:
+
+| reason               | when                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| `profile_unavailable` | the profile could not be built, or the launch/session did not prove its identity    |
+| `tool_attempted`      | the model attempted a tool, filesystem, MCP or skill operation                      |
+| `timeout`             | the 30-second deadline expired                                                      |
+| `output_overflow`     | captured text exceeded 8 KiB (the whole capture is discarded, never truncated)      |
+| `incomplete_output`   | no text, blank text, or a prompt that did not stop with `end_turn`                  |
+| `session_failed`      | connect, session creation or dispatch failed                                        |
+
+Identity is verified twice before the authored text moves: the launch read back off the factory's
+own config (`executionProfile`, plus the host-only OMP marker REQUIRED to carry its exact value),
+and the created session itself — the OpenCode session must advertise the authored intent agent as
+the ONE active AND selectable session mode, and a session advertising a model selector that is not
+already on the requested `${providerID}/${modelID}` is pinned to it, with the resulting active mode
+and model re-verified against the engine's own response. Every refusal happens BEFORE any prompt is
+dispatched.
+
+Teardown is producer-safe: the private roots are removed only when quiescence is positively proven
+(no wrapper was ever spawned, or the connector observed the wrapper exiting within its own grace
+period). An unconfirmed exit — including a wrapper that had to be SIGKILLed — retains the roots
+with a bounded warning `Retaining email intent private roots: the launched wrapper's exit is
+unconfirmed` instead of reclaiming files a live engine could still be using, and the runtime never
+logs, audits or persists authored text, captured text or engine stderr.
+
+### Accepted limitation (model judgment)
+
+Interpretation remains model judgment. An isolated, deny-all, bounded session raises the cost of a
+prompt-injection or tool-abuse attempt; it does not make the model's reading of the authored text
+correct, and it is not an authorization decision. The strict decision JSON, the destination grants
+and the session/work binding are owned by later changes (`email-destination-grants` and its
+consumers). `complete` therefore means "the interpreter produced a bounded text", never
+"the request is authorized".
+
+### Exported API
+
+- `EmailIntentRuntime.interpret({ authoredText, model, backend }) -> Promise<EmailIntentResult>`
+  - `model`: `{ providerID, modelID }` (row 16/17 profile selection)
+  - `backend`: `"opencode" | "omp"`
+  - `EmailIntentResult`: `{ status: "complete", text } | { status: "unavailable", reason }`
+- Constructor options: `{ config, logger, deadlineMs?, maxOutputBytes?, rootsBase?, profileOptions?,
+  connectorFactory? }`. `deadlineMs`/`maxOutputBytes` may only TIGHTEN the hard bounds
+  (`EMAIL_INTENT_DEADLINE_MS` = 30 s, `EMAIL_INTENT_MAX_OUTPUT_BYTES` = 8 KiB).
+- Internal seams: `EmailIntentConnector` / `EmailIntentConnectorFactory` (the `AgentConnector`
+  connect/createSession/prompt/cancel/disconnect lifecycle), and the ACP-layer
+  `ClientConfig.intentCapture` / `EmailIntentSessionCapture` deny-all + capture contract.
+- ACP-layer identity error: `EmailIntentProfileMismatchError` (bounded `reason` enum).
+
+The module is an internal host API: there is no skill endpoint, no dashboard surface and no
+configuration field that reaches it, and it is not wired into production bootstrap until
+`email-activation`.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-intent-runtime/specs/email-intent-runtime/spec.md`:
+
+- **Isolated interpretation**: a model attempt at a shell, filesystem, MCP or skill operation
+  produces no tool effect and an `unavailable` result — not merely a denied call.
+- **Bounded private interpretation**: output beyond 8 KiB or execution beyond 30 seconds returns no
+  partial output, and the interpretation's resources are safely reclaimed.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/acp/email-intent-runtime.test.ts
+```
+
+`tests/acp/email-intent-runtime.test.ts` drives the real runtime, the real `AgentConnector` and the
+real `ChatbotClient` against a scripted fake ACP engine
+(`tests/acp/fixtures/email-intent-acp-engine.ts`) for BOTH engines: success capture, timeout,
+8 KiB + 1 overflow, exactly-8-KiB success, tool attempt through a permission request, a tool-call
+notification and both filesystem callbacks (with a filesystem sentinel proving zero tool effect),
+incomplete output, refused profiles, mode/model pinning, stderr and capture privacy, root
+reclamation, and the unchanged ordinary connector path. The subprocess-backed cases self-skip when
+`dumb-init` is unavailable. No provider, credential or network is contacted, and no real
+`opencode`/`omp` executable or model judgment is claimed.

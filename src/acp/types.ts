@@ -103,6 +103,50 @@ export interface ClientConfig {
    * Direct client fixtures that omit it keep the legacy/OpenCode decoder path.
    */
   agentType?: AgentType;
+
+  /**
+   * INTERNAL intent-capture contract of the email-intent runtime
+   * (`email-intent-runtime`). Present ONLY on the internal email-intent
+   * profile's ACP session; every ordinary launch leaves it unset, so an
+   * existing session keeps its logging, buffering and permission behavior
+   * byte-for-byte.
+   *
+   * While it is present the client becomes content-blind and deny-all: agent
+   * text chunks reach {@link EmailIntentSessionCapture.onText} instead of the
+   * message buffer or any log, and a permission request, a filesystem callback
+   * or a tool-call update is reported through
+   * {@link EmailIntentSessionCapture.onToolAttempt} and refused without
+   * evaluating any ordinary approval path (YOLO, registered-skill, read/edit).
+   */
+  intentCapture?: EmailIntentSessionCapture;
+}
+
+/**
+ * Bounded hand-off of ONE interpretation's private agent output
+ * (`email-intent-runtime`).
+ *
+ * The runtime owns the bound: it counts the cumulative UTF-8 bytes of every
+ * chunk it receives, keeps the text in memory only, and never logs, persists
+ * or forwards it beyond its own bounded result. The client therefore reports
+ * chunks verbatim and imposes no size policy of its own.
+ */
+export interface EmailIntentSessionCapture {
+  /**
+   * One `agent_message_chunk` text of this interpretation, with the ACP
+   * session it arrived on. Called for EVERY text chunk, in arrival order,
+   * including chunks that no longer fit the runtime's byte bound and chunks
+   * from a session the runtime has not armed for the current turn: the runtime
+   * — not the client — decides which session's text is the final answer, so no
+   * notification is silently dropped before it can make that decision.
+   */
+  onText(text: string, sessionId: string): void;
+  /**
+   * A tool attempt was observed on this session: a permission request, a
+   * filesystem callback, or a `tool_call`/`tool_call_update` notification. The
+   * attempt is ALWAYS refused; the runtime records it and fails the whole
+   * interpretation closed instead of returning captured text.
+   */
+  onToolAttempt(): void;
 }
 
 /**
@@ -375,4 +419,17 @@ export interface AgentConnectorOptions {
   agentType: AgentType;
   /** Maximum time in milliseconds to wait for the ACP handshake during `connect()` (default: 30000) */
   connectTimeoutMs?: number;
+  /**
+   * INTERNAL intent-profile run contract (`email-intent-runtime`): the
+   * `${providerID}/${modelID}` selection THIS interpretation must run as.
+   *
+   * Set only by the email-intent runtime, together with
+   * `AgentConfig.executionProfile === "email-intent"` and
+   * `ClientConfig.intentCapture`. When the created session advertises a model
+   * selector whose active value differs, the connector applies this selection
+   * before the prompt and fails the session closed when the advertised catalog
+   * refuses it. A session that advertises no model selector keeps whatever the
+   * profile's own provisioning selected. Unset for every ordinary launch.
+   */
+  intentModelSelection?: string;
 }
