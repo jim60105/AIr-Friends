@@ -21,3 +21,9 @@ Explicit email reply anchors SHALL resolve from retained durable history by auth
 
 - **WHEN** the explicit anchor is absent, corrupt, belongs to a different owner or thread, or lacks usable wire threading identifiers
 - **THEN** no SMTP submission occurs and an explicit refusal is returned without substituting another anchor
+
+#### Scenario: Explicit outbound anchor
+
+- **WHEN** the explicit retained anchor is outbound and a verified same-owner-thread inbound source exists outside recent context
+- **THEN** the selected outbound anchor determines threading and the verified inbound source determines recipient
+- **AND** absence of such a verified source causes refusal without owner-wide sender substitution

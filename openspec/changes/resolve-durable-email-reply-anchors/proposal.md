@@ -24,7 +24,7 @@ None.
 
 ## Impact
 
-Expected changes are `src/core/session-orchestrator.ts`, `src/platforms/email/email-adapter.ts`, targeted adapter/reminder tests and `docs/email-platform.md`. Existing `EmailMessageStore.get` and adapter `fetchMessage` provide durable owner-thread isolation; no new persistence, migration or compatibility layer is needed. Scope is one engineer-day for both resolution checks and focused regression coverage. Previously disabled review-required reminders are not automatically re-enabled.
+Expected changes are `src/core/session-orchestrator.ts`, email service/core composition, `src/platforms/email/email-adapter.ts`, `src/platforms/email/message-store.ts`, targeted adapter/reminder tests and `docs/email-platform.md`. Existing durable lookup provides owner-thread isolation; a shared eligibility resolver adds wire-ID/sender checks without new persistence, migration or compatibility layers. Scope is one engineer-day for both resolution checks and focused regression coverage. Previously disabled review-required reminders are not automatically re-enabled.
 
 ## Batch:
 

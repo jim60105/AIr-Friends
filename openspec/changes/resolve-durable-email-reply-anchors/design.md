@@ -16,7 +16,7 @@ See proposal.md for motivation. The original approved design at `docs/superpower
 
 ### Use existing durable interfaces in both checks
 
-Replace reminder preflight's fetchRecentMessages membership check with owner-thread-scoped `fetchMessage(origin.channelId, origin.replyAnchorRecordId)`. Check returned identity against the persisted record and channel owner/thread; lookup errors or unavailable lookup capability fail closed for email, without the current permissive non-email-double fallback. Remove the now-obsolete reminder anchor window constant/comments. Keep non-email reminder behavior unchanged.
+Replace reminder preflight's recent membership check with a narrow host-owned email reply-eligibility resolver backed by durable owner-thread-record lookup. Reuse this resolver in adapter explicit-send resolution so both checks validate record identity, usable wire threading and verified recipient. `fetchMessage` alone returns no wire IDs and cannot prove eligibility. Expose the resolver through existing email service/core composition, without exposing archived content to tools. Lookup errors or unavailable capability fail closed for email. Permanent unusable origins become disabled/review-required before generation; retain evidence suppression ahead of generation. Remove the obsolete anchor-window constant/comments and keep non-email behavior unchanged.
 
 In adapter explicit-send resolution, call `messageStore.get(owner, threadId, replyToMessageId)` directly before any bounded-history dependency. A missing/invalid record refuses the send. Thread references and subject come from that exact selected record. Do not require nonempty recent history in this explicit branch. The implicit branch retains its existing latest-record selection and bounded context behavior; spontaneous sends retain their separate new-thread path.
 
@@ -24,7 +24,7 @@ In adapter explicit-send resolution, call `messageStore.get(owner, threadId, rep
 
 For the persisted reminder's original inbound anchor, derive the recipient from that durable record's normalized verified sender and require it to map to the owner. Keep current submission-time allowlist checks. Do not choose a latest inbound sender from the last 200 records.
 
-Explicit anchors can also reference outbound records under existing reply behavior. Preserve that supported behavior by resolving a verified same-owner inbound source from durable thread records through the existing archive indexes, with no 200-record eligibility limit, and validate the normalized sender against owner. Reuse existing sender/owner mapping rules rather than inventing a recipient from an unverified outbound field. This lookup does not load full thread content into the prompt. If no verified inbound source exists, refuse. Missing threading identifiers remain a refusal. Do not change implicit-anchor sender selection in this repair.
+Explicit anchors can also reference outbound records under existing reply behavior. Add a small `EmailMessageStore` method that inspects the existing thread index under the owner lock and returns validated same-owner-thread inbound recipient metadata without cloning whole message histories or using owner-wide sender fallback. No new index or persistence is needed. Use it for outbound anchors without a finite eligibility window and validate normalized sender against owner. If no verified inbound source exists, refuse. Missing threading identifiers remain a refusal. Do not change implicit-anchor sender selection in this repair.
 
 ### Preserve operation identity and evidence ordering
 
@@ -37,3 +37,7 @@ A retained record can still be unusable due to missing source/wire identifiers o
 ## Verification and rollout
 
 Apply tests should create an original inbound anchor plus 200 newer same-thread records, reopen file-backed stores and exercise complete reminder preflight through adapter resolution and controlled submission. Also cover a newer all-outbound suffix, explicit outbound-anchor behavior, implicit latest-anchor regression, missing/cross-owner/cross-thread and unusable wire IDs, allowlist revocation, stable operation identity and duplicate/uncertain suppression when completion persistence fails. Update the operator expiry paragraphs and related API comments to describe retained durable anchors. No migration, automatic re-enable or compatibility layer is introduced.
+
+## Batch review dispositions
+
+Adopted the final review's usability blocker by specifying a shared durable eligibility resolver, since message existence cannot validate wire threading. Add a complete reminder test showing an unthreadable retained anchor is disabled/review-required without generation or SMTP on later ticks. Adopted the store-level metadata method recommendation to avoid whole-thread copies and owner-wide fallback. Adopted the outbound-anchor normative scenario suggestion.

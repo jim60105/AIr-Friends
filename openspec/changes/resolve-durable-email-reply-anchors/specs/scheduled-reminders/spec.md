@@ -32,3 +32,9 @@ Email reminders SHALL persist and reuse their initiating user thread and reply a
 
 - **WHEN** the persisted anchor is missing, corrupt, cross-owner or cross-thread
 - **THEN** the reminder is review-required and no replacement anchor or new thread is selected
+
+#### Scenario: Retained but unthreadable original
+
+- **WHEN** a retained original anchor lacks usable wire threading identifiers
+- **THEN** the reminder is disabled as review-required before generation or SMTP
+- **AND** later ticks do not regenerate or submit that reminder
