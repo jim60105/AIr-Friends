@@ -18,6 +18,8 @@ Add send-email action compose behind enabled email service and authenticated ema
 
 ### Owned interfaces and callsites
 
+The handler is the host authorization producer for `EmailMailService.send(draft)`. It validates current session/grant immediately before entry and retains the existing side-effect lease through the durable outcome. The mail service trusts this boundary; no model or HTTP route can invoke it directly. Session expiry after admitted execution does not cancel durable result recording, and recovery cannot submit prepared third-party work after its grant session ends.
+
 Own send-email compose endpoint and parameters {grantId,request:{to,subject,body,attachments?}}. Validate request file with resolvePayloadPath/readPayloadArg and authenticated pointer semantics; server validates all fields again. Host obtains operation key third-party:<grantId>, reserves side effect under recovery fence and returns emailSubmission metadata; no model-chosen operation ID, Cc/Bcc or arbitrary headers. Attachments preflight through current-session realpath containment plus existing send-file count/per-file/aggregate/extension limits. No auto-attachment of memory/history.
 
 Affected implementation/tests: `skills/send-email/SKILL.md`, `skills/send-email/scripts/send-email.ts`, `skills/lib/payload.ts`, `src/skills/email-handler.ts`, `src/skills/registry.ts`, `src/skill-api/server.ts`, `src/skills/types.ts`, `tests/skills/email-handler.test.ts`. Update every affected caller in this responsibility when its shared interface changes; do not leave dual APIs, empty stubs or shims. New modules remain unregistered in production until final activation, while tests exercise their real implementations.
