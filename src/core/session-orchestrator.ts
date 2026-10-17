@@ -5071,6 +5071,69 @@ export class SessionOrchestrator {
     const contentBlocks: acp.ContentBlock[] = [{ type: "text" as const, text: fullPrompt }];
 
     for (const att of imageAttachments) {
+      if (att.kind === "email-local") {
+        try {
+          // Local email attachment: load directly from session-contained path
+          if (!att.sessionPath) {
+            sessionLogger.warn(
+              "Local email image has no sessionPath, skipping ContentBlock::Image",
+              {
+                attachmentId: att.attachmentId,
+              },
+            );
+            continue;
+          }
+          const fileBytes = await Deno.readFile(att.sessionPath);
+          if (fileBytes.byteLength > MAX_IMAGE_SIZE_BYTES) {
+            sessionLogger.warn(
+              "Local email image exceeds size limit, skipping ContentBlock::Image",
+              {
+                attachmentId: att.attachmentId,
+                size: fileBytes.byteLength,
+              },
+            );
+            continue;
+          }
+
+          let finalData: Uint8Array = fileBytes;
+          let finalMimeType = att.mimeType;
+
+          if (att.mimeType === "image/gif" && tmpPath) {
+            const converted = await this.convertGifToWebp(
+              fileBytes,
+              att.id,
+              tmpPath,
+              sessionLogger,
+            );
+            if (!converted) continue;
+            finalData = converted;
+            finalMimeType = "image/webp";
+          }
+
+          let binary = "";
+          const chunkSize = 8192;
+          for (let i = 0; i < finalData.length; i += chunkSize) {
+            binary += String.fromCharCode(...finalData.subarray(i, i + chunkSize));
+          }
+          const base64 = btoa(binary);
+          contentBlocks.push({
+            type: "image" as const,
+            data: base64,
+            mimeType: finalMimeType,
+          });
+          sessionLogger.debug("Local image attachment added to prompt", {
+            filename: att.filename,
+            mimeType: finalMimeType,
+          });
+        } catch (error) {
+          sessionLogger.warn("Failed to load local image attachment", {
+            attachmentId: att.attachmentId,
+            error: String(error),
+          });
+        }
+        continue;
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
       try {

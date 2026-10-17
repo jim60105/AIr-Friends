@@ -24,7 +24,7 @@ import {
   syncDirectory,
 } from "./durable-files.ts";
 import type { EmailOperationKey } from "./submission-store.ts";
-import type { Attachment, PlatformMessage } from "../../types/events.ts";
+import type { Attachment, LocalEmailAttachment, PlatformMessage } from "../../types/events.ts";
 
 /** Relative filename for owner thread association journal under `<ownerWorkspace>/email/` */
 export const THREADS_JOURNAL_FILENAME = "threads.jsonl";
@@ -823,14 +823,20 @@ export class EmailMessageStore {
    */
   toPlatformMessages(records: StoredEmailRecord[]): PlatformMessage[] {
     return records.map((r) => {
-      const attachments: Attachment[] = r.attachments.map((att) => ({
-        id: att.id,
-        url: `email://${r.owner}/${r.recordId}/${att.id}`,
-        mimeType: att.mimeType || "application/octet-stream",
-        filename: att.filename ?? att.displayName ?? "attachment",
-        size: att.size,
-        isImage: att.mimeType.startsWith("image/"),
-      }));
+      const attachments: Attachment[] = r.attachments.map((att) => {
+        const localAtt: LocalEmailAttachment = {
+          kind: "email-local",
+          id: att.id,
+          owner: r.owner,
+          recordId: r.recordId,
+          attachmentId: att.id,
+          mimeType: att.mimeType || "application/octet-stream",
+          filename: att.filename ?? att.displayName ?? "attachment",
+          size: att.size,
+          isImage: att.mimeType.startsWith("image/"),
+        };
+        return localAtt;
+      });
 
       return {
         messageId: r.recordId,

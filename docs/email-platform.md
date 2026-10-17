@@ -283,6 +283,34 @@ Acceptance requirements and test scenarios defined in `specs/email-history/spec.
 - **Duplicate wire ID**: Distinct raw messages claiming the same `Message-ID` both survive as immutable records, and ambiguous threading flags review-required.
 - **Forward later**: Even when the originating session's disposable `tmp/` area is reclaimed, original source bytes and attachments remain available by internal ID.
 
+## Owner-Scoped Local Attachments (Owned by `email-local-attachments`)
+
+Inbound email attachments are delivered to agents strictly as owner-validated local workspace files rather than remote URLs. Stored attachment binary payloads are materialized from `EmailMessageStore` into the session's staging directory (`<stagingDir>/attachments/<attachmentId>/<sanitizedFilename>`).
+
+### Invariants & Security
+
+- **Discriminated Union**: `Attachment` is a union of `NetworkAttachment` (Discord/Misskey with required `url`) and `LocalEmailAttachment` (`kind: "email-local"`, opaque `owner`, `recordId`, `attachmentId`, display metadata, and optional session `sessionPath`).
+- **Pre-Read Containment & Owner Validation**: `materializeEmailAttachment` checks that `ref.owner === sessionOwner`, valid UUIDs, canonical staging containment, and refusal of symlink escapes before any bytes are read from `EmailMessageStore`.
+- **Session Staging Boundary**: Local attachment files are placed under the current session's private directory (`0700` dirs, `0600` files). Display filenames are sanitized to a single path component without traversal.
+- **Capability & Size Enforcement**: Only trigger email images within the 20 MiB limit become `ContentBlock::Image` when the agent negotiates image support. Non-images (e.g. PDF/DOCX) or history attachments receive text descriptions with their local session path.
+- **Preservation of Archive on Cleanup**: Session cleanup reclaims ephemeral copies in `tmp/` while permanent email source and attachment files in `EmailMessageStore` remain untouched.
+
+### Acceptance Scenarios
+
+Acceptance requirements and test scenarios defined in `specs/multimedia-messages/spec.md` and `specs/platform-abstraction/spec.md`:
+
+- **Cross-user or symlink reference**: When a forged local reference names another owner or a staging symlink escapes, no private bytes are read or staged.
+- **Network protections remain intact**: Adding local attachments preserves existing HTTP SSRF checks and does not admit file URLs as network fetch targets.
+- **Cleanup preserves sources**: Session cleanup removes temporary attachment copies without removing permanent source history.
+
+### Exported API
+
+- `LocalEmailAttachment`: `{ kind: "email-local", id: string, owner: string, recordId: string, attachmentId: string, filename: string, mimeType: string, size?: number, isImage: boolean, sessionPath?: string }`
+- `NetworkAttachment`: `{ kind?: "network", id: string, url: string, filename: string, mimeType: string, size?: number, isImage: boolean }`
+- `isLocalEmailAttachment(att: Attachment): att is LocalEmailAttachment`
+- `isNetworkAttachment(att: Attachment): att is NetworkAttachment`
+- `materializeEmailAttachment(options: MaterializeAttachmentOptions): Promise<string>`
+
 ### Exported API
 
 - `parseEmailChannelId(channelId: string): { owner: string; threadId: string }`
