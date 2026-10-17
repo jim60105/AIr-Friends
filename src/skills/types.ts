@@ -8,6 +8,7 @@ import type { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { DestinationGrant } from "@core/email-intent-preflight.ts";
 import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platform.ts";
 import type { ReminderOrigin } from "../types/reminder.ts";
+import type { MessageAttachmentPreparer } from "../types/context.ts";
 
 /**
  * Skill call parameters (from external Agent)
@@ -126,6 +127,16 @@ export interface SkillContext {
    * here instead of re-deriving an id from anything the model supplied.
    */
   sessionId?: string;
+  /**
+   * Host-bound preparation of owner-scoped email attachments carried by
+   * messages this session retrieves (`fetch-context`, `get-message`).
+   *
+   * Injected by the Skill API from the authenticated session alone (owner and
+   * canonical staging directory), only for an email session whose platform
+   * runtime provides the capability. Handlers MUST fail closed, never return an
+   * unstaged local reference, when it is absent.
+   */
+  prepareEmailMessages?: MessageAttachmentPreparer;
 }
 
 /**

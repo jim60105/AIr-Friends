@@ -13,6 +13,8 @@ import type { ReplyResult, SendFileResult } from "../../src/types/platform.ts";
 import type { EmailComposeMailService } from "../../src/skills/email-handler.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import type { EmailReminderSession } from "../../src/types/reminder.ts";
+import { EmailMessageStore } from "../../src/platforms/email/message-store.ts";
+import { createEmailAttachmentPreparation } from "../../src/platforms/email/attachment-preparation.ts";
 
 // Build request headers, optionally with the per-session caller token (F13).
 function jsonHeaders(token?: string): Record<string, string> {
@@ -3958,5 +3960,116 @@ Deno.test("SkillAPIServer - a reminder session cannot compose or send files", as
     assertEquals(harness.adapter.files.length, 0);
   } finally {
     await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - email retrieval stages archived attachments into each calling session", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspacesRoot = `${tempDir}/workspaces`;
+  const workspacePath = `${workspacesRoot}/email/${EMAIL_OWNER}`;
+  await Deno.mkdir(`${workspacePath}/tmp`, { recursive: true });
+  const store = new EmailMessageStore({ workspacesRoot });
+  const sessionRegistry = new SessionRegistry();
+  const server = new SkillAPIServer(
+    sessionRegistry,
+    new SkillRegistry(
+      new MemoryStore(
+        new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" }),
+        {},
+      ),
+    ),
+    { port: 3071, host: "127.0.0.1" },
+    TEST_SKILL_SECRET,
+  );
+  try {
+    const bytes = new TextEncoder().encode("archived api attachment bytes");
+    const attachmentId = crypto.randomUUID();
+    const recordId = await store.putSource(
+      EMAIL_OWNER,
+      new TextEncoder().encode("From: sender@example.org\r\nSubject: Test\r\n\r\nHi"),
+      {
+        from: "sender@example.org",
+        subject: "Test",
+        plainBody: "Hi",
+        attachmentPayloads: [{
+          id: attachmentId,
+          filename: "report.pdf",
+          mimeType: "application/pdf",
+          content: bytes,
+        }],
+      },
+    );
+    const record = await store.getByOwnerRecord(EMAIL_OWNER, recordId);
+    assertExists(record);
+    const [archived] = store.toPlatformMessages([record]);
+    assertExists(archived);
+
+    const adapter = {
+      fetchMessage: () => Promise.resolve(archived),
+      fetchRecentMessages: () => Promise.resolve([archived]),
+    };
+    const registerSession = () =>
+      sessionRegistry.register({
+        platform: "email",
+        channelId: EMAIL_CHANNEL,
+        userId: EMAIL_OWNER,
+        isDm: true,
+        workspace: {
+          key: `email/${EMAIL_OWNER}`,
+          components: { platform: "email" as const, userId: EMAIL_OWNER },
+          path: workspacePath,
+          tmpPath: `${workspacePath}/tmp`,
+          isDm: true,
+        } as never,
+        platformAdapter: adapter as unknown as PlatformAdapter,
+      });
+
+    server.setEmailAttachmentPreparation(createEmailAttachmentPreparation(store));
+    server.start();
+    await waitForServer(3071);
+
+    const post = async (
+      sessionId: string,
+      skill: string,
+      parameters: Record<string, unknown>,
+    ) => {
+      const response = await fetch(`http://localhost:3071/api/skill/${skill}`, {
+        method: "POST",
+        headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
+        body: JSON.stringify({ sessionId, parameters }),
+      });
+      assertEquals(response.status, 200);
+      return await response.json();
+    };
+
+    const firstSession = registerSession();
+    const getBody = await post(firstSession, "get-message", { messageId: recordId });
+    assertEquals(getBody.success, true);
+    const firstPath = getBody.data.attachments[0].sessionPath as string;
+    assert(firstPath.startsWith(`${workspacePath}/tmp/${firstSession}/attachments/`));
+    assertEquals(await Deno.readFile(firstPath), bytes);
+
+    const contextBody = await post(firstSession, "fetch-context", {
+      type: "recent_messages",
+      limit: 10,
+    });
+    assertEquals(contextBody.success, true);
+    assertStringIncludes(JSON.stringify(contextBody), firstPath);
+
+    // A second session retrieving the same source gets its own staging copy.
+    const secondSession = registerSession();
+    const secondBody = await post(secondSession, "get-message", { messageId: recordId });
+    const secondPath = secondBody.data.attachments[0].sessionPath as string;
+    assert(secondPath.startsWith(`${workspacePath}/tmp/${secondSession}/attachments/`));
+    assert(secondPath !== firstPath);
+    assertEquals(await Deno.readFile(secondPath), bytes);
+
+    // The backend archive bytes are exactly what forwarding reads.
+    assertEquals(await store.attachment(EMAIL_OWNER, recordId, attachmentId), bytes);
+  } finally {
+    await server.stop();
+    sessionRegistry.stop();
+    store.close();
+    await Deno.remove(tempDir, { recursive: true });
   }
 });

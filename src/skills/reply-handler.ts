@@ -9,6 +9,7 @@ import type {
   SkillHandler,
   SkillResult,
 } from "./types.ts";
+import type { Attachment } from "../types/events.ts";
 
 import { repliesSentTotal } from "@utils/metrics.ts";
 
@@ -382,6 +383,26 @@ export class ReplyHandler {
         };
       }
 
+      // An email retrieval stages every owner-scoped attachment into THIS
+      // calling session before the message is returned. Failure is explicit
+      // and content-free; an unstaged/opaque reference is never reported as a
+      // usable file.
+      let preparedAttachments: Attachment[] | undefined;
+      if (
+        message.attachments?.some((attachment) => attachment.kind === "email-local")
+      ) {
+        const prepare = context.prepareEmailMessages;
+        if (prepare === undefined) {
+          return { success: false, error: "email_attachment_unavailable" };
+        }
+        try {
+          const [prepared] = await prepare([message]);
+          preparedAttachments = prepared.attachments;
+        } catch {
+          return { success: false, error: "email_attachment_unavailable" };
+        }
+      }
+
       return {
         success: true,
         data: {
@@ -391,6 +412,7 @@ export class ReplyHandler {
           username: message.username,
           timestamp: message.timestamp.toISOString(),
           isBot: message.isBot,
+          ...(preparedAttachments === undefined ? {} : { attachments: preparedAttachments }),
         },
       };
     } catch (error) {

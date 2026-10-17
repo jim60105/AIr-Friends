@@ -234,6 +234,8 @@ export class AgentCore {
     this.setEmailSessionReceipts(services?.receipts ?? null);
     this.setEmailSubmissionEvidence(services?.submissionEvidence ?? null);
     this.orchestrator.setEmailDestinationGrantPreflight(services?.preflight ?? null);
+    this.orchestrator.setEmailAttachmentPreparation(services?.attachmentPreparation ?? null);
+    this.skillApiServer?.setEmailAttachmentPreparation(services?.attachmentPreparation ?? null);
     this.skillRegistry.setEmailCompose(
       services === null ? null : {
         mailService: services.mailService,

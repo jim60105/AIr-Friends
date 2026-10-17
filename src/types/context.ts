@@ -173,3 +173,15 @@ export interface MessageFetcher {
    */
   fetchEmojis?(): Promise<PlatformEmoji[]>;
 }
+
+/**
+ * Host-bound preparation of every owner-scoped local attachment carried by a
+ * message, before the message is formatted or charged to a token budget.
+ *
+ * The callback is bound to ONE authenticated session (owner + staging
+ * directory) by the caller; it never receives owner or staging values from
+ * message data.
+ */
+export type MessageAttachmentPreparer = (
+  messages: readonly PlatformMessage[],
+) => Promise<PlatformMessage[]>;

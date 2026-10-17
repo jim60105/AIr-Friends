@@ -45,6 +45,10 @@ import {
 } from "@core/email-intent-preflight.ts";
 import type { EmailComposeMailService, EmailForwardSourceStore } from "@skills/email-handler.ts";
 import type { EmailSubmissionEvidenceSource } from "@core/email-response-accounting.ts";
+import {
+  createEmailAttachmentPreparation,
+  type EmailAttachmentPreparation,
+} from "./attachment-preparation.ts";
 
 const logger = createLogger("EmailActivation");
 
@@ -86,6 +90,12 @@ export interface EmailPlatformServices {
   readonly mailService: EmailComposeMailService;
   /** Owner-scoped store a forward reads its designated source through. */
   readonly forwardSourceStore?: EmailForwardSourceStore;
+  /**
+   * Session-bound staging of owner-scoped attachment references. The adapter
+   * stays session-neutral; the host seams install this capability and supply
+   * the authenticated session's own owner/staging boundary per call.
+   */
+  readonly attachmentPreparation: EmailAttachmentPreparation;
   /** Host-side destination authorization producer. */
   readonly preflight: EmailDestinationGrantPreflight;
 }
@@ -332,6 +342,7 @@ export async function composeEmailPlatform(
     submissionEvidence: mailService,
     mailService,
     forwardSourceStore: messageStore,
+    attachmentPreparation: createEmailAttachmentPreparation(messageStore),
     preflight,
   };
 

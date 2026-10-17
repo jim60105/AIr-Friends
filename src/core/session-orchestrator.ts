@@ -23,7 +23,7 @@ import {
   type RetryPromptContext,
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
-import type { AssembledSpontaneousContext } from "../types/context.ts";
+import type { AssembledSpontaneousContext, MessageAttachmentPreparer } from "../types/context.ts";
 import type { EmailSpontaneousSession, EmailSpontaneousTarget } from "./spontaneous-target.ts";
 import { sessionStagingDir } from "./session-staging.ts";
 import { resolveTrustedSkillsRoot } from "./skills-root.ts";
@@ -47,6 +47,12 @@ import type {
 } from "../types/config.ts";
 import { emailWorkReceiptOf, isValidPlatform } from "../types/events.ts";
 import type { EmailWorkReceipt, NormalizedEvent, Platform } from "../types/events.ts";
+import {
+  type EmailAttachmentPreparation,
+  EmailAttachmentPreparationError,
+  emailAttachmentScope,
+} from "../platforms/email/attachment-preparation.ts";
+import { assertStagingRootBoundary } from "../platforms/email/durable-files.ts";
 import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
 import type {
   EmailDestinationGrantOutcome,
@@ -74,7 +80,8 @@ import type {
   MCPServerConfig,
   PermissionRejection,
 } from "@acp/types.ts";
-import { dirname, join } from "@std/path";
+import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import { assertSafePath, canonicalizeRoot } from "../platforms/email/durable-files.ts";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
 import type { EmailReminderSession, ReminderOrigin, ResolvedReminder } from "../types/reminder.ts";
@@ -321,6 +328,13 @@ export class SessionOrchestrator {
    * non-email flow is untouched.
    */
   private emailSubmissionEvidence: EmailSubmissionEvidenceSource | null = null;
+  /**
+   * Session-bound email attachment staging (owned by
+   * `materialize-email-session-attachments`). Null until email ingress is
+   * wired; while null an email prompt that carries local attachment
+   * references fails explicitly instead of exposing opaque identifiers.
+   */
+  private emailAttachmentPreparation: EmailAttachmentPreparation | null = null;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -423,6 +437,15 @@ export class SessionOrchestrator {
    */
   setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
     this.emailSubmissionEvidence = source;
+  }
+
+  /**
+   * Install (or clear) the session-bound email attachment preparation
+   * capability. Email ingress wires this before its first poll; the capability
+   * receives only host-derived owner/staging values and never tool input.
+   */
+  setEmailAttachmentPreparation(preparation: EmailAttachmentPreparation | null): void {
+    this.emailAttachmentPreparation = preparation;
   }
 
   /**
@@ -1011,6 +1034,22 @@ export class SessionOrchestrator {
         channelId: event.channelId,
       });
 
+      // Session-owned attachment staging: the trigger and every fetched
+      // history message must carry CURRENT-session copies before any
+      // formatting, token accounting or image-block construction.
+      const prepareAttachments = this.emailPrepareMessagesFor({
+        platform: event.platform,
+        workspace,
+        sessionOwner: event.userId,
+        registrySessionId: shellSessionId,
+      });
+      const triggerHasLocalAttachments = event.attachments?.some((attachment) =>
+        attachment.kind === "email-local"
+      ) ?? false;
+      if (triggerHasLocalAttachments && prepareAttachments === undefined) {
+        throw new EmailAttachmentPreparationError();
+      }
+
       // 3. Assemble initial context
       const context = await this.contextAssembler.assembleContext(
         event,
@@ -1020,7 +1059,14 @@ export class SessionOrchestrator {
         resolvedModel,
         yoloDecision.enabled,
         agentWorkspacePath,
+        prepareAttachments,
       );
+      // The assembler prepared the trigger and every fetched history message
+      // through the SAME session-bound callback; image-block construction must
+      // consume exactly those prepared attachments.
+      const preparedEvent = triggerHasLocalAttachments
+        ? { ...event, attachments: context.triggerMessage.attachments }
+        : event;
       sessionLogger.debug("Context assembled", {
         memoriesCount: context.importantMemories.length,
         recentMessagesCount: context.recentMessages.length,
@@ -1041,7 +1087,7 @@ export class SessionOrchestrator {
 
       // 4. Re-render system prompt with user context to produce the full prompt
       const fullPrompt = await this.contextAssembler.renderFullPrompt(
-        event,
+        preparedEvent,
         this.skillSessionId(shellSessionId),
         // A clarification outcome prefixes ONE fixed host directive; every
         // other session (and every other outcome) passes the assembled user
@@ -1282,9 +1328,9 @@ export class SessionOrchestrator {
             const promptContent = await this.buildPromptContent(
               fullPrompt,
               connector.supportsImageContent(),
-              event,
+              preparedEvent,
               sl2,
-              workspace.tmpPath,
+              this.stagingDirFor(workspace, shellSessionId),
             );
 
             // Audit: prompt_sent
@@ -1686,9 +1732,9 @@ export class SessionOrchestrator {
         const promptContent = await this.buildPromptContent(
           fullPrompt,
           supportsImage,
-          event,
+          preparedEvent,
           sessionLogger,
-          workspace.tmpPath,
+          this.stagingDirFor(workspace, shellSessionId),
         );
 
         // Audit: prompt_sent
@@ -2261,6 +2307,12 @@ export class SessionOrchestrator {
         userId: emailTarget.userId,
         channelId: emailTarget.channelId,
       };
+      const prepareAttachments = this.emailPrepareMessagesFor({
+        platform,
+        workspace,
+        sessionOwner: sessionUserId,
+        registrySessionId: shellSessionId,
+      });
 
       // 3. Assemble spontaneous context
       const context = await this.contextAssembler.assembleSpontaneousContext(
@@ -2277,6 +2329,7 @@ export class SessionOrchestrator {
         this.skillSessionId(shellSessionId),
         resolvedModel,
         yoloDecision.enabled,
+        prepareAttachments,
       );
 
       // 4. Build prompt from template
@@ -5828,6 +5881,29 @@ export class SessionOrchestrator {
   }
 
   /**
+   * The session-bound message preparation callback of this session.
+   *
+   * Only an email session with the production capability installed gets one;
+   * the owner and staging directory come exclusively from the authenticated
+   * workspace and the host-assigned Skill API session id.
+   */
+  private emailPrepareMessagesFor(params: {
+    platform: Platform;
+    workspace: WorkspaceInfo;
+    sessionOwner: string;
+    registrySessionId: string | null;
+  }): MessageAttachmentPreparer | undefined {
+    const preparation = this.emailAttachmentPreparation;
+    if (params.platform !== "email" || preparation === null) return undefined;
+    const scope = emailAttachmentScope({
+      workspace: params.workspace,
+      sessionOwner: params.sessionOwner,
+      skillSessionId: this.skillSessionId(params.registrySessionId),
+    });
+    return (messages) => preparation.prepareMessages(scope, messages);
+  }
+
+  /**
    * The mandatory literal-first retry-prompt context: every missing-reply
    * retry names the same literal Skill API session id and absolute staging
    * directory the session's system prompt rendered (per-spawn and pooled
@@ -6097,6 +6173,16 @@ export class SessionOrchestrator {
       // existing parent — neither write sink creates parent directories, and a
       // missing directory would otherwise surface later as SKILL_PAYLOAD_NOT_FOUND.
       try {
+        // An email session's staging parent chain is authorized BEFORE this
+        // first directory creation: a symlinked workspace/tmp ancestor must
+        // never cause the host itself to create a directory outside the
+        // trusted workspace boundary.
+        if (params.platform === "email") {
+          await assertStagingRootBoundary(
+            params.workspace.path,
+            join(params.workspace.tmpPath, shellSessionId),
+          );
+        }
         await Deno.mkdir(join(params.workspace.tmpPath, shellSessionId), { recursive: true });
       } catch (error) {
         // Registration precedes staging provisioning; the caller never receives
@@ -6207,17 +6293,33 @@ export class SessionOrchestrator {
     for (const att of imageAttachments) {
       if (att.kind === "email-local") {
         try {
-          // Local email attachment: load directly from session-contained path
-          if (!att.sessionPath) {
+          // Local email attachment: load ONLY from a path inside this session's
+          // validated staging boundary. A stale path recorded by another
+          // session is refused rather than read.
+          if (!att.sessionPath || !tmpPath) {
             sessionLogger.warn(
-              "Local email image has no sessionPath, skipping ContentBlock::Image",
+              "Local email image has no session-contained path, skipping ContentBlock::Image",
               {
                 attachmentId: att.attachmentId,
+                code: "email_attachment_unavailable",
               },
             );
             continue;
           }
-          const fileBytes = await Deno.readFile(att.sessionPath);
+          const canonicalStaging = await canonicalizeRoot(tmpPath);
+          const sessionRel = relative(canonicalStaging, resolve(att.sessionPath));
+          if (sessionRel.startsWith("..") || isAbsolute(sessionRel)) {
+            sessionLogger.warn(
+              "Local email image path is outside this session's staging boundary",
+              {
+                attachmentId: att.attachmentId,
+                code: "email_attachment_unavailable",
+              },
+            );
+            continue;
+          }
+          const safeSessionPath = await assertSafePath(canonicalStaging, sessionRel);
+          const fileBytes = await Deno.readFile(safeSessionPath);
           if (fileBytes.byteLength > MAX_IMAGE_SIZE_BYTES) {
             sessionLogger.warn(
               "Local email image exceeds size limit, skipping ContentBlock::Image",
@@ -6235,7 +6337,6 @@ export class SessionOrchestrator {
           if (att.mimeType === "image/gif" && tmpPath) {
             const converted = await this.convertGifToWebp(
               fileBytes,
-              att.id,
               tmpPath,
               sessionLogger,
             );
@@ -6256,13 +6357,14 @@ export class SessionOrchestrator {
             mimeType: finalMimeType,
           });
           sessionLogger.debug("Local image attachment added to prompt", {
-            filename: att.filename,
             mimeType: finalMimeType,
+            size: finalData.byteLength,
           });
         } catch (error) {
           sessionLogger.warn("Failed to load local image attachment", {
             attachmentId: att.attachmentId,
-            error: String(error),
+            code: "email_image_unreadable",
+            errorName: error instanceof Error ? error.name : "unknown",
           });
         }
         continue;
@@ -6287,7 +6389,6 @@ export class SessionOrchestrator {
             // Convert GIF to WebP using ImageMagick
             const converted = await this.convertGifToWebp(
               new Uint8Array(arrayBuffer),
-              att.id,
               tmpPath,
               sessionLogger,
             );
@@ -6333,18 +6434,39 @@ export class SessionOrchestrator {
   /**
    * Convert a GIF image to static WebP using ImageMagick.
    * Returns the WebP file data, or null if conversion fails.
+   *
+   * Scratch names are random and both destinations are validated inside the
+   * CANONICAL session staging directory before any write, converter launch or
+   * read. Diagnostics carry only fixed codes, an exit code and sizes: never a
+   * filename, private path or raw converter output.
    */
   private async convertGifToWebp(
     gifData: Uint8Array,
-    attachmentId: string,
     tmpPath: string,
     sessionLogger: ReturnType<typeof logger.child>,
   ): Promise<Uint8Array | null> {
-    const gifPath = `${tmpPath}/${attachmentId}.gif`;
-    const webpPath = `${tmpPath}/${attachmentId}.webp`;
+    let gifPath: string | null = null;
+    let webpPath: string | null = null;
+    let produced = false;
     try {
-      await Deno.mkdir(tmpPath, { recursive: true });
-      await Deno.writeFile(gifPath, gifData);
+      const canonicalStaging = await canonicalizeRoot(tmpPath);
+      await Deno.mkdir(canonicalStaging, { recursive: true, mode: 0o700 });
+      // A random base avoids every name collision (concurrent sessions, same
+      // source attachment) and never derives a path from untrusted metadata.
+      const scratchBase = crypto.randomUUID();
+      gifPath = await assertSafePath(canonicalStaging, `${scratchBase}.gif`);
+      webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
+      // `createNew` refuses a pre-existing target, so a symlink planted at the
+      // scratch name can never be followed by the host's own write.
+      await Deno.writeFile(gifPath, gifData, { mode: 0o600, createNew: true });
+      // Reserve the output as a regular file BEFORE the converter runs, so the
+      // converter cannot follow a planted symlink either.
+      await Deno.writeFile(webpPath, new Uint8Array(), { mode: 0o600, createNew: true });
+
+      // Re-validate both paths IMMEDIATELY before the converter opens them: a
+      // component replaced after reservation is refused rather than followed.
+      gifPath = await assertSafePath(canonicalStaging, `${scratchBase}.gif`);
+      webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
 
       const command = new Deno.Command("convert", {
         args: [`${gifPath}[0]`, webpPath],
@@ -6354,32 +6476,43 @@ export class SessionOrchestrator {
       const result = await command.output();
 
       if (!result.success) {
-        const stderr = new TextDecoder().decode(result.stderr);
         sessionLogger.warn("ImageMagick GIF-to-WebP conversion failed", {
+          code: "gif_conversion_failed",
           exitCode: result.code,
-          stderr,
         });
         return null;
       }
 
+      // Re-validate after the converter ran: a component replaced during
+      // conversion is refused instead of reading outside the boundary.
+      webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
       const webpData = await Deno.readFile(webpPath);
+      produced = true;
       sessionLogger.debug("GIF converted to WebP", {
-        attachmentId,
         gifSize: gifData.length,
         webpSize: webpData.length,
       });
       return webpData;
     } catch (error) {
       sessionLogger.warn("GIF-to-WebP conversion error", {
-        attachmentId,
-        error: String(error),
+        code: "gif_conversion_failed",
+        errorName: error instanceof Error ? error.name : "unknown",
       });
       return null;
     } finally {
-      // Clean up intermediate GIF file (WebP cleaned up with tmpDir)
-      try {
-        await Deno.remove(gifPath);
-      } catch { /* ignore */ }
+      // Clean up the intermediate GIF file; the derived WebP is a session
+      // temporary removed with the rest of tmp.
+      if (gifPath) {
+        try {
+          await Deno.remove(gifPath);
+        } catch { /* ignore */ }
+      }
+      // A failed conversion leaves no empty placeholder behind.
+      if (!produced && webpPath) {
+        try {
+          await Deno.remove(webpPath);
+        } catch { /* ignore */ }
+      }
     }
   }
 

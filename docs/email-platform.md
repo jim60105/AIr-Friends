@@ -390,10 +390,45 @@ Inbound email attachments are delivered to agents strictly as owner-validated lo
 ### Invariants & Security
 
 - **Discriminated Union**: `Attachment` is a union of `NetworkAttachment` (Discord/Misskey with required `url`) and `LocalEmailAttachment` (`kind: "email-local"`, opaque `owner`, `recordId`, `attachmentId`, display metadata, and optional session `sessionPath`).
-- **Pre-Read Containment & Owner Validation**: `materializeEmailAttachment` checks that `ref.owner === sessionOwner`, valid UUIDs, canonical staging containment, and refusal of symlink escapes before any bytes are read from `EmailMessageStore`.
-- **Session Staging Boundary**: Local attachment files are placed under the current session's private directory (`0700` dirs, `0600` files). Display filenames are sanitized to a single path component without traversal.
-- **Capability & Size Enforcement**: Only trigger email images within the 20 MiB limit become `ContentBlock::Image` when the agent negotiates image support. Non-images (e.g. PDF/DOCX) or history attachments receive text descriptions with their local session path.
+- **Pre-Read Containment & Owner Validation**: `materializeEmailAttachment` checks that `ref.owner === sessionOwner`, valid UUIDs, staging-root authorization, destination containment, and refusal of symlink escapes before any directory creation or bytes are read from `EmailMessageStore`.
+- **Staging-Root Authorization**: `assertStagingRootBoundary(trustedRoot, stagingDir)` requires the authenticated workspace root to be an existing, real directory and inspects every existing component down to the session directory with `lstat` before canonicalization. A symlinked workspace or `tmp/` ancestor (even with an existing session child) is refused before any outside directory creation, file write or archive-byte read.
+- **Session Staging Boundary**: Local attachment files are placed under the current session's private directory (`0700` dirs, `0600` files). Display filenames are sanitized to a single path component without traversal. Incoming `sessionPath` values are ignored, so a path recorded by another session is never reused.
+- **Capability & Size Enforcement**: Only trigger email images within the 20 MiB limit become `ContentBlock::Image` when the agent negotiates image support. Non-images (e.g. PDF/DOCX), included history images and alternate-retrieval attachments receive text descriptions with their current-session path, never an image block.
 - **Preservation of Archive on Cleanup**: Session cleanup reclaims ephemeral copies in `tmp/` while permanent email source and attachment files in `EmailMessageStore` remain untouched.
+
+### Production session staging (Owned by `materialize-email-session-attachments`)
+
+`src/platforms/email/attachment-preparation.ts` composes the existing owner-safe
+materializer into the ONE preparation capability the host seams install:
+
+- **Host-derived scope only**: `emailAttachmentScope({ workspace, sessionOwner, skillSessionId })`
+  derives the owner and staging directory from the authenticated workspace and the
+  host-assigned Skill API session id, falling back to the workspace `tmp` root when the
+  Skill API is disabled. Owner or staging values are never taken from tool parameters,
+  email bodies, attachment metadata or the environment; a workspace owned by another user
+  is refused.
+- **Every consumer prepares first**: email activation wires the capability through
+  `AgentCore` into `SessionOrchestrator` and the Skill API. The initial prompt prepares the
+  trigger and fetched history before formatting, token accounting and image-block
+  construction, on both the per-spawn and pooled prompt paths. `fetch-context`
+  (`recent_messages`, `search_messages`) and `get-message` prepare returned messages before
+  serialization.
+- **Per-session isolation**: preparation produces message/attachment copies and assigns
+  `sessionPath` only after successful staging; shared events and archive metadata are never
+  mutated. Identical owner/record/attachment references are staged once per preparation
+  batch, with no global cache. GIF conversion scratch names are random and both the input
+  and derived WebP stay inside the calling session's validated staging directory.
+- **Publish checks are repeated at the sink**: the staging boundary and destination are
+  re-authorized immediately after the archive read, the session copy is written to an
+  exclusively created random sibling and renamed into place (`rename(2)` replaces a symlink
+  entry rather than following it), and both GIF scratch files are reserved with exclusive
+  creation and re-validated immediately before the converter opens them. Concurrent hostile
+  mutation of the workspace volume is outside the deployment's single-owner assumption.
+- **Explicit, content-free failure**: an attachment that cannot be safely staged fails that
+  prompt preparation or retrieval with `email_attachment_unavailable`. No unstaged/opaque
+  reference is presented as a usable file, and diagnostics omit filenames, bodies, archive
+  paths, converter stderr and source bytes. Reclaiming session tmp removes only the
+  disposable copies; archive bytes and backend forwarding retrieval are unchanged.
 
 ### Acceptance Scenarios
 
@@ -403,6 +438,15 @@ Acceptance requirements and test scenarios defined in `specs/multimedia-messages
 - **Network protections remain intact**: Adding local attachments preserves existing HTTP SSRF checks and does not admit file URLs as network fetch targets.
 - **Cleanup preserves sources**: Session cleanup removes temporary attachment copies without removing permanent source history.
 
+Production-path staging scenarios (trigger/history, alternate retrieval, unsafe or
+unavailable sources, cleanup, escaping staging ancestors, trigger-only inline images and
+isolated GIF conversion) are defined in
+`openspec/changes/materialize-email-session-attachments/specs/email-incoming-content/spec.md`
+and exercised by `tests/platforms/email/attachment-preparation.test.ts`,
+`tests/platforms/email/attachment-materializer.test.ts`,
+`tests/core/session-orchestrator.test.ts`, `tests/skills/context-handler.test.ts` and
+`tests/skills/reply-handler.test.ts`.
+
 ### Exported API
 
 - `LocalEmailAttachment`: `{ kind: "email-local", id: string, owner: string, recordId: string, attachmentId: string, filename: string, mimeType: string, size?: number, isImage: boolean, sessionPath?: string }`
@@ -410,6 +454,10 @@ Acceptance requirements and test scenarios defined in `specs/multimedia-messages
 - `isLocalEmailAttachment(att: Attachment): att is LocalEmailAttachment`
 - `isNetworkAttachment(att: Attachment): att is NetworkAttachment`
 - `materializeEmailAttachment(options: MaterializeAttachmentOptions): Promise<string>`
+- `assertStagingRootBoundary(trustedRoot: string, stagingDir: string): Promise<void>`
+- `createEmailAttachmentPreparation(store: EmailMessageStore): EmailAttachmentPreparation`
+- `emailAttachmentScope({ workspace, sessionOwner, skillSessionId }): EmailAttachmentPreparationScope`
+- `EmailAttachmentPreparationError` (fixed, content-free `email_attachment_unavailable`)
 
 ### Exported API
 
