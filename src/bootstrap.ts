@@ -8,6 +8,7 @@ import { shouldVerifyOmpVersion, verifyOmpVersion } from "@utils/omp-version.ts"
 import { AgentCore } from "@core/agent-core.ts";
 import { getDefaultAgentType } from "@acp/agent-factory.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
+import type { SpontaneousPostCallback } from "@core/spontaneous-scheduler.ts";
 import { ChannelLurkScheduler } from "@core/channel-lurk-scheduler.ts";
 import { extractChannelLurkIds } from "@platforms/discord/index.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
@@ -28,6 +29,7 @@ import { installExternalSkills } from "@core/skill-installer.ts";
 import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { ensureOpencodeSkillDiscoveryDeclaration } from "@utils/opencode-paths.ts";
 import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { EmailSpontaneousStore } from "@platforms/email/spontaneous-store.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
 import { isValidPlatform } from "./types/events.ts";
@@ -310,7 +312,27 @@ export async function bootstrap(
 
   // Initialize Spontaneous Scheduler
   const spontaneousScheduler = new SpontaneousScheduler(config);
-  spontaneousScheduler.setCallback(async (platform: Platform) => {
+  // Email spontaneous occurrence identity is durable and file-backed, so the lane only
+  // exists when the email platform is configured for spontaneous posting at all.
+  // Production email stays unavailable until `email-activation` removes the guard.
+  const emailSpontaneousConfig = config.platforms.email;
+  if (emailSpontaneousConfig?.enabled && emailSpontaneousConfig.spontaneousPost?.enabled) {
+    const emailRoot = join(config.workspace.repoPath, "email");
+    spontaneousScheduler.setOccurrenceStore(new EmailSpontaneousStore({ emailRoot }));
+    logger.info("Email spontaneous occurrence lane uses durable state at {emailRoot}", {
+      emailRoot,
+    });
+  }
+  const spontaneousCallback: SpontaneousPostCallback = async (platform, occurrence) => {
+    if (platform === "email") {
+      // Email target resolution, session launch and delivery are owned by
+      // `email-spontaneous-targets` and enabled by `email-activation`. Fail closed instead of
+      // recording an unimplemented dispatch as a completed occurrence.
+      throw new Error(
+        `Email spontaneous dispatch for occurrence ${occurrence?.occurrenceId ?? "unknown"} ` +
+          "is not available until email-spontaneous-targets is applied",
+      );
+    }
     const platformConfig = config.platforms[platform];
     if (!platformConfig?.spontaneousPost) {
       return;
@@ -360,7 +382,8 @@ export async function bootstrap(
         error: response.error,
       });
     }
-  });
+  };
+  spontaneousScheduler.setCallback(spontaneousCallback);
 
   // Initialize Self-Research Scheduler
   let selfResearchScheduler: SelfResearchScheduler | null = null;
@@ -721,6 +744,9 @@ export async function startPlatforms(context: AppContext): Promise<void> {
   // Start spontaneous scheduler after platforms are connected
   if (context.spontaneousScheduler) {
     context.spontaneousScheduler.start(context.savedSchedulerState);
+    // Durable occurrence lanes persist and arm asynchronously; wait for them so startup
+    // never reports ready while schedule state is still unpersisted.
+    await context.spontaneousScheduler.whenReady();
   }
 
   // Start channel lurk scheduler after platforms are connected
