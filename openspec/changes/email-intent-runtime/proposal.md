@@ -30,7 +30,11 @@ Total: **6.75 engineering hours**, strictly below 8 hours. See tasks.md for item
 
 ## Batch:
 
+- code-conflict: email-opencode-intent-profile (src/acp/types.ts)
+- code-conflict: email-omp-intent-profile (src/acp/types.ts)
 - depends-on: email-session-receipts
+- depends-on: email-opencode-intent-profile
+- depends-on: email-omp-intent-profile
 - code-conflict: email-private-observability (src/acp/client.ts)
 
 Apply in the topological order in `../email-config-identity/batch-index.md`; serialize overlapping files even without semantic dependency. All affected callers belong to this slice or named predecessors/successors and are listed in the shared contract index.

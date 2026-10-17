@@ -14,7 +14,7 @@ The approved source is `docs/superpowers/specs/2026-10-17-email-platform-design.
 
 ## Decisions
 
-Add an intent-only execution profile for OMP and OpenCode with fresh isolated temporary workspace/HOME, no user mounts, no Skill API token/pointer/JWT, no external MCP, empty script inventory and deny-all-tools at native availability and permission sink. Capture final agent text through a bounded callback, never logs. Deadline 30 seconds; output at most 8 KiB. Tool attempt, timeout, overflow or incomplete output returns unavailable. Teardown obeys existing producer-safe tmp lifecycle.
+Consume the complete native deny-all profiles from `email-opencode-intent-profile` and `email-omp-intent-profile`; this slice does not implement backend-native policy or packaging. Their factory contract supplies private HOME/cwd, provider-only model configuration, no user mounts, no mailbox credentials or Skill API material, and native pre-dispatch tool denial. Add deny-all ACP callback handling as defense in depth. Capture final agent text through a bounded callback, never logs. Deadline 30 seconds; output at most 8 KiB. Tool attempt, timeout, overflow or incomplete output returns unavailable. Teardown obeys existing producer-safe tmp lifecycle.
 
 ### Owned interfaces and callsites
 
@@ -23,6 +23,10 @@ Own EmailIntentRuntime.interpret({authoredText,model,backend})->{status:complete
 Affected implementation/tests: `src/core/email-intent-runtime.ts`, `src/acp/client.ts`, `src/acp/agent-connector.ts`, `src/acp/types.ts`, `tests/acp/email-intent-runtime.test.ts`. Update every affected caller in this responsibility when its shared interface changes; do not leave dual APIs, empty stubs or shims. New modules remain unregistered in production until final activation, while tests exercise their real implementations.
 
 ### Predecessor contracts
+
+### Native intent profiles
+
+`email-opencode-intent-profile` and `email-omp-intent-profile` own `createEmailIntentAgentConfig(backend,providerSelection,temporaryRoots)`, native denial, authored assets and real native-dispatch acceptance. See their designs for exact configuration, model provisioning and development/container paths. Required model-provider API authentication is allowed; mailbox and Skill API credentials remain excluded.
 
 ### email-session-receipts
 
@@ -41,7 +45,7 @@ Reuse the established platform/workspace/skill boundaries rather than a second s
 
 ## Verification design
 
-Use deterministic ACP fixtures for both backends with environment/filesystem sentinels and assert zero tool effects, not only prompt text. Preserve ordinary connector behavior.
+Use deterministic ACP fixtures for bounded capture, timeout and lifecycle behavior; native-dispatch enforcement and asset acceptance are completed predecessor evidence. Run one composed profile/capture smoke for each backend against the predecessor scripted provider. Preserve ordinary connector behavior.
 
 The tasks' verification is planned implementation evidence, not exercised runtime evidence. Test doubles for ACP/model decisions are labeled separately from real IMAP/SMTP protocol-service exchanges. No production credentials or mailbox may be used by automated checks.
 

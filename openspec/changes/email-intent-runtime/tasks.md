@@ -1,11 +1,11 @@
 # Tasks
 
-Total estimate: **6.75 engineering hours**, strictly below 8 hours. Estimates include tests, controlled smoke verification, documentation and contingency; they are not guarantees. Apply dependencies: `email-session-receipts`. Production activation remains blocked until the final batch cutover.
+Total estimate: **6.75 engineering hours**, strictly below 8 hours. Estimates include tests, controlled smoke verification, documentation and contingency; they are not guarantees. Apply dependencies: `email-session-receipts`, `email-opencode-intent-profile`, `email-omp-intent-profile`. Production activation remains blocked until the final batch cutover.
 
 ## 1. Owned behavior and its regression coverage
 
-- [ ] 1.1 (2h) Add isolated backend profile and deny-all native tools/permission sink; verify both OMP/OpenCode tool attempts have zero effects.
-- [ ] 1.2 (1.5h) Add bounded private text capture and teardown; verify no user mounts/credentials and timeout/overflow producer-safe cleanup.
+- [ ] 1.1 (2h) Consume both completed native profile factory contracts and add deny-all ACP callback handling; verify selected profile identity, absence of mailbox/Skill API credentials and unchanged ordinary connector behavior. Native policy/assets are predecessor work, not hidden in this budget.
+- [ ] 1.2 (1.5h) Add bounded private text capture and teardown; verify no user mounts/mailbox credentials/Skill API material and timeout/overflow producer-safe cleanup, while the selected model-provider authentication remains usable.
 - [ ] 1.3 (1.25h) Add and run this responsibility's deterministic regression cases. Verify: Use deterministic ACP fixtures for both backends with environment/filesystem sentinels and assert zero tool effects, not only prompt text. Preserve ordinary connector behavior.
 - [ ] 1.4 (0.5h) Document the intent-only profile, hard failure behavior and accepted model-judgment limitation. Verify the documented fields, outcomes and commands match the implemented interface and link this slice's acceptance scenarios in `docs/email-platform.md`; add its scoped CHANGELOG entry.
 - [ ] 1.5 (0.75h contingency) Resolve bounded integration defects in the owned interfaces/tests only; verify the same acceptance cases after fixes, or record unused contingency without inventing extra features.
