@@ -32,6 +32,15 @@ export interface PlatformCapabilities {
   /** Supports message reactions */
   supportsReactions: boolean;
 
+  /**
+   * Whether the platform can edit an already-sent message in place.
+   *
+   * Optional for backward compatibility. Discord and Misskey declare `true`
+   * explicitly; email declares `false`, and email's edit-reply path fails
+   * explicitly instead of emulating an edit by sending another message.
+   */
+  supportsEditing?: boolean;
+
   /** Maximum message length */
   maxMessageLength: number;
 }
@@ -61,6 +70,12 @@ export interface ReplyOptions {
   /** Mention the user in the reply */
   mentionUser?: boolean;
 
+  /**
+   * Host-assigned email operation context. Required by email adapters; ignored
+   * by every other platform. Never read from `platformSpecific`.
+   */
+  emailSend?: EmailSendContext;
+
   /** Additional platform-specific options */
   platformSpecific?: Record<string, unknown>;
 }
@@ -81,6 +96,30 @@ export interface EmailSubmissionMetadata {
   targetKind?: "user" | "third-party";
   sentCopy?: "pending" | "appended" | "failed";
   safeCode?: string;
+}
+
+/**
+ * Host-assigned operation context for one email send.
+ *
+ * It is supplied ONLY by the host session/scheduler that owns the durable work
+ * item (never by the model or by a tool request's `platformSpecific` data), and
+ * it is what binds an outgoing mail to its logical operation:
+ *
+ * - `workId`: the durable work/session id the host recorded before the agent
+ *   acted (for inbound mail, the mailbox hand-off workId carried by the event's
+ *   typed email receipt).
+ * - `owner`: the mailbox owner (`e_<sha256>`) the send belongs to. It must match
+ *   the owner encoded in the channel id.
+ * - `actionSlot`: the host-assigned operation slot. When omitted, the adapter
+ *   binds the ordinary slot for the send kind (`reply` for ordinary replies,
+ *   `files` for file deliveries) so a reply and a file delivery in one session
+ *   can never share one operation key. A caller performing several sends for the
+ *   same `workId` MUST give each send a distinct slot.
+ */
+export interface EmailSendContext {
+  workId: string;
+  actionSlot?: string;
+  owner: string;
 }
 
 /**
@@ -163,6 +202,11 @@ export interface SendFileOptions {
   replyToMessageId?: string;
   /** Optional text message to accompany the file */
   comment?: string;
+  /**
+   * Host-assigned email operation context. Required by email adapters; ignored
+   * by every other platform. Never read from any platform-specific data.
+   */
+  emailSend?: EmailSendContext;
 }
 
 /**

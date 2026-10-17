@@ -74,6 +74,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     supportsDm: true,
     supportsGuild: false,
     supportsReactions: true,
+    supportsEditing: true,
     maxMessageLength: 3000,
   };
 
