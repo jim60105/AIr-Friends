@@ -2393,9 +2393,10 @@ Every delivery re-reads the persisted origin and re-checks the CURRENT configura
    unresolved record (`unknown`/`submitting`) is review-required WITHOUT sending. (With no evidence
    source wired, the mail service's own operation key still answers a repeated send from its
    journal, so a second SMTP transaction is impossible either way.)
-4. **Origin anchor resolved in its owner thread.** The persisted anchor must be a record of that
-   owner's thread (`PlatformAdapter.fetchMessage`); otherwise the reminder is review-required and
-   another anchor is never chosen.
+4. **Origin anchor usable for delivery.** The persisted anchor must appear in the SAME bounded
+   owner-thread history the adapter resolves an explicitly supplied anchor from
+   (`PlatformAdapter.fetchRecentMessages`), so an anchor the adapter could never thread to is
+   review-required instead of being retried on every tick. Another anchor is never chosen.
 5. **Never a new thread.** Email delivery never calls `getDmChannelId` (which allocates a NEW
    internal thread). The session is bound to the origin channel, and the Skill API resolves its
    reply anchor from the persisted origin, so the reply threads to the message the user originally
@@ -2414,9 +2415,9 @@ because the durable operation evidence — not the reminder record — is what p
 
 ### Operator notes
 
-- The reminder anchor must remain resolvable by the adapter's bounded thread scan; an anchor that
-  falls outside it fails closed (no SMTP, no guessed thread). That bound is owned by
-  `email-adapter`.
+- The reminder anchor must remain inside the adapter's bounded thread scan; an anchor that has
+  aged out of that window fails closed (no SMTP, no guessed thread, review-required). The bound
+  itself is owned by `email-adapter`.
 - Review-required reminders are disabled, so a re-added account does not automatically resume an
   earlier reminder; this is the stated scope (no recovery policy is invented here).
 - No mailbox credential or message body is involved: reminders use opaque owner/record/thread ids

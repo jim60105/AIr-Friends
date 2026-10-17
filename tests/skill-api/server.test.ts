@@ -12,6 +12,7 @@ import type { PlatformMessage, QuotedNote } from "../../src/types/events.ts";
 import type { ReplyResult, SendFileResult } from "../../src/types/platform.ts";
 import type { EmailComposeMailService } from "../../src/skills/email-handler.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
+import type { EmailReminderSession } from "../../src/types/reminder.ts";
 
 // Build request headers, optionally with the per-session caller token (F13).
 function jsonHeaders(token?: string): Record<string, string> {
@@ -3626,6 +3627,8 @@ async function createEmailServerHarness(
     reply?: Partial<ReplyResult>;
     file?: Partial<SendFileResult>;
     mailService?: EmailComposeMailService;
+    /** Row 23: bind the session as a scheduled email reminder instead of an inbound one. */
+    reminder?: EmailReminderSession;
     port: number;
   },
 ): Promise<EmailServerHarness> {
@@ -3667,17 +3670,25 @@ async function createEmailServerHarness(
     workspace: workspace as never,
     platformAdapter: adapter as unknown as PlatformAdapter,
     agentWorkspacePath: tempDir,
-    ...(platform === "email" ? { emailWorkId: EMAIL_WORK_ID } : {}),
-    triggerEvent: {
-      platform,
-      channelId: platform === "email" ? EMAIL_CHANNEL : "456",
-      userId: platform === "email" ? EMAIL_OWNER : "123",
-      messageId: "msg_trigger",
-      isDm: platform === "email",
-      guildId: "",
-      content: "",
-      timestamp: new Date(),
-    },
+    // A reminder session is TRIGGERLESS and carries no inbound work id: its
+    // identity is the host-bound reminder operation alone.
+    ...(platform === "email" && options.reminder !== undefined
+      ? { emailReminder: options.reminder }
+      : {
+        triggerEvent: {
+          platform,
+          channelId: platform === "email" ? EMAIL_CHANNEL : "456",
+          userId: platform === "email" ? EMAIL_OWNER : "123",
+          messageId: "msg_trigger",
+          isDm: platform === "email",
+          guildId: "",
+          content: "",
+          timestamp: new Date(),
+        },
+      }),
+    ...(platform === "email" && options.reminder === undefined
+      ? { emailWorkId: EMAIL_WORK_ID }
+      : {}),
   });
 
   const server = new SkillAPIServer(
@@ -3871,6 +3882,80 @@ Deno.test("SkillAPIServer - a Discord session carries no email context or accoun
     assertEquals(harness.adapter.replies[0].options?.emailSend, undefined);
     assertEquals(harness.sessionRegistry.emailResponseOf(harness.sessionId).operations.length, 0);
     assertEquals(harness.sessionRegistry.hasEmailSubmitted(harness.sessionId), false);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+// --- Row 23: scheduled email reminder sessions over the real API path --------------
+
+const REMINDER_ID = "rem_row23";
+const REMINDER_ANCHOR_ID = "00000000-9999-4999-8999-999999999999";
+
+Deno.test("SkillAPIServer - a reminder session binds its own operation and persisted anchor", async () => {
+  const harness = await createEmailServerHarness({
+    port: 3068,
+    reminder: {
+      reminderId: REMINDER_ID,
+      origin: { channelId: EMAIL_CHANNEL, replyAnchorRecordId: REMINDER_ANCHOR_ID },
+    },
+    reply: {
+      success: true,
+      messageId: "reply-r",
+      emailSubmission: { operationId: "op-r", phase: "submitted", targetKind: "user" },
+    },
+  });
+  try {
+    const response = await harness.post("send-reply", { message: "reminder" });
+    assertEquals(response.status, 200);
+
+    // The stable reminder operation (never the session's random id) and the
+    // PERSISTED anchor the reminder was created with.
+    assertEquals(harness.adapter.replies.length, 1);
+    assertEquals(harness.adapter.replies[0].options?.emailSend, {
+      workId: REMINDER_ID,
+      owner: EMAIL_OWNER,
+      actionSlot: `reminder:${REMINDER_ID}`,
+    });
+    assertEquals(harness.adapter.replies[0].options?.replyToMessageId, REMINDER_ANCHOR_ID);
+    assertEquals(harness.sessionRegistry.emailResponseOf(harness.sessionId).operations, [
+      {
+        operationId: "op-r",
+        phase: "submitted",
+        targetKind: "user",
+        actionSlot: `reminder:${REMINDER_ID}`,
+      },
+    ]);
+  } finally {
+    await harness.dispose();
+  }
+});
+
+Deno.test("SkillAPIServer - a reminder session cannot compose or send files", async () => {
+  let composeCalls = 0;
+  const mailService = {
+    send: () => {
+      composeCalls++;
+      return Promise.resolve({ operationId: "op-x", phase: "submitted", reused: false });
+    },
+  } as unknown as EmailComposeMailService;
+  const harness = await createEmailServerHarness({
+    port: 3069,
+    reminder: {
+      reminderId: REMINDER_ID,
+      origin: { channelId: EMAIL_CHANNEL, replyAnchorRecordId: REMINDER_ANCHOR_ID },
+    },
+    mailService,
+  });
+  try {
+    // A reminder authorizes only a reply into its own thread.
+    const compose = await harness.post("send-email", { requestFile: "compose.json" });
+    assertEquals(compose.status, 403);
+    // Reminder sessions stay triggerless, so the existing send-file refusal stands.
+    const file = await harness.post("send-file", { path: "note.txt" });
+    assertEquals(file.status, 403);
+    assertEquals(composeCalls, 0);
+    assertEquals(harness.adapter.files.length, 0);
   } finally {
     await harness.dispose();
   }

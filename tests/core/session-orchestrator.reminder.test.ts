@@ -7,7 +7,7 @@ import { ContextAssembler } from "@core/context-assembler.ts";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { AgentConnector, AgentProcessEvidence } from "../../src/acp/agent-connector.ts";
-import type { Config } from "../../src/types/config.ts";
+import type { ChannelConfig, Config } from "../../src/types/config.ts";
 import type { ResolvedReminder } from "../../src/types/reminder.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -394,18 +394,18 @@ const EMAIL_CHANNEL = `mail:${EMAIL_OWNER}:${EMAIL_THREAD}`;
 const EMAIL_ANCHOR = "22222222-2222-4222-8222-222222222222";
 const REMINDER_SLOT = "reminder:re1";
 
-/** Email adapter double: allocation of a NEW thread is an immediate failure. */
-function makeEmailAdapter(
-  options: { anchorExists?: boolean; onGetDmChannelId?: () => void } = {},
-): PlatformAdapter {
+/**
+ * Email adapter double: allocation of a NEW thread is an immediate failure, and
+ * the owner-thread recent history reports the anchor the reminder stored
+ * (`recentIds`, empty for an unusable anchor).
+ */
+function makeEmailAdapter(options: { recentIds?: string[] } = {}): PlatformAdapter {
+  const recentIds = options.recentIds ?? [EMAIL_ANCHOR];
   return {
     platform: "email",
-    getDmChannelId: () => {
-      options.onGetDmChannelId?.();
-      return Promise.reject(new Error("email reminder must not allocate a new thread"));
-    },
-    fetchMessage: () =>
-      Promise.resolve(options.anchorExists === false ? null : ({ id: EMAIL_ANCHOR })),
+    getDmChannelId: () =>
+      Promise.reject(new Error("email reminder must not allocate a new thread")),
+    fetchRecentMessages: () => Promise.resolve(recentIds.map((id) => ({ messageId: id }))),
     sendReply: () => Promise.resolve({ success: false, error: "not used" }),
   } as unknown as PlatformAdapter;
 }
@@ -448,6 +448,8 @@ Deno.test("processReminder - email reminder delivers into its persisted thread a
         assertEquals(session.emailReminder?.reminderId, "re1");
         assertEquals(session.emailReminder?.origin.channelId, EMAIL_CHANNEL);
         assertEquals(session.emailReminder?.origin.replyAnchorRecordId, EMAIL_ANCHOR);
+        // No destination grant is ever carried into a reminder session.
+        assertEquals(session.emailDestinationGrants, undefined);
         boundSessionId = session.id;
         // The Skill API records the confirmed submission of the reminder's OWN
         // operation; the reminder is delivered from that evidence alone.
@@ -548,8 +550,9 @@ Deno.test("processReminder - a corrupt email origin never gets a guessed thread"
     enableEmailAccount(config);
     const reminderStore = makeMockReminderStore();
 
-    // Another owner's thread, and a valid-shaped anchor that is not in this
-    // owner thread: both are review-required, and neither reaches a session.
+    // Another owner's thread, and a valid-shaped anchor the adapter can never
+    // thread to (outside its owner-thread window): both are review-required,
+    // and neither reaches a session.
     const foreign = makeEmailReminder({
       origin: {
         channelId: `mail:e_${"cd".repeat(32)}:${EMAIL_THREAD}`,
@@ -562,7 +565,7 @@ Deno.test("processReminder - a corrupt email origin never gets a guessed thread"
 
     res = await orchestrator.processReminder(
       makeEmailReminder(),
-      makeEmailAdapter({ anchorExists: false }),
+      makeEmailAdapter({ recentIds: [] }),
       reminderStore,
     );
     assertEquals(res.success, false);
@@ -574,26 +577,33 @@ Deno.test("processReminder - a corrupt email origin never gets a guessed thread"
   }
 });
 
-Deno.test("processReminder - a revoked email account prevents reminder delivery", async () => {
+Deno.test("processReminder - a disabled or removed email account prevents reminder delivery", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
     );
-    enableEmailAccount(config, false);
 
-    const cancelledIds: string[] = [];
-    const reminderStore = makeMockReminderStore((id) => cancelledIds.push(id));
+    // Disabled entry, then the entry removed entirely: neither ever sends.
+    const cases: ChannelConfig[][] = [
+      [{ id: `email/account/${EMAIL_OWNER}`, enabled: false }],
+      [],
+    ];
+    for (const channels of cases) {
+      config.channels = channels;
+      const cancelledIds: string[] = [];
+      const reminderStore = makeMockReminderStore((id) => cancelledIds.push(id));
 
-    const res = await orchestrator.processReminder(
-      makeEmailReminder(),
-      makeEmailAdapter(),
-      reminderStore,
-    );
+      const res = await orchestrator.processReminder(
+        makeEmailReminder(),
+        makeEmailAdapter(),
+        reminderStore,
+      );
 
-    assertEquals(res.success, false);
-    assertEquals(cancelledIds, ["re1"]);
-    assertEquals(orchestrator.mockConnector, null);
+      assertEquals(res.success, false);
+      assertEquals(cancelledIds, ["re1"]);
+      assertEquals(orchestrator.mockConnector, null);
+    }
 
     sessionRegistry.stop();
   } finally {
@@ -707,6 +717,128 @@ Deno.test("processReminder - Discord reminder behavior is unchanged by the email
     assertEquals(res.replySent, true);
     assertEquals(cancelledIds, ["r_discord"]);
     assertEquals(sessionRegistry.getAll().length, 0);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+/** A reminder store whose completion write always fails (data/reminders.jsonl). */
+function makeFailingReminderStore(): ReminderStore {
+  return {
+    cancelReminder: () => {
+      throw new Error("simulated reminder patch failure");
+    },
+  } as unknown as ReminderStore;
+}
+
+Deno.test("processReminder - a failed reminder patch never resends a submitted email reminder", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
+      tempDir,
+    );
+    enableEmailAccount(config);
+    const patchFailure = makeFailingReminderStore();
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      connector.onPrompt = () => {
+        sessionRegistry.recordEmailSubmission(sessionRegistry.getAll()[0].id, {
+          operationId: "op_reminder_1",
+          phase: "submitted",
+          targetKind: "user",
+        }, REMINDER_SLOT);
+      };
+    });
+
+    // SMTP acceptance followed by a failed completion write: the verdict is
+    // preserved and the run is still reported as delivered.
+    const first = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      patchFailure,
+    );
+    assertEquals(first.success, true);
+    assertEquals(first.emailSubmitted, true);
+
+    // The next scheduler tick consults the STABLE operation: no session starts,
+    // nothing is sent again, and the reminder is disabled again (still failing,
+    // still without rewriting the verdict).
+    orchestrator.mockConnector = null;
+    orchestrator.setEmailSubmissionEvidence({
+      lookup: (_owner, key) =>
+        key.actionSlot === REMINDER_SLOT
+          ? {
+            operationId: "op_reminder_1",
+            phase: "submitted",
+            targetKind: "user",
+            reused: false,
+          }
+          : undefined,
+    });
+    const second = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      patchFailure,
+    );
+    assertEquals(second.success, true);
+    assertEquals(second.emailSubmitted, true);
+    assertEquals(orchestrator.mockConnector, null);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("processReminder - a failed reminder patch never replays an unresolved email reminder", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
+      tempDir,
+    );
+    enableEmailAccount(config);
+    const patchFailure = makeFailingReminderStore();
+    const cancelledIds: string[] = [];
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      connector.onPrompt = () => {
+        sessionRegistry.recordEmailSubmission(sessionRegistry.getAll()[0].id, {
+          operationId: "op_reminder_u",
+          phase: "unknown",
+        }, REMINDER_SLOT);
+      };
+    });
+
+    const first = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      patchFailure,
+    );
+    assertEquals(first.success, false);
+    assertEquals(first.emailUnknown, true);
+    assertEquals(cancelledIds.length, 0);
+
+    // With the durable unresolved record available, the next tick performs no
+    // session and nothing is sent; the failed disable only logs.
+    orchestrator.mockConnector = null;
+    orchestrator.setEmailSubmissionEvidence({
+      lookup: (_owner, key) =>
+        key.actionSlot === REMINDER_SLOT
+          ? { operationId: "op_reminder_u", phase: "unknown", reused: false }
+          : undefined,
+    });
+    const second = await orchestrator.processReminder(
+      makeEmailReminder(),
+      makeEmailAdapter(),
+      makeFailingReminderStore(),
+    );
+    assertEquals(second.emailUnknown, true);
+    assertEquals(second.success, false);
+    assertEquals(orchestrator.mockConnector, null);
 
     sessionRegistry.stop();
   } finally {

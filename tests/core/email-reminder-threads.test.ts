@@ -173,11 +173,17 @@ interface ReminderEnv {
   channelId: string;
 }
 
-async function buildReminderEnv(base: string, smtp: SmtpTransport): Promise<ReminderEnv> {
+/**
+ * One delivery stack (adapter + mail service + submission journal) over the given roots. A
+ * restart is modelled by building a SECOND stack over the SAME durable files.
+ */
+function buildMailStack(
+  base: string,
+  messageStore: EmailMessageStore,
+  smtp: SmtpTransport,
+): { adapter: EmailAdapter; mailService: EmailMailService } {
   const emailRoot = join(base, "email");
-  const workspacesRoot = join(base, "workspaces");
   const config = emailConfig();
-  const messageStore = new EmailMessageStore({ workspacesRoot });
   const mailboxStore = new MailboxStore({
     emailRoot,
     fingerprint: buildMailboxFingerprint("127.0.0.1", BOT, "INBOX"),
@@ -200,6 +206,14 @@ async function buildReminderEnv(base: string, smtp: SmtpTransport): Promise<Remi
     mailService,
     channels: CHANNELS,
   });
+  return { adapter, mailService };
+}
+
+async function buildReminderEnv(base: string, smtp: SmtpTransport): Promise<ReminderEnv> {
+  const workspacesRoot = join(base, "workspaces");
+  const messageStore = new EmailMessageStore({ workspacesRoot });
+  const { adapter } = buildMailStack(base, messageStore, smtp);
+  const config = emailConfig();
 
   const anchorRecordId = await messageStore.putSource(OWNER, inboundMessage(), {
     from: SENDER,
@@ -278,18 +292,23 @@ Deno.test("email reminder - restart-preserved thread, one signed submission, no 
 
     const eml = new TextDecoder().decode(smtp.submissions[0].emlBytes);
     assert(eml.includes(`In-Reply-To: ${ANCHOR_WIRE_ID}`), "reply stays in the origin thread");
-    assert(eml.includes(ANCHOR_WIRE_ID), "References carry the thread anchor");
+    assert(eml.includes(`References: ${ANCHOR_WIRE_ID}`), "References carry the thread anchor");
     // The MIME body uses CRLF line endings, so the signature is asserted token-wise.
     assertEquals(eml.split("AIr-Friends Bot").length - 1, 1, "signature applied exactly once");
     // The recipient is the initiating owner — no third-party destination is inherited.
     assertEquals(smtp.submissions[0].envelope.to, [SENDER]);
 
-    // A repeated attempt for the SAME logical operation never reaches SMTP again.
-    const replay = await env.adapter.sendReply(origin.channelId, REMINDER_BODY, {
+    // A RESTART rebuilds the delivery stack over the SAME durable files: the
+    // replayed reminder's own operation is answered from the submission
+    // journal, so the fresh transport sees ZERO new transactions.
+    const restartedSmtp = new ScriptedSmtp();
+    const restarted = buildMailStack(base, env.messageStore, restartedSmtp);
+    const replay = await restarted.adapter.sendReply(origin.channelId, REMINDER_BODY, {
       replyToMessageId: origin.replyAnchorRecordId,
       emailSend,
     });
     assert(replay.success, replay.error);
+    assertEquals(restartedSmtp.submissions.length, 0);
     assertEquals(smtp.submissions.length, 1);
     assertEquals((replay.emailSubmission as EmailSendOutcome).phase, "submitted");
 
@@ -336,6 +355,7 @@ Deno.test("email reminder - smoke: a live SMTP fixture carries the threaded remi
 
     const wire = new TextDecoder().decode(smtpService.dataTransactions[0].decoded);
     assert(wire.includes(`In-Reply-To: ${ANCHOR_WIRE_ID}`));
+    assert(wire.includes(`References: ${ANCHOR_WIRE_ID}`));
     assertEquals(wire.split("AIr-Friends Bot").length - 1, 1, "the signature is applied once");
     assertEquals(smtpService.dataTransactions[0].recipients, [SENDER]);
 

@@ -209,6 +209,14 @@ const EMAIL_OUTCOME_UNKNOWN_ERROR = "email_submission_outcome_unknown: review-re
 const EMAIL_REMINDER_ORIGIN_REVIEW_ERROR = "email_reminder_origin_review_required";
 
 /**
+ * Row 23: the bounded owner-thread window an email reminder's persisted anchor
+ * is checked against. It is the SAME window the email adapter resolves an
+ * explicitly supplied anchor from, so an anchor the adapter could never use is
+ * review-required instead of being retried on every scheduler tick.
+ */
+const EMAIL_REMINDER_ANCHOR_WINDOW = 200;
+
+/**
  * Response from a session
  */
 export interface SessionResponse {
@@ -4187,17 +4195,13 @@ export class SessionOrchestrator {
           };
           return result;
         }
-        // The persisted anchor must be a record of THIS owner's thread. An
-        // unusable anchor is review-required — another anchor is never chosen.
-        if (
-          typeof platformAdapter.fetchMessage === "function" &&
-          !(await platformAdapter.fetchMessage(
-            emailOrigin.channelId,
-            emailOrigin.replyAnchorRecordId,
-          ))
-        ) {
+        // The persisted anchor must be a record the adapter can actually thread
+        // to. An unusable anchor is review-required — another anchor is never
+        // chosen, and the reminder is not retried forever against a send that
+        // can never succeed.
+        if (!(await this.emailReminderAnchorUsable(platformAdapter, emailOrigin))) {
           sessionLogger.error(
-            "Email reminder {reminderId} origin anchor is not in the owner thread (review-required)",
+            "Email reminder {reminderId} origin anchor is unusable (review-required)",
             { reminderId: reminder.id },
           );
           await this.disableReminderForReview(reminder, reminderStore, sessionLogger);
@@ -4598,7 +4602,18 @@ export class SessionOrchestrator {
 
         // 7. Disable reminder on success
         if (reminderDelivered) {
-          await reminderStore.cancelReminder(workspace, reminder.id);
+          try {
+            await reminderStore.cancelReminder(workspace, reminder.id);
+          } catch (error) {
+            // Row 23: a failed completion write never rewrites the verdict. The
+            // reminder stays enabled, and the next tick's durable operation
+            // check — or the mail service's own operation key — prevents any
+            // resend.
+            sessionLogger.error("Failed to disable delivered reminder {reminderId}", {
+              reminderId: reminder.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
           remindersDeliveredTotal.labels(platform, "success").inc();
           sessionLogger.info("Reminder {reminderId} delivered and disabled", {
             reminderId: reminder.id,
@@ -5394,6 +5409,36 @@ export class SessionOrchestrator {
       replyAnchorRecordId: anchor,
       origin: { channelId: `mail:${owner}:${threadId}`, replyAnchorRecordId: anchor },
     };
+  }
+
+  /**
+   * Whether the reminder's persisted anchor is one the platform can deliver
+   * against (row 23).
+   *
+   * The owner-thread recent history is the SAME bounded view the adapter
+   * resolves an explicitly supplied anchor from, so this check matches the
+   * adapter's own refusal condition instead of discovering it after a prompt
+   * has been generated. An adapter that cannot expose history (a non-email
+   * double, or an unexpected platform) skips the check and leaves the decision
+   * to delivery.
+   */
+  private async emailReminderAnchorUsable(
+    platformAdapter: PlatformAdapter,
+    origin: { channelId: string; replyAnchorRecordId: string },
+  ): Promise<boolean> {
+    if (typeof platformAdapter.fetchRecentMessages !== "function") return true;
+    try {
+      const recent = await platformAdapter.fetchRecentMessages(
+        origin.channelId,
+        EMAIL_REMINDER_ANCHOR_WINDOW,
+      );
+      return recent.some((message) => message.messageId === origin.replyAnchorRecordId);
+    } catch (error) {
+      logger.warn("Failed to resolve the email reminder origin anchor: {error}", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   /**
