@@ -1004,6 +1004,139 @@ Deno.test("EmailAdapter - getDmChannelId and spontaneous targets stay inside ena
   });
 });
 
+Deno.test("EmailAdapter - a disconnect during the first round stops the poller instead of orphaning it", async () => {
+  await withTempDir(async (base) => {
+    // The first round blocks inside the transport, so the disconnect provably lands while
+    // `connect()` is still running.
+    const gate = Promise.withResolvers<void>();
+    let connectCalls = 0;
+
+    class GatedImap extends SentCopyImap {
+      override async connect(): Promise<void> {
+        connectCalls++;
+        await gate.promise;
+      }
+    }
+
+    const harness = buildHarness(base, { pollTransport: new GatedImap() });
+    const connecting = harness.adapter.connect();
+    const disconnecting = harness.adapter.disconnect();
+    gate.resolve();
+    await connecting;
+    await disconnecting;
+
+    assertEquals(harness.adapter.getConnectionStatus().state, "disconnected");
+
+    // The repeating timer was never armed: a later round is refused as stopped.
+    const round = await harness.adapter.poll();
+    assertEquals(round.halted, true);
+    assertEquals(round.accepted, 0);
+    assert(connectCalls >= 1);
+  });
+});
+
+Deno.test("EmailAdapter - concurrent connects start the poller exactly once", async () => {
+  await withTempDir(async (base) => {
+    const gate = Promise.withResolvers<void>();
+    let connectCalls = 0;
+
+    class GatedImap extends SentCopyImap {
+      override async connect(): Promise<void> {
+        connectCalls++;
+        await gate.promise;
+      }
+    }
+
+    const harness = buildHarness(base, { pollTransport: new GatedImap() });
+    const first = harness.adapter.connect();
+    const second = harness.adapter.connect();
+    gate.resolve();
+    await Promise.all([first, second]);
+
+    assertEquals(harness.adapter.getConnectionStatus().state, "connected");
+    // One start: `recover()` plus the single immediate round, never two timer chains.
+    assertEquals(connectCalls, 2);
+
+    await harness.adapter.disconnect();
+    assertEquals(harness.adapter.getConnectionStatus().state, "disconnected");
+  });
+});
+
+Deno.test("EmailAdapter - a fresh thread has no reply source and a reused operation is visible", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+
+    // A brand-new channel from `getDmChannelId` cannot serve an ordinary reply: there is no stored
+    // source message, so neither a verified recipient nor a thread anchor exists yet. The
+    // new-thread delivery for scheduled and spontaneous use is owned by
+    // `email-spontaneous-targets`.
+    const freshChannel = await harness.adapter.getDmChannelId(OWNER);
+    assert(freshChannel);
+    const fresh = await harness.adapter.sendReply(freshChannel, "hello", {
+      emailSend: { workId: "work-fresh", owner: OWNER },
+    });
+    assertEquals(fresh.success, false);
+    assert(fresh.error?.includes("no stored source message"));
+    assertEquals(harness.smtp.submissions.length, 0);
+
+    // A repeated request for one logical operation returns the recorded result and is marked as
+    // reused, so a host can tell a replay apart from a fresh submission.
+    const seeded = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<reuse@x>" }),
+      { messageId: "<reuse@x>", subject: "Reuse" },
+    );
+    const channel = formatEmailChannelId(OWNER, seeded.threadId);
+    const emailSend = { workId: "work-reuse", owner: OWNER };
+    const sent = await harness.adapter.sendReply(channel, "Once.", {
+      replyToMessageId: seeded.recordId,
+      emailSend,
+    });
+    assertEquals(sent.success, true);
+    assertEquals(sent.emailSubmission?.reused, false);
+
+    const replay = await harness.adapter.sendReply(channel, "Once.", {
+      replyToMessageId: seeded.recordId,
+      emailSend,
+    });
+    assertEquals(replay.success, true);
+    assertEquals(replay.emailSubmission?.reused, true);
+    assertEquals(replay.emailSubmission?.operationId, sent.emailSubmission?.operationId);
+    assertEquals(harness.smtp.submissions.length, 1, "a replay performs no SMTP transaction");
+  });
+});
+
+Deno.test("EmailAdapter - edit-reply reports the platform limitation before the session state", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    const workspacePath = join(base, "workspace-edit");
+    await Deno.mkdir(workspacePath, { recursive: true });
+
+    const context: SkillContext = {
+      workspace: {
+        key: `email/${OWNER}`,
+        components: { platform: "email", userId: OWNER },
+        path: workspacePath,
+        tmpPath: join(workspacePath, "tmp"),
+        isDm: true,
+      },
+      platformAdapter: harness.adapter,
+      channelId: `mail:${OWNER}:${crypto.randomUUID().toLowerCase()}`,
+      userId: OWNER,
+    };
+
+    // No reply has been sent in this session, yet the real reason is reported.
+    const edit = await new ReplyHandler().handleEditReply(
+      { messageId: crypto.randomUUID().toLowerCase(), message: "changed" },
+      context,
+    );
+    assertEquals(edit.success, false);
+    assertEquals(edit.code, "SKILL_EDIT_UNSUPPORTED");
+    assert(edit.error?.includes("not supported"));
+    assertEquals(harness.smtp.submissions.length, 0);
+  });
+});
+
 Deno.test("EmailAdapter - smoke: real IMAP and SMTP services carry a threaded answer end to end", async () => {
   await withTempDir(async (base) => {
     const imapService = new EmailImapTestService({
