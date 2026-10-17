@@ -1,11 +1,12 @@
 // tests/platforms/misskey/misskey-adapter.test.ts
 
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import type { entities } from "misskey-js";
 import { MisskeyAdapter } from "@platforms/misskey/misskey-adapter.ts";
 import { PlatformError } from "../../../src/types/errors.ts";
 import type { AvailableQuotedNote, NormalizedEvent } from "../../../src/types/events.ts";
+import { isNetworkAttachment } from "../../../src/types/events.ts";
 import {
   buildReplyParams,
   ChatMessageLite,
@@ -1539,6 +1540,7 @@ Deno.test("noteToPlatformMessage - with files", () => {
   const pm = noteToPlatformMessage(note, "bot123");
   assertEquals(pm.attachments?.length, 1);
   assertEquals(pm.attachments![0].id, "file1");
+  assert(isNetworkAttachment(pm.attachments![0]));
   assertEquals(pm.attachments![0].url, "https://example.com/file.png");
   assertEquals(pm.attachments![0].isImage, true);
 });

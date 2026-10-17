@@ -194,8 +194,9 @@ export class ReplyHandler {
       // A platform that cannot edit an already-sent message fails explicitly here, before the
       // session-state check: the capability is a platform fact, so even an edit attempted before
       // the first reply reports the real reason. No adapter call is made and no replacement
-      // message is ever sent in place of an edit.
-      if (context.platformAdapter.capabilities.supportsEditing === false) {
+      // message is ever sent in place of an edit. Optional chaining: adapters predating the
+      // capability flag (and test doubles) omit `capabilities` entirely and must still work.
+      if (context.platformAdapter.capabilities?.supportsEditing === false) {
         return {
           success: false,
           code: "SKILL_EDIT_UNSUPPORTED",
