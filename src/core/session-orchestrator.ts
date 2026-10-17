@@ -36,15 +36,16 @@ import { deleteSessionJwtFile, issueSessionJwtFile, resolveSkillJwtDir } from "@
 import { resolveModel, resolveReasoningEffort } from "./model-router.ts";
 import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
-import type { SessionRegistry } from "../skill-api/session-registry.ts";
+import type { ActiveSession, SessionRegistry } from "../skill-api/session-registry.ts";
 import type {
   Config,
   MemoryMaintenanceConfig,
   SelfResearchConfig,
   SessionType,
 } from "../types/config.ts";
-import { isValidPlatform } from "../types/events.ts";
-import type { NormalizedEvent, Platform } from "../types/events.ts";
+import { emailWorkReceiptOf, isValidPlatform } from "../types/events.ts";
+import type { EmailWorkReceipt, NormalizedEvent, Platform } from "../types/events.ts";
+import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type {
   AgentConnectorOptions,
@@ -210,6 +211,12 @@ export class SessionOrchestrator {
    * child-HOME or image-tree fallback.
    */
   private trustedSkillsDirCache: string | null = null;
+  /**
+   * Durable email work receipt sink (owned by `email-session-receipts`).
+   * Null until email ingress is wired; while null no receipt action of any kind
+   * is taken, so Discord/Misskey lifecycle behavior is untouched.
+   */
+  private emailSessionReceipts: EmailSessionReceipts | null = null;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -275,6 +282,17 @@ export class SessionOrchestrator {
    */
   setCompletedSessionStore(store: CompletedSessionStore): void {
     this.completedSessionStore = store;
+  }
+
+  /**
+   * Install (or clear) the durable email work receipt sink.
+   *
+   * Email ingress wires this before its first poll. Receipts are recorded ONLY
+   * for email-typed work carrying a typed receipt, so this never changes the
+   * lifecycle of any other platform.
+   */
+  setEmailSessionReceipts(receipts: EmailSessionReceipts | null): void {
+    this.emailSessionReceipts = receipts;
   }
 
   /**
@@ -525,6 +543,12 @@ export class SessionOrchestrator {
       channelId?: string;
       shellSessionId?: string | null;
       event?: NormalizedEvent;
+      /**
+       * Email receipt hook: invoked when the mock reply threw AFTER being
+       * invoked, i.e. the mock delivery outcome is uncertain. Never passed for
+       * other platforms, whose dry-run success semantics stay unchanged.
+       */
+      onMockDeliveryFailure?: () => void;
     },
   ): Promise<SessionResponse | null> {
     const dryRunConfig = this.config.agent.dryRun;
@@ -577,6 +601,7 @@ export class SessionOrchestrator {
         sessionLogger.warn("Dry run mock reply failed (non-fatal)", {
           error: error instanceof Error ? error.message : String(error),
         });
+        options?.onMockDeliveryFailure?.();
       }
     }
 
@@ -622,10 +647,46 @@ export class SessionOrchestrator {
       messageId: event.messageId,
     });
 
+    // Durable email work receipt (row 14). Email-typed work only: for every
+    // Discord/Misskey event `emailReceipt` is undefined and each receipt action
+    // below is skipped, leaving those lifecycles byte-for-byte unchanged.
+    const receipts = this.emailSessionReceipts;
+    const emailReceipt = emailWorkReceiptOf(event);
+    // The fence is taken at the exact point the agent (or the dry-run mock
+    // reply) first acts; a pooled session takes it only inside the lease runner,
+    // so work merely waiting for the execution lease stays unstarted/requeueable.
+    let emailWorkStarted = false;
+    let emailWorkUncertain = false;
+    let emailWorkEvidence: "completed" | "failed" | null = null;
+    // Live registry session of this run: per-spawn teardown removes the registry
+    // entry before the terminal receipt is written, so settlement must hold the
+    // object itself to still observe the session's in-flight side effects.
+    let emailSession: ActiveSession | null = null;
+    /** Durable start fence: no-op unless this event is fenced email work. */
+    const startEmailWork = async (): Promise<void> => {
+      if (!receipts || !emailReceipt || emailWorkStarted) return;
+      // Marked BEFORE the durable write: a fence interrupted mid-write is
+      // indistinguishable from a persisted one, so the receipt stays conservative.
+      emailWorkStarted = true;
+      await receipts.beginEmailWork(emailReceipt);
+    };
+
     // Check if the trigger message is a /clear command
     // If so, exit immediately without calling agent or replying
     if (event.content.trimStart().startsWith("/clear")) {
       sessionLogger.info("Trigger message is /clear command, skipping agent execution");
+      // A control command needs no agent turn: record the terminal admission so
+      // the accepted entry cannot replay the same command on every restart.
+      if (receipts && emailReceipt) {
+        emailWorkStarted = true;
+        try {
+          await receipts.denyAdmission(emailReceipt, "control-command");
+        } catch (error) {
+          sessionLogger.error("Failed to record denied email work", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       return {
         success: true,
         replySent: false,
@@ -667,6 +728,7 @@ export class SessionOrchestrator {
       shellSessionId = setup.shellSessionId;
       auditWriter = setup.auditWriter;
       sessionLogger = setup.sessionLogger;
+      emailSession = shellSessionId ? (this.sessionRegistry.get(shellSessionId) ?? null) : null;
 
       sessionLogger.debug("Workspace ready", {
         workspaceKey: workspace.key,
@@ -785,6 +847,11 @@ export class SessionOrchestrator {
       });
 
       // === DRY RUN CHECK ===
+      // The mock reply below is a delivery side effect taken WITHOUT an
+      // execution lease, so the durable start fence must precede it.
+      if (this.config.agent.dryRun?.enabled) {
+        await startEmailWork();
+      }
       const dryRunResult = await this.handleDryRun(
         sessionType,
         fullPrompt,
@@ -794,6 +861,13 @@ export class SessionOrchestrator {
           channelId: event.channelId,
           shellSessionId,
           event,
+          // A mock delivery that failed after being invoked is an uncertain
+          // email outcome; other platforms keep their existing dry-run result.
+          onMockDeliveryFailure: emailReceipt
+            ? () => {
+              emailWorkUncertain = true;
+            }
+            : undefined,
         },
       );
       if (dryRunResult) {
@@ -802,6 +876,9 @@ export class SessionOrchestrator {
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
+        // Dry run performs no agent turn and the mock reply (when any) has
+        // already settled by construction.
+        emailWorkEvidence = "completed";
         result = dryRunResult;
         return result;
       }
@@ -925,6 +1002,10 @@ export class SessionOrchestrator {
                 return undefined;
               }
             }
+            // Durable email start fence: the execution lease is held from here
+            // (the pool runs this runner only under the lease), so `started` is
+            // fsynced BEFORE this session's first agent action.
+            await startEmailWork();
             const acpSessionId = await connector.createSession(
               this.getMCPServers(),
               options.sessionCwd,
@@ -1022,6 +1103,8 @@ export class SessionOrchestrator {
               sl2.warn("Session {sessionId} ended without agent response after reconnect", {
                 sessionId: acpSessionId,
               });
+              // The agent session was lost after it may have acted: uncertain.
+              emailWorkUncertain = true;
               return acpSessionId;
             }
             sl2.info("Agent session {sessionId} completed with stopReason {stopReason}", {
@@ -1093,8 +1176,14 @@ export class SessionOrchestrator {
         // instead of the generic no-reply error. Consumed exactly once here so
         // no outcome path can leave a stale reason behind.
         const recoveryAbort = this.takeRecoveryAbortReason(shellSessionId);
+        // A recovery abort ends this session on a bounded loss (idle-timeout
+        // session loss): an uncertain outcome, never a definitive failure.
+        if (recoveryAbort) emailWorkUncertain = true;
 
         if (poolResult.cancelledByDeadline) {
+          // A pooled runner failure surfaces here as a deadline cancellation.
+          // Once started, such an interruption is uncertain, never terminal.
+          emailWorkUncertain = true;
           await auditWriter?.write("session_end", {
             success: false,
             replySent: false,
@@ -1147,10 +1236,14 @@ export class SessionOrchestrator {
             durationMs: Date.now() - sessionStartTime,
             ...auditWriter?.getSummaryCounters(),
           });
+          emailWorkEvidence = "completed";
           result = { success: true, replySent, reactionSent, fileSent };
           return result;
         }
 
+        // The turn ended with no delivery at all and no interruption: the
+        // definitive no-side-effect terminal result.
+        emailWorkEvidence = "failed";
         await auditWriter?.write("session_end", {
           success: false,
           replySent: false,
@@ -1262,6 +1355,9 @@ export class SessionOrchestrator {
         const supportsImage = connector.supportsImageContent();
         sessionLogger.info("Agent capabilities checked", { supportsImage });
 
+        // Durable email start fence: `started` is fsynced BEFORE this session's
+        // first agent action (session creation/prompt) of the fresh subprocess.
+        await startEmailWork();
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
         sessionLogger = sessionLogger.withContext({ sessionId });
@@ -1351,6 +1447,8 @@ export class SessionOrchestrator {
             shellSessionId,
             "Session lost due to idle timeout and reconnection failure",
           );
+          // Lost agent session after it may have acted: uncertain.
+          emailWorkUncertain = true;
           sessionLogger.warn(
             "Session {sessionId} ended without agent response after reconnect",
             { sessionId, error },
@@ -1476,6 +1574,7 @@ export class SessionOrchestrator {
             ...auditWriter?.getSummaryCounters(),
           });
 
+          emailWorkEvidence = "completed";
           // Generate conversation summary (fire-and-forget)
           if (replySent) {
             await this.generateConversationSummary(
@@ -1511,6 +1610,9 @@ export class SessionOrchestrator {
             error: "Agent did not generate a reply",
             ...auditWriter?.getSummaryCounters(),
           });
+          // Normal turn end with no delivery at all: the definitive
+          // no-side-effect terminal result.
+          emailWorkEvidence = "failed";
           result = {
             success: false,
             replySent: false,
@@ -1521,6 +1623,8 @@ export class SessionOrchestrator {
         }
 
         if (response.stopReason === "cancelled") {
+          // An interrupted turn is uncertain: an earlier effect may have landed.
+          emailWorkUncertain = true;
           await auditWriter?.write("session_end", {
             success: false,
             replySent: false,
@@ -1546,6 +1650,8 @@ export class SessionOrchestrator {
           error: `Unexpected stop reason: ${response.stopReason}`,
           ...auditWriter?.getSummaryCounters(),
         });
+        // Abnormal stop reason: the turn's outcome is not a clean result.
+        emailWorkUncertain = true;
         result = {
           success: false,
           replySent: false,
@@ -1577,6 +1683,9 @@ export class SessionOrchestrator {
         }
       }
     } catch (error) {
+      // Downstream handling failed after work may have started: the durable
+      // receipt must say "uncertain", never claim completion or a clean failure.
+      emailWorkUncertain = true;
       sessionLogger.error("Session failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1596,6 +1705,26 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
+      // Durable email work terminal receipt (row 14): exactly one per fenced
+      // email work item, on EVERY exit path, after the lifecycle is final.
+      // `receipts`/`emailReceipt` are undefined for every other platform.
+      if (receipts && emailReceipt && emailWorkStarted) {
+        try {
+          await this.finalizeEmailWorkReceipt(receipts, emailReceipt, {
+            uncertain: emailWorkUncertain,
+            evidence: emailWorkEvidence,
+            session: emailSession,
+          });
+        } catch (error) {
+          // A failed terminal write leaves the entry `started`: startup
+          // recovery quarantines it as review-required rather than replaying.
+          sessionLogger.error("Failed to record email work receipt", {
+            platform: event.platform,
+            sessionType,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       try {
         {
           if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
@@ -4610,6 +4739,59 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Writes the single terminal receipt for one fenced email work item.
+   *
+   * The outcome comes from explicit lifecycle evidence only — never from
+   * `SessionResponse.success`, which stays `true` for a turn whose execution was
+   * interrupted after an earlier effect landed, and stays `false` for a clean
+   * no-delivery turn. `completed` additionally requires the session's in-flight
+   * side effects to have settled; anything without definitive evidence is
+   * escalated to `review-required`.
+   */
+  private async finalizeEmailWorkReceipt(
+    receipts: EmailSessionReceipts,
+    receipt: EmailWorkReceipt,
+    outcome: {
+      /** True when the run was interrupted or the handler failed. */
+      uncertain: boolean;
+      /** Explicit lifecycle evidence, null when no path claimed an outcome. */
+      evidence: "completed" | "failed" | null;
+      /** Live registry session of the run (null when none was registered). */
+      session: ActiveSession | null;
+    },
+  ): Promise<void> {
+    if (outcome.uncertain || outcome.evidence === null) {
+      await receipts.requireReview(
+        receipt,
+        outcome.uncertain ? "session-outcome-uncertain" : "session-outcome-unverified",
+      );
+      return;
+    }
+
+    await receipts.finishEmailWork(receipt, {
+      outcome: outcome.evidence,
+      detail: outcome.evidence === "completed" ? "session-completed" : "session-no-delivery",
+      settle: () => this.settleEmailSideEffects(outcome.session),
+    });
+  }
+
+  /**
+   * Bounded settle of a session's in-flight email side effects.
+   *
+   * Admission to further side-effect skill calls is closed (recovery fence)
+   * BEFORE the counter is read, so a late call cannot land after settlement was
+   * observed. A session with no live registry object and no tracked effect
+   * settles vacuously; an unsettleable wait reports `false` so the caller cannot
+   * claim `completed`.
+   */
+  private async settleEmailSideEffects(session: ActiveSession | null): Promise<boolean> {
+    if (!session) return true;
+    session.recoveryFenced = true;
+    if ((session.inflightSideEffects ?? 0) === 0) return true;
+    return await this.waitForInflightSideEffects(session, session.id);
+  }
+
+  /**
    * Bounded machine-readable reason for a row-11 recovery abort (design §13/D7).
    * `null` means the error is NOT a recovery-abort class — genuine load
    * failures and post-load catalog misses keep their existing isolated throw.
@@ -4951,6 +5133,11 @@ export class SessionOrchestrator {
       workspaceManager: this.workspaceManager,
       // F15: authorize channel-scope memory writes per the configured policy.
       canWriteChannelMemory: (this.config.memory.channelWritePolicy ?? "sessions") === "sessions",
+      // Row 14: the durable email work id of this session's accepted inbound
+      // work, exposed to skill handlers for the lifetime of the session.
+      emailWorkId: params.triggerEvent
+        ? emailWorkReceiptOf(params.triggerEvent)?.workId
+        : undefined,
     });
 
     sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });

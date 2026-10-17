@@ -599,6 +599,7 @@ export class SkillAPIServer {
       lastReplyAnchorMessageId: session.lastReplyAnchorMessageId,
       workspaceManager: session.workspaceManager,
       canWriteChannelMemory: session.canWriteChannelMemory,
+      emailWorkId: session.emailWorkId,
     };
 
     // Execute skill

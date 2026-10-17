@@ -843,3 +843,126 @@ deno check src/main.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/mail-service.test.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/submission-service-smoke.test.ts
 ```
+
+## Durable Email Work Receipts (Owned by `email-session-receipts`)
+
+`src/platforms/email/session-receipts.ts` owns the durable receive-side receipts of one accepted
+mailbox work item. It writes them into the existing mailbox journal (`MailboxStore`,
+`processing.jsonl`); it adds no storage of its own and never precedes the journal as an
+authority. The typed binding lives on the normalized event: an email event that the poller
+accepted carries an `emailWork` receipt (`kind: "email-work"`, `workId`, `mailboxKey`,
+`recordId`), which is the ONLY thing that makes a session receipt-bearing.
+
+### Ordering Contract (the fence)
+
+1. **Admission** — accepted work is already durable (`accepted` in `processing.jsonl`). Work
+   that will never execute is recorded terminally instead of being left pending: a rejected
+   access policy, a platform with no registered adapter, and an email `/clear` control command
+   all record `ignored` with a safe reason code.
+2. **Queue** — work that is accepted but still waiting for the global execution lease is
+   **unstarted**. Nothing is written, so a restart resumes it; merely having emitted the event
+   is never treated as progress.
+3. **Start fence** — `beginEmailWork()` appends (and fsyncs) the `started` record carrying the
+   hand-off `workId` immediately before the first agent action. For a pooled session the fence
+   is taken INSIDE the lease runner, so it can only happen after the lease is held; for a
+   per-spawn session it is taken before the first ACP session is created; in dry-run mode it is
+   taken before the mock reply, which is a delivery side effect taken without a lease. A fence
+   that cannot be written fails closed: the agent is never prompted on unfenced work.
+4. **Outcome** — exactly one terminal receipt is written on every exit path, after the session
+   lifecycle is final.
+
+### Outcome Mapping
+
+| Explicit lifecycle evidence                                | Receipt           | Detail                        |
+| ---------------------------------------------------------- | ----------------- | ----------------------------- |
+| The turn delivered a response and every side effect settled | `completed`       | `session-completed`           |
+| The turn ended normally with no delivery and no uncertainty | `failed`          | `session-no-delivery`         |
+| Dry run: no agent turn ran, and the mock reply (when configured) succeeded | `completed` | `session-completed` |
+| Interrupted run: exception, lost agent session, recovery abort, cancelled turn, abnormal stop reason, pooled runner failure, or a dry-run mock delivery that failed after being invoked | `review-required` | `session-outcome-uncertain`   |
+| A path that claimed no explicit outcome                     | `review-required` | `session-outcome-unverified`  |
+| Rejected admission / control command                        | `ignored`         | safe reason code              |
+
+`completed` is **never** derived from `SessionResponse.success` alone, and it additionally
+requires the completion's side-effect settler to confirm settlement. The settler closes
+admission to further side-effect skill calls (the recovery fence) before reading the session's
+in-flight counter, waits for it to reach zero, and reports `false` when that cannot be
+confirmed — in which case the recorded outcome is `review-required` with
+`unsettled-side-effects`, never `completed`. A failed terminal write leaves the entry
+`started`, so startup recovery quarantines it as `review-required` rather than replays it.
+
+Duplicate hand-offs are marked honestly by the journal's guarded transitions: a second fence
+for the same entry is rejected, a repeated identical terminal receipt is an idempotent no-op
+with a single durable record, and a terminal receipt carrying a different `workId` is refused
+as an immutable-identity mismatch.
+
+### Receive Uncertainty vs SMTP Uncertainty
+
+The two uncertainties are separate and must not be read into one another; they share the same
+`workId`, which is what lets an operator correlate them.
+
+- **Receive uncertainty** (this module): recorded in `processing.jsonl` as
+  `started` → `review-required`. It says the inbox entry was accepted and may have been acted
+  on, without a proven outcome. Automatic polling never replays a review-required entry.
+- **Send uncertainty** (`email-submission-service`): recorded in `submissions.jsonl` as the
+  operation phase `unknown`. It says an outgoing message may or may not have been accepted by
+  the provider. It is never resubmitted automatically.
+
+An `unknown` send that occurred inside a session whose receive outcome is uncertain describes
+one incident from two sides; the shared `workId` (persisted on the `started` receipt and used
+as the outbound operation key's `workId`) links them.
+
+### Operator Inspection
+
+```sh
+# Receive receipts for one work item, in durable order (no message content is stored)
+jq -r '.data | select(.workId == "<workId>") | [.state, (.detail // ""), .timestamp] | @tsv' \
+  data/email/processing.jsonl
+
+# Everything that needs review, with the workId that links it to its sends
+jq -r '.data | select(.state == "review-required") | [.workId, .detail, .key.uid] | @tsv' \
+  data/email/processing.jsonl
+```
+
+The journal stores only opaque identifiers, states and safe codes — never bodies, addresses or
+credentials.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-session-receipts/specs/session-lifecycle/spec.md` and covered by
+`tests/core/email-session-receipts.test.ts`:
+
+- **Durable agent-start fence / queue crash**: a process death while accepted work waits for
+  the execution lease resumes that unstarted work on restart, and mere emission is never
+  treated as completion.
+- **Explicit receive completion / handler throws**: downstream event handling that fails after
+  the work started records `review-required`, and later polls do not replay it.
+
+### Exported API
+
+- `EmailSessionReceipts` (constructed with a `MailboxStore`)
+  - `beginEmailWork(receipt)` — the durable start fence; must be awaited before the agent acts.
+  - `finishEmailWork(receipt, { outcome, detail?, settle })` — terminal receipt; awaits
+    `settle` first and downgrades an unconfirmed `completed` to `review-required`.
+  - `requireReview(receipt, detail)` — escalates an uncertain outcome to `review-required`.
+  - `denyAdmission(receipt, reason)` — records work that will never execute as `ignored`.
+- `EmailWorkOutcome`, `EmailSideEffectSettler`, `EmailWorkCompletion`, `mailboxKeyOf(receipt)`
+- Event-side binding: `EmailWorkReceipt`, `isEmailWorkReceipt(value)`,
+  `emailWorkReceiptOf(event)` — the resolver used by every receipt sink, enforcing both the
+  email platform and the typed `kind: "email-work"` discriminator.
+- Session wiring: `AgentCore.setEmailSessionReceipts(receipts | null)` and
+  `SessionOrchestrator.setEmailSessionReceipts(receipts | null)`. The work id is also exposed
+  as `ActiveSession.emailWorkId` / `SkillContext.emailWorkId` for successor rows (15, 19, 22).
+
+The module is intentionally NOT registered in production bootstrap; the activation guard stays
+untouched and email ingress (row 15) installs the sink.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/email-session-receipts.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/mailbox-store.test.ts
+```

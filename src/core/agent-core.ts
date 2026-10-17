@@ -15,8 +15,10 @@ import { SessionRegistry } from "../skill-api/session-registry.ts";
 import { SkillAPIServer } from "../skill-api/server.ts";
 import { AgentProcessPool } from "./agent-process-pool.ts";
 import type { Config } from "../types/config.ts";
-import type { NormalizedEvent } from "../types/events.ts";
+import { emailWorkReceiptOf } from "../types/events.ts";
+import type { EmailWorkReceipt, NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
 
 const logger = createLogger("AgentCore");
 
@@ -47,6 +49,11 @@ export class AgentCore {
    * Shared ACP process pool (shared-process mode). Null in per-spawn mode.
    */
   private processPool: AgentProcessPool | null = null;
+  /**
+   * Durable email work receipt sink (row 14). Null until email ingress wires it;
+   * while null no email admission decision is recorded.
+   */
+  private emailSessionReceipts: EmailSessionReceipts | null = null;
 
   constructor(config: Config, yolo = false, skillApiSecret?: string) {
     this.config = config;
@@ -191,15 +198,29 @@ export class AgentCore {
   }
 
   /**
+   * Install (or clear) the durable email work receipt sink and forward it to
+   * the orchestrator. Email ingress wires this before its first poll; receipts
+   * are recorded only for email-typed work carrying a typed receipt.
+   */
+  setEmailSessionReceipts(receipts: EmailSessionReceipts | null): void {
+    this.emailSessionReceipts = receipts;
+    this.orchestrator.setEmailSessionReceipts(receipts);
+  }
+
+  /**
    * Handle an incoming event from any platform
    */
   async handleEvent(event: NormalizedEvent): Promise<void> {
     const platform = this.platformAdapters.get(event.platform);
+    const emailReceipt = emailWorkReceiptOf(event);
     if (!platform) {
       logger.error("No adapter registered for platform: {platform}", {
         platform: event.platform,
         messageId: event.messageId,
       });
+      // Accepted email work that nothing can execute is terminally ignored:
+      // leaving it accepted would re-emit the same unprocessable work forever.
+      await this.denyEmailAdmission(emailReceipt, "no-platform-adapter");
       return;
     }
 
@@ -218,6 +239,8 @@ export class AgentCore {
         messageId: event.messageId,
         policy: this.config.replyPolicy,
       });
+      // A rejected admission is a terminal decision, recorded as ignored.
+      await this.denyEmailAdmission(emailReceipt, "access-policy-denied");
       return;
     }
 
@@ -233,6 +256,28 @@ export class AgentCore {
         response,
         event.messageId,
       );
+    }
+  }
+
+  /**
+   * Records a terminally ignored receipt for rejected email work.
+   *
+   * A receipt failure is logged and swallowed: the adapter already swallows
+   * event-handler errors, and the entry stays `accepted` on failure, so the
+   * next poll re-emits it rather than losing the admission decision silently.
+   */
+  private async denyEmailAdmission(
+    receipt: EmailWorkReceipt | undefined,
+    reason: string,
+  ): Promise<void> {
+    if (!receipt || !this.emailSessionReceipts) return;
+    try {
+      await this.emailSessionReceipts.denyAdmission(receipt, reason);
+    } catch (error) {
+      logger.error("Failed to record denied email admission: {reason}", {
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
