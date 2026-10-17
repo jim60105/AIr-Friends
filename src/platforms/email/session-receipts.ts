@@ -48,9 +48,11 @@ export interface EmailWorkCompletion {
   /** Safe detail code (never message content, addresses or credentials). */
   detail?: string;
   /**
-   * Awaited BEFORE the terminal receipt is written. `completed` requires this
-   * settler to resolve `true`; an unconfirmed settlement is recorded as
-   * `review-required` with `unsettled-side-effects` instead.
+   * Awaited BEFORE the terminal receipt is written. Every outcome that makes a
+   * claim about effects (`completed` and `failed`) requires this settler to
+   * resolve `true`; an unconfirmed settlement is recorded as `review-required`
+   * with `unsettled-side-effects` instead, because an effect that is still in
+   * flight can land after the outcome was observed.
    */
   settle: EmailSideEffectSettler;
 }
@@ -74,6 +76,18 @@ export class EmailSessionReceipts {
 
   constructor(store: MailboxStore) {
     this.store = store;
+  }
+
+  /**
+   * Whether the entry still awaits execution, i.e. its durable state is
+   * `accepted` (or a bare `discovered` entry that was never accepted).
+   *
+   * A caller that is about to perform an external delivery on behalf of this
+   * work item uses this to decide whether it must take the fence itself.
+   */
+  isUnstarted(receipt: EmailWorkReceipt): boolean {
+    const state = this.store.getEntry(mailboxKeyOf(receipt))?.state;
+    return state === "accepted" || state === "discovered";
   }
 
   /**
@@ -101,15 +115,16 @@ export class EmailSessionReceipts {
     receipt: EmailWorkReceipt,
     completion: EmailWorkCompletion,
   ): Promise<void> {
-    if (completion.outcome === "completed" && typeof completion.settle !== "function") {
+    const claimsEffects = completion.outcome === "completed" || completion.outcome === "failed";
+    if (claimsEffects && typeof completion.settle !== "function") {
       throw new Error(
-        "Completing email work requires a side-effect settler: an unproven settlement must not be recorded as completed",
+        "Finishing email work with a claimed outcome requires a side-effect settler: an unproven settlement must not be recorded as completed or failed",
       );
     }
 
     let outcome = completion.outcome;
     let detail = completion.detail;
-    if (outcome === "completed" && !(await completion.settle())) {
+    if (claimsEffects && !(await completion.settle())) {
       outcome = "review-required";
       detail = "unsettled-side-effects";
     }

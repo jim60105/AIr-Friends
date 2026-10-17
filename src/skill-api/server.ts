@@ -270,10 +270,13 @@ export class SkillAPIServer {
       // Create a promise for this request (for concurrent duplicate detection)
       // Side-effect executions are counted on the session so crash recovery can
       // wait for in-flight effects to settle before making its decision.
-      const countedSideEffect = SIDE_EFFECT_SKILLS.has(skillName);
-      if (countedSideEffect) {
-        const counted = this.sessionRegistry.get(body.sessionId);
-        if (counted) counted.inflightSideEffects = (counted.inflightSideEffects ?? 0) + 1;
+      // The counter is incremented AND decremented on the SAME object: teardown
+      // may remove the registry entry while the effect is still running, and a
+      // later registry lookup would then never roll the counter back to zero.
+      const countedSession: { inflightSideEffects?: number } | undefined =
+        SIDE_EFFECT_SKILLS.has(skillName) ? this.sessionRegistry.get(body.sessionId) : undefined;
+      if (countedSession) {
+        countedSession.inflightSideEffects = (countedSession.inflightSideEffects ?? 0) + 1;
       }
       try {
         const executionPromise = this.executeSkillRequest(skillName, body, headers);
@@ -323,11 +326,11 @@ export class SkillAPIServer {
           { status: statusCode, headers },
         );
       } finally {
-        if (countedSideEffect) {
-          const counted = this.sessionRegistry.get(body.sessionId);
-          if (counted) {
-            counted.inflightSideEffects = Math.max(0, (counted.inflightSideEffects ?? 1) - 1);
-          }
+        if (countedSession) {
+          countedSession.inflightSideEffects = Math.max(
+            0,
+            (countedSession.inflightSideEffects ?? 1) - 1,
+          );
         }
       }
     } catch (error) {

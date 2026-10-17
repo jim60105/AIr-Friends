@@ -1111,6 +1111,10 @@ export class SessionOrchestrator {
               sessionId: acpSessionId,
               stopReason: response.stopReason,
             });
+            // Email receipt evidence: any stop reason other than a clean turn
+            // end is an interruption (cancellation, truncation, refusal), so the
+            // outcome can no longer be declared terminal even if a reply landed.
+            if (response.stopReason !== "end_turn") emailWorkUncertain = true;
 
             // Retry on missing response (reply / reaction / file).
             let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
@@ -1140,6 +1144,8 @@ export class SessionOrchestrator {
                   attempt: attempt + 1,
                   stopReason: retryResponse.stopReason,
                 });
+                // A retry that did not end cleanly interrupted the turn.
+                if (retryResponse.stopReason !== "end_turn") emailWorkUncertain = true;
                 replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
                 reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
                 fileSent = options.shellSessionId
@@ -1466,6 +1472,10 @@ export class SessionOrchestrator {
           sessionId,
           stopReason: response.stopReason,
         });
+        // Email receipt evidence: any stop reason other than a clean turn end is
+        // an interruption, so the outcome can no longer be declared terminal —
+        // not even when a reply was delivered before the interruption.
+        if (response.stopReason !== "end_turn") emailWorkUncertain = true;
 
         // Audit: agent_message
         if (auditWriter) {
@@ -1528,6 +1538,8 @@ export class SessionOrchestrator {
               attempt: attempt + 1,
               stopReason: retryResponse.stopReason,
             });
+            // A retry that did not end cleanly interrupted the turn.
+            if (retryResponse.stopReason !== "end_turn") emailWorkUncertain = true;
 
             // Check if reply, reaction, or file was sent after retry
             replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
@@ -1623,8 +1635,6 @@ export class SessionOrchestrator {
         }
 
         if (response.stopReason === "cancelled") {
-          // An interrupted turn is uncertain: an earlier effect may have landed.
-          emailWorkUncertain = true;
           await auditWriter?.write("session_end", {
             success: false,
             replySent: false,
@@ -1650,8 +1660,6 @@ export class SessionOrchestrator {
           error: `Unexpected stop reason: ${response.stopReason}`,
           ...auditWriter?.getSummaryCounters(),
         });
-        // Abnormal stop reason: the turn's outcome is not a clean result.
-        emailWorkUncertain = true;
         result = {
           success: false,
           replySent: false,
@@ -4780,9 +4788,14 @@ export class SessionOrchestrator {
    *
    * Admission to further side-effect skill calls is closed (recovery fence)
    * BEFORE the counter is read, so a late call cannot land after settlement was
-   * observed. A session with no live registry object and no tracked effect
-   * settles vacuously; an unsettleable wait reports `false` so the caller cannot
-   * claim `completed`.
+   * observed. The fence only reaches calls that can still look the session up
+   * in the registry, so it covers pooled sessions completely and per-spawn
+   * sessions until their teardown removes the entry — the per-spawn teardown
+   * already drains the session's tool children before that removal, and any
+   * already-admitted call still settles on the retained object. A session with
+   * no live registry object and no tracked effect settles vacuously; an
+   * unsettleable wait reports `false` so the caller never records `completed`
+   * or a definitive `failed`.
    */
   private async settleEmailSideEffects(session: ActiveSession | null): Promise<boolean> {
     if (!session) return true;

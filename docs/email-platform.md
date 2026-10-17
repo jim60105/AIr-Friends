@@ -871,6 +871,14 @@ accepted carries an `emailWork` receipt (`kind: "email-work"`, `workId`, `mailbo
 4. **Outcome** — exactly one terminal receipt is written on every exit path, after the session
    lifecycle is final.
 
+The generic error notice the bot sends when a session fails is also a delivery of the work item.
+When the session failed BEFORE the agent could act (context assembly or agent connect), the
+entry is still unstarted, so `AgentCore` takes the fence first and records the notice's own
+outcome (`error-notice-delivered` → `completed`, `error-notice-undelivered` → `review-required`)
+— an unrecorded notice would otherwise be delivered again by the next poll. Once the
+orchestrator has fenced and decided the outcome, the recorded receipt is never rewritten by a
+notification.
+
 ### Outcome Mapping
 
 | Explicit lifecycle evidence                                | Receipt           | Detail                        |
@@ -878,17 +886,20 @@ accepted carries an `emailWork` receipt (`kind: "email-work"`, `workId`, `mailbo
 | The turn delivered a response and every side effect settled | `completed`       | `session-completed`           |
 | The turn ended normally with no delivery and no uncertainty | `failed`          | `session-no-delivery`         |
 | Dry run: no agent turn ran, and the mock reply (when configured) succeeded | `completed` | `session-completed` |
-| Interrupted run: exception, lost agent session, recovery abort, cancelled turn, abnormal stop reason, pooled runner failure, or a dry-run mock delivery that failed after being invoked | `review-required` | `session-outcome-uncertain`   |
+| Error notice delivered for a session that failed before acting | `completed`   | `error-notice-delivered`      |
+| Error notice skipped, or undeliverable, for such a session  | `review-required` | `error-notice-undelivered`    |
+| Interrupted run: exception, lost agent session, recovery abort, retry that did not end cleanly, pooled runner failure, a cancelled/truncated/refused stop reason at ANY point (even when a reply was already delivered), or a dry-run mock delivery that failed after being invoked | `review-required` | `session-outcome-uncertain`   |
+| A claimed outcome whose side effects could not be settled    | `review-required` | `unsettled-side-effects`      |
 | A path that claimed no explicit outcome                     | `review-required` | `session-outcome-unverified`  |
 | Rejected admission / control command                        | `ignored`         | safe reason code              |
 
-`completed` is **never** derived from `SessionResponse.success` alone, and it additionally
-requires the completion's side-effect settler to confirm settlement. The settler closes
+Neither `completed` nor the definitive `failed` is derived from `SessionResponse.success`, and
+both require the completion's side-effect settler to confirm settlement. The settler closes
 admission to further side-effect skill calls (the recovery fence) before reading the session's
 in-flight counter, waits for it to reach zero, and reports `false` when that cannot be
 confirmed — in which case the recorded outcome is `review-required` with
-`unsettled-side-effects`, never `completed`. A failed terminal write leaves the entry
-`started`, so startup recovery quarantines it as `review-required` rather than replays it.
+`unsettled-side-effects` instead. A failed terminal write leaves the entry `started`, so
+startup recovery quarantines it as `review-required` rather than replays it.
 
 Duplicate hand-offs are marked honestly by the journal's guarded transitions: a second fence
 for the same entry is rejected, a repeated identical terminal receipt is an idempotent no-op
@@ -943,9 +954,11 @@ Acceptance requirements and scenarios are defined in
 - `EmailSessionReceipts` (constructed with a `MailboxStore`)
   - `beginEmailWork(receipt)` — the durable start fence; must be awaited before the agent acts.
   - `finishEmailWork(receipt, { outcome, detail?, settle })` — terminal receipt; awaits
-    `settle` first and downgrades an unconfirmed `completed` to `review-required`.
+    `settle` first and downgrades an unconfirmed `completed` or `failed` to `review-required`.
   - `requireReview(receipt, detail)` — escalates an uncertain outcome to `review-required`.
   - `denyAdmission(receipt, reason)` — records work that will never execute as `ignored`.
+  - `isUnstarted(receipt)` — whether the entry still awaits execution (a caller about to
+    deliver on the work item's behalf uses it to decide whether it must take the fence).
 - `EmailWorkOutcome`, `EmailSideEffectSettler`, `EmailWorkCompletion`, `mailboxKeyOf(receipt)`
 - Event-side binding: `EmailWorkReceipt`, `isEmailWorkReceipt(value)`,
   `emailWorkReceiptOf(event)` — the resolver used by every receipt sink, enforcing both the

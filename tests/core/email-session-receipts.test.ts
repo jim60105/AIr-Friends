@@ -426,9 +426,12 @@ Deno.test("Email work is fenced with a durable started receipt before the first 
   const observed: string[][] = [];
   const propagatedWorkIds: (string | undefined)[] = [];
   harness.setScript(async ({ channelId }) => {
-    // The agent must never see unfenced work: read the durable journal from
-    // inside the prompt call itself, together with the session's propagated
-    // work id (the registry entry is gone once the session ends).
+    // The agent must never see unfenced work: read the journal from inside the
+    // prompt call itself, together with the session's propagated work id (the
+    // registry entry is gone once the session ends). The append is durable —
+    // `appendDurable` fsyncs file and directory before resolving, and its own
+    // suite owns that guarantee — so an observed record at prompt time proves
+    // the fence preceded this call.
     observed.push(await statesFor(harness.root, WORK_ID));
     propagatedWorkIds.push(
       harness.sessionRegistry.getAll().find((s) => s.channelId === channelId)?.emailWorkId,
@@ -544,12 +547,23 @@ Deno.test("Queued email work stays unstarted until the execution lease is acquir
     const holder = harness.orchestrator.processMessage(discordEvent(), adapter);
     await waitUntil(() => order.includes("holder-prompt-start"), "the holder to hold the lease");
 
+    // Exact queue-admission barrier: observe the email item entering the pool's
+    // queue, so the unstarted assertion below cannot race workspace setup.
+    const pool = harness.pool!;
+    const runQueued = pool.run.bind(pool);
+    const emailQueued = Promise.withResolvers<void>();
+    pool.run = (options, runner) => {
+      if (options.poolKey.startsWith("email:")) emailQueued.resolve();
+      return runQueued(options, runner);
+    };
+
     // The email work is accepted and queued behind the held lease.
     const emailRun = harness.orchestrator.processMessage(emailEvent(emailReceipt()), adapter);
+    await emailQueued.promise;
     assertEquals(
       await statesFor(harness.root, WORK_ID),
       [],
-      "work waiting for the execution lease must stay unstarted",
+      "work queued for the execution lease must stay unstarted",
     );
     assertEquals(order, ["holder-prompt-start"]);
 
@@ -603,6 +617,99 @@ Deno.test("An agent failure after the fence records review-required, never compl
     );
   } finally {
     await pooled.dispose();
+  }
+});
+
+Deno.test("Interrupted turns record review-required, even when a reply was delivered", async () => {
+  // Per-spawn: a delivered reply followed by a cancelled stop reason is still an
+  // interrupted turn — its outcome cannot be declared terminal.
+  const perSpawn = await createHarness();
+  perSpawn.setScript(async ({ channelId }) => {
+    await perSpawn.skillRegistry.getReplyHandler().handleSendReply(
+      { message: "delivered reply" },
+      {
+        workspace: {
+          key: perSpawn.workspaceManager.getWorkspaceKeyFromEvent(emailEvent()),
+          components: { platform: "email", userId: OWNER },
+        },
+        channelId,
+        userId: OWNER,
+        platformAdapter: perSpawn.adapter,
+      } as unknown as SkillContext,
+    );
+    return { stopReason: "cancelled" } as PromptResponse;
+  });
+  try {
+    await perSpawn.accept(MAILBOX_KEY, RECORD_ID);
+    await perSpawn.orchestrator.processMessage(
+      emailEvent(emailReceipt()),
+      perSpawn.adapter as unknown as PlatformAdapter,
+    );
+    assertEquals(
+      perSpawn.adapter.sentReplies.length,
+      1,
+      "the reply landed before the interruption",
+    );
+    assertEquals(await statesFor(perSpawn.root, WORK_ID), ["started", "review-required"]);
+  } finally {
+    await perSpawn.dispose();
+  }
+
+  // Pooled: a cancelled turn with no reply is equally uncertain, not a
+  // definitive no-delivery failure.
+  const pooled = await createHarness({
+    pooled: true,
+    script: () => Promise.resolve({ stopReason: "cancelled" } as PromptResponse),
+  });
+  try {
+    await pooled.accept(MAILBOX_KEY, RECORD_ID);
+    const response = await pooled.orchestrator.processMessage(
+      emailEvent(emailReceipt()),
+      pooled.adapter as unknown as PlatformAdapter,
+    );
+    assertEquals(response.success, false);
+    assertEquals(await statesFor(pooled.root, WORK_ID), ["started", "review-required"]);
+  } finally {
+    await pooled.dispose();
+  }
+});
+
+Deno.test("A pre-agent failure fences before its error notice and records the notice outcome", async () => {
+  const root = await Deno.makeTempDir({ prefix: "email-receipts-notice-test-" });
+  const store = new MailboxStore({ emailRoot: root, fingerprint: FINGERPRINT });
+  const receipts = new EmailSessionReceipts(store);
+  try {
+    await createPrompts(root);
+    await store.initialize(0, UIDVALIDITY);
+    await store.discover(MAILBOX_KEY);
+    await store.accept(MAILBOX_KEY, RECORD_ID);
+
+    // A workspace root that is a regular file makes session setup fail BEFORE
+    // the agent fence could be taken: no prompt, no connector, no mock reply.
+    const notADirectory = join(root, "not-a-directory");
+    await Deno.writeTextFile(notADirectory, "not a directory");
+
+    const config = createConfig(root, { pooled: false, dryRun: false });
+    config.replyPolicy = "all";
+    config.workspace.repoPath = notADirectory;
+
+    const adapter = new MockEmailPlatformAdapter();
+    const agentCore = new AgentCore(config);
+    agentCore.setEmailSessionReceipts(receipts);
+    try {
+      agentCore.registerPlatform(adapter as unknown as PlatformAdapter);
+      await agentCore.handleEvent(emailEvent(emailReceipt()));
+
+      // The notice is a delivery of this work item: it was fenced first, and its
+      // own outcome is recorded — the entry is never left accepted/replayable.
+      assertEquals(adapter.sentReplies.length, 1, "the error notice was delivered");
+      assertEquals(await statesFor(root, WORK_ID), ["started", "completed"]);
+      assertEquals(store.getEntry(MAILBOX_KEY)?.detail, "error-notice-delivered");
+    } finally {
+      await agentCore.shutdown();
+    }
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
 
@@ -746,7 +853,9 @@ Deno.test("Receipt API honors the durable transition and settlement contract", a
     );
     assertEquals(await statesFor(root, mismatchWorkId), ["started"]);
 
-    // An unconfirmed settlement is never recorded as completed.
+    // An unconfirmed settlement is never recorded as a claimed outcome: both
+    // `completed` and the definitive `failed` are downgraded to review-required,
+    // because an effect still in flight can land after the outcome was observed.
     const secondKey: MailboxKey = { ...MAILBOX_KEY, uid: UID + 1 };
     const secondWorkId = "22222222-2222-3333-4444-555555555555";
     await store.discover(secondKey);
@@ -758,6 +867,32 @@ Deno.test("Receipt API honors the durable transition and settlement contract", a
       settle: () => Promise.resolve(false),
     });
     assertEquals(await statesFor(root, secondWorkId), ["started", "review-required"]);
+
+    const thirdKey: MailboxKey = { ...MAILBOX_KEY, uid: UID + 3 };
+    const thirdWorkId = "88888888-2222-3333-4444-555555555555";
+    await store.discover(thirdKey);
+    await store.accept(thirdKey, `${RECORD_ID}-c`);
+    const unsettledFailure = emailReceipt(thirdWorkId, thirdKey);
+    await receipts.beginEmailWork(unsettledFailure);
+    await receipts.finishEmailWork(unsettledFailure, {
+      outcome: "failed",
+      detail: "session-no-delivery",
+      settle: () => Promise.resolve(false),
+    });
+    assertEquals(await statesFor(root, thirdWorkId), ["started", "review-required"]);
+
+    // A claimed outcome without any settlement proof is refused outright.
+    await assertRejects(
+      () =>
+        receipts.finishEmailWork(
+          emailReceipt(thirdWorkId, thirdKey),
+          { outcome: "failed" } as unknown as Parameters<
+            EmailSessionReceipts["finishEmailWork"]
+          >[1],
+        ),
+      Error,
+      "requires a side-effect settler",
+    );
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
@@ -849,6 +984,17 @@ Deno.test("Crash semantics: unstarted work resumes; started work without a termi
     // Mere emission is never completion: no completed record exists anywhere.
     const states = (await journalRecords(root)).map((record) => record.state);
     assertEquals(states.includes("completed"), false);
+
+    // Later polls cannot replay it: a re-emitted duplicate hand-off of the
+    // reviewed entry is refused rather than executed a second time.
+    await assertRejects(
+      () =>
+        new EmailSessionReceipts(restarted).beginEmailWork(
+          emailReceipt(startedWorkId, startedKey),
+        ),
+      MailboxStoreError,
+      "[INVALID_TRANSITION]",
+    );
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
