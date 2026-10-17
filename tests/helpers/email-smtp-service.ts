@@ -82,6 +82,7 @@ export class EmailSmtpTestService {
   public authAttempts: SmtpAuthAttempt[] = [];
   public executedCommands: string[] = [];
   public dataTransactions: SmtpDataTransaction[] = [];
+  private readonly closedConnectionSignal = Promise.withResolvers<void>();
 
   constructor(options: SmtpFixtureOptions) {
     this.options = options;
@@ -97,6 +98,11 @@ export class EmailSmtpTestService {
   /** True when any command was received after the DATA payload was consumed. */
   get postDataCommands(): string[] {
     return this.executedCommands.slice(this.postDataCommandOffset);
+  }
+
+  /** Resolves when the fixture observes its first client connection closing. */
+  waitForClosedConnection(): Promise<void> {
+    return this.closedConnectionSignal.promise;
   }
 
   private postDataCommandOffset = 0;
@@ -116,7 +122,10 @@ export class EmailSmtpTestService {
 
     this.server.on("connection", (socket) => {
       this.sockets.add(socket);
-      socket.on("close", () => this.sockets.delete(socket));
+      socket.on("close", () => {
+        this.sockets.delete(socket);
+        this.closedConnectionSignal.resolve();
+      });
       socket.on("error", () => {
         this.sockets.delete(socket);
       });

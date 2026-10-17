@@ -486,6 +486,22 @@ Deno.test("EmailSmtpClient - credentials never appear in emitted diagnostics", a
   );
 });
 
+Deno.test("EmailSmtpClient - a stalled submission is torn down before submit returns", async () => {
+  await withService(
+    { tlsMode: "tls", username: USERNAME, password: PASSWORD, stallAfterPayload: true },
+    async (service) => {
+      const result = await client(service, { timeoutMs: 400 }).submit(submission());
+
+      assertEquals(result.phase, "unknown");
+      assertEquals(result.safeCode, SmtpDiagnosticCode.CONNECTION_TIMEOUT);
+      assertEquals(service.dataTransactionCount, 1);
+
+      // Bounded teardown: a peer that never answers must not leave a live handle behind.
+      await service.waitForClosedConnection();
+    },
+  );
+});
+
 Deno.test("EmailSmtpClient - greeting refusal is a definite connection failure", async () => {
   await withService(
     { tlsMode: "tls", username: USERNAME, password: PASSWORD, refuseGreeting: true },
