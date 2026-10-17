@@ -488,16 +488,21 @@ export class EmailDestinationGrantPreflight {
  * The text is split on every character that cannot appear in an addr-spec
  * atom, so a token is either a whole mailbox or nothing: a substring of a
  * larger token (`evil alice@example.com` never matches inside
- * `evilalice@example.com`) never counts. Only domain case and IDNA form change
- * under `normalizeEmailMailbox`; local-part case, plus tags and dots stay
- * distinct, exactly like the deployment's mailbox identity.
+ * `evilalice@example.com`) never counts. Combining marks (`\p{M}`) stay INSIDE
+ * the token: they are letters in a decomposed address, so treating one as a
+ * boundary would both split a real mailbox and let a decorated prefix
+ * (`evil<mark>alice@example.com`) masquerade as the bare address. Only ONE
+ * trailing sentence dot is removed, and a leading dot is never stripped: a
+ * token with a leading dot is not the mailbox it resembles. Only domain case
+ * and IDNA form change under `normalizeEmailMailbox`; local-part case, plus
+ * tags and dots stay distinct, exactly like the deployment's mailbox identity.
  */
 export function extractAuthoredMailboxes(authoredText: string): ReadonlySet<string> {
   const mailboxes = new Set<string>();
-  for (const raw of authoredText.split(/[^\p{L}\p{N}!#$%&'*+/=?^_`{|}~.@-]+/u)) {
+  for (const raw of authoredText.split(/[^\p{L}\p{N}\p{M}!#$%&'*+/=?^_`{|}~.@-]+/u)) {
     // Sentence punctuation (a trailing dot, an address in angle brackets) is
     // not part of the mailbox itself.
-    const token = raw.replace(/^[.]+/, "").replace(/[.]+$/, "");
+    const token = raw.replace(/\.$/, "");
     if (token === "" || !token.includes("@")) continue;
     try {
       mailboxes.add(normalizeEmailMailbox(token).canonicalAddress);

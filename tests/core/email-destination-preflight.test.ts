@@ -213,6 +213,41 @@ Deno.test("preflight - an address that is only a substring of another token neve
   assertEquals(reasonOf(outcome), "recipient_not_authored");
 });
 
+Deno.test("preflight - a decorated or leading-dot token never authorizes the bare address", async () => {
+  const answer =
+    '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}';
+  // A combining mark inside the authored token is part of the address, not a
+  // boundary: splitting there would let the decorated token masquerade as the
+  // bare address.
+  const decorated = createPreflight(answer);
+  assertEquals(
+    reasonOf(
+      await decorated.preflight.derive(grantRequest({
+        authoredText: "Write to evil\u0301alice@example.com about it.",
+      })),
+    ),
+    "recipient_not_authored",
+  );
+  // A leading dot is never stripped: the token is not the mailbox it resembles.
+  const leadingDot = createPreflight(answer);
+  assertEquals(
+    reasonOf(
+      await leadingDot.preflight.derive(grantRequest({
+        authoredText: "Write to .alice@example.com about it.",
+      })),
+    ),
+    "recipient_not_authored",
+  );
+  // One trailing sentence dot IS punctuation, not part of the mailbox.
+  const sentenceDot = createPreflight(answer);
+  const grants = grantsOf(
+    await sentenceDot.preflight.derive(grantRequest({
+      authoredText: "Write to alice@example.com.",
+    })),
+  );
+  assertEquals(grants[0].canonicalRecipient, "alice@example.com");
+});
+
 Deno.test("preflight - provenance normalization follows the deployment mailbox identity", async () => {
   // Domain case and IDNA form are equivalent; local-part case and plus tags are
   // NOT (the deployment's own contract keeps them distinct).
@@ -885,4 +920,9 @@ Deno.test("preflight - authored mailbox extraction accepts complete tokens only"
     "carol@example.com",
     "notalice@example.com",
   ]);
+  // A combining mark keeps the decorated token whole, and a leading dot is
+  // never treated as a boundary.
+  const decorated = extractAuthoredMailboxes("evil\u0301alice@example.com and .bob@example.com");
+  assertEquals(decorated.has("alice@example.com"), false);
+  assertEquals(decorated.has("bob@example.com"), false);
 });
