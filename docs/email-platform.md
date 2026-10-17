@@ -1421,6 +1421,15 @@ skill handlers copy from `SkillContext.emailSend`. It is never read from tool pa
 request's `platformSpecific` data, so a model cannot choose the logical operation its mail is
 bound to. A send without it is refused before any construction or SMTP work.
 
+**Producer wiring is a named dependency, not part of this change.** `EmailAdapter`,
+`ReplyHandler`, `FileHandler` and `SkillContext` consume the context; the session/scheduler that
+owns a work item must populate it (`email-response-accounting` for sessions and the Skill API,
+`email-reminder-threads`/`email-spontaneous-targets` for their lanes, and `email-activation` for
+the final wiring). The value is fully derivable from data the host already holds: for inbound
+mail, `workId` is the durable `emailWork` receipt's `workId` and `owner` is the owner encoded in
+the event's `mail:<owner>:<thread>` channel id. Until a host supplies it, every email send is
+refused (fail closed) rather than guessed — nothing is ever sent to an inferred recipient.
+
 The operation slot is bound as follows:
 
 | Send | Slot |
@@ -1447,6 +1456,11 @@ sends for one `workId` must give each send a distinct slot.
   (`operationId`, `phase`, `safeCode`), is never marked as a delivered reply and is never retried
   blindly. A repeated request for the same logical operation returns the recorded result with zero
   additional SMTP transactions.
+- `emailSubmission.reused` is `true` exactly when a repeated request was answered from the
+  recorded operation instead of submitting again. One logical operation is one message, so a host
+  that performs several distinct sends for one work item must give each send its own slot; a
+  distinct send that reuses an existing slot is answered from the journal and never reaches the
+  wire.
 - File delivery reports at most one delivered message id (one email carries the whole batch), and a
   batch that exceeds the message size bound fails entirely before construction or SMTP.
 
@@ -1457,6 +1471,11 @@ but only for a canonical owner id that currently has an enabled `email/account/<
 anything else returns `null`. `determineSpontaneousTarget` selects among enabled accounts opted
 into spontaneous posting and resolves each through the same path (the durable occurrence identity
 that binds such a thread is owned by `email-spontaneous-targets`).
+
+A brand-new thread contains no source message yet, so an ordinary reply into it is refused (there
+is no verified recipient and no thread anchor). Delivering a message into a new thread for
+scheduled or spontaneous use — including the drafting rules and the allowlist rechecks — is owned
+by `email-spontaneous-targets`.
 
 ### Acceptance Scenarios
 
