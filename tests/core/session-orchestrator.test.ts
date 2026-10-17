@@ -1,6 +1,6 @@
 // tests/core/session-orchestrator.test.ts
 
-import { assertEquals, assertExists, assertFalse, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertExists, assertFalse, assertStringIncludes } from "@std/assert";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 
 import { activeSessionsGauge, selfResearchNoNoteTotal, sessionsTotal } from "@utils/metrics.ts";
@@ -1388,9 +1388,76 @@ Skill root: {{ skillsDir }}`,
     workspaceManager,
     sessionRegistry,
     config,
+    memoryStore,
     contextAssembler,
   };
 }
+
+Deno.test("SessionOrchestrator - email spontaneous post uses target user workspace and excludes bot memories", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, workspaceManager, memoryStore, sessionRegistry, config } =
+      await createTestableOrchestrator(tempDir);
+    config.agent.systemPromptPath = `${tempDir}/prompts/system_reply.md`;
+
+    const targetUserId = "e_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const newThreadId = "thread_xyz123";
+    const channelId = `mail:${targetUserId}:${newThreadId}`;
+    const tickId = "tick_test_12345";
+
+    const targetWorkspace = await workspaceManager.getOrCreateWorkspace({
+      platform: "email",
+      channelId,
+      userId: targetUserId,
+      messageId: "m1",
+      isDm: true,
+      guildId: "",
+      content: "",
+      timestamp: new Date(),
+    });
+
+    const botWorkspace = await workspaceManager.getOrCreateWorkspace({
+      platform: "email",
+      channelId: "system",
+      userId: "bot_123",
+      messageId: "m2",
+      isDm: false,
+      guildId: "",
+      content: "",
+      timestamp: new Date(),
+    });
+
+    await memoryStore.addMemory(targetWorkspace, "TARGET_OWNER_PRIVATE_SENTINEL", {
+      importance: "high",
+    });
+    await memoryStore.addMemory(botWorkspace, "BOT_PRIVATE_SENTINEL", { importance: "high" });
+
+    const capturedPrompts: string[] = [];
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      const originalPrompt = connector.prompt.bind(connector);
+      connector.prompt = (sessionId: string, text: string) => {
+        capturedPrompts.push(text);
+        return originalPrompt(sessionId, text);
+      };
+    });
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    await orchestrator.processSpontaneousPost("email", channelId, platformAdapter, {
+      botId: "bot_123",
+      fetchRecentMessages: false,
+      email: { userId: targetUserId, newThreadId, channelId, tickId },
+    });
+
+    assert(capturedPrompts.length > 0);
+    const initialPrompt = capturedPrompts[0];
+    assertStringIncludes(initialPrompt, "TARGET_OWNER_PRIVATE_SENTINEL");
+    assertEquals(initialPrompt.includes("BOT_PRIVATE_SENTINEL"), false);
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
 
 Deno.test("SessionOrchestrator - retry sends reply on first retry attempt", async () => {
   const tempDir = await Deno.makeTempDir();

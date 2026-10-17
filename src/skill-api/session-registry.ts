@@ -17,6 +17,7 @@ import {
 } from "@core/email-response-accounting.ts";
 import type { EmailSubmissionMetadata } from "../types/platform.ts";
 import type { EmailReminderSession } from "../types/reminder.ts";
+import type { EmailSpontaneousSession } from "@core/spontaneous-target.ts";
 
 const logger = createLogger("SessionRegistry");
 
@@ -145,6 +146,15 @@ export interface ActiveSession {
    * Undefined for every other session.
    */
   emailReminder?: EmailReminderSession;
+  /**
+   * Host-bound identity of an email spontaneous session (row 25): the durable
+   * occurrence (tick) whose ONE logical outgoing email this session owns. Written
+   * by the host before the agent starts and never derived from a skill call, so a
+   * repeated tool call or a restarted tick is answered by the durable submission
+   * journal instead of submitting a second message. Undefined for every other
+   * session.
+   */
+  emailSpontaneous?: EmailSpontaneousSession;
   /**
    * Immutable third-party destination grants of this session (row 19). Written
    * exactly ONCE by the host, before the sending agent starts, through

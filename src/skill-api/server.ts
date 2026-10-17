@@ -7,6 +7,7 @@ import type { SkillContext, SkillResult } from "@skills/types.ts";
 import { emailComposeAuditParams } from "@skills/email-handler.ts";
 import { buildEmailReminderOrigin } from "@skills/reminder-handler.ts";
 import { reminderOperationKey, sessionEmailOperation } from "@core/reminder-store.ts";
+import { spontaneousOperationKey } from "@platforms/email/spontaneous-store.ts";
 import { projectEmailAuditData } from "@core/audit-logger.ts";
 import { EMAIL_AUDIT_PLATFORM } from "../types/audit.ts";
 import {
@@ -158,6 +159,12 @@ export class SkillAPIServer {
     if (reminder !== undefined) {
       return { ...reminderOperationKey(reminder.reminderId), owner };
     }
+    // Row 25: an email spontaneous session sends under the ONE partitioned operation of
+    // its durable tick, so a repeated tool call is answered by the recorded result.
+    const spontaneous = session.emailSpontaneous;
+    if (spontaneous !== undefined) {
+      return { ...spontaneousOperationKey(spontaneous.tickId), owner };
+    }
     const workId = session.emailWorkId;
     if (workId === undefined || workId.trim() === "") return undefined;
     const actionSlot = EMAIL_HOST_SKILL_SLOTS[skillName];
@@ -181,9 +188,13 @@ export class SkillAPIServer {
     const ordinarySlot = EMAIL_HOST_SKILL_SLOTS[skillName];
     if (ordinarySlot === undefined) return undefined;
     const reminder = session.emailReminder;
-    return reminder === undefined
+    if (reminder !== undefined) {
+      return reminderOperationKey(reminder.reminderId).actionSlot;
+    }
+    const spontaneous = session.emailSpontaneous;
+    return spontaneous === undefined
       ? ordinarySlot
-      : reminderOperationKey(reminder.reminderId).actionSlot;
+      : spontaneousOperationKey(spontaneous.tickId).actionSlot;
   }
 
   /**
@@ -823,6 +834,13 @@ export class SkillAPIServer {
     const reminder = session.emailReminder;
     const replyAnchor = reminder?.origin.replyAnchorRecordId ??
       session.lastFileMessageId ?? session.triggerEvent?.messageId;
+    // Row 25: an email spontaneous session OPENS a new owner thread, so no reply anchor is
+    // ever offered to its deliveries — a later call in the same tick (for example after a
+    // `send-file`) must still reach the tick's one recorded operation instead of being
+    // turned into a reply to the bot's own message.
+    const deliveryAnchor = session.platform === "email" && session.emailSpontaneous !== undefined
+      ? undefined
+      : replyAnchor;
     const skillContext: SkillContext = {
       // The Skill API session id IS the literal the session prompt renders as
       // `--session-id`, and it keys the payload staging directory; handlers that
@@ -832,7 +850,7 @@ export class SkillAPIServer {
       channelId: session.channelId,
       userId: session.userId,
       platformAdapter: session.platformAdapter!,
-      replyToMessageId: replyAnchor,
+      replyToMessageId: deliveryAnchor,
       triggerMessageId: session.triggerEvent?.messageId,
       agentWorkspacePath: session.agentWorkspacePath,
       lastSentMessageId: session.lastSentMessageId,

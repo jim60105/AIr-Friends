@@ -32,7 +32,8 @@ import type {
 } from "../../types/events.ts";
 import type { ChannelConfig, Config, EmailConfig } from "../../types/config.ts";
 import { parseChannelId } from "../../types/config.ts";
-import type { SpontaneousTarget } from "../../core/spontaneous-target.ts";
+import type { EmailSpontaneousSelection } from "../../core/spontaneous-target.ts";
+import { SPONTANEOUS_ACTION_SLOT_PREFIX } from "../../core/spontaneous-target.ts";
 import {
   ConnectionState,
   type EmailSendContext,
@@ -76,7 +77,18 @@ export const EMAIL_FILES_ACTION_SLOT = "files";
  * Host-assigned slot prefixes that name a whole non-ordinary operation
  * (`third-party:<grantId>`, `reminder:<id>`, `spontaneous:<tickId>`).
  */
-const PARTITIONED_SLOT_PREFIXES = ["third-party:", "reminder:", "spontaneous:"] as const;
+const PARTITIONED_SLOT_PREFIXES = [
+  "third-party:",
+  "reminder:",
+  SPONTANEOUS_ACTION_SLOT_PREFIX,
+] as const;
+
+/**
+ * Subject of a message that OPENS a new owner thread (row 25). A new thread has no
+ * source message, so there is no subject to inherit and none to reply to; the value is
+ * content-free, single-line and never carries a reply prefix.
+ */
+export const EMAIL_SPONTANEOUS_SUBJECT = "Spontaneous note";
 
 /** Bounded thread scan used to resolve a reply's sender and thread anchor. */
 const SEND_HISTORY_LIMIT = 200;
@@ -157,6 +169,12 @@ interface SendPreparation {
   subject: string;
   /** Thread linkage headers, or undefined when the source carries no wire identifiers. */
   thread: EmailDraft["thread"];
+  /**
+   * Internal owner-thread the outbound record must belong to, when the host
+   * already allocated it (row 25: the owner thread durably bound to a
+   * spontaneous tick). Never serialized as a header.
+   */
+  internalThreadId?: string;
 }
 
 /** Outcome of resolving an outbound send, or the explicit reason it was refused. */
@@ -436,6 +454,9 @@ export class EmailAdapter extends PlatformAdapter {
       subject: resolution.value.subject,
       authoredBody: content,
       thread: resolution.value.thread,
+      ...(resolution.value.internalThreadId
+        ? { internalThreadId: resolution.value.internalThreadId }
+        : {}),
     };
 
     const submission = await this.submit(draft);
@@ -492,6 +513,9 @@ export class EmailAdapter extends PlatformAdapter {
       subject: resolution.value.subject,
       authoredBody: options?.comment ?? "",
       thread: resolution.value.thread,
+      ...(resolution.value.internalThreadId
+        ? { internalThreadId: resolution.value.internalThreadId }
+        : {}),
       attachments,
     };
 
@@ -555,6 +579,19 @@ export class EmailAdapter extends PlatformAdapter {
       };
     }
 
+    const slot = operationSlot(emailSend.actionSlot, kind);
+    if (slot.startsWith(SPONTANEOUS_ACTION_SLOT_PREFIX)) {
+      // The host bound this send to a durable spontaneous tick: the delivery OPENS the
+      // owner thread the tick was bound to, so no reply anchor is consulted at all.
+      return await this.resolveSpontaneousThreadSend({
+        owner,
+        threadId,
+        workId,
+        slot,
+        replyToMessageId,
+      });
+    }
+
     const history = await this.messageStore.history(owner, threadId, SEND_HISTORY_LIMIT);
     if (history.length === 0) {
       return {
@@ -616,10 +653,55 @@ export class EmailAdapter extends PlatformAdapter {
         owner,
         workId,
         threadId,
-        slot: operationSlot(emailSend.actionSlot, kind),
+        slot,
         recipient,
         subject: replySubject(anchor.subject),
         thread,
+      },
+    };
+  }
+
+  /**
+   * Resolve the ONE new-thread delivery of a spontaneous tick (row 25).
+   *
+   * The recipient is the address the mailbox itself verified as this owner's (the `From`
+   * of admitted inbound mail) — never a host-supplied or model-supplied address, which is
+   * why no reply anchor is accepted here. The draft carries no thread linkage, so the wire
+   * message has no In-Reply-To/References, while the record still belongs to the owner
+   * thread the occurrence was durably bound to.
+   */
+  private async resolveSpontaneousThreadSend(params: {
+    owner: string;
+    threadId: string;
+    workId: string;
+    slot: string;
+    replyToMessageId: string | undefined;
+  }): Promise<SendResolution> {
+    if (params.replyToMessageId !== undefined) {
+      return {
+        ok: false,
+        error: "A spontaneous delivery never replies to a message; nothing was sent.",
+      };
+    }
+    const recipient = await this.messageStore.ownerVerifiedAddress(params.owner);
+    if (!recipient) {
+      return {
+        ok: false,
+        error:
+          "This account has no mailbox address verified by admitted inbound mail, so there is no recipient; nothing was sent.",
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        owner: params.owner,
+        workId: params.workId,
+        threadId: params.threadId,
+        slot: params.slot,
+        recipient,
+        subject: EMAIL_SPONTANEOUS_SUBJECT,
+        thread: undefined,
+        internalThreadId: params.threadId,
       },
     };
   }
@@ -718,7 +800,9 @@ export class EmailAdapter extends PlatformAdapter {
    *
    * A brand-new thread has no source message, so an ORDINARY reply into it is refused by
    * {@link sendReply}; the new-thread delivery for scheduled/spontaneous use is owned by
-   * `email-spontaneous-targets`, which supplies the operation context and the draft for it.
+   * `email-spontaneous-targets` (row 25), which supplies the operation context: a
+   * partitioned `spontaneous:<tickId>` slot delivers the draft for exactly this thread,
+   * addressed to the owner's verified address and carrying no reply headers.
    */
   async getDmChannelId(userId: string): Promise<string | null> {
     const owner = typeof userId === "string" ? userId.trim().toLowerCase() : "";
@@ -743,27 +827,41 @@ export class EmailAdapter extends PlatformAdapter {
   }
 
   /**
-   * Spontaneous target selection. Only enabled email accounts opted into spontaneous posting are
-   * candidates, and each candidate gets its OWN new internal thread (per durable tick; the
-   * occurrence identity that binds such a thread is owned by `email-spontaneous-targets`).
+   * Spontaneous target selection (row 25).
+   *
+   * Exactly one eligible account is picked — an enabled `email/account/<owner>` entry that
+   * explicitly opts into spontaneous posting, judged by the lane's shared eligibility rule — and
+   * that account gets a NEW internal owner thread. The caller durably binds this owner/thread to
+   * one schedule occurrence BEFORE any session or SMTP work, so a restarted tick reuses the
+   * binding instead of selecting again.
    */
-  async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
-    const targets: SpontaneousTarget[] = [];
+  override async determineSpontaneousTarget(
+    config: Config,
+  ): Promise<EmailSpontaneousSelection | null> {
+    const channels = config.channels ?? [];
+    const eligibleOwners = new Set<string>();
 
-    for (const channel of config.channels ?? []) {
-      if (channel.enabled === false || !channel.spontaneousPost) continue;
+    for (const channel of channels) {
+      if (channel.enabled === false || channel.spontaneousPost !== true) continue;
       const parsed = parseChannelId(channel.id);
       if (!parsed || parsed.platform !== "email" || parsed.type !== "account") continue;
-      const channelId = await this.getDmChannelId(parsed.value);
-      if (channelId) targets.push({ channelId });
+      eligibleOwners.add(parsed.value.trim().toLowerCase());
     }
 
-    if (targets.length === 0) {
+    if (eligibleOwners.size === 0) {
       logger.warn("No email accounts configured for spontaneous posting");
       return null;
     }
 
-    return targets[Math.floor(Math.random() * targets.length)];
+    const owners = Array.from(eligibleOwners);
+    const chosenOwner = owners[Math.floor(Math.random() * owners.length)];
+    const channelId = await this.getDmChannelId(chosenOwner);
+    if (!channelId) return null;
+    return {
+      channelId,
+      userId: chosenOwner,
+      newThreadId: parseEmailChannelId(channelId).threadId,
+    };
   }
 
   /** Parse a channel id without letting an invalid one escape as an exception. */

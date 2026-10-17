@@ -1034,7 +1034,15 @@ export class ContextAssembler {
     channelId: string,
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
-    options: { fetchRecentMessages: boolean },
+    options: {
+      fetchRecentMessages: boolean;
+      /**
+       * Row 25: the selected target owner and the NEW owner thread an email
+       * spontaneous post is delivered into. The delivered prompt is re-rendered
+       * by the orchestrator with these same values.
+       */
+      emailSpontaneous?: { userId: string; channelId: string };
+    },
     sessionId?: string,
     model?: string,
     yolo?: boolean,
@@ -1046,10 +1054,10 @@ export class ContextAssembler {
     });
 
     const templateVars: TemplateVariables = {
-      isDm: workspace.isDm,
-      platform,
-      userId: "",
-      channelId,
+      isDm: options.emailSpontaneous !== undefined ? true : workspace.isDm,
+      platform: options.emailSpontaneous === undefined ? "internal" : "email",
+      userId: options.emailSpontaneous?.userId ?? "",
+      channelId: options.emailSpontaneous?.channelId ?? "",
       guildId: "",
       agentType: this.config.agentType,
       model,
