@@ -1260,3 +1260,112 @@ forces an unreachable remote) and `DashboardServer` (real HTTP over a per-test
 temporary tree). No IMAP/SMTP transport, model call, ACP agent or production mailbox
 participates in this change: transport, provider and production evidence is owned by
 those slices and is not claimed here.
+
+## Native OpenCode Intent Profile (Owned by `email-opencode-intent-profile`)
+
+`src/acp/agent-factory.ts#createEmailIntentAgentConfig` owns the INTERNAL native deny-all
+OpenCode profile an approved email interpretation launch runs under. It exists because denying
+ACP callbacks alone cannot stop the engine's own tools: `agent-config/opencode.json` explicitly
+ALLOWS reads, skill discovery and network tools in the ordinary build profile, and those calls
+never reach ACP.
+
+### It is not a mode anyone can select
+
+The profile is a SEPARATE factory entry point. `createAgentConfig` never reaches it, and no
+configuration field, dashboard request, environment variable or ACP request can name it. Callers
+are internal: the profile is requested in code, and the returned `AgentConfig` carries
+`executionProfile: "email-intent"` so the consumer can verify the launch it is driving and fail
+closed on any mismatch. Ordinary OpenCode launches are byte-compatible: they carry no profile
+identity, no `OPENCODE_CONFIG_CONTENT`, and keep their existing build/yolo session-mode override.
+
+### Authored deny-all document
+
+`agent-config/email-intent-opencode.json` is the authored policy, installed by the Containerfile
+at `/opt/air/opencode/config/email-intent-opencode.json` — deliberately NOT in the deployment's
+global configuration directory, which the engine merges for EVERY launch. The factory reads the
+installed copy when present and the development-tree spelling otherwise, then validates it before
+injecting it as the engine's final override (`OPENCODE_CONFIG_CONTENT`):
+
+- exactly one provisioned primary agent (`email-intent`) whose permission map denies the wildcard
+  AND every shipped native surface explicitly (read, edit, glob, grep, list, bash, task,
+  external_directory, webfetch, websearch, lsp, skill, question, todoread, todowrite, doom_loop);
+- the engine's built-in agent roster (`build`, `plan`, `general`, `explore`, `scout`, `compaction`,
+  `title`, `summary`) disabled, because a built-in agent's own ruleset would override the
+  top-level denial; and
+- no permissive (`allow`/`ask`) rule, no unprovisioned agent, no unprovisioned top-level key
+  (plugin, MCP, skills, instructions, commands, compaction) and no `{file:...}` reference.
+
+A document that fails any of these never launches. The real executable then advertises exactly
+one selectable session mode (`email-intent`) and rejects mode switches to `build`/`plan`/`yolo`,
+which the native acceptance leg asserts.
+
+### Provider-only provisioning
+
+The composed document adds the selected provider's declaration, the selected model and a
+provider allow-list — nothing else. The provider options/catalog come from the deployment's own
+authored catalog: the DEPLOYED ordinary OpenCode document
+(`{daemon HOME}/.config/opencode/opencode.json`) when it exists, otherwise
+`agent-config/opencode.json`. It is read, never modified, and only the selected provider's entry
+is copied, so ordinary agents, plugin, MCP servers, skills, instruction discovery, compaction
+policy and previous auth/session state stay out of this launch entirely.
+
+The selected model provider's authentication is the ONE credential this profile may carry. It is
+resolved from `{env:NAME}` references INSIDE the selected catalog entry, so the catalog itself
+declares which variable holds its key. A reference to reserved variables (HOME, TMPDIR, PATH,
+XDG_*/OPENCODE_* engine and config selectors), to mailbox/Skill API material (`EMAIL_*`,
+`SKILL_*`), to bot platform tokens (`DISCORD_*`, `MISSKEY_*`) or to any password/secret name is
+refused, as is a `{file:...}` reference. A required credential that the environment does not
+provide refuses the launch rather than starting an unauthenticated interpretation.
+
+### Private runtime roots
+
+Every launch allocates a FRESH private `HOME` (mode 0700) with its XDG config/data/cache/state and
+`TMPDIR` beneath it, plus an EMPTY working directory. Both must be absolute, must not be symlinks
+or redirect through one, must not already contain entries, must not lie inside any repository
+ancestry (`.git` in the ancestor chain), and must not overlap the daemon's own home. This layout,
+not a permission list, is what removes discovery: with no ordinary home and no project directory
+there is nothing for the engine to discover.
+
+The returned `runtimeMounts` is METADATA describing those private roots for a confinement builder;
+this factory applies no sandbox of its own (its API carries no `Config`). The profile also carries
+NO `skillsRoot`: it provisions no skill tree, so a consumer that requires one — the ordinary
+`AgentConnector.connect()` does — must handle the profile explicitly.
+
+### Exported API
+
+- `createEmailIntentAgentConfig(backend, providerSelection, temporaryRoots, options?) -> AgentConfig`
+  - `backend`: `"opencode"` (the OMP intent profile is owned by `email-omp-intent-profile`)
+  - `providerSelection`: `{ providerID, modelID }`
+  - `temporaryRoots`: `{ home, cwd }` (allocated by the factory)
+  - `options`: injectable `{ exists?, readFile?, env?, catalogPath?, authoredConfigPath? }`
+- Constants: `EMAIL_INTENT_PROFILE`, `EMAIL_INTENT_AGENT_NAME`,
+  `EMAIL_INTENT_DENIED_NATIVE_SURFACES`, `EMAIL_INTENT_DISABLED_BUILTIN_AGENTS`,
+  `EMAIL_INTENT_OPENCODE_CONFIG_PATH`, `EMAIL_INTENT_OPENCODE_IMAGE_CONFIG_PATH`,
+  `EMAIL_INTENT_ORDINARY_CONFIG_PATH`
+- Types: `EmailIntentProviderSelection`, `EmailIntentTemporaryRoots`, `EmailIntentProfileOptions`
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-opencode-intent-profile/specs/email-opencode-intent-profile/spec.md`:
+
+- **Native read and network attempts**: the scripted loopback model requests read, bash,
+  webfetch, websearch, skill and an unknown tool; each is denied with zero filesystem, network or
+  skill side effects.
+- **Fresh HOME launch**: the selected model is advertised, the active mode is `email-intent`, and
+  no normal build/yolo policy is loaded.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/acp/email-opencode-profile.test.ts
+EMAIL_INTENT_OPENCODE_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/integration/email-intent/opencode-native.test.ts
+```
+
+The native leg is UNEXERCISED (ignored) without `EMAIL_INTENT_OPENCODE_ACCEPTANCE=1`; with it,
+every unavailable prerequisite fails the test naming the reason instead of claiming native
+success. It uses the real installed executable plus a test-owned loopback provider and never a
+paid or public model. Production email remains unavailable until the final activation change.
