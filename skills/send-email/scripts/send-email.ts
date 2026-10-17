@@ -87,6 +87,10 @@ async function main() {
       alias: "r",
       fileName: REQUEST_FILE_NAME,
       extraFreeTextFlags: EMAIL_COMPOSE_FREE_TEXT_FLAGS,
+      // The owning session was already resolved above: the staging pointer must agree with it,
+      // so a pointer that moved to another session fails closed instead of reading (and deleting)
+      // a sibling session's staged request.
+      requireSessionMatch: true,
       example: EXAMPLE,
     });
     const request = parseRequestBody(requestText ?? "");

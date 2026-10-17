@@ -1953,11 +1953,18 @@ stat'ed or read:
    `compose` slot and `targetKind: "user"`, so the mail service's current-allowlist recheck applies.
    Any other address is refused with `SKILL_EMAIL_COMPOSE_GRANT` and a message teaching the grant
    flow; no request parameter can create or widen a grant.
-5. Attachments are opt-in and session-staging-contained: each path must resolve (real path, symlink
-   escape refused) inside `{workspace}/tmp/{sessionId}`, within the reused send-file limits
-   (`maxFilesPerInvocation`, `maxFileSizeMb`, `maxTotalSizeMb`, `allowedExtensions`) — enforced in
-   two passes so a refused batch reads nothing. Nothing in the workspace (memories, notes, history)
-   is ever attached automatically, and `sendFile.enabled` is irrelevant to composing.
+5. Attachments are opt-in and session-staging-contained: the boundary is the LEXICAL staging root
+   `{workspace}/tmp/{sessionId}`, and both the requested path and its symlink-resolved real path must
+   stay inside it, so a symlinked staging root or intermediate component fails closed instead of
+   becoming the authorized base. Only regular files are accepted, the reused send-file limits
+   (`maxFilesPerInvocation`, `maxFileSizeMb`, `maxTotalSizeMb`, `allowedExtensions`) are enforced in
+   two passes so a refused batch reads nothing, and the read itself is bounded by the preflighted
+   size — a file that changed (grown, shrunk or replaced by an escaping symlink) between preflight
+   and read is refused instead of attached. Nothing in the workspace (memories, notes, history) is
+   ever attached automatically, and `sendFile.enabled` is irrelevant to composing. Residual risk:
+   like the shared payload contract, a concurrent process could still swap a validated file for a
+   same-size one inside the window between the post-read realpath check and the read itself; the
+   session's own agent already owns that directory, so this is not a destination-grant bypass.
 6. The configured signature is applied centrally by the MIME builder, exactly once. The skill
    document states explicitly that the model must not add one.
 
@@ -1980,6 +1987,10 @@ stat'ed or read:
   never the address, the subject or the body, whatever the content-hashing setting is. `send-email`
   results are also excluded from the Skill API response cache so a replay is answered by the durable
   journal (including an `unknown` phase) instead of a stale `submitted`.
+- Refusals obey the same rule: no message interpolates a model-supplied value verbatim. An
+  unsupported request field is named only when it is identifier-shaped, an attachment extension is
+  derived from the file NAME and echoed only when identifier-shaped, and a `grantId` that is not
+  identifier-shaped is recorded as `grantIdHash` instead of plaintext.
 
 ### Exported API (consumers: `email-forward-skill`, `email-response-accounting`, `email-activation`)
 

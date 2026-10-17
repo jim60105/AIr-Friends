@@ -136,7 +136,11 @@ function isPointerShape(
   return !requireAbsoluteStaging || isAbsolute(o.staging);
 }
 
-export function resolvePayloadBase(cwd: string, sessionId: string): string {
+export function resolvePayloadBase(
+  cwd: string,
+  sessionId: string,
+  options: { requireSessionMatch?: boolean } = {},
+): string {
   const jwtDir = Deno.env.get("SKILL_JWT_DIR");
   const shared = Deno.env.get("SKILL_SHARED_PROCESS") === "1";
   if (jwtDir) {
@@ -147,8 +151,18 @@ export function resolvePayloadBase(cwd: string, sessionId: string): string {
     } catch {
       parsed = undefined;
     }
-    if (isPointerShape(parsed, shared) && (shared || parsed.sessionId === sessionId)) {
-      return resolve(parsed.staging, parsed.sessionId);
+    // In shared mode the pointer normally outranks the CLI value (the pooled process carries no
+    // spawn-time identity). A caller that has ALREADY resolved its owning session
+    // (`requireSessionMatch`) demands the pointer to agree with it instead: a pointer that moved to
+    // another session between identity resolution and the payload read fails closed rather than
+    // pointing the containment boundary at a sibling session's staging directory.
+    if (isPointerShape(parsed, shared)) {
+      const pointerScopeMatches = options.requireSessionMatch === true
+        ? parsed.sessionId === sessionId
+        : (shared || parsed.sessionId === sessionId);
+      if (pointerScopeMatches) {
+        return resolve(parsed.staging, parsed.sessionId);
+      }
     }
     if (shared) {
       // Shared mode demands a VALID pointer (readable, non-empty string fields,
@@ -182,9 +196,16 @@ export function resolvePayloadPath(
   payloadPath: string,
   cwd: string,
   sessionId: string,
-  options: { flagName: string; example: string; fileName: string },
+  options: {
+    flagName: string;
+    example: string;
+    fileName: string;
+    requireSessionMatch?: boolean;
+  },
 ): string {
-  const base = resolvePayloadBase(cwd, sessionId);
+  const base = resolvePayloadBase(cwd, sessionId, {
+    requireSessionMatch: options.requireSessionMatch,
+  });
   const resolved = resolve(cwd, payloadPath);
 
   if (!isWithinDir(resolved, base)) {
@@ -244,6 +265,12 @@ export async function readPayloadArg(
      * Default: none, so existing scripts are unaffected.
      */
     extraFreeTextFlags?: readonly string[];
+    /**
+     * Require the shared-mode pointer to name exactly `sessionId` instead of
+     * outranking it. Set only by scripts that resolved their owning session
+     * themselves first (the compose contract), so a moved pointer fails closed.
+     */
+    requireSessionMatch?: boolean;
   },
 ): Promise<string | undefined> {
   const fileFlag = `--${flagName}-file`;
@@ -285,6 +312,7 @@ export async function readPayloadArg(
     flagName,
     example: options.example,
     fileName: options.fileName,
+    requireSessionMatch: options.requireSessionMatch,
   });
 
   let content: string;

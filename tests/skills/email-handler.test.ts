@@ -24,7 +24,7 @@ import type { SkillContext } from "../../src/skills/types.ts";
 import type { DestinationGrant } from "../../src/core/email-intent-preflight.ts";
 import type { PlatformAdapter } from "../../src/platforms/platform-adapter.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
-import type { EmailConfig } from "../../src/types/config.ts";
+import type { ChannelConfig, EmailConfig } from "../../src/types/config.ts";
 import type { EmailDraft } from "../../src/platforms/email/outgoing-mime.ts";
 import { OutgoingMimeBuilder } from "../../src/platforms/email/outgoing-mime.ts";
 import { EmailMailService, type EmailSendOutcome } from "../../src/platforms/email/mail-service.ts";
@@ -34,6 +34,7 @@ import {
   formatEmailChannelId,
 } from "../../src/platforms/email/message-store.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
+import { isSenderAllowed } from "../../src/platforms/email/incoming-auth.ts";
 import type {
   ImapAppendOptions,
   ImapFetchHeadersOptions,
@@ -387,6 +388,7 @@ Deno.test("compose - attachments must stay inside the session staging directory"
         path: join(workspacePath, "tmp", `${SESSION_ID}-2`, "x.txt"),
       },
       { label: "missing file", path: join(stagingDir, "absent.txt") },
+      { label: "not a regular file", path: stagingDir },
     ];
 
     const configured = [
@@ -537,6 +539,15 @@ Deno.test("compose - the audit projection never records recipient, subject or bo
   assertStringIncludes(String(projected.destinationHash), "sha256:");
   assertStringIncludes(String(projected.subjectHash), "sha256:");
   assertEquals(projected.bodyLength, bodySentinel.length);
+
+  // A hostile grant id (an address or free text) is hashed, never recorded verbatim.
+  const hostileGrant = await emailComposeAuditParams({
+    grantId: "sentinel-grant@example.org",
+    request: { to: "a@b.example", subject: "S", body: "B" },
+  });
+  assert(!JSON.stringify(hostileGrant).includes("sentinel-grant@example.org"));
+  assertStringIncludes(String(hostileGrant.grantIdHash), "sha256:");
+  assertEquals(hostileGrant.grantId, undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -604,6 +615,7 @@ interface MailHarness {
   service: EmailMailService;
   smtp: RecordingSmtp;
   imap: RecordingImap;
+  channels: ChannelConfig[];
 }
 
 function buildMailHarness(base: string): MailHarness {
@@ -635,6 +647,10 @@ function buildMailHarness(base: string): MailHarness {
   };
   const smtp = new RecordingSmtp();
   const imap = new RecordingImap();
+  // ONLY the session's own sender is an enabled account: the granted third-party destination is
+  // deliberately ABSENT from the channels, which is the delta specification's "new destination"
+  // scenario (the grant, not the allowlist, authorizes the third-party send).
+  const channels: ChannelConfig[] = [{ id: `email/account/${OWNER}`, enabled: true }];
   const service = new EmailMailService({
     config,
     emailRoot,
@@ -642,24 +658,22 @@ function buildMailHarness(base: string): MailHarness {
     messageStore: new EmailMessageStore({ workspacesRoot: join(base, "workspaces") }),
     smtp,
     imap,
-    // Both the session's own sender and the granted third party are enabled accounts.
-    channels: [
-      { id: `email/account/${OWNER}`, enabled: true },
-      { id: `email/account/${RECIPIENT_ID}`, enabled: true },
-    ],
+    channels,
     builder: new OutgoingMimeBuilder({
       fromAddress: BOT,
       now: () => new Date("2026-10-17T00:00:00Z"),
     }),
   });
-  return { service, smtp, imap };
+  return { service, smtp, imap, channels };
 }
 
 Deno.test("compose - the durable service submits the granted message and reuses its operation", async () => {
   const base = await Deno.makeTempDir();
   try {
     const stagingDir = stage(base, { "report.txt": "attachment-bytes" });
-    const { service, smtp, imap } = buildMailHarness(base);
+    // Private workspace material the compose must never pick up on its own.
+    Deno.writeTextFileSync(join(base, "memory.private.jsonl"), "MEMORY-SENTINEL-4f2c");
+    const { service, smtp, imap, channels } = buildMailHarness(base);
     const handler = new EmailComposeHandler({ mailService: service });
     const context = emailContext(base, { emailDestinationGrants: [composeGrant()] });
     const params = {
@@ -683,6 +697,8 @@ Deno.test("compose - the durable service submits the granted message and reuses 
     assertStringIncludes(raw, "Content-Disposition: attachment; filename=report.txt");
     // Attachment bytes are base64-encoded parts, so assert their encoded form.
     assertStringIncludes(raw, btoa("attachment-bytes"));
+    // The granted destination is absent from the channels, so incoming mail from it stays denied.
+    assertEquals(isSenderAllowed(RECIPIENT_ID, channels), false);
     assertEquals(imap.appended.length, 1);
 
     // The SAME logical operation is answered from the journal: no second SMTP transaction.
@@ -691,6 +707,16 @@ Deno.test("compose - the durable service submits the granted message and reuses 
     assertEquals(repeat.emailSubmission?.reused, true);
     assertEquals(smtp.submissions.length, 1);
     assertEquals(imap.appended.length, 1);
+
+    // A compose with no attachments attaches no workspace memory or unrelated history either.
+    const selfCompose = await handler.handleSendEmail(
+      { request: { to: SELF_ADDRESS, subject: "No attachments", body: "Body only." } },
+      context,
+    );
+    assertEquals(selfCompose.success, true);
+    const selfRaw = new TextDecoder().decode(smtp.submissions[1].emlBytes);
+    assert(!selfRaw.includes("MEMORY-SENTINEL-4f2c"), "no memory is attached automatically");
+    assert(!selfRaw.includes("Content-Disposition: attachment"));
   } finally {
     await Deno.remove(base, { recursive: true });
   }

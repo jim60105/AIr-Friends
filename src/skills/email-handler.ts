@@ -168,11 +168,15 @@ export class EmailComposeHandler {
       (key) => !Object.hasOwn(ALLOWED_REQUEST_KEYS, key),
     );
     if (unknownKeys.length > 0) {
+      // Only identifier-shaped names are named: a JSON key is model-supplied and could itself
+      // carry an address, a path or a sentence, and this text is written to the audit verbatim.
+      const named = unknownKeys.filter(isOpaqueIdentifierToken);
       return refuse(
         EMAIL_COMPOSE_CODES.REQUEST,
-        `The compose request carries unsupported field(s): ${unknownKeys.join(", ")}. A composed ` +
-          "message accepts exactly to, subject, body and optional attachments — additional " +
-          "recipients (Cc/Bcc) and arbitrary headers are not available. Nothing was sent.",
+        `The compose request carries ${unknownKeys.length} unsupported field(s)` +
+          (named.length > 0 ? ` (${named.join(", ")})` : "") +
+          ". A composed message accepts exactly to, subject, body and optional attachments — " +
+          "additional recipients (Cc/Bcc) and arbitrary headers are not available. Nothing was sent.",
       );
     }
 
@@ -226,8 +230,8 @@ export class EmailComposeHandler {
     } catch {
       return refuse(
         EMAIL_COMPOSE_CODES.REQUEST,
-        '"to" is not a single valid mailbox address (display names, multiple addresses and ' +
-          "malformed domains are not accepted). Nothing was sent.",
+        '"to" is not a single valid mailbox address (multiple addresses, whitespace, path ' +
+          "characters and malformed domains are not accepted). Nothing was sent.",
       );
     }
 
@@ -372,21 +376,11 @@ export class EmailComposeHandler {
 
     const configuredExtensions = limits?.allowedExtensions ?? [];
     const workspacePath = context.workspace?.path;
-    const stagingDir = sessionStagingDir(context.workspace ?? { tmpPath: "" }, sessionId);
-    let realBase: string | undefined;
-    try {
-      realBase = Deno.realPathSync(stagingDir);
-    } catch {
-      realBase = undefined;
-    }
-    if (!realBase) {
-      return {
-        ok: false,
-        error:
-          "The session staging directory is not available, so no attachment can be read from it. " +
-          "Nothing was sent.",
-      };
-    }
+    // The boundary is the LEXICAL staging root the host computed (`{workspace}/tmp/{sessionId}`).
+    // Both the requested path and its symlink-resolved real path must stay inside it, exactly like
+    // the shared payload contract: a staging root or any intermediate component that is itself a
+    // symlink pointing outside therefore fails closed instead of becoming the authorized base.
+    const stagingBase = resolve(sessionStagingDir(context.workspace ?? { tmpPath: "" }, sessionId));
 
     const maxFileSizeMb = limits?.maxFileSizeMb ?? DEFAULT_MAX_FILE_SIZE_MB;
     const maxTotalSizeMb = limits?.maxTotalSizeMb ?? DEFAULT_MAX_TOTAL_SIZE_MB;
@@ -397,7 +391,7 @@ export class EmailComposeHandler {
       const lexical = isAbsolute(attachmentPath)
         ? resolve(attachmentPath)
         : resolve(workspacePath ?? ".", attachmentPath);
-      if (!isWithinDir(lexical, resolve(stagingDir))) {
+      if (!isWithinDir(lexical, stagingBase)) {
         return {
           ok: false,
           error:
@@ -408,26 +402,37 @@ export class EmailComposeHandler {
         };
       }
 
-      const extension = "." + (attachmentPath.split(".").pop() ?? "").toLowerCase();
+      // The extension is the last dot component of the FILE NAME, never of the whole path.
+      const fileName = attachmentPath.split("/").pop() ?? attachmentPath;
+      const extension = "." + (fileName.split(".").pop() ?? "").toLowerCase();
       if (
         configuredExtensions.length > 0 &&
         !configuredExtensions.some((allowed) => allowed.toLowerCase() === extension)
       ) {
+        // Only an identifier-shaped extension is echoed: a file name is model-supplied and must
+        // never travel through the (audited) refusal text verbatim.
+        const named = isOpaqueIdentifierToken(extension.slice(1)) ? ` "${extension}"` : "";
         return {
           ok: false,
-          error: `The attachment extension "${extension}" is not allowed. Allowed: ` +
+          error: `The attachment extension${named} is not allowed. Allowed: ` +
             `${configuredExtensions.join(", ")}. Nothing was sent.`,
         };
       }
 
-      let size: number;
+      let info: Deno.FileInfo;
       try {
-        size = (await Deno.stat(lexical)).size;
+        info = await Deno.stat(lexical);
       } catch {
         return {
           ok: false,
           error: "An attachment file does not exist or cannot be read. Write it into the session " +
             "staging directory FIRST with your edit/write tool. Nothing was sent.",
+        };
+      }
+      if (!info.isFile) {
+        return {
+          ok: false,
+          error: "An attachment path is not a regular file. Nothing was sent.",
         };
       }
 
@@ -437,7 +442,7 @@ export class EmailComposeHandler {
       } catch {
         realPath = undefined;
       }
-      if (!realPath || !isWithinDir(realPath, realBase)) {
+      if (!realPath || !isWithinDir(realPath, stagingBase)) {
         return {
           ok: false,
           error: "An attachment path resolves (through a symlink) outside the session staging " +
@@ -445,6 +450,7 @@ export class EmailComposeHandler {
         };
       }
 
+      const size = info.size;
       const fileSizeMb = size / (1024 * 1024);
       if (maxFileSizeMb > 0 && fileSizeMb > maxFileSizeMb) {
         return {
@@ -455,11 +461,7 @@ export class EmailComposeHandler {
       }
 
       totalBytes += size;
-      validated.push({
-        fullPath: realPath,
-        fileName: attachmentPath.split("/").pop() ?? attachmentPath,
-        size,
-      });
+      validated.push({ fullPath: realPath, fileName, size });
     }
 
     const totalSizeMb = totalBytes / (1024 * 1024);
@@ -474,20 +476,44 @@ export class EmailComposeHandler {
 
     const value: EmailOutgoingAttachment[] = [];
     for (const file of validated) {
+      let content: Uint8Array | null;
       try {
-        value.push({
-          filename: file.fileName,
-          contentType: MIME_TYPES_BY_EXTENSION[
-            (file.fileName.split(".").pop() ?? "").toLowerCase()
-          ] ?? "application/octet-stream",
-          content: await Deno.readFile(file.fullPath),
-        });
+        content = await readPreflightedFile(file.fullPath, file.size);
       } catch {
         return {
           ok: false,
           error: "An attachment could not be read after preflight. Nothing was sent.",
         };
       }
+      if (content === null) {
+        return {
+          ok: false,
+          error: "An attachment changed between preflight and read (its size or target differs " +
+            "from the validated one), so it was not attached. Nothing was sent.",
+        };
+      }
+      // Re-check containment after the read: a component replaced by an escaping symlink during
+      // the read is refused instead of being attached.
+      let realAfter: string | undefined;
+      try {
+        realAfter = Deno.realPathSync(file.fullPath);
+      } catch {
+        realAfter = undefined;
+      }
+      if (!realAfter || !isWithinDir(realAfter, stagingBase)) {
+        return {
+          ok: false,
+          error: "An attachment no longer resolves inside the session staging directory after " +
+            "being read. Nothing was sent.",
+        };
+      }
+      value.push({
+        filename: file.fileName,
+        contentType: MIME_TYPES_BY_EXTENSION[
+          (file.fileName.split(".").pop() ?? "").toLowerCase()
+        ] ?? "application/octet-stream",
+        content,
+      });
     }
     return { ok: true, value };
   }
@@ -498,8 +524,9 @@ export class EmailComposeHandler {
  * object into its `skill_call` audit entry).
  *
  * The compose request carries private correspondence: recipient, subject and body are NEVER
- * recorded, not even with content hashing disabled — the projection keeps the opaque grant id,
- * always-hashed digests, lengths and the attachment count only.
+ * recorded, not even with content hashing disabled — the projection keeps an opaque grant id (a
+ * non-identifier-shaped value is hashed instead), always-hashed digests, lengths and the attachment
+ * count only.
  */
 export async function emailComposeAuditParams(
   parameters: Record<string, unknown>,
@@ -512,7 +539,11 @@ export async function emailComposeAuditParams(
   const attachments = request && Array.isArray(request.attachments) ? request.attachments : [];
 
   return {
-    ...(grantId !== undefined ? { grantId } : {}),
+    ...(grantId === undefined
+      ? {}
+      : isOpaqueIdentifierToken(grantId)
+      ? { grantId }
+      : { grantIdHash: `sha256:${await sha256Hash(grantId)}` }),
     ...(to !== undefined ? { destinationHash: `sha256:${await sha256Hash(to)}` } : {}),
     ...(subject !== undefined
       ? { subjectHash: `sha256:${await sha256Hash(subject)}`, subjectLength: subject.length }
@@ -718,4 +749,36 @@ function isWithinDir(path: string, base: string): boolean {
   const resolvedBase = resolve(base);
   if (resolvedPath === resolvedBase) return true;
   return resolvedPath.startsWith(resolvedBase + SEPARATOR);
+}
+
+/**
+ * Whether a value is shaped like an opaque host identifier (letters, digits, `_`, `-`, at most 64
+ * characters). Only such values are safe to repeat verbatim in a refusal message or an audit entry:
+ * an address, path, subject or free-text sentence cannot match this shape.
+ */
+function isOpaqueIdentifierToken(value: string): boolean {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(value);
+}
+
+/**
+ * Read exactly the preflighted byte count of one already-validated regular file.
+ *
+ * Returns `null` when the file no longer holds exactly `size` bytes (grown, shrunk or replaced
+ * since the stat), so a changed file is refused instead of attached. The read is bounded by
+ * `size + 1`, so a file grown after preflight cannot pull an unbounded amount of memory either.
+ */
+async function readPreflightedFile(path: string, size: number): Promise<Uint8Array | null> {
+  const handle = await Deno.open(path, { read: true });
+  try {
+    const buffer = new Uint8Array(size + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const read = await handle.read(buffer.subarray(filled));
+      if (read === null || read === 0) break;
+      filled += read;
+    }
+    return filled === size ? buffer.subarray(0, filled) : null;
+  } finally {
+    handle.close();
+  }
 }

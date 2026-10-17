@@ -28,11 +28,12 @@ real TLS socket to the local SMTP fixture in isolated temporary state: one compo
 message reaches the peer with exactly one DATA transaction, the granted recipient as the only
 envelope target, the centrally applied signature exactly once, and the explicitly selected
 attachment; a peer that rejects the final response yields the `failed` phase with no second
-transaction and no sent-folder copy. The other two scenarios are covered deterministically against
-the real `SessionRegistry` grant records: a granted address absent from channels is submitted once
-while no incoming permission is derived, and a compose without attachments attaches no workspace
-memory or history. The sent-folder copy uses a scripted IMAP double (owned by
-`email-submission-service`). No provider, credential, production mailbox or model judgment is
-exercised.
+transaction and no sent-folder copy. The configuration enables ONLY the session's own sender, so
+the granted destination is absent from channels: its compose is submitted once while
+`isSenderAllowed` keeps reporting that address as denied (`tests/skills/email-handler.test.ts`,
+real `EmailMailService`), and a compose without attachments on that same real service attaches no
+workspace memory or history (a memory sentinel is absent from the emitted MIME). The sent-folder
+copy uses a scripted IMAP double (owned by `email-submission-service`). No provider, credential,
+production mailbox or model judgment is exercised.
 
 Implementation checking policy: run local slice checks after its own edits settle; run the final repository formatting/lint/type/regression gate only once after the full integrated batch. During this planning assignment run only the final OpenSpec/artifact gate, with no application code tests.

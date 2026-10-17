@@ -118,12 +118,12 @@ If the script fails, read the JSON error on stderr/`code` field. It contains the
 The result JSON carries `emailSubmission` metadata: `operationId`, `phase`
 (`submitted` / `failed` / `unknown` / `prepared` / `submitting`) and `reused`.
 
-| Outcome       | How you know                          | What to do                                                                                               |
-| ------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **Submitted** | `success: true`, `phase: "submitted"` | The message was accepted for delivery. Exit.                                                             |
-| **Failed**    | `phase: "failed"`                     | Nothing was delivered. Correct the reported cause if the API allows it, then invoke the skill once more. |
-| **Unknown**   | `phase: "unknown"`                    | Whether it was accepted is unknown. Do NOT resend; report the uncertainty to the user instead.           |
-| **Reused**    | `reused: true`                        | This logical send was already recorded; the result is the recorded one and nothing new was submitted.    |
+| Outcome       | How you know                          | What to do                                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Submitted** | `success: true`, `phase: "submitted"` | The message was accepted for delivery. Exit.                                                                                                                                                                                                                                          |
+| **Failed**    | `phase: "failed"`                     | Nothing was delivered, and this logical send is recorded as failed: invoking it again with the same grant replays that recorded failure and submits nothing. Report the failure and its safe code to the user; only a new user request, with its own grant, can attempt another send. |
+| **Unknown**   | `phase: "unknown"`                    | Whether it was accepted is unknown. Do NOT resend; report the uncertainty to the user instead.                                                                                                                                                                                        |
+| **Reused**    | `reused: true`                        | This logical send was already recorded; the result is the recorded one and nothing new was submitted.                                                                                                                                                                                 |
 
 ## Limits
 
