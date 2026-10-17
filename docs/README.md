@@ -1,5 +1,7 @@
 # AIr-Friends 文件首頁
 
+![AIr-Friends](hero.avif)
+
 歡迎來到 **AIr-Friends** 官方說明文件！
 
 AIr-Friends 是一套專為社群對話打造的多平台對話式 AI 機器人系統。有別於傳統將所有推論邏輯寫死在單一應用程式的架構，AIr-Friends 扮演 **ACP（Agent Client Protocol，代理人客戶端協定）客戶端** 的角色，將推理與工具執行委託給外部 ACP 代理人引擎（例如 OpenCode CLI 或 Oh-My-Pi），並由機器人本體維護隔離的使用者工作區與跨對話持久化記憶。

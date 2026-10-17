@@ -1,3 +1,5 @@
+![AIr-Friends](logo.avif)
+
 # AIr-Friends
 
 > 多平台對話式 AI 機器人與自主代理客戶端

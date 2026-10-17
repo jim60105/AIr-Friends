@@ -1,6 +1,6 @@
 # AIr-Friends
 
-![preview image](./docs/preview.webp)
+![AIr-Friends](./docs/hero.avif)
 
 > 📖 **官方文件網站**: [https://jim60105.github.io/AIr-Friends/](https://jim60105.github.io/AIr-Friends/)（本地瀏覽亦可閱讀 [`docs/`](docs/README.md)）
 
