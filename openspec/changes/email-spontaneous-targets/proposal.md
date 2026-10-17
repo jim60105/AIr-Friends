@@ -30,8 +30,10 @@ Total: **6.25 engineering hours**, strictly below 8 hours. See tasks.md for item
 
 ## Batch:
 
+- code-conflict: email-spontaneous-occurrences (src/core/spontaneous-scheduler.ts)
 - depends-on: email-adapter
 - depends-on: email-response-accounting
+- depends-on: email-spontaneous-occurrences
 - code-conflict: email-config-identity (src/core/spontaneous-scheduler.ts)
 - code-conflict: email-local-attachments (src/core/session-orchestrator.ts)
 - code-conflict: email-session-receipts (src/core/session-orchestrator.ts)

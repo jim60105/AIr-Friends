@@ -1,11 +1,11 @@
 # Tasks
 
-Total estimate: **6.25 engineering hours**, strictly below 8 hours. Estimates include tests, controlled smoke verification, documentation and contingency; they are not guarantees. Apply dependencies: `email-adapter`, `email-response-accounting`. Production activation remains blocked until the final batch cutover.
+Total estimate: **6.25 engineering hours**, strictly below 8 hours. Estimates include tests, controlled smoke verification, documentation and contingency; they are not guarantees. Apply dependencies: `email-adapter`, `email-response-accounting`, `email-spontaneous-occurrences`. Production activation remains blocked until the final batch cutover.
 
 ## 1. Owned behavior and its regression coverage
 
-- [ ] 1.1 (1.5h) Implement eligible-target/new-thread selection and target-owned session context; verify privacy and default-off fixtures.
-- [ ] 1.2 (1.5h) Persist tick identity and bind single send slot with allowlist recheck; verify restart/duplicate tick behavior and actual signed SMTP mail.
+- [ ] 1.1 (1.5h) Implement eligible-target/new-thread selection and target-owned session context; verify default-off fixtures and distinct bot/user memory sentinels prove email includes only the permitted target user's memories.
+- [ ] 1.2 (1.5h) Bind the predecessor's durable restored occurrence/target/thread to its single send slot with allowlist recheck; verify actual scheduler restart after SMTP acceptance/uncertainty and before successor persistence produces zero replacement target selection or additional DATA.
 - [ ] 1.3 (1.25h) Add and run this responsibility's deterministic regression cases. Verify: Use deterministic scheduler clock/RNG and temporary journal plus predecessor SMTP service. Protect existing Discord/Misskey spontaneous workspace/interval behavior.
 - [ ] 1.4 (0.5h) Document platform plus per-account opt-in, new-thread delivery, restart outcomes and no grant inheritance. Verify the documented fields, outcomes and commands match the implemented interface and link this slice's acceptance scenarios in `docs/email-platform.md`; add its scoped CHANGELOG entry.
 - [ ] 1.5 (0.75h contingency) Resolve bounded integration defects in the owned interfaces/tests only; verify the same acceptance cases after fixes, or record unused contingency without inventing extra features.

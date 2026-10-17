@@ -14,7 +14,7 @@ The approved source is `docs/superpowers/specs/2026-10-17-email-platform-design.
 
 ## Decisions
 
-Email target selection requires both platform spontaneous enabled and enabled email/account entry with spontaneousPost=true. Pick one eligible target and allocate new thread for each durable scheduled tick. Persist tick identity before session start using email mailbox state facilities; do not reuse previous thread or grant. For email only use target user workspace so private memories remain owner-scoped; preserve other platforms bot-workspace semantics. One logical outgoing email per tick; repeated tool calls consult that slot.
+Email target selection requires both platform spontaneous enabled and enabled email/account entry with spontaneousPost=true. Consume the stable restored occurrence from `email-spontaneous-occurrences` before selection. If it already has a bound target/thread, reuse them; otherwise choose one eligible target and durably select its new thread before starting a session. Never use UID mailbox records for schedule identity or replace overdue occurrence identity with now. For email only use target user workspace so private memories remain owner-scoped; preserve other platforms bot-workspace semantics. One logical outgoing email per occurrence; repeated tool calls consult that slot.
 
 ### Owned interfaces and callsites
 
@@ -23,6 +23,10 @@ Own EmailSpontaneousTarget={userId,channelId,newThreadId,tickId}, propagation in
 Affected implementation/tests: `src/platforms/email/email-adapter.ts`, `src/core/spontaneous-scheduler.ts`, `src/core/spontaneous-target.ts`, `src/core/session-orchestrator.ts`, `tests/core/email-spontaneous.test.ts`. Update every affected caller in this responsibility when its shared interface changes; do not leave dual APIs, empty stubs or shims. New modules remain unregistered in production until final activation, while tests exercise their real implementations.
 
 ### Predecessor contracts
+
+### email-spontaneous-occurrences
+
+Owns `EmailSpontaneousStore` and `SpontaneousOccurrence`, fsynced `data/email/spontaneous.json`, stable overdue occurrence restoration, target/thread binding, typed scheduler/bootstrap handoff and atomic terminal-to-next replacement. `tickId` is exactly the restored `occurrenceId`, never a new session timestamp. This slice resolves/selects an unselected occurrence and passes its owner/thread/tick into the already-defined handoff.
 
 ### email-adapter
 
@@ -45,7 +49,7 @@ Reuse the established platform/workspace/skill boundaries rather than a second s
 
 ## Verification design
 
-Use deterministic scheduler clock/RNG and temporary journal plus predecessor SMTP service. Protect existing Discord/Misskey spontaneous workspace/interval behavior.
+Use the actual scheduler/bootstrap handoff, deterministic clock/RNG, durable occurrence store and predecessor SMTP service. Restart after accepted or unknown SMTP and before next-schedule persistence; assert the original occurrence/owner/thread is recovered, target selection is not repeated and DATA count stays one. Use distinct bot/user memory sentinels to verify only target-owned private memory appears. Protect existing Discord/Misskey spontaneous workspace/interval behavior.
 
 The tasks' verification is planned implementation evidence, not exercised runtime evidence. Test doubles for ACP/model decisions are labeled separately from real IMAP/SMTP protocol-service exchanges. No production credentials or mailbox may be used by automated checks.
 
