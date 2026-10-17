@@ -33,6 +33,7 @@ Total: **6.5 engineering hours**, strictly below 8 hours. See tasks.md for itemi
 - depends-on: email-config-identity
 - depends-on: email-message-history
 - depends-on: email-submission-journal
+- depends-on: email-incoming-mime
 - code-conflict: email-incoming-mime (deno.json, deno.lock)
 - code-conflict: email-imap-transport (deno.json, deno.lock)
 - code-conflict: email-smtp-transport (deno.json, deno.lock)

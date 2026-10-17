@@ -1,6 +1,6 @@
 # Tasks
 
-Total estimate: **6.5 engineering hours**, strictly below 8 hours. Estimates include tests, controlled smoke verification, documentation and contingency; they are not guarantees. Apply dependencies: `email-config-identity`, `email-message-history`, `email-submission-journal`. Production activation remains blocked until the final batch cutover.
+Total estimate: **6.5 engineering hours**, strictly below 8 hours. Estimates include tests, controlled smoke verification, documentation and contingency; they are not guarantees. Apply dependencies: `email-config-identity`, `email-message-history`, `email-submission-journal`, `email-incoming-mime`. Production activation remains blocked until the final batch cutover.
 
 ## 1. Owned behavior and its regression coverage
 
