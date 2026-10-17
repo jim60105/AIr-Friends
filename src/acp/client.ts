@@ -8,6 +8,7 @@ import type { ClientConfig, PermissionRejection } from "./types.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
+import { EMAIL_AUDIT_PLATFORM } from "../types/audit.ts";
 import {
   commandWithoutFdRedirects,
   containsShellOperators,
@@ -295,6 +296,13 @@ export class ChatbotClient implements acp.Client {
   private skillRegistry: SkillRegistry;
   private logger: Logger;
   private config: ClientConfig;
+  /**
+   * Whether this ACP session belongs to the private email platform. Its prompt,
+   * agent text, tool payloads and staged file names are private correspondence,
+   * so the client logs metadata only and hashes every content-bearing audit
+   * value regardless of the configured `hashContent` setting.
+   */
+  private readonly privateEmail: boolean;
   private replyAlreadySent: boolean = false;
   private skillAutoApproveList: SkillAutoApproveList;
   private auditWriter?: SessionAuditWriter;
@@ -358,8 +366,9 @@ export class ChatbotClient implements acp.Client {
     skillAutoApproveList: SkillAutoApproveList,
   ) {
     this.skillRegistry = skillRegistry;
-    this.logger = logger;
     this.config = config;
+    this.privateEmail = config.platform === EMAIL_AUDIT_PLATFORM;
+    this.logger = this.privateEmail ? logger.withPrivateEmail() : logger;
     // MANDATORY internal input (`unify-skill-root-and-inventory` D2): the
     // connector derives the inventory from the deployment's ONE explicitly
     // resolved trusted root, shared by BOTH agent types. The historical
@@ -639,10 +648,13 @@ export class ChatbotClient implements acp.Client {
     reason: string,
   ): Promise<void> {
     if (!this.auditWriter) return;
-    const hashContent = this.auditWriter.getConfig().hashContent;
+    // An email permission decision never records the agent's title or command
+    // verbatim: both can carry a staged file name or quoted mail, so the email
+    // context hashes them even when general content hashing is disabled.
+    const hashContent = this.auditWriter.getConfig().hashContent || this.privateEmail;
     const commandValue = hashContent && command ? `sha256:${await sha256Hash(command)}` : command;
     void this.auditWriter.write(phase, {
-      toolName,
+      toolName: this.privateEmail ? `sha256:${await sha256Hash(toolName)}` : toolName,
       permissionKind,
       command: commandValue,
       decision: phase === "permission_approved" ? "approved" : "denied",
@@ -2114,7 +2126,9 @@ export class ChatbotClient implements acp.Client {
 
     if (this.auditWriter) {
       const writer = this.auditWriter;
-      const hashContent = writer.getConfig().hashContent;
+      // An email session's agent text is private correspondence: it is hashed
+      // here even when general content hashing is disabled.
+      const hashContent = writer.getConfig().hashContent || this.privateEmail;
       const ts = new Date().toISOString();
       const phase = type === "message" ? "agent_complete_message" : "agent_complete_thought";
 

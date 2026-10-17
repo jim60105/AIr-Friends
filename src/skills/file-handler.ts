@@ -25,6 +25,12 @@ export class FileHandler {
     parameters: Record<string, unknown>,
     context: SkillContext,
   ): Promise<SkillResult> => {
+    // An email session's staged files are attachments of private correspondence:
+    // their names and absolute paths never reach a diagnostic. Agent-facing error
+    // text is unaffected (it is not a log or audit sink; the email audit
+    // projection drops `skillResult.error`).
+    const privateEmail = context.workspace?.components?.platform === "email";
+
     // 1. Check if skill is enabled
     if (!this.config.enabled) {
       return { success: false, error: "send-file skill is disabled" };
@@ -95,7 +101,13 @@ export class FileHandler {
           }
         }
         const msg = error instanceof Error ? error.message : String(error);
-        logger.error("Failed to stat file {filePath}", { filePath: fullPath, error: msg });
+        if (privateEmail) {
+          logger.error("Failed to stat a staged attachment file", {
+            code: "SKILL_ATTACHMENT_STAT_FAILED",
+          });
+        } else {
+          logger.error("Failed to stat file {filePath}", { filePath: fullPath, error: msg });
+        }
         return { success: false, error: `Failed to read file: ${msg}` };
       }
 
@@ -141,7 +153,13 @@ export class FileHandler {
         });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        logger.error("Failed to read file {filePath}", { filePath: fullPath, error: msg });
+        if (privateEmail) {
+          logger.error("Failed to read a staged attachment file", {
+            code: "SKILL_ATTACHMENT_READ_FAILED",
+          });
+        } else {
+          logger.error("Failed to read file {filePath}", { filePath: fullPath, error: msg });
+        }
         return { success: false, error: `Failed to read file: ${msg}` };
       }
     }
@@ -180,13 +198,21 @@ export class FileHandler {
     //    (fileSent) is marked by the Skill API server per session.
     filesSentTotal.labels(context.workspace.components.platform).inc(deliveredCount);
 
-    logger.info("Files sent via skill: {fileNames} ({deliveredCount} delivered)", {
-      workspaceKey: context.workspace.key,
-      channelId: context.channelId,
-      fileNames: files.map((f) => f.fileName).join(", "),
-      deliveredCount,
-      messageIds: result.messageIds?.join(","),
-    });
+    if (privateEmail) {
+      // Email attachment names are private metadata: report the delivery count only.
+      logger.info("Email attachments delivered via skill ({deliveredCount} delivered)", {
+        deliveredCount,
+        filesCount: files.length,
+      });
+    } else {
+      logger.info("Files sent via skill: {fileNames} ({deliveredCount} delivered)", {
+        workspaceKey: context.workspace.key,
+        channelId: context.channelId,
+        fileNames: files.map((f) => f.fileName).join(", "),
+        deliveredCount,
+        messageIds: result.messageIds?.join(","),
+      });
+    }
 
     if (!result.success) {
       // Partial delivery: report the platform error alongside the delivered IDs
