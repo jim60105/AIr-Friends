@@ -74,6 +74,7 @@ Deno.test("materializeEmailAttachment - succeeds with valid owner and attachment
       sessionOwner: OWNER_1,
       ref,
       stagingDir,
+      trustedRoot: resolve(stagingDir, ".."),
     });
 
     const fileContent = await Deno.readFile(stagedPath);
@@ -123,6 +124,7 @@ Deno.test("materializeEmailAttachment - cross-owner access is strictly refused",
           sessionOwner: OWNER_2,
           ref,
           stagingDir,
+          trustedRoot: resolve(stagingDir, ".."),
         });
       },
       MessageStoreError,
@@ -169,6 +171,7 @@ Deno.test("materializeEmailAttachment - traversal in attachment filename is sani
       sessionOwner: OWNER_1,
       ref,
       stagingDir,
+      trustedRoot: resolve(stagingDir, ".."),
     });
 
     // Filename should be sanitized to evil.sh without traversal
@@ -222,8 +225,205 @@ Deno.test("materializeEmailAttachment - symlink staging escape is refused", asyn
           sessionOwner: OWNER_1,
           ref,
           stagingDir,
+          trustedRoot: tempDir,
         });
       },
     );
   });
+});
+
+/** A store whose only observable behavior is counting archive reads. */
+function countingStore(): { store: EmailMessageStore; reads: () => number } {
+  let reads = 0;
+  return {
+    store: {
+      attachment: () => {
+        reads++;
+        return Promise.resolve(undefined);
+      },
+    } as unknown as EmailMessageStore,
+    reads: () => reads,
+  };
+}
+
+Deno.test("materializeEmailAttachment - staging outside the trusted workspace is refused before any read", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "materializer-boundary-" });
+  try {
+    const workspace = resolve(tempDir, "workspace");
+    const outside = resolve(tempDir, "outside", "session");
+    await Deno.mkdir(workspace, { recursive: true });
+    await Deno.mkdir(outside, { recursive: true });
+    const { store, reads } = countingStore();
+
+    await assertRejects(() =>
+      materializeEmailAttachment({
+        store,
+        sessionOwner: OWNER_1,
+        ref: {
+          kind: "email-local",
+          id: crypto.randomUUID(),
+          owner: OWNER_1,
+          recordId: crypto.randomUUID(),
+          attachmentId: crypto.randomUUID(),
+          filename: "private.pdf",
+          mimeType: "application/pdf",
+          isImage: false,
+        },
+        stagingDir: outside,
+        trustedRoot: workspace,
+      })
+    );
+    assertEquals(reads(), 0);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("materializeEmailAttachment - a symlinked tmp ancestor with an existing session child is refused before outside writes or reads", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "materializer-symlink-" });
+  try {
+    const workspace = resolve(tempDir, "workspace");
+    const outside = resolve(tempDir, "outside");
+    const outsideSession = resolve(outside, "session-1");
+    await Deno.mkdir(workspace, { recursive: true });
+    await Deno.mkdir(outsideSession, { recursive: true });
+    await Deno.symlink(outside, resolve(workspace, "tmp"));
+    const { store, reads } = countingStore();
+
+    await assertRejects(() =>
+      materializeEmailAttachment({
+        store,
+        sessionOwner: OWNER_1,
+        ref: {
+          kind: "email-local",
+          id: crypto.randomUUID(),
+          owner: OWNER_1,
+          recordId: crypto.randomUUID(),
+          attachmentId: crypto.randomUUID(),
+          filename: "private.pdf",
+          mimeType: "application/pdf",
+          isImage: false,
+        },
+        stagingDir: resolve(workspace, "tmp", "session-1"),
+        trustedRoot: workspace,
+      })
+    );
+
+    assertEquals(reads(), 0);
+    // Nothing was written into the symlink target, not even the attachments
+    // parent directory.
+    assertEquals([...Deno.readDirSync(outsideSession)], []);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("materializeEmailAttachment - a missing attachment fails without writing an unstaged file", async () => {
+  await withTempEnv(async (store, stagingDir, tempDir) => {
+    const recordId = await store.putSource(
+      OWNER_1,
+      new TextEncoder().encode("From: a@b.com\r\nSubject: Empty\r\n\r\nHi"),
+      { from: "a@b.com", subject: "Empty", plainBody: "Hi" },
+    );
+    const attachmentId = crypto.randomUUID();
+
+    await assertRejects(
+      () =>
+        materializeEmailAttachment({
+          store,
+          sessionOwner: OWNER_1,
+          ref: {
+            kind: "email-local",
+            id: attachmentId,
+            owner: OWNER_1,
+            recordId,
+            attachmentId,
+            filename: "missing.pdf",
+            mimeType: "application/pdf",
+            isImage: false,
+          },
+          stagingDir,
+          trustedRoot: tempDir,
+        }),
+      MessageStoreError,
+      "not found",
+    );
+
+    const unstagedFile = resolve(stagingDir, "attachments", attachmentId, "missing.pdf");
+    await assertRejects(() => Deno.stat(unstagedFile), Deno.errors.NotFound);
+  });
+});
+
+Deno.test("materializeEmailAttachment - a destination symlink is refused before the archive read", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "materializer-dest-symlink-" });
+  try {
+    const workspace = resolve(tempDir, "workspace");
+    const staging = resolve(workspace, "tmp", "session-1");
+    const outside = resolve(tempDir, "outside");
+    await Deno.mkdir(staging, { recursive: true });
+    await Deno.mkdir(outside, { recursive: true });
+    await Deno.symlink(outside, resolve(staging, "attachments"));
+    const { store, reads } = countingStore();
+
+    await assertRejects(() =>
+      materializeEmailAttachment({
+        store,
+        sessionOwner: OWNER_1,
+        ref: {
+          kind: "email-local",
+          id: crypto.randomUUID(),
+          owner: OWNER_1,
+          recordId: crypto.randomUUID(),
+          attachmentId: crypto.randomUUID(),
+          filename: "private.pdf",
+          mimeType: "application/pdf",
+          isImage: false,
+        },
+        stagingDir: staging,
+        trustedRoot: workspace,
+      })
+    );
+
+    assertEquals(reads(), 0);
+    assertEquals([...Deno.readDirSync(outside)], []);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("materializeEmailAttachment - a symlinked tmp ancestor is refused before creating a missing session child", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "materializer-symlink-missing-" });
+  try {
+    const workspace = resolve(tempDir, "workspace");
+    const outside = resolve(tempDir, "outside");
+    await Deno.mkdir(workspace, { recursive: true });
+    await Deno.mkdir(outside, { recursive: true });
+    await Deno.symlink(outside, resolve(workspace, "tmp"));
+    const { store, reads } = countingStore();
+
+    await assertRejects(() =>
+      materializeEmailAttachment({
+        store,
+        sessionOwner: OWNER_1,
+        ref: {
+          kind: "email-local",
+          id: crypto.randomUUID(),
+          owner: OWNER_1,
+          recordId: crypto.randomUUID(),
+          attachmentId: crypto.randomUUID(),
+          filename: "private.pdf",
+          mimeType: "application/pdf",
+          isImage: false,
+        },
+        stagingDir: resolve(workspace, "tmp", "session-1"),
+        trustedRoot: workspace,
+      })
+    );
+
+    // The missing session child was never created through the symlink.
+    assertEquals(reads(), 0);
+    assertEquals([...Deno.readDirSync(outside)], []);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
 });

@@ -5,6 +5,7 @@ import { ReplyHandler, stripXmlTags, unescapeNewlines } from "@skills/reply-hand
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { LocalEmailAttachment, PlatformMessage } from "../../src/types/events.ts";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (
@@ -1437,4 +1438,139 @@ Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastF
   await handler.handleGetMessage({ messageId: "explicit_file_id" }, context);
 
   assertEquals(capturedMessageId, "explicit_file_id");
+});
+
+const EMAIL_OWNER = "e_" + "1".repeat(64);
+
+function emailMessageWithLocalAttachment(): PlatformMessage {
+  return {
+    messageId: "email-record-1",
+    userId: EMAIL_OWNER,
+    username: "sender@example.org",
+    content: "Attached",
+    timestamp: new Date("2026-01-01T00:00:00Z"),
+    isBot: false,
+    attachments: [{
+      kind: "email-local",
+      id: "11111111-1111-4111-8111-111111111111",
+      owner: EMAIL_OWNER,
+      recordId: "22222222-2222-4222-8222-222222222222",
+      attachmentId: "11111111-1111-4111-8111-111111111111",
+      filename: "report.pdf",
+      mimeType: "application/pdf",
+      size: 10,
+      isImage: false,
+    }],
+  };
+}
+
+function emailSkillContext(
+  adapter: PlatformAdapter,
+  prepareEmailMessages: SkillContext["prepareEmailMessages"],
+): SkillContext {
+  return {
+    workspace: {
+      key: `email/${EMAIL_OWNER}`,
+      components: { platform: "email", userId: EMAIL_OWNER },
+      path: `/tmp/workspaces/email/${EMAIL_OWNER}`,
+      tmpPath: `/tmp/workspaces/email/${EMAIL_OWNER}/tmp`,
+      isDm: true,
+    },
+    platformAdapter: adapter,
+    channelId: `email/${EMAIL_OWNER}/thread`,
+    userId: EMAIL_OWNER,
+    ...(prepareEmailMessages === undefined ? {} : { prepareEmailMessages }),
+  };
+}
+
+Deno.test("ReplyHandler - handleGetMessage returns current-session staged email attachments", async () => {
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve(emailMessageWithLocalAttachment());
+  const context = emailSkillContext(
+    adapter,
+    (messages) =>
+      Promise.resolve(messages.map((message) => ({
+        ...message,
+        attachments: [{
+          ...(message.attachments![0] as LocalEmailAttachment),
+          sessionPath: "/workspace/tmp/session-a/attachments/a1/report.pdf",
+        }],
+      }))),
+  );
+
+  const result = await new ReplyHandler().handleGetMessage(
+    { messageId: "email-record-1" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  const data = result.data as { attachments?: LocalEmailAttachment[] };
+  assertEquals(
+    data.attachments?.[0]?.sessionPath,
+    "/workspace/tmp/session-a/attachments/a1/report.pdf",
+  );
+});
+
+Deno.test("ReplyHandler - get-message gives two sessions their own attachment locations", async () => {
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve(emailMessageWithLocalAttachment());
+  const handler = new ReplyHandler();
+  const prepareFor = (session: string) => (messages: readonly PlatformMessage[]) =>
+    Promise.resolve(messages.map((message) => ({
+      ...message,
+      attachments: [{
+        ...(message.attachments![0] as LocalEmailAttachment),
+        sessionPath: `/workspace/tmp/${session}/attachments/a1/report.pdf`,
+      }],
+    })));
+
+  const first = await handler.handleGetMessage(
+    { messageId: "email-record-1" },
+    emailSkillContext(adapter, prepareFor("session-a")),
+  );
+  const second = await handler.handleGetMessage(
+    { messageId: "email-record-1" },
+    emailSkillContext(adapter, prepareFor("session-b")),
+  );
+
+  const firstPath = (first.data as { attachments: LocalEmailAttachment[] })
+    .attachments[0].sessionPath;
+  const secondPath = (second.data as { attachments: LocalEmailAttachment[] })
+    .attachments[0].sessionPath;
+  assertEquals(firstPath, "/workspace/tmp/session-a/attachments/a1/report.pdf");
+  assertEquals(secondPath, "/workspace/tmp/session-b/attachments/a1/report.pdf");
+});
+
+Deno.test("ReplyHandler - get-message fails explicitly without the staging capability", async () => {
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve(emailMessageWithLocalAttachment());
+
+  const result = await new ReplyHandler().handleGetMessage(
+    { messageId: "email-record-1" },
+    emailSkillContext(adapter, undefined),
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "email_attachment_unavailable");
+});
+
+Deno.test("ReplyHandler - get-message hides private detail when staging fails", async () => {
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve(emailMessageWithLocalAttachment());
+  const context = emailSkillContext(
+    adapter,
+    () => Promise.reject(new Error("/private/archive/report.pdf")),
+  );
+
+  const result = await new ReplyHandler().handleGetMessage(
+    { messageId: "email-record-1" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "email_attachment_unavailable");
 });

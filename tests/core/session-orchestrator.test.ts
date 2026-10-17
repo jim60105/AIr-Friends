@@ -16,7 +16,16 @@ import { combinedTokenCount } from "@utils/token-counter.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { ActiveSession } from "../../src/skill-api/session-registry.ts";
 import type { Config } from "../../src/types/config.ts";
-import type { NormalizedEvent, PlatformMessage, QuotedNote } from "../../src/types/events.ts";
+import type {
+  LocalEmailAttachment,
+  NormalizedEvent,
+  PlatformMessage,
+  QuotedNote,
+} from "../../src/types/events.ts";
+import { EmailMessageStore } from "../../src/platforms/email/message-store.ts";
+import { createEmailAttachmentPreparation } from "../../src/platforms/email/attachment-preparation.ts";
+import { Logger, LogLevel } from "@utils/logger.ts";
+import type { LogEntry } from "../../src/types/logger.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
@@ -32,7 +41,7 @@ import {
 } from "../../src/acp/agent-connector.ts";
 import { RecoveryOwnershipError } from "../../src/acp/recovery-ownership.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
-import { dirname, join, resolve } from "@std/path";
+import { dirname, join, relative, resolve } from "@std/path";
 
 /**
  * The ONE deployment-resolved skill-script root
@@ -5704,7 +5713,12 @@ async function runTriggeredPromptTurn(
   skillRegistry: SkillRegistry,
   workspaceManager: WorkspaceManager,
   event: NormalizedEvent,
-  options: { supportsImageContent?: boolean } = {},
+  options: {
+    supportsImageContent?: boolean;
+    platformAdapter?: PlatformAdapter;
+    /** Observe the exact content handed to the agent, before session teardown. */
+    onPrompt?: (content: string | unknown[]) => void | Promise<void>;
+  } = {},
 ): Promise<string | unknown[]> {
   let promptArg: string | unknown[] | null = null;
 
@@ -5716,13 +5730,17 @@ async function runTriggeredPromptTurn(
       const replyHandler = skillRegistry.getReplyHandler();
       (replyHandler as unknown as ReplySentMapView).replySentMap.set(key, true);
     };
-    connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+    connector.prompt = async (_sessionId: string, text: string | unknown[]) => {
       promptArg ??= text;
+      await options.onPrompt?.(text);
       return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
     };
   });
 
-  await orchestrator.processMessage(event, new MockPlatformAdapter() as unknown as PlatformAdapter);
+  await orchestrator.processMessage(
+    event,
+    options.platformAdapter ?? new MockPlatformAdapter() as unknown as PlatformAdapter,
+  );
   return promptArg ?? "";
 }
 
@@ -6574,6 +6592,494 @@ Deno.test({
       assertEquals(orchestrator.mockConnector!.reconnectCalls.length, 0);
       assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
 
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// === materialize-email-session-attachments: session-owned email staging ===
+
+/** One authenticated email owner, shared by every production-path fixture. */
+const EMAIL_OWNER = "e_" + "1".repeat(64);
+const EMAIL_THREAD = "33333333-3333-4333-8333-333333333333";
+/** A minimal 1x1 GIF so ImageMagick has a real conversion source. */
+const TINY_GIF = Uint8Array.from(
+  atob("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="),
+  (char) => char.charCodeAt(0),
+);
+
+function createEmailEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
+  return {
+    platform: "email",
+    channelId: `mail:${EMAIL_OWNER}:${EMAIL_THREAD}`,
+    userId: EMAIL_OWNER,
+    messageId: "email-trigger-1",
+    isDm: true,
+    guildId: "",
+    content: "",
+    timestamp: new Date("2026-01-01T00:00:00Z"),
+    ...overrides,
+  };
+}
+
+function emailWorkspacePath(tempDir: string): string {
+  return resolve(tempDir, "workspaces", "email", EMAIL_OWNER);
+}
+
+/** Archive one attachment behind the owner-scoped store and return its message. */
+async function archiveEmailMessage(
+  store: EmailMessageStore,
+  options: { filename: string; mimeType: string; bytes: Uint8Array },
+): Promise<PlatformMessage> {
+  const attachmentId = crypto.randomUUID();
+  const recordId = await store.putSource(
+    EMAIL_OWNER,
+    new TextEncoder().encode("From: sender@example.org\r\nSubject: Test\r\n\r\nHi"),
+    {
+      from: "sender@example.org",
+      subject: "Test",
+      plainBody: "Hi",
+      attachmentPayloads: [{
+        id: attachmentId,
+        filename: options.filename,
+        mimeType: options.mimeType,
+        content: options.bytes,
+      }],
+    },
+  );
+  const record = await store.getByOwnerRecord(EMAIL_OWNER, recordId);
+  assert(record !== undefined);
+  const [message] = store.toPlatformMessages([record!]);
+  assert(message !== undefined);
+  return message!;
+}
+
+function localEmailAttachment(message: PlatformMessage): LocalEmailAttachment {
+  const attachment = message.attachments?.find((candidate) => candidate.kind === "email-local");
+  assert(attachment !== undefined);
+  return attachment as LocalEmailAttachment;
+}
+
+function decodeBase64(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+}
+
+/** Every file below `root`, tolerating a root that does not exist (yet). */
+async function listFiles(root: string): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries: Deno.DirEntry[];
+    try {
+      entries = [...Deno.readDirSync(dir)];
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory) await walk(full);
+      else files.push(full);
+    }
+  };
+  await walk(root);
+  return files;
+}
+
+interface PromptImageBlock {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+
+interface PromptTextBlock {
+  type: "text";
+  text: string;
+}
+
+Deno.test({
+  name:
+    "SessionOrchestrator - attachment-only email trigger and history stage into the current session",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    const store = new EmailMessageStore({ workspacesRoot: resolve(tempDir, "workspaces") });
+    try {
+      const triggerBytes = new TextEncoder().encode("trigger image bytes");
+      const historyBytes = new TextEncoder().encode("history image bytes");
+      const triggerMessage = await archiveEmailMessage(store, {
+        filename: "trigger.png",
+        mimeType: "image/png",
+        bytes: triggerBytes,
+      });
+      const historyMessage = await archiveEmailMessage(store, {
+        filename: "history.png",
+        mimeType: "image/png",
+        bytes: historyBytes,
+      });
+      const triggerAttachment = Object.freeze(localEmailAttachment(triggerMessage));
+      const historyAttachment = localEmailAttachment(historyMessage);
+
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+        await createTestableOrchestrator(tempDir);
+      orchestrator.setEmailAttachmentPreparation(createEmailAttachmentPreparation(store));
+
+      const event = createEmailEvent();
+      event.attachments = Object.freeze([triggerAttachment]) as typeof event.attachments;
+
+      let blocks: unknown[] = [];
+      let firstPrompt = true;
+      let stagedTriggerBytes: Uint8Array | undefined;
+      let stagedHistoryBytes: Uint8Array | undefined;
+      const tmpRoot = resolve(emailWorkspacePath(tempDir), "tmp");
+      const promptArg = await runTriggeredPromptTurn(
+        orchestrator,
+        skillRegistry,
+        workspaceManager,
+        event,
+        {
+          supportsImageContent: true,
+          platformAdapter: new HistoryMockPlatformAdapter([
+            historyMessage,
+          ]) as unknown as PlatformAdapter,
+          onPrompt: async (content) => {
+            // The initial turn carries the image blocks; a follow-up retry
+            // prompt is a plain string and must not replace the capture.
+            if (firstPrompt) {
+              firstPrompt = false;
+              blocks = content as unknown[];
+            }
+            const files = await listFiles(tmpRoot);
+            const triggerFile = files.find((file) =>
+              file.includes(`attachments/${triggerAttachment.attachmentId}/trigger.png`)
+            );
+            const historyFile = files.find((file) =>
+              file.includes(`attachments/${historyAttachment.attachmentId}/history.png`)
+            );
+            if (triggerFile) stagedTriggerBytes = await Deno.readFile(triggerFile);
+            if (historyFile) stagedHistoryBytes = await Deno.readFile(historyFile);
+          },
+        },
+      );
+
+      const textBlock = blocks[0] as PromptTextBlock;
+      const imageBlock = blocks[1] as PromptImageBlock;
+      assertEquals(blocks.length, 2);
+      assertEquals(textBlock.type, "text");
+      assertStringIncludes(textBlock.text, triggerAttachment.attachmentId);
+      assertStringIncludes(textBlock.text, historyAttachment.attachmentId);
+      // No opaque identifier is ever presented as a usable location.
+      assertFalse(textBlock.text.includes("[local:"));
+      // Only the trigger produces an image block; the historical image is a
+      // staged file reference in the rendered context.
+      assertEquals(imageBlock.type, "image");
+      assertEquals(imageBlock.mimeType, "image/png");
+      assertEquals(decodeBase64(imageBlock.data), triggerBytes);
+      assertEquals(stagedTriggerBytes, triggerBytes);
+      assertEquals(stagedHistoryBytes, historyBytes);
+      assert(Array.isArray(promptArg));
+
+      // The frozen producer metadata is untouched: paths live only on copies.
+      assertEquals(triggerAttachment.sessionPath, undefined);
+      assertEquals(event.attachments![0], triggerAttachment);
+
+      sessionRegistry.stop();
+    } finally {
+      store.close();
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - the pooled prompt path also builds trigger images from staged bytes",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    const store = new EmailMessageStore({ workspacesRoot: resolve(tempDir, "workspaces") });
+    try {
+      const triggerBytes = new TextEncoder().encode("pooled trigger bytes");
+      const triggerMessage = await archiveEmailMessage(store, {
+        filename: "pooled.png",
+        mimeType: "image/png",
+        bytes: triggerBytes,
+      });
+      const triggerAttachment = localEmailAttachment(triggerMessage);
+
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, config, skillRegistry, workspaceManager, sessionRegistry } =
+        await createTestableOrchestrator(tempDir, {
+          processPool: createStubProcessPool(fakeConnector),
+        });
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+      orchestrator.setEmailAttachmentPreparation(createEmailAttachmentPreparation(store));
+
+      const event = createEmailEvent({ attachments: [triggerAttachment] });
+      let blocks: unknown[] = [];
+      let firstPrompt = true;
+      fakeConnector.supportsImageContent = () => true;
+      fakeConnector.onPrompt = () => {
+        markReplySent(
+          skillRegistry,
+          workspaceManager.getWorkspaceKeyFromEvent(event),
+          event.channelId,
+        );
+      };
+      fakeConnector.prompt = (_sessionId: string, text: string | unknown[]) => {
+        if (firstPrompt) {
+          firstPrompt = false;
+          blocks = text as unknown[];
+        }
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+
+      await orchestrator.processMessage(
+        event,
+        new MockPlatformAdapter() as unknown as PlatformAdapter,
+      );
+
+      assertEquals(blocks.length, 2);
+      assertEquals((blocks[0] as PromptTextBlock).type, "text");
+      assertEquals((blocks[1] as PromptImageBlock).mimeType, "image/png");
+      assertEquals(decodeBase64((blocks[1] as PromptImageBlock).data), triggerBytes);
+
+      sessionRegistry.stop();
+    } finally {
+      store.close();
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - two same-owner sessions isolate GIF conversion from frozen metadata",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    const store = new EmailMessageStore({ workspacesRoot: resolve(tempDir, "workspaces") });
+    try {
+      const gifMessage = await archiveEmailMessage(store, {
+        filename: "trigger.gif",
+        mimeType: "image/gif",
+        bytes: TINY_GIF,
+      });
+      const sourceAttachment = localEmailAttachment(gifMessage);
+      // Shared producer metadata carrying a STALE path from another session.
+      const stalePath = resolve(
+        tempDir,
+        "outside",
+        "stale-session",
+        "attachments",
+        sourceAttachment.attachmentId,
+        "trigger.gif",
+      );
+      const sharedAttachment = Object.freeze({
+        ...sourceAttachment,
+        sessionPath: stalePath,
+      });
+
+      const preparation = createEmailAttachmentPreparation(store);
+      const workspaceTmp = resolve(emailWorkspacePath(tempDir), "tmp");
+      const snapshots: string[][] = [];
+      const images: PromptImageBlock[] = [];
+
+      for (let session = 0; session < 2; session++) {
+        const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+          await createTestableOrchestrator(tempDir);
+        orchestrator.setEmailAttachmentPreparation(preparation);
+        const event = createEmailEvent();
+        event.attachments = Object.freeze([sharedAttachment]) as typeof event.attachments;
+        let firstPrompt = true;
+
+        await runTriggeredPromptTurn(orchestrator, skillRegistry, workspaceManager, event, {
+          supportsImageContent: true,
+          onPrompt: async (content) => {
+            if (firstPrompt) {
+              firstPrompt = false;
+              const blocks = content as unknown[];
+              images.push(blocks[1] as PromptImageBlock);
+              snapshots.push(await listFiles(workspaceTmp));
+            }
+          },
+        });
+
+        // Frozen producer metadata never gained a session path.
+        assertEquals(sharedAttachment.sessionPath, stalePath);
+        assertEquals(event.attachments![0], sharedAttachment);
+        sessionRegistry.stop();
+      }
+
+      assertEquals(images.length, 2);
+      for (const image of images) {
+        assertEquals(image.type, "image");
+        assertEquals(image.mimeType, "image/webp");
+      }
+      // Both sessions converted the same source to identical deterministic bytes.
+      assertEquals(images[0].data, images[1].data);
+
+      const converted = snapshots.map((files) => files.filter((file) => file.endsWith(".webp")));
+      // The staged session copy is itself `trigger.gif`; only conversion scratch
+      // GIFs (random names outside the attachment directory) are intermediates.
+      const intermediates = snapshots.flatMap((files) =>
+        files.filter((file) => file.endsWith(".gif") && !file.includes("/attachments/"))
+      );
+      assertEquals(intermediates, []);
+      assertEquals(converted[0].length, 1);
+      assertEquals(converted[1].length, 1);
+      assert(converted[0][0] !== converted[1][0]);
+
+      for (const file of [...converted[0], ...converted[1]]) {
+        const rel = relative(workspaceTmp, file);
+        assertFalse(rel.startsWith(".."));
+        // `<session>/<scratch>.webp`: never directly in the shared tmp root.
+        assertEquals(rel.split("/").length, 2);
+      }
+      assertFalse(await pathExists(stalePath));
+    } finally {
+      store.close();
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - email GIF conversion diagnostics carry no private detail",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+      const staging = resolve(emailWorkspacePath(tempDir), "tmp", "session-gif");
+      await Deno.mkdir(staging, { recursive: true, mode: 0o700 });
+      const entries: LogEntry[] = [];
+      const log = new Logger("gif-conversion", {
+        level: LogLevel.DEBUG,
+        gelfTransport: { send: (entry: LogEntry) => entries.push(entry) },
+      });
+      const seam = orchestrator as unknown as {
+        convertGifToWebp(
+          data: Uint8Array,
+          tmpPath: string,
+          logger: Logger,
+        ): Promise<Uint8Array | null>;
+      };
+
+      const webp = await seam.convertGifToWebp(TINY_GIF, staging, log);
+      assert(webp !== null && webp.byteLength > 0);
+      const files = await listFiles(staging);
+      assertEquals(files.filter((file) => file.endsWith(".gif")), []);
+      assertEquals(files.filter((file) => file.endsWith(".webp")).length, 1);
+      assert(entries.some((entry) => entry.message.includes("GIF converted to WebP")));
+      const successLog = JSON.stringify(entries);
+      assertFalse(successLog.includes(staging));
+      assertFalse(successLog.includes("trigger.gif"));
+
+      entries.length = 0;
+      const failed = await seam.convertGifToWebp(
+        new TextEncoder().encode("not a gif at all"),
+        staging,
+        log,
+      );
+      assertEquals(failed, null);
+      const failureLog = JSON.stringify(entries);
+      assert(failureLog.includes("gif_conversion_failed"));
+      assertFalse(failureLog.includes("not a gif at all"));
+      assertFalse(failureLog.includes(staging));
+      assertFalse(failureLog.includes("stderr"));
+      assertEquals((await listFiles(staging)).filter((file) => file.endsWith(".gif")), []);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - an email trigger with local attachments fails explicitly when staging is unavailable",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    const store = new EmailMessageStore({ workspacesRoot: resolve(tempDir, "workspaces") });
+    try {
+      const message = await archiveEmailMessage(store, {
+        filename: "report.pdf",
+        mimeType: "application/pdf",
+        bytes: new TextEncoder().encode("private body"),
+      });
+      const attachment = localEmailAttachment(message);
+
+      // (a) No preparation capability installed at all.
+      {
+        const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+        const event = createEmailEvent({ attachments: [attachment] });
+        const response = await orchestrator.processMessage(
+          event,
+          new MockPlatformAdapter() as unknown as PlatformAdapter,
+        );
+        assertEquals(response.success, false);
+        assertEquals(response.error, "email_attachment_unavailable");
+        assertEquals(orchestrator.mockConnector, null);
+        sessionRegistry.stop();
+      }
+
+      // (b) The capability is installed but the archived bytes are missing.
+      {
+        const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+        orchestrator.setEmailAttachmentPreparation(createEmailAttachmentPreparation(store));
+        const missing = {
+          ...attachment,
+          attachmentId: crypto.randomUUID(),
+        } as LocalEmailAttachment;
+        const event = createEmailEvent({ attachments: [missing] });
+        const response = await orchestrator.processMessage(
+          event,
+          new MockPlatformAdapter() as unknown as PlatformAdapter,
+        );
+        assertEquals(response.success, false);
+        assertEquals(response.error, "email_attachment_unavailable");
+        assertFalse(response.error!.includes("/"));
+        assertEquals(orchestrator.mockConnector, null);
+        sessionRegistry.stop();
+      }
+    } finally {
+      store.close();
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - an email session never creates a staging child through a symlinked tmp ancestor",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const workspacePath = emailWorkspacePath(tempDir);
+      const outside = resolve(tempDir, "outside");
+      await Deno.mkdir(workspacePath, { recursive: true });
+      await Deno.mkdir(outside, { recursive: true });
+      await Deno.symlink(outside, resolve(workspacePath, "tmp"));
+
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+      const response = await orchestrator.processMessage(
+        createEmailEvent(),
+        new MockPlatformAdapter() as unknown as PlatformAdapter,
+      );
+
+      assertEquals(response.success, false);
+      // Boundary authorization precedes the host's first mkdir: the missing
+      // session child was never created through the symlink.
+      assertEquals([...Deno.readDirSync(outside)], []);
+      assertFalse((response.error ?? "").includes(outside));
       sessionRegistry.stop();
     } finally {
       await Deno.remove(tempDir, { recursive: true });

@@ -5,7 +5,7 @@ import { ContextHandler } from "@skills/context-handler.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { PlatformMessage, QuotedNote } from "../../src/types/events.ts";
+import type { LocalEmailAttachment, PlatformMessage, QuotedNote } from "../../src/types/events.ts";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (
@@ -484,4 +484,106 @@ Deno.test("ContextHandler - handleFetchContext handles errors in user_info", asy
 
   assertEquals(result.success, false);
   assertEquals(result.error, "Username fetch failed");
+});
+
+/** One owner-scoped local email attachment reference. */
+const LOCAL_ATTACHMENT: LocalEmailAttachment = {
+  kind: "email-local",
+  id: "11111111-1111-4111-8111-111111111111",
+  owner: "e_" + "1".repeat(64),
+  recordId: "22222222-2222-4222-8222-222222222222",
+  attachmentId: "11111111-1111-4111-8111-111111111111",
+  filename: "report.pdf",
+  mimeType: "application/pdf",
+  size: 10,
+  isImage: false,
+};
+
+function emailMessageWithAttachment(): PlatformMessage {
+  return {
+    messageId: "email-record-1",
+    userId: "e_" + "1".repeat(64),
+    username: "sender@example.org",
+    content: "See attached",
+    timestamp: new Date("2026-01-01T00:00:00Z"),
+    isBot: false,
+    attachments: [LOCAL_ATTACHMENT],
+  };
+}
+
+Deno.test("ContextHandler - recent_messages stages local email attachments into the calling session", async () => {
+  const handler = new ContextHandler();
+  const context = createTestContext(
+    createMockPlatformAdapter({ fetchRecentMessagesResult: [emailMessageWithAttachment()] }),
+  );
+  const seen: (readonly PlatformMessage[])[] = [];
+  context.prepareEmailMessages = (messages) => {
+    seen.push(messages);
+    return Promise.resolve(messages.map((message) => ({
+      ...message,
+      attachments: [{
+        ...LOCAL_ATTACHMENT,
+        sessionPath: "/workspace/tmp/session-a/attachments/a1/report.pdf",
+      }],
+    })));
+  };
+
+  const result = await handler.handleFetchContext({ type: "recent_messages" }, context);
+
+  assertEquals(result.success, true);
+  assertEquals(seen.length, 1);
+  const data = result.data as { type: string; data: PlatformMessage[] };
+  const attachment = data.data[0].attachments![0] as LocalEmailAttachment;
+  assertEquals(attachment.sessionPath, "/workspace/tmp/session-a/attachments/a1/report.pdf");
+});
+
+Deno.test("ContextHandler - search_messages stages local email attachments too", async () => {
+  const handler = new ContextHandler();
+  const context = createTestContext(
+    createMockPlatformAdapter({ searchRelatedMessagesResult: [emailMessageWithAttachment()] }),
+  );
+  context.prepareEmailMessages = (messages) =>
+    Promise.resolve(messages.map((message) => ({
+      ...message,
+      attachments: [{
+        ...LOCAL_ATTACHMENT,
+        sessionPath: "/workspace/tmp/session-b/attachments/a1/report.pdf",
+      }],
+    })));
+
+  const result = await handler.handleFetchContext(
+    { type: "search_messages", query: "report" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  const data = result.data as { type: string; data: PlatformMessage[] };
+  const attachment = data.data[0].attachments![0] as LocalEmailAttachment;
+  assertEquals(attachment.sessionPath, "/workspace/tmp/session-b/attachments/a1/report.pdf");
+});
+
+Deno.test("ContextHandler - a local email attachment without the preparation capability fails explicitly", async () => {
+  const handler = new ContextHandler();
+  const context = createTestContext(
+    createMockPlatformAdapter({ fetchRecentMessagesResult: [emailMessageWithAttachment()] }),
+  );
+
+  const result = await handler.handleFetchContext({ type: "recent_messages" }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "email_attachment_unavailable");
+});
+
+Deno.test("ContextHandler - a staging failure is content-free and explicit", async () => {
+  const handler = new ContextHandler();
+  const context = createTestContext(
+    createMockPlatformAdapter({ fetchRecentMessagesResult: [emailMessageWithAttachment()] }),
+  );
+  context.prepareEmailMessages = () =>
+    Promise.reject(new Error("/private/archive/path/report.pdf"));
+
+  const result = await handler.handleFetchContext({ type: "recent_messages" }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "email_attachment_unavailable");
 });
