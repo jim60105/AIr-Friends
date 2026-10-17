@@ -5,6 +5,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { NoteRecallResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
+import type { EmailSubmissionMetadata } from "../types/platform.ts";
 
 /**
  * Skill call parameters (from external Agent)
@@ -27,6 +28,11 @@ export interface SkillResult {
    * instructive errors to the agent.
    */
   code?: string;
+  /**
+   * Optional durable email submission metadata when a skill initiates or
+   * resolves an outbound email operation.
+   */
+  emailSubmission?: EmailSubmissionMetadata;
 }
 
 /**

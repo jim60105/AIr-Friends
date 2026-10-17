@@ -114,6 +114,7 @@ Mailbox progress, discovery boundaries, and per-entry processing lifecycle state
 ### Acceptance Scenarios
 
 Detailed acceptance requirements and scenarios are defined in `specs/email-mailbox-state/spec.md`:
+
 - **First activation boundary**: The initial position is durably recorded; downtime and restarts exclude pre-activation inbox messages.
 - **Discovery and processing durability**: Progress never drops accepted unstarted work; each entry retains its lifecycle state independently of the cursor.
 - **Uncertain receive recovery**: Work left in started state without terminal evidence requires manual review rather than automatic replay.
@@ -133,4 +134,48 @@ Detailed acceptance requirements and scenarios are defined in `specs/email-mailb
   - `recover(): Promise<MailboxRecoveryResult>`
   - `getSnapshot(): MailboxSnapshot | null`
   - `getEntry(key: MailboxKey): MailboxEntrySnapshot | undefined`
+  - `close(): void`
+
+## Durable Submission Operations Journal (Owned by `email-submission-journal`)
+
+Outbound email operations, deduplication reservation keys, and sending lifecycle states are durably tracked under the email state directory (`data/email/submissions.jsonl`) via `SubmissionStore` in `src/platforms/email/submission-store.ts`.
+
+### Files & Layout
+
+- **`submissions.jsonl`**: Append-only transition journal containing state changes for outbound operations (`prepare`, `submitting`, `outcome`, `sent-copy`).
+
+### Invariants & Semantics
+
+- **Stable Logical Operation**: All email submissions are bound to an owner-scoped `EmailOperationKey` (`{ workId: string, actionSlot: string }`) and content digest persisted durably before invoking SMTP.
+- **Idempotent Reservation**: Repeated calls for the same logical operation with an identical content digest return the existing operation record. Repeated calls with changed payload return a conflict (`KEY_PAYLOAD_CONFLICT`).
+- **Absorbing Unknown on Recovery**: Any operation left in the `submitting` phase without a terminal outcome upon crash or restart is durably converted to `unknown` during startup `recover()`. Operations in `unknown` state are absorbing for automatic sends and are NEVER automatically resubmitted.
+- **Submitted Outcome Immutability**: Successful SMTP acceptance records `submitted`. Sent folder copy append failures do not downgrade or alter an accepted `submitted` outcome. Once reached, terminal outcomes (`submitted`, `failed`, `unknown`) cannot transition to different terminal outcomes.
+- **Missing Evidence Blocks Submission**: Prepared operations require their referenced constructed `.eml` file and content digest to be verified prior to transmission. Missing or altered evidence blocks automatic sending without erasing or omitting the operation record.
+- **Torn Tail & Corruption Fencing**: When `submissions.jsonl` exhibits `torn-tail` or `corrupt` integrity status, startup recovery fails closed with `STORE_CORRUPT`. The entire mailbox submission lane is fenced (`STORE_DAMAGED_APPEND_REFUSED`), rejecting subsequent appends without destroying evidence.
+- **Privacy in Diagnostics**: Diagnostics and logs contain opaque identifiers (`op_<hash>`), safe diagnostic codes, and byte offsets. Private mail bodies, recipient addresses, and credentials are never stored in journal records or logged.
+
+### Acceptance Scenarios
+
+Acceptance requirements and test scenarios defined in `specs/email-submission-state/spec.md`:
+
+- **Concurrent repeats**: Two callers requesting the same logical action share one durable reservation, and changed payloads return conflict.
+- **Tail lacks outcome**: Submitting records without terminal outcomes become unknown on recovery and automatic sends remain blocked.
+- **Unattributable corrupt intent**: Journal corruption blocks the whole mailbox submission lane for operator review.
+
+### Exported API
+
+- `EmailOperationKey`: `{ workId: string, actionSlot: EmailActionSlot | string }`
+- `SubmissionPhase`: `"prepared" | "submitting" | "submitted" | "failed" | "unknown"`
+- `SentCopyStatus`: `"pending" | "appended" | "failed"`
+- `TargetKind`: `"user" | "third-party"`
+- `SubmissionDiagnosticCode`: Safe enum diagnostic codes (`CLEAN`, `INVALID_KEY`, `KEY_PAYLOAD_CONFLICT`, `STORE_CORRUPT`, `STORE_DAMAGED_APPEND_REFUSED`, `MISSING_SUBMISSION_EVIDENCE`, `UNKNOWN_ABSORBING`, etc.)
+- `SubmissionStore`:
+  - `prepare(ownerId: string, key: EmailOperationKey, contentDigest: string, emlRef: string, options?: PrepareSubmissionOptions): Promise<SubmissionEntrySnapshot>`
+  - `markSubmitting(key: EmailOperationKey): Promise<SubmissionEntrySnapshot>`
+  - `recordOutcome(key: EmailOperationKey, outcome: "submitted" | "failed" | "unknown", options?: RecordOutcomeOptions): Promise<SubmissionEntrySnapshot>`
+  - `updateSentCopy(key: EmailOperationKey, sentCopy: SentCopyStatus): Promise<SubmissionEntrySnapshot>`
+  - `verifySubmissionEvidence(key: EmailOperationKey, computeDigestFn?: (bytes: Uint8Array) => Promise<string> | string): Promise<void>`
+  - `lookup(key: EmailOperationKey): SubmissionEntrySnapshot | undefined`
+  - `lookupById(operationId: string): SubmissionEntrySnapshot | undefined`
+  - `recover(): Promise<SubmissionRecoveryResult>`
   - `close(): void`
