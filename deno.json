@@ -32,7 +32,7 @@
     "@acp/": "./src/acp/"
   },
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts",
     "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts",
     "start:config": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --config",
     // `--parallel` is deliberately NOT used: Deno runs parallel test modules in one process, so

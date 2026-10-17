@@ -479,7 +479,7 @@ STOPSIGNAL SIGTERM
 ENTRYPOINT ["dumb-init", "--"]
 
 # Default command to run the chatbot
-CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "--allow-ffi", "src/main.ts"]
+CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "--allow-ffi", "--allow-sys", "src/main.ts"]
 
 ARG VERSION
 ARG RELEASE

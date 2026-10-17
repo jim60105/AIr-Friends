@@ -160,7 +160,7 @@ jobs:
           RUST_MIN_STACK: 16777216
         run: >-
           deno compile --check
-          --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi
+          --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys
           --output /tmp/air-friends src/main.ts
 
       - name: Verify executable

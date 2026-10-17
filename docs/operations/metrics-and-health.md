@@ -38,7 +38,7 @@
 在開發提示詞或驗證工作階段組裝流程時，可使用 `--dry-run` 旗標啟動。
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --dry-run
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --dry-run
 ```
 
 這個模式會完整執行工作區準備、記憶檢索、提示詞組裝與 Vento 樣板渲染，但不呼叫外部付費 LLM，因此沒有 API 成本。組裝後的完整 Prompt 會儲存至 `agent.dryRun.outputPath`（預設 `./data/dry-run/`）供審閱，若同時設定了 `agent.dryRun.mockReply`，系統會直接發送測試文字至平台，方便驗證連線與排版。

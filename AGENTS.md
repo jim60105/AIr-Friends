@@ -98,7 +98,7 @@ deno fmt --check src/ tests/
 When running manually, use these explicit permissions:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts
 ```
 
 **Never use `--allow-all`**. Required permissions:
@@ -111,13 +111,14 @@ deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-
 | `--allow-env`   | Environment variables (tokens, configuration)              |
 | `--allow-run`   | Spawning ACP agent subprocesses and skill scripts          |
 | `--allow-ffi`   | Loading the jieba native binding (memory recall tokenizer) |
+| `--allow-sys`   | Node-compat `os.hostname()` required by pino via imapflow  |
 
 #### YOLO Mode
 
 The `--yolo` flag enables automatic approval of ALL permission requests from the ACP agent:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env src/main.ts --yolo
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --yolo
 ```
 
 YOLO mode can also be configured per-channel via the `yolo` field in `channels` configuration:
@@ -152,7 +153,7 @@ channels:
 The `--dry-run` flag enables dry run / debug mode. The system assembles context but does NOT call the ACP Agent — instead, the assembled prompt is written to an output directory:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --dry-run
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --dry-run
 ```
 
 **Use cases**:
