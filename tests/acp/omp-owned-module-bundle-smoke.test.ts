@@ -50,8 +50,14 @@ interface SmokeResult {
   readonly toStringName: SmokeCall;
 }
 
-/** Build the generated bundle and run the driver against the delivered file. */
-async function runBundleSmoke(): Promise<SmokeResult> {
+/**
+ * Build the generated bundle and run the driver against the delivered file.
+ *
+ * `allowEnv` controls whether the child may READ the process environment at
+ * all: every ordinary launch classification does (the host-only intent marker
+ * lives there), and the flag is withheld by the fail-closed case below.
+ */
+async function runBundleSmoke(options: { allowEnv?: boolean } = {}): Promise<SmokeResult> {
   const buildTarget = `${repoRoot}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH.replace(/\/[^/]+$/, "")}`;
   const build = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
     args: [repoRoot, buildTarget, `${repoRoot}/deno.lock`],
@@ -66,6 +72,7 @@ async function runBundleSmoke(): Promise<SmokeResult> {
     args: [
       "run",
       "--allow-read",
+      ...(options.allowEnv === false ? [] : ["--allow-env"]),
       driverPath,
       `file://${declaredArtifactPath}`,
     ],
@@ -113,6 +120,43 @@ Deno.test({
     // the own-property membership check must treat as unknown.
     for (
       const [name, call] of [
+        ["unknownTool", result.unknownTool],
+        ["protoName", result.protoName],
+        ["toStringName", result.toStringName],
+      ] as const
+    ) {
+      assertEquals(call.outcome, "block", name);
+      assertEquals(call.executed, 0, `${name} must execute no operation`);
+    }
+  },
+  sanitizeOps: false,
+  sanitizeResources: false,
+});
+
+/**
+ * The delivered artifact must not CRASH and must not widen admission when its
+ * own environment read is unavailable: an unobservable launch classification is
+ * treated as an intent-profile launch, so every name is blocked.
+ */
+Deno.test({
+  name: "bundle smoke: an unreadable process environment fails closed to deny-all",
+  fn: async () => {
+    const result = await runBundleSmoke({ allowEnv: false });
+
+    assertEquals(result.handlerCount, 1);
+    for (
+      const [name, call] of [
+        ["read", result.read],
+        ["grep", result.grep],
+        ["glob", result.glob],
+        ["find", result.find],
+        ["todo", result.todo],
+        ["web_search", result.web_search],
+        ["bash", result.bash],
+        ["edit", result.edit],
+        ["write", result.write],
+        ["delete", result.delete],
+        ["move", result.move],
         ["unknownTool", result.unknownTool],
         ["protoName", result.protoName],
         ["toStringName", result.toStringName],

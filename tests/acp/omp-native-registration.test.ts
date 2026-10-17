@@ -19,8 +19,14 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   createOmpCapabilityToolCallHandler,
+  createOmpIntentToolCallHandler,
+  createOmpToolCallHandler,
   type NativeExtensionApi,
   type NativeToolCallHandler,
+  observeOmpLaunchMarker,
+  OMP_INTENT_BLOCKED_REASON,
+  OMP_INTENT_PROFILE_FLAG,
+  OMP_INTENT_PROFILE_FLAG_VALUE,
   registerOmpCapabilityCallback,
 } from "@acp/omp/extension/native-registration.ts";
 
@@ -167,4 +173,76 @@ Deno.test("the registered callback blocks before dispatch", () => {
 
   assertEquals(invokeNativeToolCall(registered, "bash").dispatched, 1);
   assertEquals(invokeNativeToolCall(registered, "__proto__").dispatched, 0);
+});
+
+// ---------------------------------------------------------------------------
+// The INTERNAL email-intent profile launch branch
+// (`email-omp-intent-profile`): the SAME generated module attaches a deny-all
+// callback when, and only when, the host-only marker is observed.
+// ---------------------------------------------------------------------------
+
+/** The bounded denial every intent-profile callback returns. */
+const INTENT_BLOCKED = { block: true, reason: OMP_INTENT_BLOCKED_REASON } as const;
+
+/** A `process` stand-in carrying the given environment table. */
+function processStandIn(env: Record<string, string | undefined>): unknown {
+  return { env };
+}
+
+Deno.test("the intent marker is observed, absent and indeterminate exactly once each", () => {
+  assertEquals(
+    observeOmpLaunchMarker(processStandIn({ [OMP_INTENT_PROFILE_FLAG]: "1" })),
+    "intent",
+  );
+  assertEquals(observeOmpLaunchMarker(processStandIn({})), "ordinary");
+  assertEquals(
+    observeOmpLaunchMarker(processStandIn({ [OMP_INTENT_PROFILE_FLAG]: "0" })),
+    "ordinary",
+  );
+  for (const host of [undefined, null, 42, "process", {}, { env: null }, { env: "x" }]) {
+    assertEquals(
+      observeOmpLaunchMarker(host),
+      "indeterminate",
+      `host ${JSON.stringify(host)} must be indeterminate`,
+    );
+  }
+});
+
+Deno.test("an intent-profile launch blocks every name, mapped and unmatched alike", () => {
+  const handler = createOmpToolCallHandler({
+    host: processStandIn({ [OMP_INTENT_PROFILE_FLAG]: OMP_INTENT_PROFILE_FLAG_VALUE }),
+  });
+
+  for (const toolName of [...MAPPED_TOOL_NAMES, ...UNMATCHED_TOOL_NAMES]) {
+    assertEquals(handler({ toolName }), INTENT_BLOCKED, JSON.stringify(toolName));
+    assertEquals(invokeNativeToolCall(handler, toolName).dispatched, 0, toolName);
+  }
+});
+
+Deno.test("a launch whose marker state cannot be observed fails closed to denial", () => {
+  for (const host of [undefined, null, {}, { env: undefined }, 7]) {
+    const handler = createOmpToolCallHandler({ host });
+    for (const toolName of [...MAPPED_TOOL_NAMES, ...UNMATCHED_TOOL_NAMES]) {
+      assertEquals(handler({ toolName }), INTENT_BLOCKED, `${toolName} / ${String(host)}`);
+    }
+  }
+});
+
+Deno.test("an ordinary launch keeps the restricted capability callback unchanged", () => {
+  const handler = createOmpToolCallHandler({ host: processStandIn({}) });
+
+  for (const toolName of MAPPED_TOOL_NAMES) {
+    assertEquals(handler({ toolName }), undefined, toolName);
+  }
+  for (const toolName of UNMATCHED_TOOL_NAMES) {
+    assertEquals(handler({ toolName }), BLOCKED, toolName);
+  }
+});
+
+Deno.test("the deny-all callback ignores the name entirely", () => {
+  const handler = createOmpIntentToolCallHandler();
+
+  for (const toolName of [...MAPPED_TOOL_NAMES, ...UNMATCHED_TOOL_NAMES]) {
+    assertEquals(handler({ toolName }), INTENT_BLOCKED, JSON.stringify(toolName));
+  }
 });
