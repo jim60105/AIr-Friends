@@ -18,8 +18,16 @@
 // No model and no production credential is involved.
 
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
 import { reminderOperationKey, ReminderStore } from "@core/reminder-store.ts";
+import { WorkspaceManager } from "@core/workspace-manager.ts";
+import { MemoryStore } from "@core/memory-store.ts";
+import { ContextAssembler } from "@core/context-assembler.ts";
+import { SessionOrchestrator } from "@core/session-orchestrator.ts";
+import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
+import { SkillRegistry } from "@skills/registry.ts";
+import { SkillAPIServer } from "../../src/skill-api/server.ts";
+import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { buildEmailReminderOrigin, ReminderHandler } from "../../src/skills/reminder-handler.ts";
 import { EmailAdapter } from "../../src/platforms/email/email-adapter.ts";
 import { EmailMailService, type EmailSendOutcome } from "../../src/platforms/email/mail-service.ts";
@@ -27,10 +35,12 @@ import { buildMailboxFingerprint, MailboxStore } from "../../src/platforms/email
 import {
   EmailMessageStore,
   formatEmailChannelId,
+  parseEmailChannelId,
 } from "../../src/platforms/email/message-store.ts";
 import { OutgoingMimeBuilder } from "../../src/platforms/email/outgoing-mime.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import { SubmissionStore } from "../../src/platforms/email/submission-store.ts";
+import { createEmailReplyEligibilityResolver } from "../../src/platforms/email/reply-eligibility.ts";
 import type {
   ImapAppendOptions,
   ImapFetchHeadersOptions,
@@ -48,10 +58,18 @@ import {
   type SmtpTransport,
 } from "../../src/platforms/email/smtp-client.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
-import type { ChannelConfig, EmailConfig, RemindersConfig } from "../../src/types/config.ts";
-import type { ResolvedReminder } from "../../src/types/reminder.ts";
+import type {
+  ChannelConfig,
+  Config,
+  EmailConfig,
+  RemindersConfig,
+} from "../../src/types/config.ts";
+import type { ReminderEntry, ResolvedReminder } from "../../src/types/reminder.ts";
 import type { SkillContext } from "../../src/skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
+import type { AgentConnectorOptions } from "../../src/acp/types.ts";
+import type { AgentConnector, AgentProcessEvidence } from "../../src/acp/agent-connector.ts";
+import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 
 const BOT = "bot@example.com";
 const SENDER = "alice@allowed-domain.org";
@@ -273,6 +291,183 @@ async function persistAndReplayReminder(env: ReminderEnv): Promise<ResolvedRemin
   return replayed[0];
 }
 
+// ---------------------------------------------------------------------------
+// Complete reminder processing: preflight -> Skill API reply -> adapter -> SMTP
+// ---------------------------------------------------------------------------
+
+/** Deployment-resolved trusted skill-script root (same literal the prompts render). */
+const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
+  resolve(import.meta.dirname ?? ".", "../../skills"),
+);
+const SKILL_SECRET = "0123456789abcdef0123456789abcdef01";
+/** Distinct from the ports owned by `tests/skill-api/server.test.ts`. */
+const SKILL_PORT = 3982;
+
+type ReminderPromptHook = () => Promise<void>;
+
+/** Scripted ACP connector: every prompt is answered by the test's host-side hook. */
+class ScriptedConnector {
+  processEvidence: AgentProcessEvidence = { generations: 0, pid: undefined };
+  promptHook?: ReminderPromptHook;
+  promptCallCount = 0;
+
+  constructor(_options: AgentConnectorOptions) {}
+  getProcessEvidence(): AgentProcessEvidence {
+    return this.processEvidence;
+  }
+  connect(): Promise<void> {
+    return Promise.resolve();
+  }
+  supportsImageContent(): boolean {
+    return false;
+  }
+  createSession(): Promise<string> {
+    return Promise.resolve("mock-session-id");
+  }
+  setSessionModel(_sessionId: string, _modelId: string): Promise<void> {
+    return Promise.resolve();
+  }
+  setReasoningEffort(_sessionId: string, _value: string): Promise<string> {
+    return Promise.resolve("applied");
+  }
+  async prompt(_sessionId: string, _text: string): Promise<PromptResponse> {
+    this.promptCallCount++;
+    await this.promptHook?.();
+    return { stopReason: "end_turn" } as PromptResponse;
+  }
+  disconnect(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+/** Orchestrator whose connector is the scripted double above. */
+class ReminderScriptedOrchestrator extends SessionOrchestrator {
+  promptHook?: ReminderPromptHook;
+  lastConnector: ScriptedConnector | null = null;
+
+  protected override createConnector(options: AgentConnectorOptions): AgentConnector {
+    const connector = new ScriptedConnector(options);
+    connector.promptHook = this.promptHook;
+    this.lastConnector = connector;
+    return connector as unknown as AgentConnector;
+  }
+}
+
+function reminderTestConfig(base: string): Config {
+  return {
+    platforms: {
+      discord: { token: "test", enabled: true },
+      misskey: { host: "test", token: "t", enabled: false },
+    },
+    agent: {
+      model: "gpt-4",
+      systemPromptPath: `${base}/prompts/system_reply.md`,
+      tokenLimit: 20000,
+      defaultAgentType: "opencode",
+    },
+    memory: { recentMessageLimit: 20, workingTierLimit: 20 },
+    workspace: { repoPath: base, workspacesDir: "workspaces" },
+    logging: { level: "FATAL" },
+    accessControl: { replyTo: "whitelist", whitelist: [] },
+    skillApi: { enabled: true, port: SKILL_PORT, host: "127.0.0.1" },
+    channels: [...CHANNELS],
+  } as unknown as Config;
+}
+
+/**
+ * Build the REAL orchestrator over the same durable roots as the delivery stack.
+ * Its eligibility resolver is the production one over `messageStore`, exactly as
+ * the composed email platform installs it.
+ */
+async function buildReminderOrchestrator(
+  base: string,
+  messageStore: EmailMessageStore,
+): Promise<{
+  orchestrator: ReminderScriptedOrchestrator;
+  sessionRegistry: SessionRegistry;
+  skillRegistry: SkillRegistry;
+  config: Config;
+}> {
+  await Deno.mkdir(`${base}/prompts`, { recursive: true });
+  await Deno.writeTextFile(
+    `${base}/prompts/system_reply.md`,
+    "You are a helper.\nSkill root: {{ skillsDir }}",
+  );
+  await Deno.writeTextFile(
+    `${base}/prompts/system_reminder.md`,
+    "Reminder: {{ reminderMessage }}\nPlatform: {{ platform }}\nSkill root: {{ skillsDir }}",
+  );
+
+  const config = reminderTestConfig(base);
+  const workspaceManager = new WorkspaceManager({
+    repoPath: base,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
+  const skillRegistry = new SkillRegistry(memoryStore);
+  const contextAssembler = new ContextAssembler(memoryStore, {
+    systemPromptPath: `${base}/prompts/system_reply.md`,
+    skillsDir: RESOLVED_SKILLS_ROOT,
+    recentMessageLimit: 20,
+    tokenLimit: 20000,
+  });
+  const sessionRegistry = new SessionRegistry();
+  const orchestrator = new ReminderScriptedOrchestrator(
+    workspaceManager,
+    contextAssembler,
+    skillRegistry,
+    config,
+    sessionRegistry,
+    memoryStore,
+  );
+  orchestrator.setEmailReplyEligibility(createEmailReplyEligibilityResolver(messageStore));
+  return { orchestrator, sessionRegistry, skillRegistry, config };
+}
+
+/** Push a retained anchor outside the bounded recent window with newer outbound records. */
+async function seedNewerOutboundRecords(
+  messageStore: EmailMessageStore,
+  threadId: string,
+  count: number,
+): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await messageStore.putSent(
+      OWNER,
+      {
+        emlBytes: `Subject: Re: Newer ${i}\r\n\r\nNewer reply ${i}`,
+        historyBody: `Newer reply ${i}`,
+        to: SENDER,
+        subject: `Newer ${i}`,
+        targetKind: "user",
+        threadId,
+        wireIds: { messageId: `<newer-${i}@x>`, inReplyTo: ANCHOR_WIRE_ID },
+      },
+      { workId: `newer-${i}`, actionSlot: "reply" },
+    );
+  }
+}
+
+/**
+ * Wait for the in-process Skill API listener to accept requests. `Deno.serve`
+ * binds synchronously, so retrying on the first connection error needs only a
+ * microtask yield — no wall-clock delay and no guessed duration.
+ */
+async function waitForSkillApi(port: number, maxAttempts = 100): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/skill/test`, {
+        method: "POST",
+        body: JSON.stringify({ sessionId: "probe" }),
+      });
+      await response.body?.cancel();
+      return;
+    } catch {
+      await Promise.resolve();
+    }
+  }
+  throw new Error("Skill API fixture did not start");
+}
+
 Deno.test("email reminder - restart-preserved thread, one signed submission, no replay", async () => {
   const base = await Deno.makeTempDir();
   try {
@@ -369,5 +564,334 @@ Deno.test("email reminder - smoke: a live SMTP fixture carries the threaded remi
   } finally {
     await Deno.remove(base, { recursive: true });
     await smtpService.stop();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Durable retained anchors through COMPLETE reminder processing
+// ---------------------------------------------------------------------------
+
+/** A reminder store whose completion write always fails (simulated patch failure). */
+function failingReminderStore(): ReminderStore {
+  return {
+    cancelReminder: () => Promise.reject(new Error("simulated reminder patch failure")),
+  } as unknown as ReminderStore;
+}
+
+/** A due email reminder entry persisted directly, bypassing the future-time creation gate. */
+function dueEmailReminder(
+  id: string,
+  origin: NonNullable<ResolvedReminder["origin"]>,
+): ReminderEntry {
+  const due = new Date(Date.now() - 60_000).toISOString();
+  return {
+    type: "reminder",
+    id,
+    createdAt: due,
+    scheduledAt: due,
+    message: REMINDER_MESSAGE,
+    platform: "email",
+    userId: OWNER,
+    enabled: true,
+    origin,
+  };
+}
+
+/** Raw inbound mail whose source carries neither Message-ID nor References. */
+function inboundWithoutWireIds(): string {
+  return [
+    `From: ${SENDER}`,
+    `To: ${BOT}`,
+    "Subject: No wire ids",
+    "Authentication-Results: mx.example.com; dmarc=pass header.from=allowed-domain.org",
+    "",
+    "No wire ids",
+  ].join("\r\n");
+}
+
+Deno.test("email reminder - a retained anchor outside 200 newer records delivers once through the host path and never replays", async () => {
+  const base = await Deno.makeTempDir();
+  const smtp = new ScriptedSmtp();
+  try {
+    const env = await buildReminderEnv(base, smtp);
+    const reminder = await persistAndReplayReminder(env);
+    const origin = reminder.origin!;
+    const { threadId } = parseEmailChannelId(origin.channelId);
+    await seedNewerOutboundRecords(env.messageStore, threadId, 200);
+
+    // The retained anchor is outside every bounded window, and the recent suffix is
+    // ALL outbound: no recent inbound record can stand in for the recipient.
+    const recent = await env.messageStore.history(OWNER, threadId, 200);
+    assertEquals(recent.length, 200);
+    assertEquals(recent.every((record) => record.direction === "outbound"), true);
+    assert(!recent.some((record) => record.recordId === env.anchorRecordId));
+    assertEquals((await env.adapter.fetchRecentMessages(origin.channelId, 500)).length, 200);
+
+    // RESTART: reopen the archive and rebuild the whole delivery stack over the
+    // same durable files. The reminder's completion write fails on this tick.
+    const reopened = new EmailMessageStore({ workspacesRoot: join(base, "workspaces") });
+    const firstSmtp = new ScriptedSmtp();
+    const firstStack = buildMailStack(base, reopened, firstSmtp);
+    const firstRun = await buildReminderOrchestrator(base, reopened);
+    firstRun.orchestrator.setEmailSubmissionEvidence(firstStack.mailService);
+
+    const server = new SkillAPIServer(
+      firstRun.sessionRegistry,
+      firstRun.skillRegistry,
+      { port: SKILL_PORT, host: "127.0.0.1" },
+      SKILL_SECRET,
+    );
+    server.start();
+    await waitForSkillApi(SKILL_PORT);
+    try {
+      // The HOST path: the mocked connector calls the real Skill API `send-reply`,
+      // which derives the reminder operation and the persisted anchor from the
+      // session alone. Nothing here supplies a work id or an anchor.
+      firstRun.orchestrator.promptHook = async () => {
+        const session = firstRun.sessionRegistry.getAll()[0];
+        assertEquals(session.channelId, origin.channelId);
+        assertEquals(session.emailReminder?.reminderId, reminder.id);
+        assertEquals(session.emailReminder?.origin.replyAnchorRecordId, env.anchorRecordId);
+        const token = await createSkillJwt(SKILL_SECRET, {
+          sub: session.id,
+          channel: session.channelId,
+          jti: firstRun.sessionRegistry.getCallerToken(session.id) ?? "",
+        });
+        const response = await fetch(`http://127.0.0.1:${SKILL_PORT}/api/skill/send-reply`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            sessionId: session.id,
+            parameters: { message: REMINDER_BODY },
+          }),
+        });
+        const body = await response.json() as { success: boolean; error?: string };
+        assertEquals(response.status, 200);
+        assert(body.success, body.error);
+      };
+
+      const first = await firstRun.orchestrator.processReminder(
+        reminder,
+        firstStack.adapter,
+        failingReminderStore(),
+      );
+      assertEquals(first.success, true);
+      assertEquals(first.emailSubmitted, true);
+
+      // ONE submission, to the ORIGINAL verified sender, in the ORIGIN thread, under
+      // the stable host-derived reminder operation.
+      assertEquals(firstSmtp.submissions.length, 1);
+      assertEquals(firstSmtp.submissions[0].envelope.to, [SENDER]);
+      const wire = new TextDecoder().decode(firstSmtp.submissions[0].emlBytes);
+      assert(wire.includes(`In-Reply-To: ${ANCHOR_WIRE_ID}`), "the retained anchor threads");
+      assert(wire.includes(`References: ${ANCHOR_WIRE_ID}`));
+
+      const operation = reminderOperationKey(reminder.id);
+      assertEquals(operation, {
+        workId: reminder.id,
+        actionSlot: `reminder:${reminder.id}`,
+      });
+      const outcome = firstStack.mailService.lookup(OWNER, operation);
+      assert(outcome, "the stable operation is recorded durably");
+      assertEquals(outcome.phase, "submitted");
+      const [delivered] = await reopened.history(OWNER, threadId, 1);
+      assertEquals(delivered.operationKey, operation);
+      assertEquals(delivered.to, SENDER);
+      assertEquals(delivered.inReplyTo, ANCHOR_WIRE_ID);
+    } finally {
+      await server.stop();
+      firstRun.sessionRegistry.stop();
+    }
+
+    // The completion write failed, so the reminder record is still enabled.
+    const persisted = await new ReminderStore(REMINDERS_CONFIG.persistPath)
+      .loadReminders(env.workspace);
+    assertEquals(persisted[0].enabled, true);
+
+    // NEXT TICK OVER A RESTARTED STACK: the durable operation is consulted before
+    // any generation, so nothing is regenerated and no second SMTP transaction runs.
+    const reopenedAgain = new EmailMessageStore({ workspacesRoot: join(base, "workspaces") });
+    const secondSmtp = new ScriptedSmtp();
+    const secondStack = buildMailStack(base, reopenedAgain, secondSmtp);
+    const secondRun = await buildReminderOrchestrator(base, reopenedAgain);
+    secondRun.orchestrator.setEmailSubmissionEvidence(secondStack.mailService);
+
+    const second = await secondRun.orchestrator.processReminder(
+      reminder,
+      secondStack.adapter,
+      new ReminderStore(REMINDERS_CONFIG.persistPath),
+    );
+    assertEquals(second.emailSubmitted, true);
+    assertEquals(secondSmtp.submissions.length, 0);
+    assertEquals(secondRun.orchestrator.lastConnector, null);
+    assertEquals(
+      (await new ReminderStore(REMINDERS_CONFIG.persistPath).loadReminders(env.workspace))[0]
+        .enabled,
+      false,
+    );
+    secondRun.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(base, { recursive: true });
+  }
+});
+
+Deno.test("email reminder - a retained but unthreadable anchor is disabled before generation or SMTP", async () => {
+  const base = await Deno.makeTempDir();
+  const smtp = new ScriptedSmtp();
+  try {
+    const env = await buildReminderEnv(base, smtp);
+    const recordId = await env.messageStore.putSource(OWNER, inboundWithoutWireIds(), {
+      from: SENDER,
+      subject: "No wire ids",
+      plainBody: "No wire ids",
+    });
+    const record = await env.messageStore.getByOwnerRecord(OWNER, recordId);
+    assert(record);
+    const channelId = formatEmailChannelId(OWNER, record.threadId);
+    const reminder = dueEmailReminder("rem_unthreadable", {
+      channelId,
+      replyAnchorRecordId: recordId,
+    });
+    await new ReminderStore(REMINDERS_CONFIG.persistPath).addReminder(env.workspace, reminder);
+
+    // Normal scheduling selection sees the due reminder before the tick.
+    const firstStore = new ReminderStore(REMINDERS_CONFIG.persistPath);
+    const due = await firstStore.getDueReminders(env.workspace);
+    assertEquals(due.map((entry) => entry.id), ["rem_unthreadable"]);
+
+    const { orchestrator, sessionRegistry } = await buildReminderOrchestrator(
+      base,
+      env.messageStore,
+    );
+    const result = await orchestrator.processReminder(due[0], env.adapter, firstStore);
+    assertEquals(result.success, false);
+    assertEquals(result.error, "email_reminder_origin_review_required");
+    assertEquals(orchestrator.lastConnector, null, "no generation");
+    assertEquals(smtp.submissions.length, 0, "no SMTP");
+    sessionRegistry.stop();
+
+    // A reopened store proves the disabled state AND that later ticks cannot select it.
+    const reopened = new ReminderStore(REMINDERS_CONFIG.persistPath);
+    assertEquals(await reopened.getDueReminders(env.workspace), []);
+    const [persisted] = await reopened.loadReminders(env.workspace);
+    assertEquals(persisted.enabled, false);
+  } finally {
+    await Deno.remove(base, { recursive: true });
+  }
+});
+
+Deno.test("email reminder - completed or uncertain retained-anchor operations never replay across ticks", async () => {
+  const phases = ["submitted", "unknown", "submitting"] as const;
+  for (const phase of phases) {
+    const base = await Deno.makeTempDir();
+    const smtp = new ScriptedSmtp();
+    try {
+      const env = await buildReminderEnv(base, smtp);
+      const reminder = await persistAndReplayReminder(env);
+      const operation = reminderOperationKey(reminder.id);
+
+      const { orchestrator, sessionRegistry } = await buildReminderOrchestrator(
+        base,
+        env.messageStore,
+      );
+      orchestrator.setEmailSubmissionEvidence({
+        lookup: (owner, key) => {
+          // Only the reminder's OWN stable operation is evidence, for the right owner.
+          if (
+            owner !== OWNER || key.workId !== operation.workId ||
+            key.actionSlot !== operation.actionSlot
+          ) {
+            return undefined;
+          }
+          return phase === "submitted"
+            ? {
+              operationId: `op_${phase}`,
+              phase,
+              targetKind: "user",
+              reused: false,
+            }
+            : { operationId: `op_${phase}`, phase, reused: false };
+        },
+      });
+
+      const store = new ReminderStore(REMINDERS_CONFIG.persistPath);
+      const first = await orchestrator.processReminder(reminder, env.adapter, store);
+      assertEquals(orchestrator.lastConnector, null, `${phase}: no generation`);
+      assertEquals(smtp.submissions.length, 0, `${phase}: no SMTP`);
+      assertEquals(first.success, phase === "submitted", `${phase}: verdict`);
+      if (phase === "submitted") {
+        assertEquals(first.emailSubmitted, true, `${phase}: delivery verdict`);
+      } else {
+        assertEquals(first.emailUnknown, true, `${phase}: uncertainty`);
+      }
+      sessionRegistry.stop();
+
+      // A later tick after a restart reaches the same durable verdict, with the
+      // reminder record disabled and no session or submission.
+      const reopened = new ReminderStore(REMINDERS_CONFIG.persistPath);
+      assertEquals(await reopened.getDueReminders(env.workspace), []);
+      const [persisted] = await reopened.loadReminders(env.workspace);
+      assertEquals(persisted.enabled, false);
+
+      const restartedStore = new EmailMessageStore({
+        workspacesRoot: join(base, "workspaces"),
+      });
+      const restartedSmtp = new ScriptedSmtp();
+      const restartedStack = buildMailStack(base, restartedStore, restartedSmtp);
+      const restartedRun = await buildReminderOrchestrator(base, restartedStore);
+      restartedRun.orchestrator.setEmailSubmissionEvidence({
+        lookup: (owner, key) =>
+          owner === OWNER && key.workId === operation.workId &&
+            key.actionSlot === operation.actionSlot
+            ? { operationId: `op_${phase}`, phase, reused: false }
+            : undefined,
+      });
+      const restarted = await restartedRun.orchestrator.processReminder(
+        reminder,
+        restartedStack.adapter,
+        new ReminderStore(REMINDERS_CONFIG.persistPath),
+      );
+      assertEquals(
+        phase === "submitted" ? restarted.emailSubmitted : restarted.emailUnknown,
+        true,
+        `${phase}: durable verdict survives the restart`,
+      );
+      assertEquals(restartedRun.orchestrator.lastConnector, null);
+      assertEquals(restartedSmtp.submissions.length, 0);
+      restartedRun.sessionRegistry.stop();
+    } finally {
+      await Deno.remove(base, { recursive: true });
+    }
+  }
+});
+
+Deno.test("email reminder - a revoked allowlist prevents submission with a retained anchor", async () => {
+  const base = await Deno.makeTempDir();
+  const smtp = new ScriptedSmtp();
+  try {
+    const env = await buildReminderEnv(base, smtp);
+    const reminder = await persistAndReplayReminder(env);
+    const { orchestrator, sessionRegistry, config } = await buildReminderOrchestrator(
+      base,
+      env.messageStore,
+    );
+    config.channels = [{ id: `email/account/${OWNER}`, enabled: false }];
+
+    const store = new ReminderStore(REMINDERS_CONFIG.persistPath);
+    const result = await orchestrator.processReminder(reminder, env.adapter, store);
+    assertEquals(result.success, false);
+    assertEquals(orchestrator.lastConnector, null);
+    assertEquals(smtp.submissions.length, 0);
+    assertEquals(
+      (await new ReminderStore(REMINDERS_CONFIG.persistPath).loadReminders(env.workspace))[0]
+        .enabled,
+      false,
+    );
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(base, { recursive: true });
   }
 });

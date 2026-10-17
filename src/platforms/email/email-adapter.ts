@@ -56,14 +56,14 @@ import {
 } from "./mailbox-poller.ts";
 import type { EmailMailService, EmailSendOutcome } from "./mail-service.ts";
 import type { EmailDraft, EmailOutgoingAttachment } from "./outgoing-mime.ts";
-import {
-  formatEmailChannelId,
-  OWNER_USER_ID_REGEX,
-  parseEmailChannelId,
-  type StoredEmailRecord,
-} from "./message-store.ts";
+import { formatEmailChannelId, OWNER_USER_ID_REGEX, parseEmailChannelId } from "./message-store.ts";
 import type { EmailMessageStore } from "./message-store.ts";
 import { normalizeEmailMailbox } from "./email-identity.ts";
+import {
+  createEmailReplyEligibilityResolver,
+  type EmailReplyEligibilityResolver,
+  threadReferenceOf,
+} from "./reply-eligibility.ts";
 
 const logger = createLogger("EmailAdapter");
 
@@ -90,7 +90,12 @@ const PARTITIONED_SLOT_PREFIXES = [
  */
 export const EMAIL_SPONTANEOUS_SUBJECT = "Spontaneous note";
 
-/** Bounded thread scan used to resolve a reply's sender and thread anchor. */
+/**
+ * Bounded thread scan used only to resolve an IMPLICIT send's latest anchor and sender.
+ *
+ * An explicit `replyToMessageId` never consults this window: it resolves through the
+ * durable owner-thread archive instead (see `reply-eligibility.ts`).
+ */
 const SEND_HISTORY_LIMIT = 200;
 
 /** Bounded upper limit accepted by {@link EmailAdapter.fetchRecentMessages}. */
@@ -146,6 +151,12 @@ export interface EmailAdapterOptions {
   messageStore: EmailMessageStore;
   /** Common durable outbound send service; the only path that may submit mail. */
   mailService: EmailMailService;
+  /**
+   * Durable eligibility resolver for explicit reply anchors. The host composes ONE
+   * resolver over the same message store and shares it with the reminder preflight;
+   * tests and embedded stacks get the default over `messageStore`.
+   */
+  replyEligibility?: EmailReplyEligibilityResolver;
   /** Configured channels; the sender allowlist and the enabled email accounts. */
   channels: ChannelConfig[];
   /** Reports mailbox entries requiring operator review (forwarded from the poller). */
@@ -201,6 +212,7 @@ export class EmailAdapter extends PlatformAdapter {
 
   private readonly messageStore: EmailMessageStore;
   private readonly mailService: EmailMailService;
+  private readonly replyEligibility: EmailReplyEligibilityResolver;
   private readonly channels: ChannelConfig[];
   private readonly poller: EmailMailboxPoller;
   private readonly botOwnerId: string;
@@ -216,6 +228,8 @@ export class EmailAdapter extends PlatformAdapter {
 
     this.messageStore = options.messageStore;
     this.mailService = options.mailService;
+    this.replyEligibility = options.replyEligibility ??
+      createEmailReplyEligibilityResolver(options.messageStore);
     this.channels = options.channels ?? [];
     this.botOwnerId = normalizeEmailMailbox(options.config.address).userId;
     this.capabilities = {
@@ -555,6 +569,11 @@ export class EmailAdapter extends PlatformAdapter {
    * original sender re-derived from the owner thread — the stored address is not trusted as-is,
    * `Reply-To`/`Cc`/`Bcc` are never consulted, and the mail service re-checks the allowlist
    * immediately before submission.
+   *
+   * An EXPLICIT `replyToMessageId` is resolved through the durable owner-thread-record archive
+   * (the same host-owned resolver the reminder preflight uses), so a retained anchor is eligible
+   * regardless of how many newer records the thread has. Only an IMPLICIT send falls back to the
+   * bounded recent-history window that selects the latest anchor.
    */
   private async resolveSend(
     channelId: string,
@@ -606,6 +625,32 @@ export class EmailAdapter extends PlatformAdapter {
       });
     }
 
+    if (replyToMessageId !== undefined) {
+      // Durable explicit anchor: record identity, wire threading and the verified recipient all
+      // come from the retained record (or its own thread's durable inbound source). No bounded
+      // history is consulted, and no substitute anchor or new thread is ever selected.
+      const eligibility = await this.replyEligibility.resolve({
+        owner,
+        threadId,
+        recordId: replyToMessageId,
+      });
+      if (!eligibility.ok) return { ok: false, error: eligibility.error };
+      return {
+        ok: true,
+        value: {
+          owner,
+          workId,
+          threadId,
+          slot,
+          recipient: eligibility.value.recipient,
+          subject: replySubject(eligibility.value.subject),
+          thread: eligibility.value.thread,
+        },
+      };
+    }
+
+    // Implicit send (no reply anchor supplied): keep the bounded recent-history selection of the
+    // latest anchor and its latest inbound sender exactly as before.
     const history = await this.messageStore.history(owner, threadId, SEND_HISTORY_LIMIT);
     if (history.length === 0) {
       return {
@@ -614,17 +659,7 @@ export class EmailAdapter extends PlatformAdapter {
       };
     }
 
-    let anchor = history[history.length - 1];
-    if (replyToMessageId !== undefined) {
-      const requested = history.find((record) => record.recordId === replyToMessageId);
-      if (!requested) {
-        return {
-          ok: false,
-          error: "The reply anchor is not part of this owner thread; nothing was sent.",
-        };
-      }
-      anchor = requested;
-    }
+    const anchor = history[history.length - 1];
 
     const thread = threadReferenceOf(anchor);
     if (!thread) {
@@ -909,16 +944,6 @@ function operationSlot(hostSlot: string | undefined, kind: EmailSendKind): strin
     );
   }
   return kind;
-}
-
-/** The thread linkage for a reply, or undefined when the source has no wire identifiers at all. */
-function threadReferenceOf(anchor: StoredEmailRecord): EmailDraft["thread"] {
-  const references = anchor.references ?? [];
-  if (!anchor.wireMessageId && references.length === 0) return undefined;
-  return {
-    ...(anchor.wireMessageId ? { wireMessageId: anchor.wireMessageId } : {}),
-    ...(references.length > 0 ? { references: [...references] } : {}),
-  };
 }
 
 /** `Re: <subject>` unless the source already carries a reply prefix. */

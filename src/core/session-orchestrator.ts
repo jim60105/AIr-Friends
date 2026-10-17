@@ -91,6 +91,7 @@ import {
   sessionEmailOperation,
 } from "./reminder-store.ts";
 import { parseEmailChannelId } from "@platforms/email/message-store.ts";
+import type { EmailReplyEligibilityResolver } from "@platforms/email/reply-eligibility.ts";
 import { isSenderAllowed } from "@platforms/email/incoming-auth.ts";
 import { spontaneousOperationKey } from "@platforms/email/spontaneous-store.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
@@ -213,19 +214,12 @@ const EMAIL_OUTCOME_UNKNOWN_ERROR = "email_submission_outcome_unknown: review-re
 
 /**
  * Row 23: the bounded, content-free failure text for an email reminder whose
- * origin cannot be used (missing/corrupt record, an anchor outside its owner
- * thread, or a currently revoked/disallowed account). No thread is guessed and
- * nothing was sent, so the reminder is disabled for operator review.
+ * origin cannot be used (a missing/corrupt record, an anchor outside its owner
+ * thread, an unthreadable retained anchor, or a currently revoked/disallowed
+ * account). No thread is guessed and nothing was sent, so the reminder is
+ * disabled for operator review.
  */
 const EMAIL_REMINDER_ORIGIN_REVIEW_ERROR = "email_reminder_origin_review_required";
-
-/**
- * Row 23: the bounded owner-thread window an email reminder's persisted anchor
- * is checked against. It is the SAME window the email adapter resolves an
- * explicitly supplied anchor from, so an anchor the adapter could never use is
- * review-required instead of being retried on every scheduler tick.
- */
-const EMAIL_REMINDER_ANCHOR_WINDOW = 200;
 
 /**
  * Response from a session
@@ -328,6 +322,13 @@ export class SessionOrchestrator {
    * non-email flow is untouched.
    */
   private emailSubmissionEvidence: EmailSubmissionEvidenceSource | null = null;
+  /**
+   * Durable explicit-reply-anchor eligibility, shared with the email adapter
+   * (`resolve-durable-email-reply-anchors`). Null until email ingress is wired;
+   * while null an email reminder's persisted anchor is unprovable and is
+   * therefore review-required instead of being retried forever.
+   */
+  private emailReplyEligibility: EmailReplyEligibilityResolver | null = null;
   /**
    * Session-bound email attachment staging (owned by
    * `materialize-email-session-attachments`). Null until email ingress is
@@ -437,6 +438,18 @@ export class SessionOrchestrator {
    */
   setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
     this.emailSubmissionEvidence = source;
+  }
+
+  /**
+   * Install (or clear) the durable explicit-reply-anchor eligibility resolver.
+   *
+   * Email ingress wires this together with the other email seams, before its
+   * first poll. It is consulted ONLY by the scheduled-reminder preflight, so no
+   * non-email or ordinary inbound flow ever reaches it, and an unavailable
+   * resolver fails closed for email.
+   */
+  setEmailReplyEligibility(resolver: EmailReplyEligibilityResolver | null): void {
+    this.emailReplyEligibility = resolver;
   }
 
   /**
@@ -4317,11 +4330,12 @@ export class SessionOrchestrator {
           };
           return result;
         }
-        // The persisted anchor must be a record the adapter can actually thread
-        // to. An unusable anchor is review-required — another anchor is never
-        // chosen, and the reminder is not retried forever against a send that
-        // can never succeed.
-        if (!(await this.emailReminderAnchorUsable(platformAdapter, emailOrigin))) {
+        // The persisted anchor must be a RETAINED record of its owner thread that
+        // can be threaded to, independent of the bounded recent window. An
+        // unusable anchor is review-required — another anchor is never chosen,
+        // and the reminder is not retried forever against a send that can never
+        // succeed.
+        if (!(await this.emailReminderAnchorUsable(emailOrigin))) {
           sessionLogger.error(
             "Email reminder {reminderId} origin anchor is unusable (review-required)",
             { reminderId: reminder.id },
@@ -5512,7 +5526,13 @@ export class SessionOrchestrator {
   private resolveEmailReminderOrigin(
     reminder: ResolvedReminder,
   ):
-    | { owner: string; channelId: string; replyAnchorRecordId: string; origin: ReminderOrigin }
+    | {
+      owner: string;
+      threadId: string;
+      channelId: string;
+      replyAnchorRecordId: string;
+      origin: ReminderOrigin;
+    }
     | null {
     const origin = reminder.origin;
     if (
@@ -5540,6 +5560,7 @@ export class SessionOrchestrator {
     if (!isSenderAllowed(owner, this.config.channels ?? [])) return null;
     return {
       owner,
+      threadId,
       channelId: `mail:${owner}:${threadId}`,
       replyAnchorRecordId: anchor,
       origin: { channelId: `mail:${owner}:${threadId}`, replyAnchorRecordId: anchor },
@@ -5550,24 +5571,29 @@ export class SessionOrchestrator {
    * Whether the reminder's persisted anchor is one the platform can deliver
    * against (row 23).
    *
-   * The owner-thread recent history is the SAME bounded view the adapter
-   * resolves an explicitly supplied anchor from, so this check matches the
-   * adapter's own refusal condition instead of discovering it after a prompt
-   * has been generated. An adapter that cannot expose history (a non-email
-   * double, or an unexpected platform) skips the check and leaves the decision
-   * to delivery.
+   * The anchor is resolved through the SAME durable owner-thread-record lookup
+   * the adapter resolves an explicitly supplied anchor from, so a retained
+   * anchor stays deliverable no matter how many newer records the thread has,
+   * while a missing, corrupt, cross-owner, cross-thread or unthreadable one is
+   * review-required BEFORE any prompt is generated. No recent-history window is
+   * consulted. The capability is email-only: when it is unavailable the anchor
+   * cannot be proven usable, so the reminder fails closed.
    */
   private async emailReminderAnchorUsable(
-    platformAdapter: PlatformAdapter,
-    origin: { channelId: string; replyAnchorRecordId: string },
+    origin: { owner: string; threadId: string; replyAnchorRecordId: string },
   ): Promise<boolean> {
-    if (typeof platformAdapter.fetchRecentMessages !== "function") return true;
+    const resolver = this.emailReplyEligibility;
+    if (!resolver) {
+      logger.warn("Email reply-anchor eligibility is unavailable; refusing the reminder origin");
+      return false;
+    }
     try {
-      const recent = await platformAdapter.fetchRecentMessages(
-        origin.channelId,
-        EMAIL_REMINDER_ANCHOR_WINDOW,
-      );
-      return recent.some((message) => message.messageId === origin.replyAnchorRecordId);
+      const result = await resolver.resolve({
+        owner: origin.owner,
+        threadId: origin.threadId,
+        recordId: origin.replyAnchorRecordId,
+      });
+      return result.ok;
     } catch (error) {
       logger.warn("Failed to resolve the email reminder origin anchor: {error}", {
         error: error instanceof Error ? error.message : String(error),

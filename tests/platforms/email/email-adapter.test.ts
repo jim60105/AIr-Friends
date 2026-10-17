@@ -290,6 +290,38 @@ async function seedInbound(
   return { recordId, threadId: record.threadId };
 }
 
+/**
+ * Seed one outbound record into an existing owner thread (or a NEW thread when
+ * `threadId` is omitted). Used to push a retained anchor outside the bounded
+ * recent-history window.
+ */
+async function seedOutbound(
+  messageStore: EmailMessageStore,
+  threadId: string | undefined,
+  index: number,
+  options: { subject?: string; inReplyTo?: string; label?: string } = {},
+): Promise<{ recordId: string; threadId: string; wireMessageId: string }> {
+  const wireMessageId = `<out-${index}@x>`;
+  const subject = options.subject ?? `Reply ${index}`;
+  const { recordId, threadId: storedThreadId } = await messageStore.putSent(
+    OWNER,
+    {
+      emlBytes: `Subject: ${subject}\r\n\r\nReply ${index}`,
+      historyBody: `Reply ${index}`,
+      to: SENDER,
+      subject,
+      targetKind: "user",
+      ...(threadId === undefined ? {} : { threadId }),
+      wireIds: {
+        messageId: wireMessageId,
+        ...(options.inReplyTo === undefined ? {} : { inReplyTo: options.inReplyTo }),
+      },
+    },
+    { workId: `${options.label ?? "seed"}-${index}`, actionSlot: "reply" },
+  );
+  return { recordId, threadId: storedThreadId, wireMessageId };
+}
+
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await Deno.makeTempDir({ prefix: "email-adapter-test-" });
   try {
@@ -720,6 +752,275 @@ Deno.test("EmailAdapter - stored sender that does not match the thread owner is 
     });
     assertEquals(result.success, false);
     assert(result.error?.includes("verified recipient"));
+    assertEquals(harness.smtp.submissions.length, 0);
+  });
+});
+
+Deno.test("EmailAdapter - an explicit anchor older than 200 records resolves durably", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    const anchor = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<original@x>", subject: "Original subject" }),
+      { messageId: "<original@x>", subject: "Original subject", body: "Original body." },
+    );
+    const channel = formatEmailChannelId(OWNER, anchor.threadId);
+
+    // 200 newer records push the retained anchor out of every bounded window and
+    // leave an ALL-OUTBOUND recent suffix (no recent inbound source at all).
+    for (let i = 0; i < 200; i++) {
+      await seedOutbound(harness.messageStore, anchor.threadId, i, {
+        subject: `Different subject ${i}`,
+        inReplyTo: "<original@x>",
+        label: "aged",
+      });
+    }
+    const recent = await harness.messageStore.history(OWNER, anchor.threadId, 200);
+    assertEquals(recent.length, 200);
+    assertEquals(recent.every((record) => record.direction === "outbound"), true);
+    assert(
+      !recent.some((record) => record.recordId === anchor.recordId),
+      "the retained anchor is outside the bounded recent window",
+    );
+
+    const result = await harness.adapter.sendReply(channel, "Answer body.", {
+      replyToMessageId: anchor.recordId,
+      emailSend: { workId: "work-aged", owner: OWNER },
+    });
+
+    assert(result.success, result.error);
+    assertEquals(harness.smtp.submissions.length, 1);
+    assertEquals(harness.smtp.submissions[0].envelope.to, [SENDER]);
+    const wire = decode(harness.smtp.submissions[0].emlBytes);
+    assert(wire.includes("In-Reply-To: <original@x>"), "threading uses the retained anchor");
+    assert(wire.includes("References: <original@x>"));
+    assert(wire.includes("Subject: Re: Original subject"), "the selected anchor's subject");
+    assert(!wire.includes("Different subject"), "no newer record's subject is inherited");
+
+    // The delivery is durably recorded in the ORIGIN thread.
+    const [latest] = await harness.messageStore.history(OWNER, anchor.threadId, 1);
+    assertEquals(latest.direction, "outbound");
+    assertEquals(latest.inReplyTo, "<original@x>");
+    assertEquals(latest.subject, "Re: Original subject");
+  });
+});
+
+Deno.test("EmailAdapter - an explicit outbound anchor threads to it and uses the thread's inbound source", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    const root = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<root@x>", subject: "Thread root" }),
+      { messageId: "<root@x>", subject: "Thread root", body: "Root body." },
+    );
+    // The selected explicit anchor is an OUTBOUND record retained outside the
+    // recent window; the recipient must still come from this thread's inbound root.
+    const selected = await seedOutbound(harness.messageStore, root.threadId, 7, {
+      subject: "Chosen outbound",
+      inReplyTo: "<root@x>",
+      label: "chosen",
+    });
+    for (let i = 0; i < 200; i++) {
+      await seedOutbound(harness.messageStore, root.threadId, i, {
+        subject: `Newer subject ${i}`,
+        inReplyTo: "<root@x>",
+        label: "newer",
+      });
+    }
+    const channel = formatEmailChannelId(OWNER, root.threadId);
+
+    const result = await harness.adapter.sendReply(channel, "Answer body.", {
+      replyToMessageId: selected.recordId,
+      emailSend: { workId: "work-outbound-anchor", owner: OWNER },
+    });
+
+    assert(result.success, result.error);
+    assertEquals(harness.smtp.submissions.length, 1);
+    assertEquals(harness.smtp.submissions[0].envelope.to, [SENDER]);
+    const wire = decode(harness.smtp.submissions[0].emlBytes);
+    assert(wire.includes(`In-Reply-To: ${selected.wireMessageId}`));
+    assert(wire.includes(`References: ${selected.wireMessageId}`));
+    assert(wire.includes("Subject: Re: Chosen outbound"));
+    assert(!wire.includes("Newer subject"), "no substitute anchor is chosen");
+  });
+});
+
+Deno.test("EmailAdapter - an outbound anchor with no same-thread inbound source is refused", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    // A verified inbound source exists for this owner, but in ANOTHER thread. It
+    // must never stand in for the explicit anchor's own thread.
+    await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<other-thread@x>" }),
+      { messageId: "<other-thread@x>", subject: "Other thread" },
+    );
+    assert(await harness.messageStore.ownerVerifiedAddress(OWNER));
+
+    // An outbound-only thread (no reply linkage) has no inbound source of its own.
+    const lonely = await seedOutbound(harness.messageStore, undefined, 99, {
+      subject: "Outbound only",
+      label: "lonely",
+    });
+    assertEquals(
+      await harness.messageStore.threadInboundRecipient(OWNER, lonely.threadId),
+      undefined,
+      "the lookup is thread-scoped, not owner-wide",
+    );
+
+    const result = await harness.adapter.sendReply(
+      formatEmailChannelId(OWNER, lonely.threadId),
+      "Answer body.",
+      {
+        replyToMessageId: lonely.recordId,
+        emailSend: { workId: "work-no-inbound", owner: OWNER },
+      },
+    );
+
+    assertEquals(result.success, false);
+    assert(result.error?.includes("verified recipient"));
+    assertEquals(harness.smtp.submissions.length, 0);
+  });
+});
+
+Deno.test("EmailAdapter - the implicit latest anchor keeps its bounded behavior", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    const anchor = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<implicit-root@x>", subject: "Implicit root" }),
+      { messageId: "<implicit-root@x>", subject: "Implicit root" },
+    );
+    await seedOutbound(harness.messageStore, anchor.threadId, 1, {
+      subject: "First reply",
+      inReplyTo: "<implicit-root@x>",
+      label: "implicit",
+    });
+    const latest = await seedOutbound(harness.messageStore, anchor.threadId, 2, {
+      subject: "Latest reply",
+      inReplyTo: "<implicit-root@x>",
+      label: "implicit",
+    });
+    const channel = formatEmailChannelId(OWNER, anchor.threadId);
+
+    const result = await harness.adapter.sendReply(channel, "Answer body.", {
+      emailSend: { workId: "work-implicit", owner: OWNER },
+    });
+    assert(result.success, result.error);
+    const wire = decode(harness.smtp.submissions[0].emlBytes);
+    assert(wire.includes(`In-Reply-To: ${latest.wireMessageId}`));
+    assert(wire.includes("Subject: Re: Latest reply"));
+    assertEquals(harness.smtp.submissions[0].envelope.to, [SENDER]);
+
+    // The implicit sender/anchor selection stays bounded: with the retained inbound
+    // anchor outside the last 200 all-outbound records, an implicit send is refused
+    // instead of widening the window.
+    for (let i = 0; i < 200; i++) {
+      await seedOutbound(harness.messageStore, anchor.threadId, i, {
+        subject: `Suffix ${i}`,
+        inReplyTo: "<implicit-root@x>",
+        label: "implicit-suffix",
+      });
+    }
+    const bounded = await harness.adapter.sendReply(channel, "Another answer.", {
+      emailSend: { workId: "work-implicit-aged", owner: OWNER },
+    });
+    assertEquals(bounded.success, false);
+    assert(bounded.error?.includes("no inbound source"));
+    assertEquals(harness.smtp.submissions.length, 1);
+  });
+});
+
+Deno.test("EmailAdapter - missing, malformed, cross-thread, cross-owner and unthreadable anchors are refused", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    const first = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<first@x>" }),
+      { messageId: "<first@x>", subject: "First thread" },
+    );
+    const second = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<second@x>" }),
+      { messageId: "<second@x>", subject: "Second thread" },
+    );
+    const otherOwner = `e_${"cd".repeat(32)}`;
+    const cases: Array<{ channel: string; anchor: string; owner: string }> = [
+      // A retained-id-shaped record that does not exist.
+      {
+        channel: formatEmailChannelId(OWNER, first.threadId),
+        anchor: crypto.randomUUID().toLowerCase(),
+        owner: OWNER,
+      },
+      // A malformed record id never reaches a record.
+      {
+        channel: formatEmailChannelId(OWNER, first.threadId),
+        anchor: "not-a-record-id",
+        owner: OWNER,
+      },
+      // A record of ANOTHER owner thread.
+      {
+        channel: formatEmailChannelId(OWNER, first.threadId),
+        anchor: second.recordId,
+        owner: OWNER,
+      },
+      // A record of ANOTHER owner.
+      {
+        channel: formatEmailChannelId(otherOwner, first.threadId),
+        anchor: first.recordId,
+        owner: otherOwner,
+      },
+    ];
+
+    for (const [index, anchorCase] of cases.entries()) {
+      const result = await harness.adapter.sendReply(anchorCase.channel, "Answer.", {
+        replyToMessageId: anchorCase.anchor,
+        emailSend: { workId: `work-refusal-${index}`, owner: anchorCase.owner },
+      });
+      assertEquals(result.success, false, `case ${index} is refused`);
+      assertEquals(harness.smtp.submissions.length, 0, `case ${index} never reaches SMTP`);
+    }
+
+    // A retained record without usable wire identifiers is refused on the EXPLICIT path.
+    const unthreadable = await seedInbound(
+      harness.messageStore,
+      rawMessage({ subject: "No wire ids" }),
+      { subject: "No wire ids" },
+    );
+    const refused = await harness.adapter.sendReply(
+      formatEmailChannelId(OWNER, unthreadable.threadId),
+      "Answer.",
+      {
+        replyToMessageId: unthreadable.recordId,
+        emailSend: { workId: "work-unthreadable-explicit", owner: OWNER },
+      },
+    );
+    assertEquals(refused.success, false);
+    assert(refused.error?.includes("wire identifiers"));
+    assertEquals(harness.smtp.submissions.length, 0);
+  });
+});
+
+Deno.test("EmailAdapter - an unreadable archive refuses an explicit anchor instead of guessing", async () => {
+  await withTempDir(async (base) => {
+    const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
+    const anchor = await seedInbound(
+      harness.messageStore,
+      rawMessage({ messageId: "<closed@x>" }),
+      { messageId: "<closed@x>", subject: "Closed archive" },
+    );
+    harness.messageStore.close();
+
+    const result = await harness.adapter.sendReply(
+      formatEmailChannelId(OWNER, anchor.threadId),
+      "Answer.",
+      {
+        replyToMessageId: anchor.recordId,
+        emailSend: { workId: "work-closed-archive", owner: OWNER },
+      },
+    );
+    assertEquals(result.success, false);
+    assert(result.error?.includes("not a retained record"));
     assertEquals(harness.smtp.submissions.length, 0);
   });
 });

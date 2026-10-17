@@ -227,13 +227,15 @@ export class AgentCore {
    *
    * Email activation composes the durable stack after this core exists, so every email seam is
    * installed here as ONE unit: durable work receipts, recovered submission evidence, the
-   * destination-grant preflight and the `send-email` skill. Passing `null` removes all of them,
-   * leaving email blocked rather than partially enabled.
+   * destination-grant preflight, the durable reply-anchor eligibility resolver and the
+   * `send-email` skill. Passing `null` removes all of them, leaving email blocked rather than
+   * partially enabled.
    */
   setEmailPlatform(services: EmailPlatformServices | null): void {
     this.setEmailSessionReceipts(services?.receipts ?? null);
     this.setEmailSubmissionEvidence(services?.submissionEvidence ?? null);
     this.orchestrator.setEmailDestinationGrantPreflight(services?.preflight ?? null);
+    this.orchestrator.setEmailReplyEligibility(services?.replyEligibility ?? null);
     this.orchestrator.setEmailAttachmentPreparation(services?.attachmentPreparation ?? null);
     this.skillApiServer?.setEmailAttachmentPreparation(services?.attachmentPreparation ?? null);
     this.skillRegistry.setEmailCompose(
