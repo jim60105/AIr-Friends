@@ -803,3 +803,72 @@ Deno.test("reclaimOrphanTmpDirs - a root that cannot be enumerated is reported, 
     );
   });
 });
+
+// --- Email user workspace recognition (email-platform-surfaces) ---
+//
+// Email adds no layout of its own: a sender's workspace is `email/{userId}` with the
+// canonical `e_<sha256>` directory name, its durable archive below `email/` (owned by
+// the message store) and only session staging inside `tmp/`. Recognition and
+// reclamation therefore follow the existing shape rules — email must be recognized
+// from the directory shape, never treated as foreign, and only `tmp/` is disposable.
+
+/** One canonical email user id (the message store's owner-name shape). */
+const EMAIL_OWNER = `e_${"cd".repeat(32)}`;
+
+Deno.test("reclaimOrphanTmpDirs - an email workspace keeps memory, archive bytes and engine state, reclaiming tmp only", async () => {
+  await withWorkspaceRoot(async ({ repoPath, manager }) => {
+    const workspacePath = join(repoPath, "workspaces", "email", EMAIL_OWNER);
+    const tmpPath = join(workspacePath, "tmp");
+
+    // Durable per-user state: the two memory files every workspace keeps …
+    const memoryFiles: Record<string, string> = {
+      "memory.public.jsonl": '{"id":"mem_1","content":"public memory"}\n',
+      "memory.private.jsonl": '{"id":"mem_2","content":"private memory"}\n',
+    };
+    // … and the sender's email archive (`<workspace>/email/`): thread journal,
+    // inbound plus signed outbound source bytes, parsed snapshots and attachments.
+    const archiveFiles: Record<string, string> = {
+      "email/threads.jsonl": '{"v":1,"seq":1,"data":{"type":"inbound"}}\n',
+      "email/source/rec-in-1.eml": "From: sender@example.org\r\n\r\ninbound body\r\n",
+      "email/source/rec-out-1.eml": "From: owner@example.com\r\n\r\nsigned outbound body\r\n",
+      "email/parsed/rec-in-1.json": '{"recordId":"rec-in-1","threadId":"th-1"}\n',
+      "email/attachments/rec-in-1/att-1": "permanent attachment bytes",
+    };
+    for (const [rel, content] of Object.entries({ ...memoryFiles, ...archiveFiles })) {
+      writeFixture(join(workspacePath, rel), content);
+    }
+
+    // Disposable session staging: the skill staging payload, a browser profile and the
+    // session-local copy of an already archived attachment.
+    writeFixture(join(tmpPath, "sess_abc", "payload.json"), "staged");
+    writeFixture(join(tmpPath, "browser-profile", "Default", "Cookies"), "profile");
+    writeFixture(join(tmpPath, "attachments", "rec-in-1", "att-1"), "session copy");
+    // Reserved engine state below tmp/ must survive verbatim.
+    writeFixture(
+      join(tmpPath, "omp-agent", "restricted", "xdg-data", "omp", "sessions.db"),
+      "engine state",
+    );
+
+    const report = await manager.reclaimOrphanTmpDirs();
+
+    // The email workspace is a recognized workspace: visited, nothing skipped.
+    assertEquals(report.workspaces, 1);
+    assertEquals(report.skipped, 0);
+    assert(report.removed >= 3, `expected the staging entries to be removed: ${report.removed}`);
+
+    for (const disposable of ["sess_abc", "browser-profile", "attachments"]) {
+      assertFalse(exists(join(tmpPath, disposable)), `${disposable} is disposable staging`);
+    }
+    assertEquals(
+      Deno.readTextFileSync(
+        join(tmpPath, "omp-agent", "restricted", "xdg-data", "omp", "sessions.db"),
+      ),
+      "engine state",
+    );
+
+    // Every durable byte is untouched: memory, archive, source, attachment.
+    for (const [rel, content] of Object.entries({ ...memoryFiles, ...archiveFiles })) {
+      assertEquals(Deno.readTextFileSync(join(workspacePath, rel)), content, rel);
+    }
+  });
+});

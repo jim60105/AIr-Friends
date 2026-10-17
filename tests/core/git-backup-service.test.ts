@@ -959,3 +959,179 @@ Deno.test("GitBackupService - leaves operator .gitignore untouched - Case C (syn
     assertEquals(content, customGitignore);
   });
 });
+
+// --- Email durable state inclusion (email-platform-surfaces) ---
+//
+// The data-directory backup stages the whole data tree, so email state, the signed
+// sent history and the private source/attachment archive participate without an
+// email-specific inclusion list — while the backup's own redaction keeps the
+// configured credential out of every log line the operator sees.
+
+/** One canonical email user id: the only owner id the message store accepts. */
+const EMAIL_OWNER = `e_${"ab".repeat(32)}`;
+/** Private correspondence marker: proves body bytes are backed up verbatim. */
+const PRIVATE_BODY_SENTINEL = "PRIVATE-CORRESPONDENCE-SENTINEL-4f7c";
+/** Operator credential marker: must never reach any log channel. */
+const BACKUP_CREDENTIAL_SENTINEL = "backup-credential-sentinel-2d9a";
+
+/**
+ * Every durable email file of one deployment, data-dir relative: the email state root
+ * (mailbox/processing/submission journals and the outbound `.eml` evidence) plus one
+ * sender's archive (thread journal, inbound and signed outbound source bytes, parsed
+ * snapshots and attachment payloads).
+ */
+const EMAIL_DURABLE_FILES: Record<string, string> = {
+  "email/mailbox.json": '{"version":1,"fingerprint":"imap.example:owner@example.com:INBOX"}\n',
+  "email/processing.jsonl": '{"v":1,"seq":1,"data":{"state":"accepted"}}\n',
+  "email/submissions.jsonl": '{"v":1,"seq":1,"data":{"operationId":"op-1"}}\n',
+  "email/outbound/op-1.eml": `From: owner@example.com\r\n\r\n${PRIVATE_BODY_SENTINEL}\r\n`,
+  "email/outbound/op-1.meta.json": '{"operationId":"op-1","contentDigest":"deadbeef"}\n',
+  [`workspaces/email/${EMAIL_OWNER}/email/threads.jsonl`]:
+    '{"v":1,"seq":1,"data":{"type":"inbound"}}\n',
+  [`workspaces/email/${EMAIL_OWNER}/email/source/rec-in-1.eml`]:
+    `From: sender@example.org\r\n\r\n${PRIVATE_BODY_SENTINEL}\r\n`,
+  [`workspaces/email/${EMAIL_OWNER}/email/parsed/rec-in-1.json`]:
+    '{"recordId":"rec-in-1","threadId":"th-1"}\n',
+  [`workspaces/email/${EMAIL_OWNER}/email/source/rec-out-1.eml`]:
+    `From: owner@example.com\r\n\r\n${PRIVATE_BODY_SENTINEL}\r\n`,
+  [`workspaces/email/${EMAIL_OWNER}/email/attachments/rec-in-1/att-1`]:
+    `attachment-bytes-${PRIVATE_BODY_SENTINEL}`,
+};
+
+/** Write the whole email fixture tree below the data directory. */
+async function writeEmailDurableFiles(dataDir: string): Promise<void> {
+  for (const [rel, content] of Object.entries(EMAIL_DURABLE_FILES)) {
+    const full = `${dataDir}/${rel}`;
+    await Deno.mkdir(full.slice(0, full.lastIndexOf("/")), { recursive: true });
+    await Deno.writeTextFile(full, content);
+  }
+}
+
+/**
+ * Make the data directory an existing Git repository that stores bytes verbatim.
+ * `core.autocrlf` is pinned per repository: the host's global Git configuration must
+ * not decide whether the private `.eml` bytes in a byte-identity assertion change.
+ */
+async function initDataRepo(dataDir: string): Promise<void> {
+  await gitText(dataDir, ["init", "-b", "master"]);
+  await gitText(dataDir, ["config", "core.autocrlf", "false"]);
+}
+
+/** Run one git command in `cwd`, failing loudly with git's own stderr. */
+async function gitText(cwd: string, args: string[]): Promise<string> {
+  const command = new Deno.Command("git", {
+    args,
+    cwd,
+    stdout: "piped",
+    stderr: "piped",
+    env: { GIT_TERMINAL_PROMPT: "0" },
+  });
+  const { code, stdout, stderr } = await command.output();
+  if (code !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} failed (${code}): ${new TextDecoder().decode(stderr)}`,
+    );
+  }
+  return new TextDecoder().decode(stdout);
+}
+
+/** Every path in the committed tree of `HEAD`, excluding the root tree itself. */
+async function committedPaths(dataDir: string): Promise<string[]> {
+  const output = await gitText(dataDir, ["ls-tree", "-r", "--name-only", "-z", "HEAD"]);
+  return output.split("\0").filter((path) => path.length > 0);
+}
+
+/** Capture every console channel the logger writes to, restoring them in `finally`. */
+function captureAllConsole(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const original = { log: console.log, warn: console.warn, error: console.error };
+  const record = (...args: unknown[]) => {
+    lines.push(args.map((arg) => String(arg)).join(" "));
+  };
+  console.log = record;
+  console.warn = record;
+  console.error = record;
+  return {
+    lines,
+    restore: () => {
+      console.log = original.log;
+      console.warn = original.warn;
+      console.error = original.error;
+    },
+  };
+}
+
+Deno.test("GitBackupService - email state, signed sent history and archive bytes are all backed up", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    await initDataRepo(dataDir);
+    await writeEmailDurableFiles(dataDir);
+    // A reserved native-cache payload stays out of the index; email data is not affected.
+    const reserved =
+      "omp-pools/email:hidden/omp-agent/restricted/xdg-data/omp/natives/18.6.1/x.node";
+    await Deno.mkdir(`${dataDir}/${reserved.slice(0, reserved.lastIndexOf("/"))}`, {
+      recursive: true,
+    });
+    await Deno.writeTextFile(`${dataDir}/${reserved}`, "native payload");
+
+    const service = new GitBackupService(createConfig({ remoteUrl: bareDir }), dataDir);
+    await service.initialize();
+
+    const committed = await committedPaths(dataDir);
+    for (const [rel, content] of Object.entries(EMAIL_DURABLE_FILES)) {
+      assertEquals(committed.includes(rel), true, `${rel} must be committed to the backup`);
+      assertEquals(
+        await gitText(dataDir, ["show", `HEAD:${rel}`]),
+        content,
+        `${rel} must be backed up byte-identically`,
+      );
+    }
+    assertEquals(
+      committed.includes(reserved),
+      false,
+      "the reserved native-cache payload must stay out of the backup",
+    );
+  });
+});
+
+Deno.test("GitBackupService - backup logging never discloses the configured credential", async () => {
+  await withTempGitEnv(async (dataDir, _bareDir) => {
+    await writeEmailDurableFiles(dataDir);
+    const service = new GitBackupService(
+      createConfig({
+        // A syntactically valid HTTPS remote that refuses connections locally: the push
+        // fails, so the failing git invocations (whose argv carries the authenticated
+        // URL) are logged and their redaction is what this test observes.
+        remoteUrl: "https://x-access-token:unused@127.0.0.1:9/private-backup.git",
+        authUser: "x-access-token",
+        authPassword: BACKUP_CREDENTIAL_SENTINEL,
+      }),
+      dataDir,
+    );
+
+    const captured = captureAllConsole();
+    try {
+      await service.initialize();
+    } finally {
+      captured.restore();
+    }
+    const output = captured.lines.join("\n");
+
+    assertEquals(
+      output.includes(BACKUP_CREDENTIAL_SENTINEL),
+      false,
+      "the configured backup credential must never be logged",
+    );
+    // The credential-bearing remote URL is the one argument redaction covers, and the
+    // unreachable remote proves the failing path (not only the happy path) was logged.
+    assertEquals(
+      output.includes("[REDACTED_URL]"),
+      true,
+      `expected a redacted git invocation, got: ${output}`,
+    );
+    // Email data was still committed locally despite the unreachable remote.
+    const committed = await committedPaths(dataDir);
+    for (const rel of Object.keys(EMAIL_DURABLE_FILES)) {
+      assertEquals(committed.includes(rel), true, `${rel} must be committed locally`);
+    }
+  });
+});
