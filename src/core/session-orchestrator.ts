@@ -54,7 +54,6 @@ import type {
 import {
   type EmailResponseAccounting,
   emailResponseFromEvidence,
-  emailResponseSlots,
   emailSessionOwner,
   type EmailSubmissionEvidenceSource,
   EMPTY_EMAIL_RESPONSE,
@@ -75,8 +74,14 @@ import type {
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
-import type { ResolvedReminder } from "../types/reminder.ts";
-import type { ReminderStore } from "./reminder-store.ts";
+import type { EmailReminderSession, ReminderOrigin, ResolvedReminder } from "../types/reminder.ts";
+import {
+  reminderOperationKey,
+  type ReminderStore,
+  sessionEmailOperation,
+} from "./reminder-store.ts";
+import { parseEmailChannelId } from "@platforms/email/message-store.ts";
+import { isSenderAllowed } from "@platforms/email/incoming-auth.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
 import { safeFetch } from "@utils/ssrf.ts";
@@ -194,6 +199,14 @@ const EMAIL_DESTINATION_CLARIFICATION_DIRECTIVE =
  * receipt as "review required".
  */
 const EMAIL_OUTCOME_UNKNOWN_ERROR = "email_submission_outcome_unknown: review-required";
+
+/**
+ * Row 23: the bounded, content-free failure text for an email reminder whose
+ * origin cannot be used (missing/corrupt record, an anchor outside its owner
+ * thread, or a currently revoked/disallowed account). No thread is guessed and
+ * nothing was sent, so the reminder is disabled for operator review.
+ */
+const EMAIL_REMINDER_ORIGIN_REVIEW_ERROR = "email_reminder_origin_review_required";
 
 /**
  * Response from a session
@@ -2472,9 +2485,17 @@ export class SessionOrchestrator {
         const emailSuppressed = hasEmailResponseOrUncertainty(emailAccounting);
         if (emailSession) emailSession.recoveryFenced = false;
 
+        // Row 23: an EMAIL reminder is delivered only when ITS OWN logical
+        // operation submitted mail. The shared reply-state map is keyed by
+        // workspace+channel, so another session replying into this same owner
+        // thread must never mark the reminder delivered.
+        const deliveryConfirmed = platform === "email"
+          ? hasEmailSubmitted(emailAccounting)
+          : replySent;
+
         // Retry if no reply sent
         if (
-          !replySent && !hasEmailSubmitted(emailAccounting) && !emailSuppressed &&
+          !deliveryConfirmed && !hasEmailSubmitted(emailAccounting) && !emailSuppressed &&
           response.stopReason === "end_turn"
         ) {
           sessionLogger.warn("Agent completed without reply, retrying");
@@ -4115,33 +4136,113 @@ export class SessionOrchestrator {
     let emailSession: ActiveSession | null = null;
 
     try {
-      // 1. Resolve DM channel
-      const dmChannelId = await platformAdapter.getDmChannelId(reminder.userId);
-      if (!dmChannelId) {
-        sessionLogger.warn(
-          "Cannot resolve DM channel for user {userId}, disabling reminder {reminderId}",
-          { userId: reminder.userId, reminderId: reminder.id },
+      // 1. Resolve the delivery channel.
+      //
+      // Row 23: an EMAIL reminder is delivered into the user thread it was
+      // created in. Its origin is replayed from the store and re-checked here —
+      // never guessed, and never re-allocated with `getDmChannelId`, which
+      // would silently start a NEW thread.
+      const emailOrigin = platform === "email" ? this.resolveEmailReminderOrigin(reminder) : null;
+      if (platform === "email" && emailOrigin === null) {
+        sessionLogger.error(
+          "Refusing to deliver email reminder {reminderId}: no usable origin (review-required)",
+          { reminderId: reminder.id, userId: reminder.userId },
         );
-        // Create workspace to access reminder store
-        const syntheticEvent: NormalizedEvent = {
-          platform,
-          channelId: "internal",
-          userId: reminder.userId,
-          messageId: `reminder_cancel_${Date.now()}`,
-          isDm: true,
-          guildId: "",
-          content: "",
-          timestamp: new Date(),
-        };
-        const ws = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
-        await reminderStore.cancelReminder(ws, reminder.id);
+        await this.disableReminderForReview(reminder, reminderStore, sessionLogger);
         result = {
           success: false,
           replySent: false,
           fileSent: false,
-          error: "Cannot resolve DM channel — reminder disabled",
+          error: EMAIL_REMINDER_ORIGIN_REVIEW_ERROR,
         };
         return result;
+      }
+      if (emailOrigin !== null) {
+        // A submitted or unresolved prior attempt is never repeated: the
+        // reminder's own durable operation decides, even when a previous tick
+        // failed to disable the reminder record.
+        const prior = this.reminderEmailEvidence(reminder, emailOrigin.owner);
+        if (hasEmailSubmitted(prior)) {
+          sessionLogger.info(
+            "Email reminder {reminderId} was already submitted; disabling without resending",
+            { reminderId: reminder.id },
+          );
+          await this.disableReminderForReview(reminder, reminderStore, sessionLogger);
+          remindersDeliveredTotal.labels(platform, "success").inc();
+          result = { success: true, replySent: false, fileSent: false, emailSubmitted: true };
+          return result;
+        }
+        if (prior.unknown || hasEmailUncertaintyEvidence(prior)) {
+          sessionLogger.error(
+            "Email reminder {reminderId} has an unresolved prior submission; review-required",
+            { reminderId: reminder.id },
+          );
+          await this.disableReminderForReview(reminder, reminderStore, sessionLogger);
+          result = {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            emailUnknown: true,
+            error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+          };
+          return result;
+        }
+        // The persisted anchor must be a record of THIS owner's thread. An
+        // unusable anchor is review-required — another anchor is never chosen.
+        if (
+          typeof platformAdapter.fetchMessage === "function" &&
+          !(await platformAdapter.fetchMessage(
+            emailOrigin.channelId,
+            emailOrigin.replyAnchorRecordId,
+          ))
+        ) {
+          sessionLogger.error(
+            "Email reminder {reminderId} origin anchor is not in the owner thread (review-required)",
+            { reminderId: reminder.id },
+          );
+          await this.disableReminderForReview(reminder, reminderStore, sessionLogger);
+          result = {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: EMAIL_REMINDER_ORIGIN_REVIEW_ERROR,
+          };
+          return result;
+        }
+      }
+
+      let dmChannelId: string;
+      if (emailOrigin !== null) {
+        dmChannelId = emailOrigin.channelId;
+      } else {
+        const resolved = await platformAdapter.getDmChannelId(reminder.userId);
+        if (!resolved) {
+          sessionLogger.warn(
+            "Cannot resolve DM channel for user {userId}, disabling reminder {reminderId}",
+            { userId: reminder.userId, reminderId: reminder.id },
+          );
+          // Create workspace to access reminder store
+          const syntheticEvent: NormalizedEvent = {
+            platform,
+            channelId: "internal",
+            userId: reminder.userId,
+            messageId: `reminder_cancel_${Date.now()}`,
+            isDm: true,
+            guildId: "",
+            content: "",
+            timestamp: new Date(),
+          };
+          const ws = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
+          await reminderStore.cancelReminder(ws, reminder.id);
+          result = {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Cannot resolve DM channel — reminder disabled",
+          };
+          return result;
+        }
+        dmChannelId = resolved;
       }
 
       // 2. Create synthetic DM event
@@ -4165,6 +4266,13 @@ export class SessionOrchestrator {
         isDm: true,
         workspace,
         platformAdapter,
+        // Row 23: bind the reminder's persisted origin and its stable logical
+        // operation to this session. Reminder sessions stay TRIGGERLESS, so
+        // `send-file` keeps its existing refusal and only the reply into this
+        // thread is authorized.
+        ...(emailOrigin === null ? {} : {
+          emailReminder: { reminderId: reminder.id, origin: emailOrigin.origin },
+        }),
         sessionLogger,
       });
       const agentWorkspacePath = setup.agentWorkspacePath;
@@ -4483,9 +4591,13 @@ export class SessionOrchestrator {
         // classification; an unresolved outcome is never treated as delivered.
         const finalEmail = await this.emailResponseFor(emailSession);
         const emailDelivered = hasEmailSubmitted(finalEmail);
+        const reminderDelivered = platform === "email"
+          ? emailDelivered
+          : (replySent || emailDelivered);
+        const reminderReplied = platform === "email" ? emailDelivered : replySent;
 
         // 7. Disable reminder on success
-        if (replySent || emailDelivered) {
+        if (reminderDelivered) {
           await reminderStore.cancelReminder(workspace, reminder.id);
           remindersDeliveredTotal.labels(platform, "success").inc();
           sessionLogger.info("Reminder {reminderId} delivered and disabled", {
@@ -4497,15 +4609,15 @@ export class SessionOrchestrator {
 
         // Row 22: an unresolved email outcome is never reported as delivered, and
         // a submitted email satisfies this reminder without any reply anchor.
-        const reminderSuccess = !finalEmail.unknown && (replySent || emailDelivered);
+        const reminderSuccess = !finalEmail.unknown && reminderDelivered;
         const reminderError = finalEmail.unknown
           ? EMAIL_OUTCOME_UNKNOWN_ERROR
-          : (replySent ? undefined : "Agent did not send a reply");
+          : (reminderReplied ? undefined : "Agent did not send a reply");
 
         // Audit: session_end (reminder)
         await auditWriter?.write("session_end", {
           success: reminderSuccess,
-          replySent,
+          replySent: reminderReplied,
           fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: reminderError,
@@ -4514,7 +4626,7 @@ export class SessionOrchestrator {
 
         result = {
           success: reminderSuccess,
-          replySent,
+          replySent: reminderReplied,
           fileSent: false,
           error: reminderError,
         };
@@ -5216,15 +5328,15 @@ export class SessionOrchestrator {
     }
     const evidence = this.emailSubmissionEvidence;
     const owner = emailSessionOwner(session);
-    const workId = session.emailWorkId;
-    if (!evidence || owner === undefined || workId === undefined || workId.trim() === "") {
+    const identity = sessionEmailOperation(session);
+    if (!evidence || owner === undefined || identity === undefined) {
       return session.emailResponse ?? EMPTY_EMAIL_RESPONSE;
     }
     try {
       session.emailResponse = emailResponseFromEvidence({
         owner,
-        workId,
-        slots: emailResponseSlots(session.emailDestinationGrants),
+        workId: identity.workId,
+        slots: identity.slots,
         accounting: session.emailResponse,
         lookup: (lookupOwner, key) => evidence.lookup(lookupOwner, key),
       });
@@ -5237,6 +5349,118 @@ export class SessionOrchestrator {
       session.emailResponse = recordEmailUncertainty(session.emailResponse);
     }
     return session.emailResponse;
+  }
+
+  /**
+   * Resolve the persisted origin of an email reminder into a usable delivery
+   * channel (row 23), re-checking the CURRENT allowlist.
+   *
+   * Returns null when the origin is missing, malformed, belongs to another
+   * owner, or the account is no longer an ENABLED email account. The caller
+   * never substitutes a newly allocated thread for a null result.
+   */
+  private resolveEmailReminderOrigin(
+    reminder: ResolvedReminder,
+  ):
+    | { owner: string; channelId: string; replyAnchorRecordId: string; origin: ReminderOrigin }
+    | null {
+    const origin = reminder.origin;
+    if (
+      !origin || typeof origin.channelId !== "string" ||
+      typeof origin.replyAnchorRecordId !== "string"
+    ) {
+      return null;
+    }
+    const anchor = origin.replyAnchorRecordId.trim();
+    if (anchor === "") return null;
+    let owner: string;
+    let threadId: string;
+    try {
+      ({ owner, threadId } = parseEmailChannelId(origin.channelId));
+    } catch {
+      return null;
+    }
+    const expectedOwner = typeof reminder.userId === "string"
+      ? reminder.userId.trim().toLowerCase()
+      : "";
+    if (owner !== expectedOwner) return null;
+    // Fire-time allowlist recheck: the account must be enabled and allowed NOW,
+    // not merely when the reminder was created. The mail service re-checks the
+    // same allowlist immediately before submission.
+    if (!isSenderAllowed(owner, this.config.channels ?? [])) return null;
+    return {
+      owner,
+      channelId: `mail:${owner}:${threadId}`,
+      replyAnchorRecordId: anchor,
+      origin: { channelId: `mail:${owner}:${threadId}`, replyAnchorRecordId: anchor },
+    };
+  }
+
+  /**
+   * Durable evidence of the reminder's OWN logical operation (row 23). A
+   * missing evidence source reports NO KNOWN prior operation: no journal is
+   * wired in this build, so the reminder proceeds and the mail service's own
+   * operation key still answers a repeated send from its journal. An unreadable
+   * journal, by contrast, cannot prove that nothing was submitted and is
+   * reported as unresolved instead.
+   */
+  private reminderEmailEvidence(
+    reminder: ResolvedReminder,
+    owner: string,
+  ): EmailResponseAccounting {
+    const evidence = this.emailSubmissionEvidence;
+    if (!evidence) return EMPTY_EMAIL_RESPONSE;
+    const operation = reminderOperationKey(reminder.id);
+    try {
+      return emailResponseFromEvidence({
+        owner,
+        workId: operation.workId,
+        slots: [operation.actionSlot],
+        lookup: (lookupOwner, key) => evidence.lookup(lookupOwner, key),
+      });
+    } catch (error) {
+      logger.error("Failed to read durable email evidence for reminder {reminderId}", {
+        reminderId: reminder.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return recordEmailUncertainty(EMPTY_EMAIL_RESPONSE);
+    }
+  }
+
+  /**
+   * Disable a reminder that cannot be delivered automatically (row 23).
+   *
+   * A failed write is logged as its own persistence error and NEVER replaces the
+   * caller's verdict: the caller still returns the review-required response, and
+   * the reminder's durable operation state is what prevents any later resend.
+   */
+  private async disableReminderForReview(
+    reminder: ResolvedReminder,
+    reminderStore: ReminderStore,
+    sessionLogger: Logger,
+  ): Promise<void> {
+    try {
+      const event: NormalizedEvent = {
+        platform: reminder.platform as Platform,
+        channelId: "internal",
+        userId: reminder.userId,
+        messageId: `reminder_review_${Date.now()}`,
+        isDm: true,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(event);
+      await reminderStore.cancelReminder(workspace, reminder.id);
+    } catch (error) {
+      sessionLogger.error(
+        "Failed to disable reminder {reminderId} after a review-required verdict",
+        {
+          reminderId: reminder.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
   }
 
   /**
@@ -5266,9 +5490,17 @@ export class SessionOrchestrator {
     response.emailUnknown = accounting.unknown || hasEmailUncertaintyEvidence(accounting) ||
       runUncertain;
     const owner = emailSessionOwner(session);
-    const workId = session.emailWorkId;
-    if (owner !== undefined && workId !== undefined && workId.trim() !== "") {
-      response.emailSend = { workId, owner };
+    const identity = sessionEmailOperation(session);
+    if (owner !== undefined && identity !== undefined) {
+      // Row 23: a reminder session reports its own stable operation, so a
+      // fallback never re-binds the reminder's mail to another slot.
+      response.emailSend = {
+        workId: identity.workId,
+        owner,
+        ...(session.emailReminder === undefined
+          ? {}
+          : { actionSlot: reminderOperationKey(session.emailReminder.reminderId).actionSlot }),
+      };
     }
     return response;
   }
@@ -5649,6 +5881,12 @@ export class SessionOrchestrator {
     guildId?: string;
     platformAdapter?: PlatformAdapter;
     triggerEvent?: NormalizedEvent;
+    /**
+     * Row 23: the host-bound identity of a scheduled email reminder session
+     * (reminder id + persisted origin). Present only for such a session; the
+     * agent can never see or supply it.
+     */
+    emailReminder?: EmailReminderSession;
     sessionLogger: ReturnType<typeof logger.child>;
   }): Promise<{
     agentWorkspacePath: string;
@@ -5678,6 +5916,9 @@ export class SessionOrchestrator {
       emailWorkId: params.triggerEvent
         ? emailWorkReceiptOf(params.triggerEvent)?.workId
         : undefined,
+      // Row 23: a scheduled email reminder session has no inbound work receipt;
+      // its own reminder identity is the host-bound operation binding.
+      ...(params.emailReminder === undefined ? {} : { emailReminder: params.emailReminder }),
     });
 
     sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });

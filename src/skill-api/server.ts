@@ -5,9 +5,10 @@ import { type ActiveSession, SessionRegistry } from "./session-registry.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import type { SkillContext, SkillResult } from "@skills/types.ts";
 import { emailComposeAuditParams } from "@skills/email-handler.ts";
+import { buildEmailReminderOrigin } from "@skills/reminder-handler.ts";
+import { reminderOperationKey, sessionEmailOperation } from "@core/reminder-store.ts";
 import {
   EMAIL_HOST_SKILL_SLOTS,
-  emailResponseSlots,
   emailSessionOwner,
   type EmailSubmissionEvidenceSource,
 } from "@core/email-response-accounting.ts";
@@ -143,14 +144,41 @@ export class SkillAPIServer {
     skillName: string,
   ): EmailSendContext | undefined {
     const owner = emailSessionOwner(session);
+    if (owner === undefined) return undefined;
+    // Row 23: a scheduled email reminder carries its OWN stable operation
+    // (`workId` = reminder id, partitioned slot `reminder:<id>`), never the
+    // session's random id, so a restarted reminder is answered by the durable
+    // journal instead of submitting a second message.
+    const reminder = session.emailReminder;
+    if (reminder !== undefined) {
+      return { ...reminderOperationKey(reminder.reminderId), owner };
+    }
     const workId = session.emailWorkId;
-    if (owner === undefined || workId === undefined || workId.trim() === "") return undefined;
+    if (workId === undefined || workId.trim() === "") return undefined;
     const actionSlot = EMAIL_HOST_SKILL_SLOTS[skillName];
     return {
       workId,
       owner,
       ...(actionSlot === undefined ? {} : { actionSlot }),
     };
+  }
+
+  /**
+   * The logical operation slot a skill's submission metadata belongs to.
+   *
+   * The ordinary adapter-backed skills keep their kind slot; only a scheduled
+   * email reminder binds the partitioned `reminder:<id>` slot (row 23), and
+   * ONLY for those adapter-backed skills — relabeling a different operation
+   * (e.g. a compose) with the reminder slot would merge unrelated operations in
+   * the accounting.
+   */
+  private hostEmailSkillSlot(session: ActiveSession, skillName: string): string | undefined {
+    const ordinarySlot = EMAIL_HOST_SKILL_SLOTS[skillName];
+    if (ordinarySlot === undefined) return undefined;
+    const reminder = session.emailReminder;
+    return reminder === undefined
+      ? ordinarySlot
+      : reminderOperationKey(reminder.reminderId).actionSlot;
   }
 
   /**
@@ -177,7 +205,7 @@ export class SkillAPIServer {
     result: SkillResult,
   ): boolean {
     if (session.platform !== "email") return false;
-    const actionSlot = EMAIL_HOST_SKILL_SLOTS[skillName];
+    const actionSlot = this.hostEmailSkillSlot(session, skillName);
     const metadata = result.emailSubmission;
     if (metadata) {
       this.sessionRegistry.recordEmailSubmission(session.id, metadata, actionSlot);
@@ -198,13 +226,13 @@ export class SkillAPIServer {
   private reconcileDurableEmailEvidence(session: ActiveSession): boolean {
     const evidence = this.emailSubmissionEvidence;
     const owner = emailSessionOwner(session);
-    const workId = session.emailWorkId;
-    if (!evidence || owner === undefined || workId === undefined || workId.trim() === "") {
+    const identity = sessionEmailOperation(session);
+    if (!evidence || owner === undefined || identity === undefined) {
       return false;
     }
     let submitted = false;
-    for (const actionSlot of emailResponseSlots(session.emailDestinationGrants)) {
-      const recorded = evidence.lookup(owner, { workId, actionSlot });
+    for (const actionSlot of identity.slots) {
+      const recorded = evidence.lookup(owner, { workId: identity.workId, actionSlot });
       if (!recorded || recorded.phase === "prepared" || recorded.phase === "failed") continue;
       this.sessionRegistry.recordEmailSubmission(session.id, recorded, actionSlot);
       if (recorded.phase === "submitted") submitted = true;
@@ -634,6 +662,19 @@ export class SkillAPIServer {
       }
     }
 
+    // A scheduled email reminder session may only reply into its own reminder
+    // operation; composing a NEW message is a different (unthreaded) operation
+    // that no reminder authorizes, so it is refused at the host boundary before
+    // any request file is read.
+    if (skillName === "send-email" && session.emailReminder !== undefined) {
+      return {
+        success: false,
+        error: "send-email is not available in a scheduled reminder session; only a reply into " +
+          "the reminder's own thread is authorized. Nothing was sent.",
+        statusCode: 403,
+      };
+    }
+
     // Send-file quota and doom-loop protection (independent of the reply counters)
     if (skillName === "send-file") {
       // send-file delivers externally visible output; it is only meaningful in
@@ -707,7 +748,12 @@ export class SkillAPIServer {
     // Build skill context. The reply anchor is resolved once per call and
     // captured in a local so it can be recorded as the per-reply anchor
     // (`lastReplyAnchorMessageId`) when a send-reply succeeds.
-    const replyAnchor = session.lastFileMessageId ?? session.triggerEvent?.messageId;
+    // Row 23: a scheduled email reminder reuses its PERSISTED reply anchor, so
+    // the reminder's reply threads to the message the user originally asked
+    // about — not to whatever the current (possibly foreign) session last sent.
+    const reminder = session.emailReminder;
+    const replyAnchor = reminder?.origin.replyAnchorRecordId ??
+      session.lastFileMessageId ?? session.triggerEvent?.messageId;
     const skillContext: SkillContext = {
       // The Skill API session id IS the literal the session prompt renders as
       // `--session-id`, and it keys the payload staging directory; handlers that
@@ -726,6 +772,13 @@ export class SkillAPIServer {
       workspaceManager: session.workspaceManager,
       canWriteChannelMemory: session.canWriteChannelMemory,
       emailWorkId: session.emailWorkId,
+      // Row 23: the host-resolved origin of the reminder this email session may
+      // set. For a reminder session it is the persisted origin; for an ordinary
+      // inbound email session it is derived from this session's own channel and
+      // reply anchor. Never populated for a non-email session.
+      emailReminderOrigin: session.platform === "email"
+        ? (reminder?.origin ?? buildEmailReminderOrigin(session.channelId, replyAnchor))
+        : undefined,
       // Row 19: the session's immutable grants, exactly as the host recorded
       // them. Read-only for handlers; no request parameter can reach this field.
       emailDestinationGrants: session.emailDestinationGrants,

@@ -1,12 +1,18 @@
 // tests/skills/reminder-handler.test.ts
 
 import { assertEquals } from "@std/assert";
-import { ReminderHandler } from "../../src/skills/reminder-handler.ts";
+import {
+  buildEmailReminderOrigin,
+  EMAIL_REMINDER_ORIGIN_ERROR,
+  ReminderHandler,
+  validateEmailReminderOrigin,
+} from "../../src/skills/reminder-handler.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
-import type { ResolvedReminder } from "../../src/types/reminder.ts";
+import type { ReminderEntry, ResolvedReminder } from "../../src/types/reminder.ts";
 import type { RemindersConfig } from "../../src/types/config.ts";
 import type { SkillContext } from "../../src/skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
+import type { Platform } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 
 const createMockPlatformAdapter = (): PlatformAdapter => {
@@ -35,7 +41,7 @@ const createMockPlatformAdapter = (): PlatformAdapter => {
 const makeWorkspace = (
   tempDir: string,
   isDm = true,
-  platform = "discord" as const,
+  platform: Platform = "discord",
   userId = "u1",
 ): WorkspaceInfo => {
   const path = `${tempDir}/workspaces/${platform}/${userId}`;
@@ -652,4 +658,207 @@ Deno.test("handleListReminders - non-DM context returns error", async () => {
   const res = await handler.handleListReminders({}, context);
   assertEquals(res.success, false);
   assertEquals(typeof res.error, "string");
+});
+
+// ---------------------------------------------------------------------------
+// Row 23: email reminder origin capture
+// ---------------------------------------------------------------------------
+
+/** A canonical mailbox owner id (`e_<sha256>`) for the email reminder cases. */
+const EMAIL_OWNER = `e_${"ab".repeat(32)}`;
+const EMAIL_THREAD = "11111111-1111-4111-8111-111111111111";
+const EMAIL_CHANNEL = `mail:${EMAIL_OWNER}:${EMAIL_THREAD}`;
+const EMAIL_ANCHOR = "22222222-2222-4222-8222-222222222222";
+
+function makeEmailContext(
+  workspace: WorkspaceInfo,
+  overrides: Partial<SkillContext> = {},
+): SkillContext {
+  return {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: EMAIL_CHANNEL,
+    userId: EMAIL_OWNER,
+    emailReminderOrigin: { channelId: EMAIL_CHANNEL, replyAnchorRecordId: EMAIL_ANCHOR },
+    ...overrides,
+  };
+}
+
+function makeEmailHandler(
+  configOverrides: Partial<RemindersConfig> = {},
+): {
+  handler: ReminderHandler;
+  added: () => Record<string, unknown> | null;
+  config: RemindersConfig;
+} {
+  const config: RemindersConfig = {
+    enabled: true,
+    maxRemindersPerUser: 3,
+    minIntervalMs: 1000,
+    persistPath: "reminders.jsonl",
+    checkIntervalMs: 1000,
+    ...configOverrides,
+  };
+  let captured: Record<string, unknown> | null = null;
+  const mockStore = {
+    getActiveCount: () => Promise.resolve(0),
+    addReminder: (_ws: unknown, entry: unknown) => {
+      captured = entry as Record<string, unknown>;
+      return Promise.resolve();
+    },
+    loadReminders: () => Promise.resolve([]),
+    cancelReminder: () => Promise.resolve(),
+  } as unknown as ReminderStore;
+  return {
+    handler: new ReminderHandler(mockStore, config),
+    added: () => captured,
+    config,
+  };
+}
+
+Deno.test("handleSetReminder - email platform without a host origin is refused", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { handler, added } = makeEmailHandler();
+    const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
+    await Deno.mkdir(workspace.path, { recursive: true });
+    const context = makeEmailContext(workspace, { emailReminderOrigin: undefined });
+
+    const res = await handler.handleSetReminder({
+      scheduledAt: new Date(Date.now() + 5000).toISOString(),
+      message: "pay rent",
+    }, context);
+
+    assertEquals(res.success, false);
+    assertEquals(res.error, EMAIL_REMINDER_ORIGIN_ERROR);
+    assertEquals(added(), null);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("handleSetReminder - email origin of another owner is refused", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { handler, added } = makeEmailHandler();
+    const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
+    await Deno.mkdir(workspace.path, { recursive: true });
+    const otherOwner = `e_${"cd".repeat(32)}`;
+    const context = makeEmailContext(workspace, {
+      emailReminderOrigin: {
+        channelId: `mail:${otherOwner}:${EMAIL_THREAD}`,
+        replyAnchorRecordId: EMAIL_ANCHOR,
+      },
+    });
+
+    const res = await handler.handleSetReminder({
+      scheduledAt: new Date(Date.now() + 5000).toISOString(),
+      message: "x",
+    }, context);
+
+    assertEquals(res.success, false);
+    assertEquals(res.error, EMAIL_REMINDER_ORIGIN_ERROR);
+    assertEquals(added(), null);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("handleSetReminder - malformed email origin channel is refused", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { handler, added } = makeEmailHandler();
+    const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
+    await Deno.mkdir(workspace.path, { recursive: true });
+    // Wrong thread shape and a missing anchor: both are refused.
+    for (
+      const origin of [
+        { channelId: `mail:${EMAIL_OWNER}:not-a-thread`, replyAnchorRecordId: EMAIL_ANCHOR },
+        { channelId: EMAIL_CHANNEL, replyAnchorRecordId: "  " },
+      ]
+    ) {
+      const res = await handler.handleSetReminder({
+        scheduledAt: new Date(Date.now() + 5000).toISOString(),
+        message: "x",
+      }, makeEmailContext(workspace, { emailReminderOrigin: origin }));
+      assertEquals(res.success, false);
+      assertEquals(res.error, EMAIL_REMINDER_ORIGIN_ERROR);
+    }
+    assertEquals(added(), null);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("handleSetReminder - email reminder persists its owner-validated origin", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { handler, added } = makeEmailHandler();
+    const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
+    await Deno.mkdir(workspace.path, { recursive: true });
+    // Upper-case channel/anchor inputs are normalized to the stored form.
+    const context = makeEmailContext(workspace, {
+      emailReminderOrigin: {
+        channelId: EMAIL_CHANNEL.toUpperCase().replace("MAIL:", "mail:"),
+        replyAnchorRecordId: `  ${EMAIL_ANCHOR}  `,
+      },
+    });
+
+    const scheduledAt = new Date(Date.now() + 5000).toISOString();
+    const res = await handler.handleSetReminder({ scheduledAt, message: "pay rent" }, context);
+
+    assertEquals(res.success, true);
+    const entry = added() as unknown as ReminderEntry;
+    assertEquals(entry.platform, "email");
+    assertEquals(entry.origin, {
+      channelId: EMAIL_CHANNEL,
+      replyAnchorRecordId: EMAIL_ANCHOR,
+    });
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("handleSetReminder - Discord reminder carries no origin field", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { handler, added } = makeEmailHandler();
+    const workspace = makeWorkspace(tempDir, true, "discord", "u20");
+    await Deno.mkdir(workspace.path, { recursive: true });
+    const res = await handler.handleSetReminder({
+      scheduledAt: new Date(Date.now() + 5000).toISOString(),
+      message: "stand up",
+    }, {
+      workspace,
+      platformAdapter: createMockPlatformAdapter(),
+      channelId: "dm-ch",
+      userId: "u20",
+    });
+
+    assertEquals(res.success, true);
+    assertEquals("origin" in (added() as Record<string, unknown>), false);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("buildEmailReminderOrigin - normalizes valid input and rejects invalid input", () => {
+  assertEquals(buildEmailReminderOrigin(EMAIL_CHANNEL, EMAIL_ANCHOR), {
+    channelId: EMAIL_CHANNEL,
+    replyAnchorRecordId: EMAIL_ANCHOR,
+  });
+  assertEquals(buildEmailReminderOrigin(EMAIL_CHANNEL, "   "), undefined);
+  assertEquals(buildEmailReminderOrigin("not-a-channel", EMAIL_ANCHOR), undefined);
+  assertEquals(buildEmailReminderOrigin(`mail:${EMAIL_OWNER}:bad`, EMAIL_ANCHOR), undefined);
+});
+
+Deno.test("validateEmailReminderOrigin - binds the origin owner to the reminder owner", () => {
+  const origin = { channelId: EMAIL_CHANNEL, replyAnchorRecordId: EMAIL_ANCHOR };
+  assertEquals(validateEmailReminderOrigin(origin, EMAIL_OWNER.toUpperCase()), origin);
+  assertEquals(validateEmailReminderOrigin(origin, "someone-else"), undefined);
+  assertEquals(validateEmailReminderOrigin(undefined, EMAIL_OWNER), undefined);
+  assertEquals(
+    validateEmailReminderOrigin({ ...origin, replyAnchorRecordId: "" }, EMAIL_OWNER),
+    undefined,
+  );
 });

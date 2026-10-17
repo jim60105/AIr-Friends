@@ -9,8 +9,59 @@ import type {
   ReminderPatch,
   ResolvedReminder,
 } from "../types/reminder.ts";
+import type { EmailOperationKey } from "@platforms/email/submission-store.ts";
+import { emailResponseSlots } from "./email-response-accounting.ts";
 
 const logger = createLogger("ReminderStore");
+
+/** The logical email operation identity a host session's sends belong to. */
+export interface SessionEmailOperation {
+  workId: string;
+  slots: readonly string[];
+}
+
+/**
+ * Email operation identity of a host session (row 23 helper).
+ *
+ * An ordinary email session sends under its durable inbound work id and the
+ * ordinary slots plus one partition per destination grant. A scheduled email
+ * reminder session has no inbound work: its sends belong to the ONE stable
+ * `reminder:<id>` operation of that reminder, so a restarted run is answered
+ * from the durable journal instead of submitting again.
+ *
+ * The parameter is structural on purpose: this is the shared identity rule for
+ * the Skill API host and the orchestrator, and neither needs the full session
+ * type to apply it.
+ */
+export function sessionEmailOperation(session: {
+  emailWorkId?: string;
+  emailReminder?: { reminderId: string };
+  emailDestinationGrants?: readonly { grantId: string }[];
+}): SessionEmailOperation | undefined {
+  const reminder = session.emailReminder;
+  if (reminder !== undefined && reminder.reminderId.trim() !== "") {
+    const operation = reminderOperationKey(reminder.reminderId);
+    return { workId: operation.workId, slots: [operation.actionSlot] };
+  }
+  const workId = session.emailWorkId;
+  if (workId === undefined || workId.trim() === "") return undefined;
+  return { workId, slots: emailResponseSlots(session.emailDestinationGrants) };
+}
+
+/**
+ * Stable logical email operation of ONE scheduled reminder (row 23).
+ *
+ * Both the work id and the action slot derive from the durable reminder id, so
+ * a restarted reminder (a fresh session) reuses the SAME durable journal
+ * operation instead of authorizing a second SMTP transaction. Mirrors the
+ * row-24 `spontaneousOperationKey` contract.
+ */
+export function reminderOperationKey(reminderId: string): EmailOperationKey {
+  return {
+    workId: reminderId,
+    actionSlot: `reminder:${reminderId}`,
+  };
+}
 
 export class ReminderStore {
   constructor(private readonly persistPath: string) {}
@@ -129,6 +180,10 @@ export class ReminderStore {
           platform: event.platform,
           userId: event.userId,
           enabled: event.enabled,
+          // Row 23: the persisted email origin is replayed verbatim. Records
+          // written before this field existed carry no origin and resolve
+          // exactly as before (no migration, no synthesized origin).
+          ...(isReminderOrigin(event.origin) ? { origin: event.origin } : {}),
         });
       } else if (event.type === "reminder-patch") {
         const patches = patchesMap.get(event.targetId) ?? [];
@@ -152,4 +207,22 @@ export class ReminderStore {
 
     return Array.from(remindersMap.values());
   }
+}
+
+/**
+ * Whether a replayed JSONL value is a structurally usable reminder origin.
+ *
+ * The JSONL parser returns asserted types, so this is the runtime guard that
+ * decides whether the origin may be replayed at all. Anything else (a null, a
+ * missing field, a non-string) is treated as ABSENT rather than propagated;
+ * the scheduler then refuses to guess a thread for an email reminder.
+ */
+function isReminderOrigin(
+  value: unknown,
+): value is { channelId: string; replyAnchorRecordId: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { channelId?: unknown; replyAnchorRecordId?: unknown };
+  return typeof candidate.channelId === "string" && candidate.channelId.trim() !== "" &&
+    typeof candidate.replyAnchorRecordId === "string" &&
+    candidate.replyAnchorRecordId.trim() !== "";
 }
