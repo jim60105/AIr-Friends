@@ -30,6 +30,7 @@ import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { ensureOpencodeSkillDiscoveryDeclaration } from "@utils/opencode-paths.ts";
 import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
 import { EmailSpontaneousStore } from "@platforms/email/spontaneous-store.ts";
+import { composeEmailPlatform, type EmailPlatformRuntime } from "@platforms/email/activation.ts";
 import {
   type SubmissionRecoveryResult,
   SubmissionStore,
@@ -76,6 +77,11 @@ export interface AppContext {
   emailSubmissionStore: SubmissionStore | null;
   /** Result of startup recovery on the submission store, if performed. */
   emailSubmissionRecoveryResult?: SubmissionRecoveryResult | null;
+  /**
+   * Composed production email platform, or null when email is disabled or its durable state
+   * could not be recovered (in which case email stays blocked and other platforms continue).
+   */
+  emailPlatform: EmailPlatformRuntime | null;
   savedSchedulerState: Record<string, string>;
   gelfTransport: GelfTransport | null;
   yolo: boolean;
@@ -302,6 +308,39 @@ export async function bootstrap(
   logger.info("Initializing platform registry");
   const platformRegistry = getPlatformRegistry();
 
+  // Compose the production email platform BEFORE any adapter connects. The composer replays the
+  // durable submission journal first, then builds the real stores, protocol clients, poller,
+  // mail service and adapter. A recovery failure leaves email blocked (no adapter, no skill, no
+  // scheduler lane) instead of enabling ingress on unknown evidence; configuration failures
+  // already aborted startup during config loading.
+  let emailPlatform: EmailPlatformRuntime | null = null;
+  let emailSubmissionStore: SubmissionStore | null = null;
+  let emailSubmissionRecoveryResult: SubmissionRecoveryResult | null = null;
+  if (config.platforms.email?.enabled) {
+    logger.info("Composing email platform");
+    try {
+      emailPlatform = await composeEmailPlatform({ config });
+      emailSubmissionStore = emailPlatform.submissionStore;
+      emailSubmissionRecoveryResult = emailPlatform.submissionRecovery;
+      // Install every seam before registration/connection: work receipts, submission evidence,
+      // grant preflight and the send-email skill all observe the same durable state.
+      agentCore.setEmailPlatform(emailPlatform.services);
+      platformRegistry.register(emailPlatform.adapter);
+      agentCore.registerPlatform(emailPlatform.adapter);
+      logger.info("Email platform composed and registered (recovered {Total} submission(s))", {
+        Total: emailPlatform.submissionRecovery.totalTracked,
+      });
+    } catch (error) {
+      logger.error(
+        "Email platform remains blocked: its durable state could not be recovered safely",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      emailPlatform = null;
+      emailSubmissionStore = null;
+      emailSubmissionRecoveryResult = null;
+    }
+  }
+
   // Register Discord adapter if configured
   if (config.platforms.discord.enabled) {
     logger.info("Registering Discord adapter");
@@ -330,19 +369,14 @@ export async function bootstrap(
   const spontaneousScheduler = new SpontaneousScheduler(config);
   // Email spontaneous occurrence identity is durable and file-backed, so the lane only
   // exists when the email platform is configured for spontaneous posting at all.
-  // Production email stays unavailable until `email-activation` removes the guard.
   const emailSpontaneousConfig = config.platforms.email;
-  let emailSubmissionStore: SubmissionStore | null = null;
   let emailSpontaneousStore: EmailSpontaneousStore | null = null;
-  let emailSubmissionRecoveryResult: SubmissionRecoveryResult | null = null;
-  if (emailSpontaneousConfig?.enabled && emailSpontaneousConfig.spontaneousPost?.enabled) {
-    const emailRoot = join(config.workspace.repoPath, "email");
+  if (emailSubmissionStore && emailSpontaneousConfig?.spontaneousPost?.enabled) {
+    const emailRoot = emailPlatform!.emailRoot;
     // The durable occurrence lane classifies a dispatched tick from its recorded submission
     // evidence, so the journal must be replayed BEFORE the lane restores: an unattached or
     // unreplayed provider cannot tell "this tick never submitted" from "evidence not loaded"
     // and would have to fail closed on every tick.
-    emailSubmissionStore = new SubmissionStore(emailRoot);
-    emailSubmissionRecoveryResult = await emailSubmissionStore.recover();
     emailSpontaneousStore = new EmailSpontaneousStore({
       emailRoot,
       evidence: emailSubmissionStore,
@@ -753,6 +787,7 @@ export async function bootstrap(
     schedulerStateStore,
     emailSubmissionStore,
     emailSubmissionRecoveryResult,
+    emailPlatform,
     savedSchedulerState,
     gelfTransport,
     yolo,

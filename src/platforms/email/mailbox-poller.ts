@@ -131,6 +131,8 @@ export interface EmailMailboxPollerOptions {
   transport: ImapTransport;
   /** Durable mailbox journal; its fingerprint MUST match the configured mailbox identity. */
   mailboxStore: MailboxStore;
+  /** Already replayed startup journal; never replay a live store twice. */
+  mailboxRecovery?: MailboxRecoveryResult;
   /** Owner-scoped message history store. */
   messageStore: EmailMessageStore;
   /** Configured channels provide the sender allowlist. */
@@ -171,6 +173,7 @@ export class EmailMailboxPoller {
   private readonly batchLimit: number;
   private readonly historyLimit: number;
   private readonly workIdFactory: () => string;
+  private readonly initialRecovery?: MailboxRecoveryResult;
 
   private readonly folder: string;
   private readonly fingerprint: string;
@@ -194,6 +197,7 @@ export class EmailMailboxPoller {
     this.config = options.config;
     this.transport = options.transport;
     this.mailboxStore = options.mailboxStore;
+    this.initialRecovery = options.mailboxRecovery;
     this.messageStore = options.messageStore;
     this.channels = options.channels;
     this.emit = options.emit;
@@ -330,7 +334,7 @@ export class EmailMailboxPoller {
     if (this.recovery) return Promise.resolve(this.recovery);
     if (this.recoveryInFlight) return this.recoveryInFlight;
     const run = (async () => {
-      const result = await this.mailboxStore.recover();
+      const result = this.initialRecovery ?? await this.mailboxStore.recover();
       this.recovery = result;
       this.pendingAccepted = result.unstarted.map((entry) => ({
         ...entry,

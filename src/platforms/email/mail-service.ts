@@ -305,6 +305,13 @@ export class EmailMailService {
   private recoveryPromise: Promise<void> | null = null;
   private recoveryUnavailable = false;
   private unknownRecovered: string[] = [];
+  /**
+   * Submissions currently executing in this service.
+   *
+   * Shutdown drains these before protocol clients close, so no accepted submission is abandoned
+   * mid-journal-write. A submission that already reached a terminal state is never resubmitted.
+   */
+  private readonly inFlight = new Set<Promise<EmailSendOutcome>>();
 
   constructor(options: EmailMailServiceOptions) {
     if (!options?.config) {
@@ -359,6 +366,41 @@ export class EmailMailService {
    * transaction.
    */
   async send(draft: EmailDraft): Promise<EmailSendOutcome> {
+    if (this.admissionClosed) throw new Error("Email submission admission is closed");
+    const submission = this.sendInternal(draft);
+    this.inFlight.add(submission);
+    try {
+      return await submission;
+    } finally {
+      this.inFlight.delete(submission);
+    }
+  }
+
+  /**
+   * Wait until every in-flight submission and sent-copy lane has settled.
+   *
+   * Used by activation shutdown: the poll round and its session hand-off have already settled
+   * (the adapter stopped first), so this drains submissions started through the Skill API. It
+   * awaits the service's own work only; it never starts, resumes or retries a submission.
+   */
+  async drain(): Promise<void> {
+    while (this.inFlight.size > 0) {
+      await Promise.allSettled([...this.inFlight]);
+    }
+    const copyLane = COPY_LANES.get(this.imap);
+    if (copyLane) {
+      await copyLane.catch(() => undefined);
+    }
+  }
+
+  /** Permanently fence new submissions before shutdown drains admitted work. */
+  stopAdmission(): void {
+    this.admissionClosed = true;
+  }
+
+  private admissionClosed = false;
+
+  private async sendInternal(draft: EmailDraft): Promise<EmailSendOutcome> {
     const owner = this.assertDraftShape(draft);
     const key = validateOperationKey(draft.operationKey);
     await this.ensureRecovered();

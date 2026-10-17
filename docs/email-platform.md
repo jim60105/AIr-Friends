@@ -43,9 +43,69 @@ All email settings default to disabled and are exposed across the configuration 
 | `spontaneousPost.maxIntervalMs`           | `EMAIL_SPONTANEOUS_MAX_INTERVAL_MS`           | `43200000` (12 hours)                          |
 | `spontaneousPost.contextFetchProbability` | `EMAIL_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` | `0.5`                                          |
 
-### Security & Activation Guard
+### Production Activation & Lifecycle (Owned by `email-activation`)
 
-Production email activation is guarded until the `email-activation` change is completed. Setting `platforms.email.enabled: true` runs transport and trust validation and then halts startup with a `ConfigError` indicating production activation is unavailable in this release.
+Setting `platforms.email.enabled: true` composes the complete production stack through
+`composeEmailPlatform` (`src/platforms/email/activation.ts`) from `bootstrap()`: the durable
+submission journal, the owner-scoped message store, the durable mailbox journal, the serialized
+IMAP poller, the durable mail service, the platform adapter and the destination-grant preflight.
+There is no placeholder adapter and no second composition path.
+
+**Fail-closed startup.** Config loading and the composer both revalidate the typed configuration
+before any client is constructed. Only certificate-validated `tls` or mandatory `starttls` is
+accepted (plaintext and opportunistic TLS are prohibited), both mail credentials are required,
+and `receivingAuth.authservId` must name the trusted receiver while
+`receivingAuth.attestedStripping` must be `true`. A missing or unattested setting fails startup
+explicitly with a `ConfigError`; email is never activated on an insecure or unauthenticated
+transport.
+
+**Startup order.** The awaited workspace reclamation completes first. Both durable journals are
+then recovered BEFORE any transport exists: a corrupted or unreadable journal leaves email
+blocked (no adapter, no skill, no spontaneous lane) while the other platforms continue. The
+adapter is installed on the connection-status registry and `AgentCore` (work receipts,
+submission evidence, grant preflight and `send-email`) before `startPlatforms()` connects it. On
+`connect()` the adapter consumes the recovered mailbox state and resumes accepted-unstarted work;
+only then does it schedule rounds, so its first-activation boundary still excludes preexisting
+mail.
+
+**Shutdown order.** The schedulers stop first, then the email platform: submission admission is
+permanently closed, registry reconnect cannot reopen the adapter, poll admission stops and
+the in-flight round and its session hand-off settle, in-flight submissions and their durable
+journal writes drain, and only then do the IMAP clients close. SMTP is never retried. An
+interrupted submission keeps its durable uncertainty for the next startup recovery.
+
+**Latency caveat.** `pollIntervalMs` (default `300000`, i.e. 5 minutes) measures wall-clock
+between completed rounds and deliberately EXCLUDES server and agent processing time. A reply can
+therefore take up to one poll interval plus the session's own duration before it starts.
+
+**Backup & privacy.** The data-directory backup stages the whole tree, including
+`data/email/**` (mailbox, processing and submission journals, outbound `.eml` evidence) and
+`data/workspaces/email/**` (thread journals, source bytes, parsed snapshots, attachments). That
+repository contains private correspondence in cleartext: keep it private and access-controlled;
+disabling the backup loses the only durable copy. See also
+[Deployment & MTA Stripping Verification Procedure](#deployment--mta-stripping-verification-procedure)
+and [Private correspondence backup](#private-correspondence-backup).
+
+### Activation acceptance manifest
+
+| Acceptance boundary | Owned executable evidence |
+| --- | --- |
+| Complete registration, status, cleanup ordering, email-only config and fail-closed authority/TLS | `tests/core/email-bootstrap.test.ts`, `tests/core/config-loader.test.ts` |
+| Preexisting exclusion, authenticated admission, threaded signed reply and granted forward with duplicate suppression | `tests/integration/email-platform.integration.test.ts` |
+| Unknown outcome survives production recomposition without another DATA transaction | `tests/integration/email-platform.integration.test.ts` |
+| Persisted reminder origin and real scheduler delivery through local SMTP | `tests/core/email-reminder-threads.test.ts` |
+| Submission crash recovery and uncertain poll receipts | `tests/platforms/email/submission-service-smoke.test.ts`, `tests/platforms/email/mailbox-poller.test.ts` |
+| Discord/Misskey regressions | `tests/platforms/discord/`, `tests/platforms/misskey/` |
+
+The activation smoke uses real certificate-validated local TLS IMAP/SMTP clients and real
+file-backed stores. It constructs the intent runtime but does not invoke a model; the forward
+grant is host-provided test data. Reminder scheduler execution is covered by its predecessor
+suite, separately from the composed adapter's reminder-slot smoke. No production mailbox,
+credential, delivery guarantee or model-interpretation evidence is claimed.
+
+Run the composed smoke with `deno test --allow-net --allow-read --allow-write --allow-env
+--allow-run --allow-ffi --allow-sys tests/core/email-bootstrap.test.ts
+tests/integration/email-platform.integration.test.ts` (join the wrapped command onto one line).
 
 ## Crash-Safe Durable Files (Owned by `email-durable-files`)
 
@@ -421,8 +481,8 @@ Acceptance requirements and test scenarios defined in `specs/email-submission-st
 
 The poll-cycle orchestrator wires the IMAP transport to MIME parsing, inbound authentication, the
 durable mailbox journal, and the owner message store in `src/platforms/email/mailbox-poller.ts`
-(`EmailMailboxPoller`). It is intentionally NOT registered in production bootstrap; email ingress
-stays unavailable until the `email-activation` change removes the configuration guard.
+(`EmailMailboxPoller`). Production activation composes it through `composeEmailPlatform`; its
+startup recovery completes before the first round admits work.
 
 ### Invariants & Semantics
 
@@ -507,8 +567,8 @@ deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/ema
 
 `src/platforms/email/outgoing-mime.ts` owns the single construction point for every
 outgoing email path: ordinary replies, third-party compositions, forwards, file
-deliveries, reminders, and spontaneous messages. It is intentionally NOT registered
-in production bootstrap; no SMTP transport or submission orchestration lives here.
+deliveries, reminders, and spontaneous messages. Production activation composes it as the
+single outbound path; no SMTP transport or submission orchestration lives here.
 
 ### Construction Contract
 
@@ -603,11 +663,11 @@ deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/ema
 
 ## Certificate-Validated SMTP Submission (Owned by `email-smtp-transport`)
 
-`src/platforms/email/smtp-client.ts` owns every outbound SMTP submission. It is
-intentionally NOT registered in production bootstrap, it writes no state, and it holds no
-retry policy: it submits one constructed message and reports exactly one classified
-outcome. Durable submission bookkeeping belongs to `submission-store.ts` (row 04), and the
-submission service (row 13) owns preparing an operation before invoking this transport.
+`src/platforms/email/smtp-client.ts` owns every outbound SMTP submission. Production activation
+constructs it inside the mail service, it writes no state, and it holds no retry policy: it
+submits one constructed message and reports exactly one classified outcome. Durable submission
+bookkeeping belongs to `submission-store.ts` (row 04), and the submission service (row 13) owns
+preparing an operation before invoking this transport.
 
 ### Submission Outcome Taxonomy
 
@@ -721,8 +781,8 @@ deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow
 
 `src/platforms/email/mail-service.ts` owns every outbound email path. Model- and skill-facing
 callers (rows 15/20/21) hand one `EmailDraft` plus its logical operation key to
-`EmailMailService.send()`; nothing else submits mail. The module is intentionally NOT
-registered in production bootstrap, and the activation guard is untouched.
+`EmailMailService.send()`; nothing else submits mail. Production activation composes it before
+the adapter is registered, and shutdown drains its in-flight submissions before closing clients.
 
 ### Effect Order (the contract)
 
@@ -967,8 +1027,8 @@ Acceptance requirements and scenarios are defined in
   `SessionOrchestrator.setEmailSessionReceipts(receipts | null)`. The work id is also exposed
   as `ActiveSession.emailWorkId` / `SkillContext.emailWorkId` for successor rows (15, 19, 22).
 
-The module is intentionally NOT registered in production bootstrap; the activation guard stays
-untouched and email ingress (row 15) installs the sink.
+Production activation installs the sink on `AgentCore` before the adapter is registered, so
+email ingress (row 15) always records its work lifecycle.
 
 ### Slice Verification
 
@@ -1074,11 +1134,12 @@ all, so a stale `spontaneous:email` key there has no effect.
 - **Corruption blocks the lane**: malformed, semantically invalid, or unsupported snapshots
   fail closed (`STORE_CORRUPT`); the file is never repaired, rewritten, or trimmed, and the
   lane arms no timer. Inspect the file directly and restart to resume.
-- **Not a production flow yet**: bootstrap attaches the durable lane only while
+- **Production wiring**: bootstrap attaches the durable lane only while
   `platforms.email.enabled` and `spontaneousPost.enabled` are both set, and email dispatch
   itself (target resolution, session, delivery) is implemented in `email-spontaneous-targets` and
-  enabled for production by `email-activation`. Prior to activation, production email remains disabled so an unauthorized
-  dispatch can never be recorded as a successful occurrence.
+  enabled for production by `email-activation`. The lane exists only when the email platform was
+  composed successfully, so an unauthorized dispatch can never be recorded as a successful
+  occurrence.
 
 ### Acceptance Scenarios
 
@@ -1147,7 +1208,7 @@ email-only surface or abstraction is added.
 | Metrics | `src/utils/metrics.ts` | Platform-labelled counters/histograms carry `platform="email"`; no user id, address or channel becomes a label |
 | Administration (session monitor, history, audit, workspace/channel selectors) | `src/dashboard/` | Existing authenticated endpoints accept email sessions, audit directories (`{auditBasePath}/email/{e_<sha256>}/{sessionId}.jsonl`) and platform/channel keys; authorization is unchanged |
 | Data-directory backup | `src/core/git-backup-service.ts` | The whole data tree is staged, so email state, signed sent history and source/attachment bytes are included |
-| Startup/shutdown, registry connection status, platform validation | `src/bootstrap.ts`, `src/platforms/platform-registry.ts`, `src/core/config-loader.ts` | Email is a member of the union those consumers iterate; registration and its connection status remain owned by `email-activation` |
+| Startup/shutdown, registry connection status, platform validation | `src/bootstrap.ts`, `src/platforms/platform-registry.ts`, `src/core/config-loader.ts` | Email is a member of the union those consumers iterate; `email-activation` registers it, reports its connection status and orders its shutdown |
 
 ### Workspace shape and reclamation
 
@@ -1368,15 +1429,16 @@ EMAIL_INTENT_OPENCODE_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-wr
 The native leg is UNEXERCISED (ignored) without `EMAIL_INTENT_OPENCODE_ACCEPTANCE=1`; with it,
 every unavailable prerequisite fails the test naming the reason instead of claiming native
 success. It uses the real installed executable plus a test-owned loopback provider and never a
-paid or public model. Production email remains unavailable until the final activation change.
+paid or public model. Production activation selects the profile backend through the deployment's
+default agent type and its model-routing rules.
 
 ## Email Platform Adapter (Owned by `email-adapter`)
 
 `src/platforms/email/email-adapter.ts` is the single platform-facing face of the email platform.
 `EmailAdapter` composes the serialized IMAP poller (receiving), the owner message store (thread
 history) and the durable mail service (every outbound path); it never talks to IMAP or SMTP itself
-and never invents durable state. It is intentionally NOT registered in the production bootstrap —
-production email stays unavailable until the final activation change.
+and never invents durable state. Production activation registers it with the platform registry and
+`AgentCore` before connecting it.
 
 ### Receiving
 
@@ -1516,8 +1578,9 @@ deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow
 ```
 
 The tests use the real stores, the real poller, the real mail service, the in-process IMAP fixture
-and a scripted SMTP double; no production credential or mailbox is used. Production email remains
-unavailable until the final activation change.
+and a scripted SMTP double; no production credential or mailbox is used. Production activation is
+covered by `tests/core/email-bootstrap.test.ts` and
+`tests/integration/email-platform.integration.test.ts`.
 
 ## Native OMP Intent Profile (Owned by `email-omp-intent-profile`)
 
@@ -1654,8 +1717,8 @@ The native leg is UNEXERCISED (ignored) without `EMAIL_INTENT_OMP_ACCEPTANCE=1`;
 unavailable prerequisite fails the test naming the reason instead of claiming native success. It
 requires the real pinned executable (`omp` 18.6.1), the generated extension bundle and a prepared
 native payload, uses a test-owned loopback provider plus the tracked loopback model fixture, and
-never contacts a paid or public model. Production email remains unavailable until the final
-activation change.
+never contacts a paid or public model. Production activation selects this backend through the
+deployment's default agent type.
 
 ## Isolated Intent Interpretation Runtime (Owned by `email-intent-runtime`)
 
@@ -1738,8 +1801,8 @@ consumers). `complete` therefore means "the interpreter produced a bounded text"
 - ACP-layer identity error: `EmailIntentProfileMismatchError` (bounded `reason` enum).
 
 The module is an internal host API: there is no skill endpoint, no dashboard surface and no
-configuration field that reaches it, and it is not wired into production bootstrap until
-`email-activation`.
+configuration field that reaches it. Production activation constructs it behind the destination
+preflight and the model/backend selection described above.
 
 ### Acceptance Scenarios
 
@@ -1857,8 +1920,8 @@ against prompt injection. This residual risk was explicitly accepted by the plat
   and `SessionRegistry.emailDestinationGrantsOf(sessionId): readonly DestinationGrant[]`
 - `SessionOrchestrator.setEmailDestinationGrantPreflight(preflight | null)`
 
-The module is an internal host API and is NOT wired into production bootstrap until
-`email-activation`.
+The module is an internal host API; production activation installs it on the orchestrator before
+any adapter connects.
 
 ### Acceptance Scenarios
 
@@ -1999,9 +2062,10 @@ stat'ed or read:
     seam `{ send(draft: EmailDraft): Promise<EmailSendOutcome> }` the real `EmailMailService` satisfies
   - `EMAIL_COMPOSE_ACTION_SLOT = "compose"`, `EMAIL_COMPOSE_CODES`
   - `emailComposeAuditParams(parameters)` — the content-safe `skill_call` projection
-- `SkillRegistry` constructor gains an optional `emailCompose?: { mailService: EmailComposeMailService }`;
-  `send-email` is registered ONLY when it is supplied, so production has no email send path until
-  `email-activation` wires the service.
+- `SkillRegistry` constructor accepts an optional `emailCompose?: { mailService: EmailComposeMailService; forwardSourceStore?: EmailForwardSourceStore }`,
+  and `SkillRegistry.setEmailCompose(...)` installs or removes it after construction.
+  `send-email` is registered ONLY when a mail service is supplied; production activation supplies
+  it through `AgentCore.setEmailPlatform(...)` once the durable service exists.
 - `SkillContext.sessionId` (the Skill API session id that keys the staging directory) and
   `SendEmailParams` / `SendEmailRequest` in `src/skills/types.ts`
 - Skill script `skills/send-email/scripts/send-email.ts` (`--session-id`, `--grant-id`, `--request-file`)

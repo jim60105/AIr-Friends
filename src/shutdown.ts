@@ -110,6 +110,16 @@ export class ShutdownHandler {
         logger.info("Audit retention scheduler stopped");
       }
 
+      // Email first stops poll admission and settles its in-flight round, then drains
+      // in-flight submissions and their durable journal writes, then closes its protocol
+      // clients. This runs BEFORE the final backup so the backup includes the settled state,
+      // and before the remaining platform clients disconnect.
+      if (this.context.emailPlatform) {
+        logger.info("Stopping email platform");
+        await this.context.emailPlatform.shutdown();
+        logger.info("Email platform stopped");
+      }
+
       // Stop git backup scheduler and perform final backup
       if (this.context.gitBackupScheduler) {
         logger.info("Stopping git backup scheduler");

@@ -40,13 +40,13 @@ export class SkillRegistry {
    */
   private readonly sendFileConfig?: SendFileSkillConfig;
   /** Durable email submission service; absent until email activation wires it. */
-  private readonly emailComposeMailService?: EmailComposeMailService;
+  private emailComposeMailService?: EmailComposeMailService;
   /**
    * Owner-scoped message store a forward reads its designated source from (row 21). Absent
    * leaves composing available and forwarding failing closed, because no source may be read
    * through any other seam.
    */
-  private readonly emailForwardSourceStore?: EmailForwardSourceStore;
+  private emailForwardSourceStore?: EmailForwardSourceStore;
 
   constructor(
     memoryStore: MemoryStore,
@@ -114,25 +114,49 @@ export class SkillRegistry {
       this.handlers.set("send-file", this.fileHandler.handleSendFile);
     }
 
-    // Email compose skill (conditional): registered ONLY once the durable submission
-    // service is wired (email activation). Until then the skill does not exist, so no
-    // session can reach an email send path.
-    if (this.emailComposeMailService) {
-      const handler = new EmailComposeHandler({
-        mailService: this.emailComposeMailService,
-        ...(this.emailForwardSourceStore === undefined
-          ? {}
-          : { forwardSourceStore: this.emailForwardSourceStore }),
-        limits: this.sendFileConfig,
-      });
-      this.handlers.set("send-email", handler.handleSendEmail);
-    }
+    this.registerEmailComposeSkill();
 
     logger.info("Skills registered: {count} skills ({skillNames})", {
       count: this.handlers.size,
       skillNames: Array.from(this.handlers.keys()).join(", "),
       skills: Array.from(this.handlers.keys()),
     });
+  }
+
+  /**
+   * Install (or remove) the production email compose/forward skill.
+   *
+   * Email activation composes the durable mail service after `AgentCore` (and therefore this
+   * registry) exists, so the skill is registered through this seam. Without a mail service the
+   * handler is not registered at all, so no session can reach an email send path.
+   */
+  setEmailCompose(
+    emailCompose:
+      | { mailService: EmailComposeMailService; forwardSourceStore?: EmailForwardSourceStore }
+      | null,
+  ): void {
+    this.emailComposeMailService = emailCompose?.mailService;
+    this.emailForwardSourceStore = emailCompose?.forwardSourceStore;
+    this.registerEmailComposeSkill();
+    logger.info("Email compose skill {state}", {
+      state: emailCompose === null ? "removed" : "registered",
+    });
+  }
+
+  /** Register the send-email handler only when the durable mail service is supplied. */
+  private registerEmailComposeSkill(): void {
+    if (!this.emailComposeMailService) {
+      this.handlers.delete("send-email");
+      return;
+    }
+    const handler = new EmailComposeHandler({
+      mailService: this.emailComposeMailService,
+      ...(this.emailForwardSourceStore === undefined
+        ? {}
+        : { forwardSourceStore: this.emailForwardSourceStore }),
+      limits: this.sendFileConfig,
+    });
+    this.handlers.set("send-email", handler.handleSendEmail);
   }
 
   /**

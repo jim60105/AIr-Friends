@@ -21,6 +21,7 @@ import type { EmailWorkReceipt, NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
 import type { EmailSubmissionEvidenceSource } from "./email-response-accounting.ts";
+import type { EmailPlatformServices } from "../platforms/email/activation.ts";
 
 const logger = createLogger("AgentCore");
 
@@ -219,6 +220,28 @@ export class AgentCore {
   setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
     this.orchestrator.setEmailSubmissionEvidence(source);
     this.skillApiServer?.setEmailSubmissionEvidence(source);
+  }
+
+  /**
+   * Install (or clear) the composed production email platform.
+   *
+   * Email activation composes the durable stack after this core exists, so every email seam is
+   * installed here as ONE unit: durable work receipts, recovered submission evidence, the
+   * destination-grant preflight and the `send-email` skill. Passing `null` removes all of them,
+   * leaving email blocked rather than partially enabled.
+   */
+  setEmailPlatform(services: EmailPlatformServices | null): void {
+    this.setEmailSessionReceipts(services?.receipts ?? null);
+    this.setEmailSubmissionEvidence(services?.submissionEvidence ?? null);
+    this.orchestrator.setEmailDestinationGrantPreflight(services?.preflight ?? null);
+    this.skillRegistry.setEmailCompose(
+      services === null ? null : {
+        mailService: services.mailService,
+        ...(services.forwardSourceStore === undefined
+          ? {}
+          : { forwardSourceStore: services.forwardSourceStore }),
+      },
+    );
   }
 
   /**

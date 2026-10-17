@@ -464,7 +464,9 @@ function expandEnvVars(value: string): string {
 /**
  * Validate email platform configuration when enabled.
  * Enforces secure transport (tls/starttls only), port defaults, required credentials,
- * receiving authentication trust declaration, and the production activation guard.
+ * receiving authentication trust declaration, and complete mailbox settings. A missing or
+ * insecure setting fails startup explicitly instead of activating a partially configured
+ * mailbox.
  */
 function validateEmailConfig(email: Record<string, unknown>): void {
   if (email.enabled !== true) return;
@@ -598,12 +600,37 @@ function validateEmailConfig(email: Record<string, unknown>): void {
     );
   }
 
-  // Production activation guard: email platform cannot be activated in production until email-activation change
-  throw new ConfigError(
-    ErrorCode.CONFIG_INVALID,
-    "Email platform activation is unavailable in this release: production email remains disabled until final batch cutover",
-    { field: "platforms.email.enabled" },
-  );
+  // Complete settings surface. The activation composition revalidates the typed config before
+  // constructing any client; these checks keep a loaded config from carrying a blank folder or
+  // an unusable size bound.
+  if (
+    typeof email.incomingFolder !== "string" || email.incomingFolder.trim() === "" ||
+    typeof email.sentFolder !== "string" || email.sentFolder.trim() === ""
+  ) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "platforms.email.incomingFolder and platforms.email.sentFolder must be non-empty strings",
+      { field: "platforms.email.incomingFolder" },
+    );
+  }
+  for (const field of ["maxMessageBytes", "maxIncomingAttachments"] as const) {
+    const value = Number(email[field]);
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Invalid platforms.email.${field}: must be a positive integer`,
+        { field: `platforms.email.${field}` },
+      );
+    }
+    email[field] = value;
+  }
+  if (typeof email.signature !== "string") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "platforms.email.signature must be a string when email is enabled",
+      { field: "platforms.email.signature" },
+    );
+  }
 }
 
 /**

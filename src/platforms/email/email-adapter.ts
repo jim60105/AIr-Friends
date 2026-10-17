@@ -140,6 +140,8 @@ export interface EmailAdapterOptions {
   transport: ImapTransport;
   /** Durable mailbox journal; its fingerprint MUST match the configured mailbox. */
   mailboxStore: MailboxStore;
+  /** Startup-only journal replay supplied by production composition. */
+  mailboxRecovery?: import("./mailbox-store.ts").MailboxRecoveryResult;
   /** Owner-scoped message and thread history store. */
   messageStore: EmailMessageStore;
   /** Common durable outbound send service; the only path that may submit mail. */
@@ -233,6 +235,7 @@ export class EmailAdapter extends PlatformAdapter {
       transport: options.transport,
       mailboxStore: options.mailboxStore,
       messageStore: options.messageStore,
+      mailboxRecovery: options.mailboxRecovery,
       channels: this.channels,
       emit: (work) => this.onIncomingWork(work),
       onReviewRequired: options.onReviewRequired,
@@ -253,6 +256,7 @@ export class EmailAdapter extends PlatformAdapter {
    * stopped instead of arming the repeating timer behind the caller's back.
    */
   async connect(): Promise<void> {
+    if (this.terminated) throw new Error("Email runtime has shut down");
     if (this.started) return;
     if (this.startPromise) return await this.startPromise;
 
@@ -292,6 +296,7 @@ export class EmailAdapter extends PlatformAdapter {
    */
   async disconnect(): Promise<void> {
     this.stopping = true;
+    const stopping = this.poller.stop();
     const pending = this.startPromise;
     if (pending) {
       try {
@@ -305,7 +310,16 @@ export class EmailAdapter extends PlatformAdapter {
       await this.poller.stop();
       this.updateConnectionState(ConnectionState.DISCONNECTED);
     }
+    await stopping;
     this.stopping = false;
+  }
+
+  private terminated = false;
+
+  /** Terminal shutdown prevents registry reconnect from reopening ingress. */
+  async shutdown(): Promise<void> {
+    this.terminated = true;
+    await this.disconnect();
   }
 
   /**
