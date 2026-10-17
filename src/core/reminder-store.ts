@@ -10,6 +10,7 @@ import type {
   ResolvedReminder,
 } from "../types/reminder.ts";
 import type { EmailOperationKey } from "@platforms/email/submission-store.ts";
+import { spontaneousOperationKey } from "@platforms/email/spontaneous-store.ts";
 import { emailResponseSlots } from "./email-response-accounting.ts";
 import type { Platform } from "../types/events.ts";
 
@@ -51,6 +52,10 @@ export interface SessionEmailOperation {
  * `reminder:<id>` operation of that reminder, so a restarted run is answered
  * from the durable journal instead of submitting again.
  *
+ * An email spontaneous session (row 25) has no inbound work either: its sends
+ * belong to the ONE stable `spontaneous:<tickId>` operation of its durable
+ * schedule occurrence, derived through the occurrence's own key function.
+ *
  * The parameter is structural on purpose: this is the shared identity rule for
  * the Skill API host and the orchestrator, and neither needs the full session
  * type to apply it.
@@ -58,11 +63,17 @@ export interface SessionEmailOperation {
 export function sessionEmailOperation(session: {
   emailWorkId?: string;
   emailReminder?: { reminderId: string };
+  emailSpontaneous?: { tickId: string };
   emailDestinationGrants?: readonly { grantId: string }[];
 }): SessionEmailOperation | undefined {
   const reminder = session.emailReminder;
   if (reminder !== undefined && reminder.reminderId.trim() !== "") {
     const operation = reminderOperationKey(reminder.reminderId);
+    return { workId: operation.workId, slots: [operation.actionSlot] };
+  }
+  const spontaneous = session.emailSpontaneous;
+  if (spontaneous !== undefined && spontaneous.tickId.trim() !== "") {
+    const operation = spontaneousOperationKey(spontaneous.tickId);
     return { workId: operation.workId, slots: [operation.actionSlot] };
   }
   const workId = session.emailWorkId;

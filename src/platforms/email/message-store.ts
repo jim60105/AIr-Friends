@@ -24,6 +24,7 @@ import {
   syncDirectory,
 } from "./durable-files.ts";
 import type { EmailOperationKey } from "./submission-store.ts";
+import { type NormalizedEmailMailbox, normalizeEmailMailbox } from "./email-identity.ts";
 import type { Attachment, LocalEmailAttachment, PlatformMessage } from "../../types/events.ts";
 
 /** Relative filename for owner thread association journal under `<ownerWorkspace>/email/` */
@@ -782,6 +783,37 @@ export class EmailMessageStore {
         return records.slice(records.length - limit);
       }
       return records;
+    });
+  }
+
+  /**
+   * The verified recipient address of one mailbox owner (row 25).
+   *
+   * An autonomous send (a spontaneous message opening a NEW owner thread) has no
+   * reply anchor to re-derive the recipient from, so the only address it may be
+   * addressed to is one the mailbox itself admitted as this owner: the canonical
+   * `From` address of the most recent stored INBOUND record whose normalized
+   * userId equals `owner` (journal order is chronological, so the last match
+   * wins). Returns `undefined` when the owner has no admitted inbound record —
+   * the caller must then refuse the send instead of guessing a recipient.
+   */
+  async ownerVerifiedAddress(owner: string): Promise<string | undefined> {
+    const validOwner = validateOwnerId(owner);
+
+    return await this.withOwnerLock(validOwner, (state) => {
+      let verified: string | undefined;
+      for (const record of state.records.values()) {
+        if (record.owner !== validOwner || record.direction !== "inbound") continue;
+        let mailbox: NormalizedEmailMailbox;
+        try {
+          mailbox = normalizeEmailMailbox(record.from);
+        } catch {
+          continue;
+        }
+        if (mailbox.userId !== validOwner) continue;
+        verified = mailbox.canonicalAddress;
+      }
+      return verified;
     });
   }
 

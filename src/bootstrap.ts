@@ -30,6 +30,11 @@ import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { ensureOpencodeSkillDiscoveryDeclaration } from "@utils/opencode-paths.ts";
 import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
 import { EmailSpontaneousStore } from "@platforms/email/spontaneous-store.ts";
+import {
+  type SubmissionRecoveryResult,
+  SubmissionStore,
+} from "@platforms/email/submission-store.ts";
+import { dispatchEmailSpontaneousOccurrence } from "@core/spontaneous-target.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
 import { isValidPlatform } from "./types/events.ts";
@@ -60,6 +65,17 @@ export interface AppContext {
   reminderScheduler: ReminderScheduler | null;
   auditRetentionScheduler: AuditRetentionScheduler | null;
   schedulerStateStore: SchedulerStateStore | null;
+  /**
+   * Recovered durable email submission journal of this process, or null when the
+   * email spontaneous lane does not exist. The email platform wiring (deferred to
+   * `email-activation`) attaches the mail service to THIS instance: a second
+   * `recover()` of the same journal root is rejected by the store, and the
+   * spontaneous lane's occurrence classification reads the same recovered
+   * evidence.
+   */
+  emailSubmissionStore: SubmissionStore | null;
+  /** Result of startup recovery on the submission store, if performed. */
+  emailSubmissionRecoveryResult?: SubmissionRecoveryResult | null;
   savedSchedulerState: Record<string, string>;
   gelfTransport: GelfTransport | null;
   yolo: boolean;
@@ -316,22 +332,48 @@ export async function bootstrap(
   // exists when the email platform is configured for spontaneous posting at all.
   // Production email stays unavailable until `email-activation` removes the guard.
   const emailSpontaneousConfig = config.platforms.email;
+  let emailSubmissionStore: SubmissionStore | null = null;
+  let emailSpontaneousStore: EmailSpontaneousStore | null = null;
+  let emailSubmissionRecoveryResult: SubmissionRecoveryResult | null = null;
   if (emailSpontaneousConfig?.enabled && emailSpontaneousConfig.spontaneousPost?.enabled) {
     const emailRoot = join(config.workspace.repoPath, "email");
-    spontaneousScheduler.setOccurrenceStore(new EmailSpontaneousStore({ emailRoot }));
+    // The durable occurrence lane classifies a dispatched tick from its recorded submission
+    // evidence, so the journal must be replayed BEFORE the lane restores: an unattached or
+    // unreplayed provider cannot tell "this tick never submitted" from "evidence not loaded"
+    // and would have to fail closed on every tick.
+    emailSubmissionStore = new SubmissionStore(emailRoot);
+    emailSubmissionRecoveryResult = await emailSubmissionStore.recover();
+    emailSpontaneousStore = new EmailSpontaneousStore({
+      emailRoot,
+      evidence: emailSubmissionStore,
+    });
+    spontaneousScheduler.setOccurrenceStore(emailSpontaneousStore);
     logger.info("Email spontaneous occurrence lane uses durable state at {emailRoot}", {
       emailRoot,
     });
   }
   const spontaneousCallback: SpontaneousPostCallback = async (platform, occurrence) => {
     if (platform === "email") {
-      // Email target resolution, session launch and delivery are owned by
-      // `email-spontaneous-targets` and enabled by `email-activation`. Fail closed instead of
-      // recording an unimplemented dispatch as a completed occurrence.
-      throw new Error(
-        `Email spontaneous dispatch for occurrence ${occurrence?.occurrenceId ?? "unknown"} ` +
-          "is not available until email-spontaneous-targets is applied",
-      );
+      // Row 25: resolve/select ONE eligible target, durably bind it to this occurrence and
+      // claim it BEFORE any session or SMTP work. A tick with no eligible target is consumed
+      // without a session and without guessing a recipient; a store rejection propagates and
+      // marks the dispatch unavailable (review-required) instead of allocating an identity.
+      const emailAdapter = platformRegistry.getAdapter("email");
+      const occurrenceStore = emailSpontaneousStore;
+      if (!occurrence || !emailAdapter || !occurrenceStore) {
+        throw new Error(
+          `Email spontaneous dispatch for occurrence ${occurrence?.occurrenceId ?? "unknown"} ` +
+            "has no email platform wiring; refusing to run an unbound spontaneous session",
+        );
+      }
+      await dispatchEmailSpontaneousOccurrence({
+        store: occurrenceStore,
+        adapter: emailAdapter,
+        config,
+        occurrence,
+        orchestrator: agentCore.getOrchestrator(),
+      });
+      return;
     }
     const platformConfig = config.platforms[platform];
     if (!platformConfig?.spontaneousPost) {
@@ -709,6 +751,8 @@ export async function bootstrap(
     reminderScheduler,
     auditRetentionScheduler,
     schedulerStateStore,
+    emailSubmissionStore,
+    emailSubmissionRecoveryResult,
     savedSchedulerState,
     gelfTransport,
     yolo,

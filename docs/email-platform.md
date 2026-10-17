@@ -1076,8 +1076,8 @@ all, so a stale `spontaneous:email` key there has no effect.
   lane arms no timer. Inspect the file directly and restart to resume.
 - **Not a production flow yet**: bootstrap attaches the durable lane only while
   `platforms.email.enabled` and `spontaneousPost.enabled` are both set, and email dispatch
-  itself (target resolution, session, delivery) is owned by `email-spontaneous-targets` and
-  enabled by `email-activation`. Until then the email callback fails closed, so an unimplemented
+  itself (target resolution, session, delivery) is implemented in `email-spontaneous-targets` and
+  enabled for production by `email-activation`. Prior to activation, production email remains disabled so an unauthorized
   dispatch can never be recorded as a successful occurrence.
 
 ### Acceptance Scenarios
@@ -2638,3 +2638,77 @@ adversarial extra field, a thrown handler exception that crosses the skill regis
 real `ReminderStore` due-reminder enumeration on a malformed email JSONL (a position only, never the
 line or the parser message), and byte-compatible non-email entries. No model, provider or production
 credential is involved.
+
+## Email Spontaneous Targets & Session Context (Owned by `email-spontaneous-targets`)
+
+`src/core/spontaneous-target.ts`, `src/platforms/email/email-adapter.ts`, `src/core/session-orchestrator.ts`,
+and `src/core/context-assembler.ts` implement the target selection, durable binding, owner-scoped workspace
+resolution, and single-operation delivery of spontaneous email correspondence (row 25).
+
+### Architecture & Invariants
+
+- **Dual Opt-In Required**: email spontaneous posting requires BOTH platform-level enablement
+  (`platforms.email.enabled: true` and `platforms.email.spontaneousPost.enabled: true`) AND per-account
+  opt-in (`channel.enabled !== false` and `channel.spontaneousPost === true` on an `email/account/<owner>` channel).
+  If no account opts in, the scheduler tick completes without launching an agent session.
+- **Durable Target Binding**: before any agent session or SMTP interaction begins, exactly one eligible
+  account is chosen and allocated a brand-new internal owner thread (`mail:<owner>:<threadId>`).
+  `EmailSpontaneousStore.select()` binds this target (`{ owner, threadId }`) to the restored occurrence, and
+  `EmailSpontaneousStore.begin()` claims the occurrence. A restarted tick recovers the persisted target and
+  never re-selects another recipient.
+- **Target-Owned Session Workspace**: unlike Discord and Misskey which use bot-owned workspaces for spontaneous posts,
+  email spontaneous sessions execute in the selected target user's workspace (`email/<userId>`). Memory loading
+  and context assembly use the target user's workspace, guaranteeing that private memories stay owner-scoped and
+  distinct from bot memories or other users' memories.
+- **Prompt Template Variables**: `ContextAssembler.assembleSpontaneousContext` and `SessionOrchestrator.buildSpontaneousPromptFromTemplate`
+  populate the Vento template variables for email spontaneous sessions:
+  - `isDm`: `true`
+  - `platform`: `"email"`
+  - `userId`: the selected target account owner's canonical id (`e_<sha256>`)
+  - `channelId`: the newly allocated owner thread channel (`mail:<owner>:<threadId>`)
+  - `guildId`: `""`
+- **Single Logical Outgoing Email**: the session's send is partitioned under the host-bound operation key
+  `spontaneousOperationKey(tickId)` (`actionSlot: "spontaneous:<tickId>"`). Repeated tool calls in the same
+  session or across retries return the recorded submission result from `SubmissionStore` without duplicate SMTP
+  DATA transactions.
+- **New-Thread Delivery Without Reply Headers**: `EmailAdapter.resolveSpontaneousThreadSend` resolves spontaneous
+  deliveries to the recipient address verified by admitted inbound mail (`ownerVerifiedAddress`). The draft has
+  no reply anchor or thread references, producing wire MIME messages without `In-Reply-To` or `References` headers.
+- **No Grant Inheritance**: spontaneous sessions carry no third-party destination grants (`emailDestinationGrants`
+  is empty); any attempt to send to a third party is refused.
+- **Allowlist Recheck at Submission**: `EmailMailService.assertRecipientAuthorized` verifies that the target account
+  remains enabled and opted into spontaneous posting immediately before SMTP submission (including after
+  `markSubmitting` resolves). If an account is disabled or opted out before submission, the send is refused with
+  `RECIPIENT_NOT_ALLOWED` and zero wire submissions occur.
+- **Restart Outcomes**:
+  - *Restart after acceptance*: `EmailSpontaneousStore.inspectEvidence()` observes `submitted` evidence from
+    `SubmissionStore`, treats delivery as resolved, avoids replacement target selection or sending, and atomically
+    installs the successor occurrence.
+  - *Restart after uncertainty*: unclosed `submitting` or `unknown` operations are classified as `uncertain` /
+    `review-required`. The occurrence is preserved for operator review and produces zero duplicate submissions.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-spontaneous-targets/specs/spontaneous-posting/spec.md`:
+
+- **Allowlist changes**: an account disabled between selection and submission is rejected at submission time with zero SMTP transactions.
+- **Consecutive ticks**: consecutive spontaneous ticks to the same permitted account allocate distinct internal and wire threads with no `In-Reply-To` header.
+- **Tick deduplication**: repeated calls in one tick or process restarts after accepted/uncertain SMTP consult durable evidence and produce zero duplicate DATA transactions.
+- **Email memory ownership**: distinct bot, target-user, and third-party user memory sentinels verify that only the target user's memories appear in context and prompt.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/core/email-spontaneous.test.ts tests/core/email-spontaneous-smoke.test.ts
+```
+
+Evidence: `tests/core/email-spontaneous.test.ts` exercises the full local stack with the real
+`SpontaneousScheduler`, real `EmailSpontaneousStore`, real `EmailAdapter`, real `EmailMailService`,
+`SubmissionStore`, and `EmailMessageStore` on isolated temporary directories, asserting exact DATA counts
+and durable states. `tests/core/email-spontaneous-smoke.test.ts` drives the complete lane over real local
+IMAP and SMTP test servers.

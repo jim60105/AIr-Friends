@@ -40,6 +40,10 @@ import {
 } from "./durable-files.ts";
 import { normalizeEmailMailbox } from "./email-identity.ts";
 import { isSenderAllowed } from "./incoming-auth.ts";
+import {
+  isSpontaneousTargetAllowed,
+  SPONTANEOUS_ACTION_SLOT_PREFIX,
+} from "@core/spontaneous-target.ts";
 import { EmailDraft, OutgoingMimeBuilder } from "./outgoing-mime.ts";
 import type { ImapTransport } from "./imap-client.ts";
 import type { EmailMessageIdentifiers } from "./message-store.ts";
@@ -52,6 +56,7 @@ import {
   formatOwnerOperationKey,
   SubmissionDiagnosticCode,
   SubmissionEntrySnapshot,
+  type SubmissionRecoveryResult,
   SubmissionStore,
   SubmissionStoreError,
   validateOperationKey,
@@ -134,6 +139,14 @@ export interface OutboundEvidenceMeta {
   /** Signed logical body (signature applied exactly once at construction time). */
   historyBody: string;
   wireIds: EmailMessageIdentifiers;
+  /**
+   * Internal owner-thread the host bound this operation to (row 25: the owner
+   * thread durably selected for one spontaneous occurrence). Persisted so
+   * history recording and its crash repair attribute the outbound record to the
+   * SAME thread instead of allocating another one from the wire Message-ID.
+   * Absent for operations that resolve their thread from the wire references.
+   */
+  internalThreadId?: string;
   digest: string;
   sizeBytes: number;
   /** Local history reference, recorded once `putSent` succeeded. */
@@ -213,6 +226,8 @@ export interface EmailMailServiceOptions {
   builder?: OutgoingMimeBuilder;
   /** Durable file options forwarded to evidence and journal writes. */
   durableOptions?: DurableFileOptions;
+  /** Pre-recovered submission store result, so the service does not repeat recovery. */
+  recoveryResult?: SubmissionRecoveryResult;
 }
 
 /** One tracked logical operation (inventory for history/copy repair). */
@@ -323,6 +338,17 @@ export class EmailMailService {
     this.signature = options.config.signature;
     this.sentFolder = options.config.sentFolder;
     this.maxMessageBytes = options.config.maxMessageBytes;
+    if (options.recoveryResult) {
+      this.recoveryPromise = (() => {
+        this.unknownRecovered = options.recoveryResult!.unknownRecovered.map((entry) =>
+          entry.operationId
+        );
+        for (const entry of options.recoveryResult!.entries.values()) {
+          this.track(entry.ownerId, entry.key);
+        }
+        return Promise.resolve();
+      })();
+    }
   }
 
   /**
@@ -548,7 +574,7 @@ export class EmailMailService {
     draft: EmailDraft,
   ): Promise<EmailSendOutcome> {
     // Fail closed before any evidence is written for a recipient the allowlist rejects.
-    this.assertRecipientAuthorized(draft.targetKind, draft.to);
+    this.assertRecipientAuthorized(draft.targetKind, draft.to, draft.operationKey.actionSlot);
 
     const operationId = computeOperationId(owner, key);
     const constructed = await this.builder.construct(draft, this.signature);
@@ -572,6 +598,7 @@ export class EmailMailService {
       messageId: constructed.messageId,
       historyBody: constructed.historyBody,
       wireIds: { ...constructed.wireIds },
+      ...(draft.internalThreadId ? { internalThreadId: draft.internalThreadId } : {}),
       digest: constructed.digest,
       sizeBytes: constructed.sizeBytes,
     };
@@ -643,10 +670,26 @@ export class EmailMailService {
     const { meta, emlBytes } = evidence;
 
     // Recheck the current allowlist immediately before SMTP.
-    this.assertRecipientAuthorized(meta.targetKind, meta.envelope.to[0] ?? meta.to);
+    this.assertRecipientAuthorized(meta.targetKind, meta.envelope.to[0] ?? meta.to, key.actionSlot);
 
     // Exclusive durable gate, gated on the fsynced `.eml` evidence digest.
     await this.submissionStore.markSubmitting(owner, key);
+
+    // Re-verify immediately before SMTP to ensure no revocation happened during the journal write
+    try {
+      this.assertRecipientAuthorized(
+        meta.targetKind,
+        meta.envelope.to[0] ?? meta.to,
+        key.actionSlot,
+      );
+    } catch (err) {
+      await this.submissionStore.recordOutcome(owner, key, "failed", {
+        safeCode: err instanceof EmailMailServiceError
+          ? err.diagnosticCode
+          : EmailSubmissionDiagnosticCode.RECIPIENT_NOT_ALLOWED,
+      });
+      throw err;
+    }
 
     const submission: SmtpSubmission = {
       emlBytes,
@@ -744,6 +787,7 @@ export class EmailMailService {
       to: meta.to,
       subject: meta.subject,
       targetKind: meta.targetKind,
+      ...(meta.internalThreadId ? { threadId: meta.internalThreadId } : {}),
       wireIds: { ...meta.wireIds },
     }, key);
     await this.writeHistoryRef(meta, recorded.recordId, recorded.threadId);
@@ -1118,8 +1162,18 @@ export class EmailMailService {
    *
    * Third-party destinations are authorized by the owning compose/forward handler (row 19),
    * which is not re-implemented here.
+   *
+   * A partitioned `spontaneous:<tickId>` operation additionally requires the account to be
+   * CURRENTLY opted into spontaneous posting: an autonomous send must never reach an account
+   * that was opted out, disabled or removed after its target was chosen. This runs both before
+   * the operation is reserved and immediately before SMTP (including a resumed prepared
+   * operation), so the requirement cannot be satisfied by a stale decision.
    */
-  private assertRecipientAuthorized(targetKind: "user" | "third-party", to: string): void {
+  private assertRecipientAuthorized(
+    targetKind: "user" | "third-party",
+    to: string,
+    actionSlot?: string,
+  ): void {
     if (targetKind !== "user") {
       return;
     }
@@ -1128,6 +1182,15 @@ export class EmailMailService {
       throw new EmailMailServiceError(
         EmailSubmissionDiagnosticCode.RECIPIENT_NOT_ALLOWED,
         "Recipient is not present in the current email allowlist",
+      );
+    }
+    if (
+      typeof actionSlot === "string" && actionSlot.startsWith(SPONTANEOUS_ACTION_SLOT_PREFIX) &&
+      !isSpontaneousTargetAllowed(userId, this.channels)
+    ) {
+      throw new EmailMailServiceError(
+        EmailSubmissionDiagnosticCode.RECIPIENT_NOT_ALLOWED,
+        "Recipient account is no longer opted into spontaneous posting",
       );
     }
   }

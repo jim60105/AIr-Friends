@@ -115,6 +115,14 @@ export interface EmailDraft {
   subject: string;
   authoredBody: string;
   thread?: EmailThreadReference;
+  /**
+   * Internal owner-thread this message belongs to, when the host already
+   * allocated one (row 25: a spontaneous message opens a NEW owner thread that
+   * was durably bound to its schedule occurrence). Local-only metadata: it is
+   * never serialized as a header, and `thread` stays absent so the message
+   * carries no In-Reply-To/References.
+   */
+  internalThreadId?: string;
   forwardSource?: EmailForwardSource;
   attachments?: EmailOutgoingAttachment[];
 }

@@ -23,6 +23,8 @@ import {
   type RetryPromptContext,
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
+import type { AssembledSpontaneousContext } from "../types/context.ts";
+import type { EmailSpontaneousSession, EmailSpontaneousTarget } from "./spontaneous-target.ts";
 import { sessionStagingDir } from "./session-staging.ts";
 import { resolveTrustedSkillsRoot } from "./skills-root.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
@@ -82,6 +84,7 @@ import {
 } from "./reminder-store.ts";
 import { parseEmailChannelId } from "@platforms/email/message-store.ts";
 import { isSenderAllowed } from "@platforms/email/incoming-auth.ts";
+import { spontaneousOperationKey } from "@platforms/email/spontaneous-store.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
 import { safeFetch } from "@utils/ssrf.ts";
@@ -2100,10 +2103,23 @@ export class SessionOrchestrator {
     options: {
       botId: string;
       fetchRecentMessages: boolean;
+      /**
+       * Row 25: the durably bound email spontaneous target of this tick. Its
+       * owner is the session's user identity (workspace, memories, model
+       * routing), its channel is the NEW owner thread the message opens, and its
+       * tick id is the ONE logical outgoing email this session owns. Absent for
+       * every non-email platform, which keeps the bot-owned workspace contract.
+       */
+      email?: EmailSpontaneousTarget;
     },
   ): Promise<SessionResponse> {
     const sessionLoggerName = `spontaneous:${platform}:${channelId}`;
     let sessionLogger = logger.child(sessionLoggerName);
+
+    // An email spontaneous session belongs to the target owner: only that user
+    // owns the private memories and the thread its message opens.
+    const emailTarget = options.email;
+    const sessionUserId = emailTarget?.userId ?? options.botId;
 
     sessionLogger.info("Processing spontaneous post", {
       platform,
@@ -2114,7 +2130,7 @@ export class SessionOrchestrator {
     // Temporary-use ownership precedes workspace creation (design D2).
     const tmpRoots = [
       this.producerTmpRoot(
-        this.workspaceManager.computeWorkspaceKey({ platform, userId: options.botId }),
+        this.workspaceManager.computeWorkspaceKey({ platform, userId: sessionUserId }),
       ),
     ];
     this.acquireProducerTmpUse(tmpRoots);
@@ -2128,27 +2144,34 @@ export class SessionOrchestrator {
     let emailSession: ActiveSession | null = null;
 
     try {
-      // 1. Create workspace for the bot itself
-      const botEvent: NormalizedEvent = {
+      // 1. Create the session workspace. Non-email spontaneous posts keep the bot's own
+      // workspace; an email spontaneous post uses the selected target owner's workspace,
+      // so its private memories stay owner-scoped.
+      const workspaceEvent: NormalizedEvent = {
         platform,
         channelId,
-        userId: options.botId,
+        userId: sessionUserId,
         messageId: `spontaneous_${Date.now()}`,
-        isDm: false,
+        isDm: emailTarget !== undefined,
         guildId: "",
         content: "",
         timestamp: new Date(),
       };
-      const workspace = await this.workspaceManager.getOrCreateWorkspace(botEvent);
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(workspaceEvent);
 
       // 2. Register session WITHOUT triggerEvent
       const setup = await this.setupSession({
         platform,
-        userId: options.botId,
+        userId: sessionUserId,
         channelId,
-        isDm: false,
+        isDm: emailTarget !== undefined,
         workspace,
         platformAdapter,
+        // Row 25: bind the durable occurrence's ONE logical outgoing email to this
+        // session before the agent starts; the agent can never supply it.
+        ...(emailTarget === undefined ? {} : {
+          emailSpontaneous: { tickId: emailTarget.tickId },
+        }),
         sessionLogger,
       });
       const agentWorkspacePath = setup.agentWorkspacePath;
@@ -2174,7 +2197,7 @@ export class SessionOrchestrator {
       const routingContext: ModelRoutingContext = {
         sessionType: "spontaneous",
         platform,
-        userId: options.botId,
+        userId: sessionUserId,
         channelId,
       };
       const resolvedModel = resolveModel(
@@ -2187,7 +2210,7 @@ export class SessionOrchestrator {
       const resolvedReasoningEffort = this.resolveSessionReasoningEffort(routingContext);
 
       // Compute YOLO decision early so it's available for context assembly and prompt rendering
-      const yoloDecision = this.getEffectiveYolo(platform, options.botId, channelId);
+      const yoloDecision = this.getEffectiveYolo(platform, sessionUserId, channelId);
 
       // Audit: session_start
       await auditWriter?.write("session_start", {
@@ -2206,9 +2229,14 @@ export class SessionOrchestrator {
         yoloSource: yoloDecision.source,
         matchedConfigId: yoloDecision.matchedConfigId,
         platform,
-        userId: options.botId,
+        userId: sessionUserId,
         channelId,
       });
+
+      const emailSessionContext = emailTarget === undefined ? undefined : {
+        userId: emailTarget.userId,
+        channelId: emailTarget.channelId,
+      };
 
       // 3. Assemble spontaneous context
       const context = await this.contextAssembler.assembleSpontaneousContext(
@@ -2216,7 +2244,12 @@ export class SessionOrchestrator {
         channelId,
         workspace,
         platformAdapter,
-        { fetchRecentMessages: options.fetchRecentMessages },
+        {
+          fetchRecentMessages: options.fetchRecentMessages,
+          ...(emailSessionContext === undefined ? {} : {
+            emailSpontaneous: emailSessionContext,
+          }),
+        },
         this.skillSessionId(shellSessionId),
         resolvedModel,
         yoloDecision.enabled,
@@ -2229,6 +2262,7 @@ export class SessionOrchestrator {
         resolvedModel,
         yoloDecision.enabled,
         this.stagingDirFor(workspace, shellSessionId),
+        emailSessionContext,
       );
 
       sessionLogger.debug("Spontaneous prompt built", {
@@ -2621,7 +2655,7 @@ export class SessionOrchestrator {
         this.recordSessionMetrics({
           platform,
           sessionType: "spontaneous",
-          userId: options.botId,
+          userId: sessionUserId,
           shellSessionId,
           sessionStartTime,
           success: result!.success,
@@ -5542,9 +5576,13 @@ export class SessionOrchestrator {
       response.emailSend = {
         workId: identity.workId,
         owner,
-        ...(session.emailReminder === undefined
-          ? {}
-          : { actionSlot: reminderOperationKey(session.emailReminder.reminderId).actionSlot }),
+        // Row 25: a spontaneous session reports the ONE partitioned operation of its
+        // durable tick, exactly like a reminder reports its own.
+        ...(session.emailReminder !== undefined
+          ? { actionSlot: reminderOperationKey(session.emailReminder.reminderId).actionSlot }
+          : session.emailSpontaneous !== undefined
+          ? { actionSlot: spontaneousOperationKey(session.emailSpontaneous.tickId).actionSlot }
+          : {}),
       };
     }
     return response;
@@ -5932,6 +5970,12 @@ export class SessionOrchestrator {
      * agent can never see or supply it.
      */
     emailReminder?: EmailReminderSession;
+    /**
+     * Row 25: the host-bound identity of a spontaneous EMAIL session (the durable
+     * occurrence whose ONE logical outgoing email this session owns). Present only
+     * for such a session; the agent can never see or supply it.
+     */
+    emailSpontaneous?: EmailSpontaneousSession;
     sessionLogger: ReturnType<typeof logger.child>;
   }): Promise<{
     agentWorkspacePath: string;
@@ -5964,6 +6008,11 @@ export class SessionOrchestrator {
       // Row 23: a scheduled email reminder session has no inbound work receipt;
       // its own reminder identity is the host-bound operation binding.
       ...(params.emailReminder === undefined ? {} : { emailReminder: params.emailReminder }),
+      // Row 25: an email spontaneous session has no inbound work receipt either; its
+      // durable tick is the host-bound operation binding.
+      ...(params.emailSpontaneous === undefined
+        ? {}
+        : { emailSpontaneous: params.emailSpontaneous }),
     });
 
     sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
@@ -6266,11 +6315,12 @@ export class SessionOrchestrator {
    * Build the full prompt for spontaneous posts using Vento template
    */
   private async buildSpontaneousPromptFromTemplate(
-    context: import("../types/context.ts").AssembledSpontaneousContext,
+    context: AssembledSpontaneousContext,
     sessionId: string | null,
     model?: string,
     yolo?: boolean,
     tmpDir?: string,
+    emailSpontaneous?: { userId: string; channelId: string },
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_spontaneous.md");
@@ -6297,10 +6347,13 @@ export class SessionOrchestrator {
       : "";
 
     const variables: TemplateVariables = {
-      isDm: false,
-      platform: "internal",
-      userId: "",
-      channelId: "",
+      // Row 25: an email spontaneous post is delivered as a private message into the
+      // NEW owner thread of the selected target user, so the template receives that
+      // identity. Every other platform keeps the triggerless `internal` shape.
+      isDm: emailSpontaneous !== undefined,
+      platform: emailSpontaneous === undefined ? "internal" : "email",
+      userId: emailSpontaneous?.userId ?? "",
+      channelId: emailSpontaneous?.channelId ?? "",
       guildId: "",
       agentType: getDefaultAgentType(this.config),
       skillsDir: this.trustedSkillsDir(),
