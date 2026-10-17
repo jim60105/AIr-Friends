@@ -6,7 +6,7 @@ Total estimate: **6.25 engineering hours**, strictly below 8 hours. Estimates in
 
 - [ ] 1.1 (1.5h) Add platform-aware prompt fragments and trusted inventory gating; verify snapshot/contract tests across backend/spawn shapes.
 - [ ] 1.2 (1.5h) Update bundled skill and retry/result guidance for signature, payloads and SMTP uncertainty; verify no extra-response wording in email paths.
-- [ ] 1.3 (1.25h) Add and run this responsibility's deterministic regression cases. Verify: Use existing prompt/skill-root fixtures, compare non-email renderings and ensure backend denial persists when unsupported scripts are called manually.
+- [ ] 1.3 (1.25h) Add and run this responsibility's deterministic regression cases. Verify: Use existing prompt/skill-root fixtures, compare non-email renderings and verify backend denial persists when unsupported scripts are called manually, including an email no-response corrective turn with no reaction guidance.
 - [ ] 1.4 (0.5h) Update skills usage examples and mounted-prompt restart/deployment instructions, with no model-proof authorization claim. Verify the documented fields, outcomes and commands match the implemented interface and link this slice's acceptance scenarios in `docs/email-platform.md`; add its scoped CHANGELOG entry.
 - [ ] 1.5 (0.75h contingency) Resolve bounded integration defects in the owned interfaces/tests only; verify the same acceptance cases after fixes, or record unused contingency without inventing extra features.
 

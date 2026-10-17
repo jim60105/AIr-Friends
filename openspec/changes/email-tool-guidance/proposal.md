@@ -30,6 +30,8 @@ Total: **6.25 engineering hours**, strictly below 8 hours. See tasks.md for item
 
 ## Batch:
 
+- code-conflict: email-opencode-intent-profile (src/acp/agent-factory.ts)
+- code-conflict: email-omp-intent-profile (src/acp/agent-factory.ts)
 - depends-on: email-forward-skill
 - depends-on: email-response-accounting
 - depends-on: email-reminder-threads

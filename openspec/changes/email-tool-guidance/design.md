@@ -18,6 +18,8 @@ Render email context explicitly in message/reminder/spontaneous prompts without 
 
 ### Owned interfaces and callsites
 
+This slice updates `src/acp/agent-factory.ts` retry construction as well as orchestrator templates. Email no-response corrective turns must not read/render react-message instructions; ordinary platforms retain their full three-skill corrective prompt. Add a no-response email corrective-turn regression in both spawn shapes that proves reaction guidance is absent and supported literal payload recipes remain.
+
 Own email availability policy in trusted inventory and prompt variables, for both OMP and OpenCode and per-spawn/pool. Retry guidance uses email operation evidence and does not demand a new send after third-party/file submission or uncertainty. Prompt-only changes cannot authorize delivery. Preserve all generic-platform prompts and mount override guidance; deployment requires updating operator-mounted prompt files.
 
 Affected implementation/tests: `prompts`, `skills/send-email/SKILL.md`, `skills/send-reply/SKILL.md`, `skills/send-file/SKILL.md`, `src/core/session-orchestrator.ts`, `src/acp/skill-inventory.ts`, `tests/core/prompt-permission-guidance.test.ts`, `tests/core/skill-root-wiring.test.ts`. Update every affected caller in this responsibility when its shared interface changes; do not leave dual APIs, empty stubs or shims. New modules remain unregistered in production until final activation, while tests exercise their real implementations.
@@ -53,7 +55,7 @@ Reuse the established platform/workspace/skill boundaries rather than a second s
 
 ## Verification design
 
-Use existing prompt/skill-root fixtures, compare non-email renderings and ensure backend denial persists when unsupported scripts are called manually.
+Use existing prompt/skill-root fixtures, compare non-email renderings and verify backend denial persists when unsupported scripts are called manually.
 
 The tasks' verification is planned implementation evidence, not exercised runtime evidence. Test doubles for ACP/model decisions are labeled separately from real IMAP/SMTP protocol-service exchanges. No production credentials or mailbox may be used by automated checks.
 
