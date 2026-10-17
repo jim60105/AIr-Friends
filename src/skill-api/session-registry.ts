@@ -6,8 +6,12 @@ import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
+import type { DestinationGrant } from "@core/email-intent-preflight.ts";
 
 const logger = createLogger("SessionRegistry");
+
+/** The read-only answer for a session that has no recorded grants. */
+const EMPTY_GRANTS: readonly DestinationGrant[] = Object.freeze([]);
 
 /**
  * Active session information
@@ -122,6 +126,15 @@ export interface ActiveSession {
    * through the skill context. Undefined for every non-email session.
    */
   emailWorkId?: string;
+  /**
+   * Immutable third-party destination grants of this session (row 19). Written
+   * exactly ONCE by the host, before the sending agent starts, through
+   * {@link SessionRegistry.recordEmailDestinationGrants}; an empty array means
+   * "this session has no third-party authorization" and latches that verdict.
+   * Lives only as long as this registry entry, so grants die with the session,
+   * and no caller can add, replace or widen one.
+   */
+  emailDestinationGrants?: readonly DestinationGrant[];
 }
 
 /**
@@ -184,6 +197,7 @@ export class SessionRegistry {
       | "editCount"
       | "fileSendCount"
       | "memorySaveCount"
+      | "emailDestinationGrants"
     >,
   ): string {
     const id = this.generateSessionId();
@@ -247,6 +261,41 @@ export class SessionRegistry {
     if (session) {
       session.lastActivityAt = new Date();
     }
+  }
+
+  /**
+   * Record this session's destination authorization exactly once (row 19).
+   *
+   * Host-only: the orchestrator calls this before the sending agent starts, and
+   * the argument is the preflight's own frozen grant set. The FIRST call wins,
+   * including an explicit empty array — the verdict "this session may not send
+   * to any third party" is latched, so no later caller (a tool parameter, a
+   * retry, a second derivation attempt) can add or enlarge a grant. There is no
+   * API that appends to or replaces the recorded value.
+   *
+   * Returns false when the session is unknown or already recorded.
+   */
+  recordEmailDestinationGrants(
+    sessionId: string,
+    grants: readonly DestinationGrant[],
+  ): boolean {
+    const session = this.get(sessionId);
+    if (!session || session.emailDestinationGrants !== undefined) return false;
+    session.emailDestinationGrants = Object.freeze([...grants]);
+    logger.debug("Destination grants recorded for session {sessionId}", {
+      sessionId,
+      count: session.emailDestinationGrants.length,
+    });
+    return true;
+  }
+
+  /**
+   * Read this session's destination grants. Returns an empty frozen list when
+   * the session is unknown, expired or was never recorded, so a caller can
+   * never observe a mutable or partially recorded set.
+   */
+  emailDestinationGrantsOf(sessionId: string): readonly DestinationGrant[] {
+    return this.get(sessionId)?.emailDestinationGrants ?? EMPTY_GRANTS;
   }
 
   /**

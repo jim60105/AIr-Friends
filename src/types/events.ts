@@ -139,6 +139,30 @@ export function isEmailWorkReceipt(value: unknown): value is EmailWorkReceipt {
 }
 
 /**
+ * The current authored request of one accepted inbound email, as separated by
+ * the MIME provenance parser (`email-incoming-mime`, row 06) and carried
+ * host-only on the email event (`email-destination-grants`, row 19).
+ *
+ * Only `authoredText` — the text the verified sender wrote in THIS message —
+ * ever reaches this carrier: quoted and forwarded material, earlier thread
+ * content, attachments and retrieved pages are deliberately absent, so no
+ * consumer has to re-derive (and can never accidentally widen) the authorship
+ * boundary. It is populated by the email adapter from the accepted work's own
+ * provenance, never from tool parameters, model output or request data, and it
+ * is never logged or persisted.
+ */
+export interface EmailAuthoredRequest {
+  /** The current message's authored text only (no quotes, no forwarded bodies). */
+  authoredText: string;
+  /**
+   * The parser's authorship verdict for the whole message. `"ambiguous"` means
+   * the authored/quoted boundary could not be established confidently, so the
+   * text cannot authorize anything.
+   */
+  provenanceStatus: "clean" | "ambiguous";
+}
+
+/**
  * Normalized event from any platform
  * All platform-specific events are converted to this format
  */
@@ -186,6 +210,14 @@ export interface NormalizedEvent {
    * that are not bound to an accepted mailbox record.
    */
   emailWork?: EmailWorkReceipt;
+
+  /**
+   * Current authored request of this email event (row 19), including the
+   * parser's authorship verdict. Present only on email events the adapter
+   * emitted from an accepted mailbox record; every other platform leaves it
+   * unset and no consumer requires it.
+   */
+  emailAuthoredRequest?: EmailAuthoredRequest;
 
   /** Raw platform-specific data for reference */
   raw?: unknown;

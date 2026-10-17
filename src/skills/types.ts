@@ -5,6 +5,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { NoteRecallResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
+import type { DestinationGrant } from "@core/email-intent-preflight.ts";
 import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platform.ts";
 
 /**
@@ -97,6 +98,15 @@ export interface SkillContext {
    * not bound (the email adapter then refuses to send).
    */
   emailSend?: EmailSendContext;
+  /**
+   * Immutable third-party destination grants of this session (row 19), exactly
+   * as the host recorded them before the agent started. READ-ONLY: a handler
+   * may only match an outbound operation against a grant it already holds, and
+   * no skill parameter — however named — can create, add to or widen this list.
+   * Empty/undefined means this session holds no third-party authorization, so a
+   * third-party send must be refused.
+   */
+  emailDestinationGrants?: readonly DestinationGrant[];
 }
 
 /**
