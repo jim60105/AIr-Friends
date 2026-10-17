@@ -502,3 +502,101 @@ deno lint src/ tests/
 deno check src/main.ts
 deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/email/mailbox-poller.test.ts
 ```
+
+## Outgoing MIME Construction & Fixed Signature (Owned by `email-mime-signature`)
+
+`src/platforms/email/outgoing-mime.ts` owns the single construction point for every
+outgoing email path: ordinary replies, third-party compositions, forwards, file
+deliveries, reminders, and spontaneous messages. It is intentionally NOT registered
+in production bootstrap; no SMTP transport or submission orchestration lives here.
+
+### Construction Contract
+
+`new OutgoingMimeBuilder({ fromAddress, now? })` keeps the configured bot address and
+an injectable clock. `construct(draft, signature)` returns
+`{ messageId, emlBytes, digest, historyBody, envelope, sizeBytes, wireIds, to, subject }`:
+
+- `EmailDraft = { owner, operationKey, targetKind, to, subject, authoredBody, thread?, forwardSource?, attachments? }`.
+  There is no Cc/Bcc or arbitrary header surface; `to` is the single authorized
+  envelope recipient.
+- `emlBytes` are complete RFC 5322 wire bytes with CRLF line endings; `digest` is the
+  SHA-256 hex digest of exactly those bytes (submission evidence, row 04), and
+  `sizeBytes` is their byte length.
+- `envelope = { from, to: [recipient] }` is returned explicitly for SMTP submission
+  (row 12); the transport never derives recipients from caller-supplied headers.
+- The same draft, signature, clock, and attachment bytes always produce identical
+  bytes, digest, and Message-ID, so recovery and sent-copy append reuse the stored
+  `.eml` rather than reconstructing or re-signing it.
+
+### Central Fixed Signature
+
+The signature from `platforms.email.signature` is passed on every `construct` call and
+applied **once**, after body cleanup and before MIME construction:
+
+- separated from the authored body by a newline and the standard separator line
+  (`--` followed by one ASCII space);
+- an absent, empty, or whitespace-only signature adds nothing at all (no separator);
+- the configured text is inserted literally — `${...}` template syntax and multiline
+  line structure are preserved; changing it requires a bot restart;
+- no heuristic de-duplication runs, so the signature is applied once by construction and
+  model-written signature-like tails are kept verbatim (authored text that already
+  contains the literal signature keeps it, and the central application adds one more).
+
+Prompts and skills MUST tell the model not to generate the configured signature. Sent
+history stores the actual signed outgoing content (`historyBody`), including the
+signature and, for forwards, the quoted original section.
+
+### Headers, Attachments & Forwarding
+
+- Header-bound values are rejected before any bytes are produced: CR/LF/NUL injection
+  in `subject`, mailboxes, thread identifiers, or attachment metadata fails
+  construction, so a rejected draft cannot create a submission intent.
+- `to` and `fromAddress` are canonicalized and restricted to a strict dot-atom
+  addr-spec; group/route syntax that a MIME serializer would reinterpret is refused.
+- `thread.wireMessageId` becomes `In-Reply-To`; `thread.references` are preserved in
+  order with the parent appended once, and `Message-ID` is generated per construction.
+- Every message carries `Auto-Submitted: auto-generated` to limit automatic-response
+  loops; `Subject` uses RFC 2047 encoded words when needed.
+- Bodies are plain text (always with a `text/plain` part, even when the authored body is
+  empty) and attachments produce `multipart/mixed`; binary attachments use base64
+  transfer encoding. Attachment filenames are display-only, strip paths and control
+  characters, and never address the filesystem.
+- Attached messages (`message/*`, e.g. a raw source `.eml`) are sent unencoded, so they
+  must already be CRLF-terminated: content containing bare line feeds cannot be
+  preserved byte-for-byte and is rejected instead of being silently rewritten.
+- A forward places the signature after its authored commentary and before a labeled
+  `---------- Forwarded message ---------` section that carries the original metadata
+  and body verbatim; original signature text and byte-preservable attachment bytes are
+  kept exactly (attached messages follow the CRLF rule above). The incoming provenance
+  parser classifies that section as forwarded text.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-mime-signature/specs/email-message-construction/spec.md`:
+
+- **Multiline and literal content**: literal line structure remains and sent-copy
+  construction never adds a second signature.
+- **Signed source forward**: the new signature precedes source content while source
+  bytes stay identical.
+- **Injected subject**: CRLF plus header text fails construction before a submission
+  intent exists.
+
+### Exported API
+
+- `EmailDraft`, `EmailForwardSource`, `EmailOutgoingAttachment`, `EmailThreadReference`
+- `ConstructedOutgoingEmail`
+- `OutgoingMimeBuilder` with `construct(draft, signature)` and `sender`
+- `applyOutgoingSignature(body, signature)`, `buildForwardSection(source)`
+- `SIGNATURE_SEPARATOR`, `FORWARD_SECTION_MARKER`,
+  `OutgoingMimeError` / `OutgoingMimeDiagnosticCode`
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/email/outgoing-mime.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env tests/platforms/email/outgoing-mime-smoke.test.ts
+```
