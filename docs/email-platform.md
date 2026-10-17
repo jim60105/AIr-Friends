@@ -2484,3 +2484,157 @@ adapter, mail service, submission journal and MIME builder over isolated tempora
 smoke leg uses the local `EmailSmtpTestService` fixture to assert exactly ONE live DATA transaction,
 the origin thread linkage, one signature and the owner recipient — with the restart replay
 performing none. A model is involved nowhere, and no production credential or mailbox is used.
+
+## Private Observability of Email Execution (Owned by `email-private-observability`)
+
+Email content is private correspondence: bodies, recipients, subjects, attachment bytes and names,
+the agent's authored text and its interpretation output NEVER reach an operational log, an audit
+entry or a metrics label. What stays visible is metadata only — opaque identifiers, bounded enums,
+counts, lengths and SHA-256 digests — whatever `audit.hashContent` is configured to do.
+
+### Privacy invariants
+
+- **Metadata-only audit, regardless of configuration.** `SessionAuditWriter` recognizes the `email`
+  platform and projects EVERY entry through `projectEmailAuditData` before it is written. A content
+  field is replaced by `<field>Hash: sha256:<digest>` (plus `<field>Length`), an array of staged
+  paths/ids by one digest plus `<field>Count`, an already-canonical digest is preserved unchanged,
+  and every key that is not a host-assigned identifier, a bounded enum, a number or a boolean is
+  dropped. A raw `agent_message.promptContentHash` written with hashing off therefore becomes the
+  digest its name claims to be. The projection is idempotent, so the pre-projected `skill_call`
+  params and the writer's own pass can never change a digest's meaning.
+- **`email_operation` phase.** One entry per executed email-capable skill records the submission
+  outcome under the strict allowlist `{operationId, workId, phase, targetKind, sentCopy, safeCode}`.
+  `phase: "submitted"` with `sentCopy: "failed"` is an accepted mail whose sent-folder APPEND
+  failed; it is never reported as unsent, and `phase: "unknown"` marks the mail that must not be
+  retried blindly.
+- **Private loggers.** Every `Email*` module logger and every `email:<address>` session logger is
+  private by construction: identifiers/enums/counts survive, everything else is dropped,
+  placeholders holding a dropped value render as `[redacted]`, and mail addresses are redacted out
+  of the emitted module name.
+- **Execution-scoped propagation.** `runWithPrivateEmailScope()` wraps one whole email skill call,
+  so the skill registry's, session registry's and audit writer's own loggers are private for exactly
+  that execution — and never for a concurrent Discord/Misskey one. `Logger.withPrivateEmail()`
+  covers the mixed modules that serve both platforms (the Skill API server, the ACP client).
+- **Fail closed on errors.** A protocol, provider or agent error is recorded as its typed code
+  (`skillResult.code`, `safeCode`) or a constant failure code. Exception messages, raw tool titles
+  and command lines are hashed (ACP permission decisions) or dropped; a malformed request body is
+  reported as `SKILL_API_INVALID_JSON_BODY` without the parser message, which embeds body text.
+- **Diagnostics.** Attachment stat/read failures in an email session log a safe code, and a
+  successful email attachment delivery logs counts only. Metrics keep their existing platform/skill
+  labels; no address, subject, body or file name is ever a label value.
+- **Private bytes stay private.** The only place real content lives is the private archive and the
+  fsynced submission evidence (`data/email/outbound/…`, `data/workspaces/email/<owner>/email/…`,
+  directory `0700` / file `0600`, included in the data backup), exactly as documented by
+  `email-message-history` and `email-submission-service`. Those files are for manual review, not for
+  the dashboard.
+
+### Known limitation (not owned by this slice)
+
+`MemoryStore` reports a malformed memory JSONL line with a 100-character excerpt of that line
+(`src/core/memory-store.ts`). That path is platform-agnostic and runs during context assembly, i.e.
+outside any email skill execution, so a malformed line in the email workspace's memory files can
+still appear in the `MemoryStore` log. `src/core/memory-store.ts` is outside this slice's file
+ownership (its excerpt logging predates the email platform), so it is recorded here instead of being
+silently changed; the malformed-replay case this slice does own — the pre-session due-reminder
+enumeration — is content-free in `src/core/reminder-store.ts` (`email-reminder-threads`).
+
+### Operator inspection (no content required)
+
+```sh
+# Every outbound operation of one session, with its durable phase and copy state
+jq -r 'select(.phase == "email_operation") | .data
+  | [.operationId, .workId, .phase, (.targetKind // ""), (.sentCopy // "pending"), (.safeCode // "")] | @tsv' \
+  data/audit/email/<owner>/<sessionId>.jsonl
+
+# Which operations still need manual review (unknown outcome, or submitted with a failed sent copy)
+jq -r 'select(.phase == "email_operation"
+  and ((.data.phase == "unknown") or (.data.sentCopy == "failed")))
+  | [.data.operationId, .data.phase, (.data.sentCopy // "pending")] | @tsv' \
+  data/audit/email/<owner>/<sessionId>.jsonl
+
+# The durable truth for one operation (row 13), correlated by the same operationId
+jq -r 'select(.data.operationId == "op_<id>")
+  | [.data.transition, .data.phase, (.data.sentCopy // "pending")] | @tsv' \
+  data/email/submissions.jsonl
+```
+
+`<owner>` is the canonical `e_<sha256>` identity — never a raw address — and the audit path, the
+log module name and every metrics label use that identity or the platform identifier only.
+
+### Exported API (consumers: `email-tool-guidance`, `email-activation`)
+
+```ts
+// src/types/audit.ts
+export const EMAIL_AUDIT_PLATFORM = "email";
+export interface EmailOperationAuditData {
+  operationId?: string;
+  workId?: string;
+  phase?: string;
+  targetKind?: "user" | "third-party";
+  sentCopy?: "pending" | "appended" | "failed";
+  safeCode?: string;
+}
+export const EMAIL_OPERATION_AUDIT_FIELDS; // the six-field allowlist above
+export function isSafeEmailAuditScalar(key: string, value: string): boolean;
+export const EMAIL_HASH_VALUE_PATTERN; // ^sha256:[0-9a-f]{64}$
+export const EMAIL_HASH_FIELD_PATTERN; // /hash$/i
+export const EMAIL_CONTENT_FIELD_NAMES; // content/query/text/message/… → hashed
+export const EMAIL_CONTENT_ARRAY_FIELD_NAMES; // filePaths/fileNames/messageIds/… → hashed + count
+// `AuditPhase` gains "email_operation"; `SessionAuditEntry.data` gains
+// operationId/workId/actionSlot/targetKind/sentCopy/safeCode and `skillResult.code`.
+
+// src/core/audit-logger.ts
+export function projectEmailAuditData(
+  data: Record<string, unknown>,
+  depth?: number,
+): Promise<Record<string, unknown>>;
+export function projectEmailOperationData(input: EmailOperationAuditData): EmailOperationAuditData;
+// On SessionAuditWriter:
+isPrivateEmail(): boolean;
+writeEmailOperation(data: EmailOperationAuditData, timestamp?: string): Promise<void>;
+
+// src/utils/logger.ts
+export type LogPrivacy = "normal" | "private-email";
+export function isPrivateEmailLogModule(module: string): boolean;
+export function runWithPrivateEmailScope<T>(fn: () => T): T;
+// On Logger:
+withPrivateEmail(): Logger;
+```
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-private-observability/specs/session-audit-log/spec.md`:
+
+- **Adversarial errors**: a protocol or agent error carrying a private body or password records only
+  a safe reason code and opaque operation/work identifiers, in both the audit entry and the log.
+- **Malformed reminder before session creation**: `ReminderStore.parseLog()` decides replay
+  sensitivity from the trusted `workspace.components.platform`, so an email workspace's due-reminder
+  enumeration logs the safe `REMINDER_LINE_PARSE_FAILED` code with the line number and byte offset
+  only — never the line, and never the parser message that quotes it. That enumeration runs before
+  any session logger exists.
+- **APPEND failure**: an accepted email whose sent-folder copy fails shows `submitted` plus
+  `sentCopy: failed` and never `unsent`.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/core/email-privacy.test.ts tests/core/reminder-store.test.ts tests/core/audit-logger.test.ts \
+  tests/utils/logger.test.ts \
+  tests/types/audit.test.ts tests/acp/client.test.ts tests/skill-api/server.test.ts \
+  tests/skills/email-handler.test.ts tests/skills/email-forward.test.ts tests/skills/file-handler.test.ts
+```
+
+`tests/core/email-privacy.test.ts` drives the REAL audit writer, logger, ACP client and Skill API
+server over HTTP (with the real `SessionRegistry`, JWT issuance and `EmailComposeHandler` behind a
+recording mail-service seam) using sentinel values for the address, subject, body, credentials and
+attachment name. It asserts their absence from every phase entry, every log line and the metrics
+output, the presence of digests and identifiers instead, the `email_operation` allowlist under an
+adversarial extra field, a thrown handler exception that crosses the skill registry's logger, the
+real `ReminderStore` due-reminder enumeration on a malformed email JSONL (a position only, never the
+line or the parser message), and byte-compatible non-email entries. No model, provider or production
+credential is involved.

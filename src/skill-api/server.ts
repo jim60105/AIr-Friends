@@ -1,24 +1,29 @@
 // src/skill-api/server.ts
 
-import { createLogger } from "@utils/logger.ts";
+import { createLogger, runWithPrivateEmailScope } from "@utils/logger.ts";
 import { type ActiveSession, SessionRegistry } from "./session-registry.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import type { SkillContext, SkillResult } from "@skills/types.ts";
 import { emailComposeAuditParams } from "@skills/email-handler.ts";
 import { buildEmailReminderOrigin } from "@skills/reminder-handler.ts";
 import { reminderOperationKey, sessionEmailOperation } from "@core/reminder-store.ts";
+import { projectEmailAuditData } from "@core/audit-logger.ts";
+import { EMAIL_AUDIT_PLATFORM } from "../types/audit.ts";
 import {
   EMAIL_HOST_SKILL_SLOTS,
   emailSessionOwner,
   type EmailSubmissionEvidenceSource,
 } from "@core/email-response-accounting.ts";
-import type { EmailSendContext } from "../types/platform.ts";
+import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platform.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
 import { verifySkillJwt } from "@utils/skill-jwt.ts";
 
 const logger = createLogger("SkillAPIServer");
+
+/** Failure code of the Skill API's own outer error log in a private context. */
+const SKILL_API_ERROR_CODE = "SKILL_API_ERROR";
 
 /**
  * Extract the bearer token from an `Authorization: Bearer <token>` header.
@@ -203,41 +208,46 @@ export class SkillAPIServer {
     session: ActiveSession,
     skillName: string,
     result: SkillResult,
-  ): boolean {
-    if (session.platform !== "email") return false;
+  ): { slotConsumed: boolean; outcomes: EmailSubmissionMetadata[] } {
+    if (session.platform !== "email") return { slotConsumed: false, outcomes: [] };
     const actionSlot = this.hostEmailSkillSlot(session, skillName);
     const metadata = result.emailSubmission;
     if (metadata) {
       this.sessionRegistry.recordEmailSubmission(session.id, metadata, actionSlot);
-      return metadata.phase === "submitted";
+      return { slotConsumed: metadata.phase === "submitted", outcomes: [metadata] };
     }
     // No metadata: only a failure needs the durable second opinion (a success
     // that reported nothing recorded no email effect).
-    if (result.success) return false;
-    return this.reconcileDurableEmailEvidence(session);
+    if (result.success) return { slotConsumed: false, outcomes: [] };
+    const recorded = this.reconcileDurableEmailEvidence(session);
+    return {
+      slotConsumed: recorded.some((outcome) => outcome.phase === "submitted"),
+      outcomes: recorded,
+    };
   }
 
   /**
    * Read this session's durable email evidence for its own logical slots — the
    * ordinary slots plus one partition per immutable grant — and record every
-   * result that is not a recorded non-delivery. Returns true when a CONFIRMED
-   * submission was found.
+   * result that is not a recorded non-delivery. The recorded outcomes are
+   * returned so the caller can audit the evidence it just recovered: a lost
+   * skill response must not lose the operator's operation record with it.
    */
-  private reconcileDurableEmailEvidence(session: ActiveSession): boolean {
+  private reconcileDurableEmailEvidence(session: ActiveSession): EmailSubmissionMetadata[] {
     const evidence = this.emailSubmissionEvidence;
     const owner = emailSessionOwner(session);
     const identity = sessionEmailOperation(session);
     if (!evidence || owner === undefined || identity === undefined) {
-      return false;
+      return [];
     }
-    let submitted = false;
+    const recorded: EmailSubmissionMetadata[] = [];
     for (const actionSlot of identity.slots) {
-      const recorded = evidence.lookup(owner, { workId: identity.workId, actionSlot });
-      if (!recorded || recorded.phase === "prepared" || recorded.phase === "failed") continue;
-      this.sessionRegistry.recordEmailSubmission(session.id, recorded, actionSlot);
-      if (recorded.phase === "submitted") submitted = true;
+      const outcome = evidence.lookup(owner, { workId: identity.workId, actionSlot });
+      if (!outcome || outcome.phase === "prepared" || outcome.phase === "failed") continue;
+      this.sessionRegistry.recordEmailSubmission(session.id, outcome, actionSlot);
+      recorded.push(outcome);
     }
-    return submitted;
+    return recorded;
   }
 
   /**
@@ -326,17 +336,73 @@ export class SkillAPIServer {
     skillName: string,
     headers: Record<string, string>,
   ): Promise<Response> {
+    let parsed: unknown;
     try {
-      // Parse request body
-      const body = await request.json() as SkillRequest;
+      parsed = await request.json();
+    } catch (error) {
+      // Never log the parser message: it embeds a snippet of the request body,
+      // which for email codecs is private correspondence (recipient, subject,
+      // body or staged attachment names).
+      logger.error("Skill API request body was not valid JSON", {
+        code: "SKILL_API_INVALID_JSON_BODY",
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid JSON body" }),
+        { status: 400, headers },
+      );
+    }
 
-      if (!body.sessionId) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Missing sessionId" }),
-          { status: 400, headers },
-        );
-      }
+    // The envelope is validated before it is dereferenced: a valid `null` (or
+    // any other non-object) body must reach the same structured 400 as a
+    // missing session id instead of escaping as a server-level rejection.
+    if (parsed === null || typeof parsed !== "object") {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing sessionId" }),
+        { status: 400, headers },
+      );
+    }
+    const body = parsed as SkillRequest;
+    if (typeof body.sessionId !== "string" || body.sessionId.length === 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing sessionId" }),
+        { status: 400, headers },
+      );
+    }
 
+    // An email session's skill call handles private correspondence end to end:
+    // the whole execution (including the skill registry's and the audit
+    // writer's own loggers, and any deferred callback started here) runs inside
+    // the ambient private scope, so a thrown provider error can never print a
+    // password, a body or an attachment name.
+    if (this.sessionRegistry.get(body.sessionId)?.platform === EMAIL_AUDIT_PLATFORM) {
+      return await runWithPrivateEmailScope(() =>
+        this.runSkillRequest(
+          skillName,
+          body,
+          headers,
+          request.headers.get("authorization"),
+        )
+      );
+    }
+    return await this.runSkillRequest(
+      skillName,
+      body,
+      headers,
+      request.headers.get("authorization"),
+    );
+  }
+
+  /**
+   * Authenticate, gate and execute one parsed skill request.
+   */
+  private async runSkillRequest(
+    skillName: string,
+    body: SkillRequest,
+    headers: Record<string, string>,
+    authorization: string | null,
+  ): Promise<Response> {
+    try {
       // Authenticate BEFORE the dedup cache: a valid session ID is not
       // sufficient — the caller must present the owning session's signed JWT.
       // Authentication failures are returned immediately and are NOT cached, so
@@ -344,7 +410,7 @@ export class SkillAPIServer {
       // legitimate caller's cached result.
       const auth = await this.authenticate(
         body.sessionId,
-        extractBearerToken(request.headers.get("authorization")),
+        extractBearerToken(authorization),
       );
       if (!auth.ok) {
         return new Response(
@@ -481,7 +547,10 @@ export class SkillAPIServer {
         }
       }
     } catch (error) {
+      // In an email execution the ambient private scope already strips the
+      // message; the constant code keeps the failure diagnosable either way.
       logger.error("Skill API error", {
+        code: SKILL_API_ERROR_CODE,
         error: error instanceof Error ? error.message : String(error),
       });
 
@@ -798,18 +867,32 @@ export class SkillAPIServer {
 
     const auditWriter = session.auditWriter;
     const skillStartTime = Date.now();
+    // An email session handles private correspondence, so its whole audit trail is
+    // metadata-only whatever the general content-hashing setting says.
+    const privateEmail = session.platform === EMAIL_AUDIT_PLATFORM;
 
     // Sanitize params for audit before execution (fire-and-forget safe). A composed
     // message is private correspondence, so `send-email` is projected to digests and
     // lengths FIRST — its recipient, subject and body are never recorded, whatever
-    // the configured content-hashing setting is.
+    // the configured content-hashing setting is. Every other email-session skill is
+    // projected the same way, so a reply body, a memory payload or a staged file
+    // name cannot reach the entry through the generic hashing rule.
     const sanitizedParams = auditWriter
-      ? await sanitizeSkillParams(
-        skillName === "send-email"
-          ? await emailComposeAuditParams(body.parameters ?? {})
-          : body.parameters ?? {},
-        auditWriter.getConfig().hashContent,
-      )
+      ? privateEmail
+        ? await projectEmailAuditData(
+          await sanitizeSkillParams(
+            skillName === "send-email"
+              ? await emailComposeAuditParams(body.parameters ?? {})
+              : body.parameters ?? {},
+            true,
+          ),
+        )
+        : await sanitizeSkillParams(
+          skillName === "send-email"
+            ? await emailComposeAuditParams(body.parameters ?? {})
+            : body.parameters ?? {},
+          auditWriter.getConfig().hashContent,
+        )
       : undefined;
 
     const result = await this.skillRegistry.executeSkill(
@@ -822,7 +905,15 @@ export class SkillAPIServer {
     await auditWriter?.write("skill_call", {
       skillName,
       skillParams: sanitizedParams,
-      skillResult: { success: result.success, error: result.error },
+      // An email failure is reported by its typed code: the message text can echo
+      // a provider/agent error and has no place in a private audit entry. The
+      // `code` field itself stays email-only, so non-email `skillResult`
+      // serialization is byte-identical to what it was.
+      skillResult: {
+        success: result.success,
+        ...(privateEmail && result.code !== undefined ? { code: result.code } : {}),
+        ...(privateEmail || result.error === undefined ? {} : { error: result.error }),
+      },
       skillDurationMs: Date.now() - skillStartTime,
     });
     auditWriter?.incrementSkillCalls();
@@ -832,7 +923,33 @@ export class SkillAPIServer {
     // for a confirmed submission, whose reservation must survive the rollback;
     // unresolved evidence keeps its `unknown` latch (which suppresses automatic
     // retry) while the existing rollback still clears unconfirmed delivery state.
-    const emailSlotConsumed = this.accountEmailSkillOutcome(session, skillName, result);
+    const emailAccounting = this.accountEmailSkillOutcome(session, skillName, result);
+    const emailSlotConsumed = emailAccounting.slotConsumed;
+
+    // Audit: email_operation — the operator's stable correlation of one submitted,
+    // failed or unknown email (and its sent-copy state) without any content. A
+    // result that reported nothing but whose durable evidence the accounting just
+    // recovered is audited from that same evidence.
+    if (privateEmail && auditWriter) {
+      // The work id recorded here must be the one the durable evidence is filed
+      // under: a scheduled reminder session has no inbound work item, so its
+      // logical operation carries the reminder's own id.
+      const emailWorkId = sessionEmailOperation(session)?.workId;
+      for (const emailSubmission of emailAccounting.outcomes) {
+        await auditWriter.writeEmailOperation({
+          ...(emailSubmission.operationId === undefined
+            ? {}
+            : { operationId: emailSubmission.operationId }),
+          ...(emailWorkId === undefined ? {} : { workId: emailWorkId }),
+          phase: emailSubmission.phase,
+          ...(emailSubmission.targetKind === undefined
+            ? {}
+            : { targetKind: emailSubmission.targetKind }),
+          ...(emailSubmission.sentCopy === undefined ? {} : { sentCopy: emailSubmission.sentCopy }),
+          ...(emailSubmission.safeCode === undefined ? {} : { safeCode: emailSubmission.safeCode }),
+        });
+      }
+    }
 
     // Rollback if send-reply failed
     if (skillName === "send-reply" && !result.success && !emailSlotConsumed) {
@@ -929,7 +1046,9 @@ export class SkillAPIServer {
           );
         }
         if (auditWriter) {
-          const hashContent = auditWriter.getConfig().hashContent;
+          // An email attachment name is private metadata: it is hashed even when
+          // general content hashing is disabled.
+          const hashContent = auditWriter.getConfig().hashContent || privateEmail;
           const params = (body.parameters ?? {}) as Record<string, unknown>;
           const caption = typeof params.caption === "string" ? params.caption : "";
           const fileNames = Array.isArray(params.filePaths)
@@ -961,7 +1080,7 @@ export class SkillAPIServer {
         ? (body.parameters as Record<string, string>).message
         : "";
       await auditWriter.write("reply_sent", {
-        replyContentHash: auditWriter.getConfig().hashContent
+        replyContentHash: (auditWriter.getConfig().hashContent || privateEmail)
           ? `sha256:${await sha256Hash(replyContent)}`
           : undefined,
         replyLength: replyContent.length,
@@ -984,7 +1103,7 @@ export class SkillAPIServer {
       await auditWriter.write("reply_edited", {
         originalMessageId: originalMsgId,
         newMessageId: newMsgId,
-        replyContentHash: auditWriter.getConfig().hashContent
+        replyContentHash: (auditWriter.getConfig().hashContent || privateEmail)
           ? `sha256:${await sha256Hash(editContent)}`
           : undefined,
         replyLength: editContent.length,

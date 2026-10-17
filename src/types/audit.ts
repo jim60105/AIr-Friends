@@ -20,6 +20,7 @@ export type AuditPhase =
   | "reply_sent"
   | "reply_edited"
   | "file_sent"
+  | "email_operation"
   | "retry_triggered"
   | "process_acquired"
   | "session_end"
@@ -85,7 +86,7 @@ export interface SessionAuditEntry {
     // skill_call
     skillName?: string;
     skillParams?: Record<string, unknown>;
-    skillResult?: { success: boolean; error?: string };
+    skillResult?: { success: boolean; error?: string; code?: string };
     skillDurationMs?: number;
 
     // memory_operation
@@ -122,6 +123,15 @@ export interface SessionAuditEntry {
     fileNamesHash?: string;
     fileNames?: string;
 
+    // email_operation (private email context): the six-field allowlist below,
+    // never any message content, address or file name.
+    operationId?: string;
+    workId?: string;
+    actionSlot?: string;
+    targetKind?: "user" | "third-party";
+    sentCopy?: "pending" | "appended" | "failed";
+    safeCode?: string;
+
     // reply_edited
     originalMessageId?: string;
     newMessageId?: string;
@@ -152,4 +162,247 @@ export interface SessionAuditEntry {
     // common
     [key: string]: unknown;
   };
+}
+
+/**
+ * Platform identifier of the private email execution context. A session whose
+ * platform is `email` carries private correspondence, so its audit entries are
+ * serialized metadata-only regardless of the general `hashContent` setting.
+ */
+export const EMAIL_AUDIT_PLATFORM = "email";
+
+/**
+ * The exact field allowlist of the `email_operation` audit phase
+ * (`email-private-observability` design). `phase` is the durable submission
+ * phase (`prepared`/`submitting`/`submitted`/`failed`/`unknown`); the entry's
+ * own `phase` field stays `email_operation`.
+ */
+export interface EmailOperationAuditData {
+  operationId?: string;
+  workId?: string;
+  phase?: string;
+  targetKind?: "user" | "third-party";
+  sentCopy?: "pending" | "appended" | "failed";
+  safeCode?: string;
+}
+
+/** The allowlisted `email_operation` data keys, in canonical spelling. */
+export const EMAIL_OPERATION_AUDIT_FIELDS = [
+  "operationId",
+  "workId",
+  "phase",
+  "targetKind",
+  "sentCopy",
+  "safeCode",
+] as const;
+
+/** Canonical SHA-256 audit digest form (`sanitizeSkillParams` convention). */
+export const EMAIL_HASH_VALUE_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+/** Key suffix of a digest-bearing audit field. */
+export const EMAIL_HASH_FIELD_PATTERN = /hash$/i;
+
+/**
+ * Fields that name a content payload. In the private email context these are
+ * never recorded: only their digest (and string length / array count) is.
+ * Deliberately includes agent-provided titles and raw command text, which can
+ * carry a staged file name, a subject or quoted mail.
+ */
+export const EMAIL_CONTENT_FIELD_NAMES: Record<string, true> = {
+  content: true,
+  query: true,
+  text: true,
+  message: true,
+  replycontent: true,
+  body: true,
+  subject: true,
+  caption: true,
+  title: true,
+  toolname: true,
+  command: true,
+  authoredtext: true,
+  intenttext: true,
+  prompt: true,
+  prompttext: true,
+};
+
+/** Fields carrying a collection of paths/names/ids: hashed into one digest. */
+export const EMAIL_CONTENT_ARRAY_FIELD_NAMES: Record<string, true> = {
+  filepaths: true,
+  filenames: true,
+  messageids: true,
+  files: true,
+  paths: true,
+  attachments: true,
+};
+
+// Value formats of the fields that may be recorded verbatim. Every one of them
+// is a host-assigned identifier, a bounded enum or a classification produced by
+// the host — never a free-form model/agent payload. A value that does not match
+// its field's format is dropped (or hashed) instead of being recorded.
+const SESSION_ID_VALUE = /^sess_[A-Za-z0-9_]{1,64}$/;
+const OPERATION_ID_VALUE = /^op_[A-Za-z0-9_-]{1,64}$/;
+const HOST_ID_VALUE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const HOST_SLOT_VALUE = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,63}$/;
+const LOWER_TOKEN_VALUE = /^[a-z][a-z0-9_-]{0,63}$/;
+const UPPER_CODE_VALUE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const MODEL_VALUE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+
+/** Format rules of the verbatim-recordable audit fields (keys are lowercased). */
+const EMAIL_SAFE_TEXT_FIELDS: Record<string, RegExp> = {
+  sessionid: SESSION_ID_VALUE,
+  operationid: OPERATION_ID_VALUE,
+  workid: HOST_ID_VALUE,
+  actionslot: HOST_SLOT_VALUE,
+  grantid: HOST_ID_VALUE,
+  sourcerecordid: HOST_ID_VALUE,
+  memoryid: HOST_ID_VALUE,
+  sessiontype: LOWER_TOKEN_VALUE,
+  phase: LOWER_TOKEN_VALUE,
+  targetkind: /^(user|third-party)$/,
+  sentcopy: /^(pending|appended|failed)$/,
+  safecode: UPPER_CODE_VALUE,
+  code: UPPER_CODE_VALUE,
+  action: LOWER_TOKEN_VALUE,
+  skillname: LOWER_TOKEN_VALUE,
+  platform: /^(discord|misskey|email)$/,
+  agenttype: /^(opencode|omp)$/,
+  model: MODEL_VALUE,
+  modelid: MODEL_VALUE,
+  reasoningeffort: LOWER_TOKEN_VALUE,
+  permissionmode: /^(restricted|native-yolo|yolo-switch)$/,
+  permissionkind: /^(read|edit|delete|move|search|execute|think|fetch|other|unknown)$/,
+  processnamespace: HOST_ID_VALUE,
+  decision: LOWER_TOKEN_VALUE,
+  reason: LOWER_TOKEN_VALUE,
+  operation: LOWER_TOKEN_VALUE,
+  visibility: /^(public|private)$/,
+  tier: LOWER_TOKEN_VALUE,
+  category: LOWER_TOKEN_VALUE,
+  stopreason: /^[A-Za-z0-9_-]{1,32}$/,
+};
+
+/**
+ * Scalar (number/boolean) metadata fields that may be recorded verbatim. Keys
+ * are the contract here — a private email sink records a number only under a
+ * name it knows, so an attacker-supplied property name cannot smuggle text
+ * through the value type.
+ */
+export const EMAIL_METADATA_SCALAR_KEYS: Record<string, true> = {
+  // session/turn shape
+  isdm: true,
+  yolo: true,
+  pooled: true,
+  isretry: true,
+  success: true,
+  repliesent: true,
+  reactionsent: true,
+  filesent: true,
+  reused: true,
+  // counts and durations
+  contentlength: true,
+  attachmentcount: true,
+  filescount: true,
+  durationms: true,
+  memoriescount: true,
+  recentmessagescount: true,
+  relatedmessagescount: true,
+  estimatedtokens: true,
+  requestcount: true,
+  maxrequests: true,
+  cooldownremainingms: true,
+  promptlength: true,
+  imagecount: true,
+  messagelength: true,
+  thoughtlength: true,
+  replylength: true,
+  chunkcount: true,
+  retrycount: true,
+  maxretries: true,
+  repliescount: true,
+  skillcallscount: true,
+  memoryopscount: true,
+  permissiondecisionscount: true,
+  resultcount: true,
+  skilldurationms: true,
+  subjectlength: true,
+  bodylength: true,
+  // `attachments` is the attachment COUNT in the compose handler's log context.
+  attachments: true,
+  attachmentscount: true,
+  // operational counters of the modules that log email work
+  count: true,
+  size: true,
+  used: true,
+  index: true,
+  total: true,
+  threshold: true,
+  attempt: true,
+  attempts: true,
+  cacheage: true,
+  filesendcount: true,
+  replycount: true,
+  editcount: true,
+  maxfilesends: true,
+  maxreplies: true,
+};
+
+/** Suffix rule for the projection's own derived scalar fields. */
+const EMAIL_DERIVED_SCALAR_KEY = /^[a-z][A-Za-z0-9]*(Length|Count|Counts|Ms|Bytes|Tokens|Age)$/;
+
+/** Structural fields whose nested payload is projected recursively. */
+export const EMAIL_STRUCTURAL_FIELD_NAMES: Record<string, true> = {
+  skillparams: true,
+  skillresult: true,
+};
+
+/**
+ * The only text fields an agent-supplied payload (skill params/results) may
+ * carry verbatim. Host metadata fields are excluded on purpose: a model that
+ * sends `workId`/`model`/`reason` must not have those values recorded just
+ * because the key looks recognized.
+ */
+export const EMAIL_PARAM_SAFE_TEXT_KEYS: Record<string, true> = {
+  action: true,
+  grantid: true,
+  sourcerecordid: true,
+  code: true,
+};
+
+/** Exact formats of the `email_operation` allowlist fields. */
+export const EMAIL_OPERATION_FIELD_VALIDATORS: Record<
+  keyof EmailOperationAuditData,
+  RegExp
+> = {
+  operationId: OPERATION_ID_VALUE,
+  workId: HOST_ID_VALUE,
+  phase: /^(prepared|submitting|submitted|failed|unknown)$/,
+  targetKind: /^(user|third-party)$/,
+  sentCopy: /^(pending|appended|failed)$/,
+  safeCode: UPPER_CODE_VALUE,
+};
+
+/** Whether a number/boolean may be recorded under `key`. */
+export function isEmailMetadataScalarKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return EMAIL_METADATA_SCALAR_KEYS[lower] === true || EMAIL_DERIVED_SCALAR_KEY.test(key);
+}
+
+/**
+ * Whether the value of a text field may be recorded under `key` in a private
+ * email context. Host metadata is validated by its own field format;
+ * agent-supplied payloads (`paramScope`) may only carry the narrow param
+ * allowlist. An already-canonical digest is accepted under a digest-bearing key
+ * only.
+ */
+export function isSafeEmailAuditScalar(
+  key: string,
+  value: string,
+  paramScope: boolean = false,
+): boolean {
+  if (EMAIL_HASH_VALUE_PATTERN.test(value)) return EMAIL_HASH_FIELD_PATTERN.test(key);
+  const lower = key.toLowerCase();
+  if (paramScope && EMAIL_PARAM_SAFE_TEXT_KEYS[lower] !== true) return false;
+  const pattern = EMAIL_SAFE_TEXT_FIELDS[lower];
+  return pattern !== undefined && pattern.test(value);
 }

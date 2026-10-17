@@ -1195,6 +1195,7 @@ Per-session JSONL audit trail for replay and debugging. Each session writes time
 | `agent_complete_message` | Agent complete buffered response  |
 | `reply_sent`             | Reply sent to platform            |
 | `reply_edited`           | Reply edited on platform          |
+| `email_operation`        | Email submission outcome (metadata only) |
 | `retry_triggered`        | Missing-reply retry activated     |
 | `session_end`            | Session lifecycle completed       |
 | `permission_approved`    | Permission request approved       |
@@ -1233,6 +1234,19 @@ audit:
 6. Retention cleanup runs at startup and every 24 hours, deleting files older than `retentionDays`
 7. Skill call auditing is done in the Skill API Server (`src/skill-api/server.ts`)
 
+**Email Privacy (`email-private-observability`):** A session whose platform is `email` carries
+private correspondence, so its audit entries, logs and metrics labels are metadata-only REGARDLESS
+of `audit.hashContent`. `SessionAuditWriter` projects every entry of an email session through
+`projectEmailAuditData()` (content fields → `sha256:` digests, unknown/agent-provided keys dropped),
+and `email_operation` is restricted to the allowlist below. `Logger` is private for `Email*`
+modules, for `email:<address>` session loggers and for any logger reached inside
+`runWithPrivateEmailScope()` (one email skill execution); dropped placeholders render as
+`[redacted]` and mail addresses are redacted out of the module name. `ChatbotClient`/`Skill API`
+hash permission titles/commands, agent text, reply bodies and attachment names in an email context
+and report failures as typed codes. Never add a raw address, subject, body, attachment name or
+exception message to an email-context sink — private bytes belong in the archive/evidence files
+only.
+
 **Phase-Specific `SessionAuditEntry.data` Fields:**
 
 - `trigger_received`: `platform`, `channelId`, `userId`, `messageId`, `isDm`, `contentLength`, `attachmentCount`
@@ -1248,6 +1262,7 @@ audit:
 - `agent_complete_message`: `messageContentHash`, `messageLength`, `chunkCount`
 - `reply_sent`: `replyContentHash`, `replyLength`, `platform`
 - `reply_edited`: `originalMessageId`, `newMessageId`, `replyContentHash`, `replyLength`, `platform`
+- `email_operation`: `operationId`, `workId`, `phase` (durable submission phase), `targetKind`, `sentCopy`, `safeCode` — the private email allowlist
 - `retry_triggered`: `retryCount`, `maxRetries`, `reason`
 - `session_end`: `success`, `replySent`, `reactionSent`, `durationMs`, `error`, `repliesCount`, `skillCallsCount`, `memoryOpsCount`, `permissionDecisionsCount`
 - `permission_approved` / `permission_denied`: `toolName`, `permissionKind`, `command`, `decision`, `reason`

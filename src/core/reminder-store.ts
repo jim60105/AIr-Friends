@@ -11,8 +11,30 @@ import type {
 } from "../types/reminder.ts";
 import type { EmailOperationKey } from "@platforms/email/submission-store.ts";
 import { emailResponseSlots } from "./email-response-accounting.ts";
+import type { Platform } from "../types/events.ts";
 
 const logger = createLogger("ReminderStore");
+
+/**
+ * Safe parse-failure code of a PRIVATE workspace's reminder line. A malformed
+ * line in an email workspace may be private correspondence, and the parser's own
+ * message quotes that line, so neither an excerpt nor the exception text is ever
+ * logged there — only this code and the position to inspect by hand.
+ */
+const PRIVATE_PARSE_FAILURE_CODE = "REMINDER_LINE_PARSE_FAILED";
+
+/**
+ * UTF-8 byte offset of the start of `lines[index]` (0-based). Computed only on
+ * the private failure path, so ordinary parsing stays as cheap as it was.
+ */
+function byteOffsetOfLine(lines: readonly string[], index: number): number {
+  const encoder = new TextEncoder();
+  let offset = 0;
+  for (let i = 0; i < index; i++) {
+    offset += encoder.encode(lines[i]).length + 1; // + the "\n" separator
+  }
+  return offset;
+}
 
 /** The logical email operation identity a host session's sends belong to. */
 export interface SessionEmailOperation {
@@ -118,7 +140,7 @@ export class ReminderStore {
       throw error;
     }
 
-    const events = this.parseLog(content);
+    const events = this.parseLog(content, workspace.components.platform);
     return this.resolveReminders(events);
   }
 
@@ -141,21 +163,38 @@ export class ReminderStore {
   }
 
   /**
-   * Parse JSONL content into log events
+   * Parse JSONL content into log events.
+   *
+   * `platform` is the trusted workspace identity, never anything read out of the
+   * content: a due-reminder enumeration runs before any session logger exists,
+   * and in an email workspace a malformed line may BE private correspondence.
+   * There the failure is reported as a safe code plus the line's position, with
+   * no excerpt and no content-bearing parser exception. Non-email workspaces keep
+   * their historical diagnostic unchanged.
    */
-  private parseLog(content: string): ReminderLogEvent[] {
+  private parseLog(content: string, platform: Platform): ReminderLogEvent[] {
     const events: ReminderLogEvent[] = [];
-    const lines = content.split("\n").filter((line) => line.trim());
+    const privateWorkspace = platform === "email";
+    const lines = content.split("\n");
 
-    for (const line of lines) {
+    for (const [index, line] of lines.entries()) {
+      if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as ReminderLogEvent;
         events.push(event);
       } catch (error) {
-        logger.warn("Failed to parse reminder log line", {
-          line: line.substring(0, 100),
-          error: String(error),
-        });
+        if (privateWorkspace) {
+          logger.warn("Failed to parse reminder log line", {
+            code: PRIVATE_PARSE_FAILURE_CODE,
+            line: index + 1,
+            offset: byteOffsetOfLine(lines, index),
+          });
+        } else {
+          logger.warn("Failed to parse reminder log line", {
+            line: line.substring(0, 100),
+            error: String(error),
+          });
+        }
       }
     }
 
