@@ -11,6 +11,7 @@ Defines durable smtp operation identity so email users and operators receive tes
 All email submission requests SHALL be bound to a durable owner-scoped logical operation before any SMTP side effect.
 
 #### Scenario: Concurrent repeats
+
 - **WHEN** two callers request the same logical action
 - **THEN** one durable operation is reserved and changed payload returns conflict
 
@@ -19,6 +20,7 @@ All email submission requests SHALL be bound to a durable owner-scoped logical o
 A submitting operation without a durable outcome SHALL become unknown on recovery and SHALL NOT be automatically resubmitted.
 
 #### Scenario: Tail lacks outcome
+
 - **WHEN** a submitting record exists and the final outcome record is truncated
 - **THEN** the operation stays unknown and automatic sends remain blocked
 
@@ -27,6 +29,6 @@ A submitting operation without a durable outcome SHALL become unknown on recover
 Corruption or missing submission evidence SHALL block affected automatic sends without treating the operation as absent.
 
 #### Scenario: Unattributable corrupt intent
+
 - **WHEN** journal corruption prevents identifying its owning operation
 - **THEN** the whole mailbox submission lane is blocked for review
-
