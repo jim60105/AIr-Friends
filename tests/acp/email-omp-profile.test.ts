@@ -373,6 +373,25 @@ Deno.test("profile - launches the authored deny-all document with its private ro
     assertEquals(env["XDG_CACHE_HOME"], join(home, ".cache"));
     assertEquals(env["XDG_STATE_HOME"], join(home, ".local", "state"));
     assertEquals(env[OMP_INTENT_PROFILE_FLAG], OMP_INTENT_PROFILE_FLAG_VALUE);
+    // The launch's ENVIRONMENT is part of the contract: exactly these keys, so
+    // nothing can quietly widen what the profile forwards. The consumer must
+    // spawn the child with `clearEnv: true` and this table VERBATIM — the marker
+    // is the launch's own identity and must never be routed through an
+    // environment allow-list/filter that could drop it, because an absent marker
+    // classifies the launch as an ordinary one.
+    assertEquals(Object.keys(env).sort(), [
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "OMP_INTENT_PROFILE",
+      "OPENROUTER_API_KEY",
+      "PATH",
+      "TMPDIR",
+      "USER",
+      "XDG_CACHE_HOME",
+      "XDG_DATA_HOME",
+      "XDG_STATE_HOME",
+    ]);
     // Native OMP resolves its agent (config) directory from HOME, so the
     // profile never relocates XDG_CONFIG_HOME; no skill tree and no Skill JWT
     // staging directory exist on this path.

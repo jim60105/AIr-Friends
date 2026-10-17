@@ -1561,7 +1561,13 @@ carry no profile identity and no intent marker.
 
 The marker is a factory-set child variable only: it is not a configuration field, not an
 `ENV_MAPPINGS` entry, not reachable from a prompt or tool request, and every ordinary launch builds
-its child environment from scratch.
+its child environment from scratch. The consumer must therefore spawn this config with `clearEnv`
+semantics and the returned `env` VERBATIM: the marker is the launch's own identity, so it must
+never be routed through an environment allow-list or filter (the ordinary sandbox's `filterEnv`
+pass keeps only a permitted subset and would drop it) — and a launch whose marker is absent
+classifies as an ordinary one, which would silently select the restricted capability callback and
+lose the pre-dispatch denial layer. `tests/acp/email-omp-profile.test.ts` pins the launch's exact
+environment key set so an accidental addition is visible too.
 
 ### Provider-only provisioning
 

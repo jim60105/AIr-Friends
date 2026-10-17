@@ -2179,6 +2179,16 @@ function buildEmailIntentOmpConfig(
 
   // Isolation variables are written LAST: they are the launch's own roots and
   // the host-only intent marker, and no forwarded credential may shadow them.
+  //
+  // SPAWN CONTRACT for the consumer: this child environment is returned as
+  // written and must be passed to the executable VERBATIM under `clearEnv`
+  // semantics. `OMP_INTENT_PROFILE` is the launch's own identity — an
+  // environment allow-list/filter that keeps only a permitted subset (the
+  // ordinary sandbox's `filterEnv` pass, for instance) would drop it, and a
+  // launch without a readable marker classifies as an ORDINARY one, which would
+  // silently select the restricted capability callback and lose the profile's
+  // pre-dispatch denial layer.
+  //
   // `XDG_CONFIG_HOME` is deliberately NOT set: native OMP resolves its agent
   // (config) directory from HOME (`~/.omp/agent/models.yml`), so a relocated
   // config home would put the authored model file the launch just copied out of
