@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Process startup now declares `--allow-sys` wherever the application is launched. The email platform's IMAP client imports `imapflow`, which eagerly loads `pino`, and `pino` calls `os.hostname()` while its module initializes; because the email platform is composed from `bootstrap.ts`, that runs on every start even when email is disabled. CI's compile-time build check, the `dev` task, the container `CMD` and the documented launch commands now carry the flag that `start` and the test tasks already had, so the compiled binary and the container image no longer fail at startup with `NotCapable: Requires sys access to "hostname"`.
 
+- Scheduled email reminders and explicit email replies no longer expire when their original anchor is pushed out of the 200-record recent window. Both the reminder preflight and the adapter's explicit send resolution now share one durable owner-thread-record eligibility resolver (`src/platforms/email/reply-eligibility.ts`): a retained inbound anchor supplies its own verified sender and wire threading, an outbound anchor takes its recipient from that thread's durable verified inbound source, and missing/corrupt/cross-owner/cross-thread/unthreadable anchors still refuse fail-closed with no SMTP, no substitute anchor and no new thread. Implicit latest-anchor sends and bounded recent model context are unchanged, and an unavailable resolver leaves an email reminder review-required instead of retrying forever.
+
 ## [0.35.0] - 2026-10-16
 
 ### Fixed

@@ -1554,12 +1554,21 @@ sends for one `workId` must give each send a distinct slot.
 
 ### Recipient, thread and outcome rules
 
-- The recipient is the verified original sender, re-derived from the owner thread: the newest
-  inbound record's stored address is re-normalized and accepted only when its owner id matches the
-  thread owner. `Reply-To`/`Cc`/`Bcc` are never consulted, the stored address is never trusted
-  unchecked, and the mail service re-checks the allowlist immediately before submission.
-- The reply stays in the thread: `In-Reply-To`/`References` come from the thread anchor the session
-  resolved. A source that carries no wire identifiers at all is refused rather than answered
+- An EXPLICIT reply anchor (`replyToMessageId`) resolves by durable authenticated owner, internal
+  thread and immutable record id through the same host-owned eligibility resolver the scheduled
+  reminder preflight uses (`src/platforms/email/reply-eligibility.ts`). Recent-history bounds play
+  no part: a retained anchor stays eligible however many newer records the thread has. The selected
+  record's wire identifiers determine `In-Reply-To`/`References`; an inbound anchor's own verified
+  sender (or, for an outbound anchor, the thread's durable verified inbound source) determines the
+  recipient. A missing, corrupt, cross-owner, cross-thread or unthreadable anchor is refused with
+  no SMTP, no substitute anchor and no new thread.
+- An IMPLICIT send (no anchor supplied) keeps its bounded recent-history behavior: the newest
+  record in that window supplies the thread anchor, and the newest inbound record in the same window
+  supplies the verified recipient. Its stored address is re-normalized and accepted only when its
+  owner id matches the thread owner. `Reply-To`/`Cc`/`Bcc` are never consulted, the stored address
+  is never trusted unchecked, and the mail service re-checks the allowlist immediately before
+  submission.
+- A selected source that carries no wire identifiers at all is refused rather than answered
   unthreaded.
 - Outcome reporting never over-claims: only `submitted` is reported as a delivered reply/file; a
   `failed` or `unknown` submission is reported as such with its `emailSubmission` metadata
@@ -2505,10 +2514,12 @@ Every delivery re-reads the persisted origin and re-checks the CURRENT configura
    unresolved record (`unknown`/`submitting`) is review-required WITHOUT sending. (With no evidence
    source wired, the mail service's own operation key still answers a repeated send from its
    journal, so a second SMTP transaction is impossible either way.)
-4. **Origin anchor usable for delivery.** The persisted anchor must appear in the SAME bounded
-   owner-thread history the adapter resolves an explicitly supplied anchor from
-   (`PlatformAdapter.fetchRecentMessages`), so an anchor the adapter could never thread to is
-   review-required instead of being retried on every tick. Another anchor is never chosen.
+4. **Origin anchor usable for delivery.** The persisted anchor is resolved through the SAME durable
+   owner-thread-record eligibility resolver the adapter uses for an explicitly supplied anchor. A
+   retained anchor therefore stays deliverable after any amount of newer history (and after a
+   restart); only a missing, corrupt, cross-owner, cross-thread or unthreadable anchor is
+   review-required before generation instead of being retried on every tick. Another anchor is
+   never chosen. An unavailable resolver fails closed for email.
 5. **Never a new thread.** Email delivery never calls `getDmChannelId` (which allocates a NEW
    internal thread). The session is bound to the origin channel, and the Skill API resolves its
    reply anchor from the persisted origin, so the reply threads to the message the user originally
@@ -2527,9 +2538,11 @@ because the durable operation evidence — not the reminder record — is what p
 
 ### Operator notes
 
-- The reminder anchor must remain inside the adapter's bounded thread scan; an anchor that has
-  aged out of that window fails closed (no SMTP, no guessed thread, review-required). The bound
-  itself is owned by `email-adapter`.
+- A reminder anchor does NOT expire with recent history: it remains usable while the owner-thread
+  archive retains it. Only an anchor the archive no longer contains (or one that is corrupt,
+  cross-owner, cross-thread or missing wire identifiers) fails closed with no SMTP and no guessed
+  thread, leaving the reminder disabled and review-required. The bounded scan owned by
+  `email-adapter` applies to IMPLICIT sends only.
 - Review-required reminders are disabled, so a re-added account does not automatically resume an
   earlier reminder; this is the stated scope (no recovery policy is invented here).
 - No mailbox credential or message body is involved: reminders use opaque owner/record/thread ids
@@ -2558,6 +2571,11 @@ export function validateEmailReminderOrigin(origin: ReminderOrigin | undefined, 
 // src/skill-api/session-registry.ts
 // ActiveSession.emailReminder?: EmailReminderSession
 // SessionOrchestrator.setupSession({ …, emailReminder? })
+
+// src/platforms/email/reply-eligibility.ts
+export function createEmailReplyEligibilityResolver(
+  store: EmailMessageStore,
+): EmailReplyEligibilityResolver;  // resolve({ owner, threadId, recordId })
 ```
 
 ### Acceptance Scenarios
@@ -2571,8 +2589,9 @@ Acceptance requirements and scenarios are defined in
   performs no SMTP submission; the reminder is disabled for review.
 - **Reminder patch fails** — SMTP acceptance is followed by a failed reminder disable; the next
   scheduler tick consults the stable `reminder:<id>` operation and does not send again.
-- **Missing / corrupt origin** — no usable origin, an anchor from another thread, or an anchor no
-  longer present in its owner thread is review-required; no thread is guessed and no mail is sent.
+- **Missing / corrupt origin** — no usable origin, an anchor from another thread, an anchor the
+  archive no longer contains, or a retained anchor without wire identifiers is review-required; no
+  thread is guessed and no mail is sent.
 
 ### Slice Verification
 
