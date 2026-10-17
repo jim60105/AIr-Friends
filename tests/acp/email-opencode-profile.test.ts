@@ -637,6 +637,13 @@ Deno.test("profile - refuses an authored document that drops a surface or adds p
         },
         /must not carry any/,
       ],
+      [
+        (document) => {
+          agentEntry(document, EMAIL_INTENT_AGENT_NAME)["prompt"] =
+            "/app/prompts/system_prompt_override.md";
+        },
+        /carries the unprovisioned member "prompt"/,
+      ],
     ];
 
     for (const [edit, expected] of cases) {

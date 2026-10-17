@@ -924,6 +924,18 @@ const PROFILE_ASSET_KEYS: Record<string, true> = {
   agent: true,
 };
 
+/**
+ * The only members the authored primary agent may carry. An unprovisioned
+ * member is a launch-time surface in its own right (a `prompt` names a file
+ * the engine reads while loading configuration, before any tool permission
+ * applies), so it is refused instead of tolerated.
+ */
+const PROFILE_PRIMARY_AGENT_KEYS: Record<string, true> = {
+  mode: true,
+  description: true,
+  permission: true,
+};
+
 /** Environment variables the profile must never forward from the deployment. */
 const PROFILE_RESERVED_ENV: Record<string, true> = {
   HOME: true,
@@ -1096,6 +1108,16 @@ function assertEmailIntentAsset(document: ProfileObject, path: string): void {
   const primary = agents[EMAIL_INTENT_AGENT_NAME];
   if (!isProfileObject(primary)) {
     refuseEmailIntentProfile(`"${path}" must declare the "${EMAIL_INTENT_AGENT_NAME}" agent`);
+  }
+  for (const key of Object.keys(primary)) {
+    if (PROFILE_PRIMARY_AGENT_KEYS[key] !== true) {
+      refuseEmailIntentProfile(
+        `the "${EMAIL_INTENT_AGENT_NAME}" agent of "${path}" carries the unprovisioned ` +
+          `member "${key}"; only ${
+            Object.keys(PROFILE_PRIMARY_AGENT_KEYS).join(", ")
+          } are part of the profile`,
+      );
+    }
   }
   if (primary["mode"] !== "primary") {
     refuseEmailIntentProfile(
