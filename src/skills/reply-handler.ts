@@ -191,22 +191,24 @@ export class ReplyHandler {
     context: SkillContext,
   ): Promise<SkillResult> => {
     try {
-      // Must have sent a reply first
-      if (!this.hasReplySentInternal(context)) {
-        return {
-          success: false,
-          error: "No reply has been sent yet. Use send-reply first.",
-        };
-      }
-
-      // A platform that cannot edit an already-sent message fails explicitly here: no adapter
-      // edit call is made and no replacement message is ever sent in its place.
+      // A platform that cannot edit an already-sent message fails explicitly here, before the
+      // session-state check: the capability is a platform fact, so even an edit attempted before
+      // the first reply reports the real reason. No adapter call is made and no replacement
+      // message is ever sent in place of an edit.
       if (context.platformAdapter.capabilities.supportsEditing === false) {
         return {
           success: false,
           code: "SKILL_EDIT_UNSUPPORTED",
           error:
             "Editing a sent message is not supported on this platform. The message was not changed and no replacement message was sent.",
+        };
+      }
+
+      // Must have sent a reply first
+      if (!this.hasReplySentInternal(context)) {
+        return {
+          success: false,
+          error: "No reply has been sent yet. Use send-reply first.",
         };
       }
 

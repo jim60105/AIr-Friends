@@ -96,6 +96,13 @@ export interface EmailSubmissionMetadata {
   targetKind?: "user" | "third-party";
   sentCopy?: "pending" | "appended" | "failed";
   safeCode?: string;
+  /**
+   * True when the recorded result of an already-known logical operation was returned instead of
+   * submitting again. One logical operation is one message: a caller that performs several
+   * distinct sends must give each one a distinct operation slot, or the later send is answered
+   * from the journal and never reaches the wire.
+   */
+  reused?: boolean;
 }
 
 /**
