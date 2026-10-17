@@ -2528,6 +2528,16 @@ counts, lengths and SHA-256 digests — whatever `audit.hashContent` is configur
   `email-message-history` and `email-submission-service`. Those files are for manual review, not for
   the dashboard.
 
+### Known limitation (not owned by this slice)
+
+`MemoryStore` reports a malformed memory JSONL line with a 100-character excerpt of that line
+(`src/core/memory-store.ts`). That path is platform-agnostic and runs during context assembly, i.e.
+outside any email skill execution, so a malformed line in the email workspace's memory files can
+still appear in the `MemoryStore` log. `src/core/memory-store.ts` is outside this slice's file
+ownership (its excerpt logging predates the email platform), so it is recorded here instead of being
+silently changed; the malformed-replay case this slice does own — the pre-session due-reminder
+enumeration — is content-free in `src/core/reminder-store.ts` (`email-reminder-threads`).
+
 ### Operator inspection (no content required)
 
 ```sh
