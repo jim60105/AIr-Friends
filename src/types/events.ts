@@ -86,6 +86,59 @@ export function isNetworkAttachment(att: Attachment): att is NetworkAttachment {
 }
 
 /**
+ * Internal typed email work receipt (owned by `email-session-receipts`).
+ *
+ * Bound to a mailbox entry that the poller (`email-poll-recovery`) already
+ * accepted durably, and to the hand-off workId it emitted: the session
+ * lifecycle records the journal `started` fence under that workId before the
+ * agent acts, and the explicit terminal outcome afterwards. It lives on the
+ * common event type because the platform adapter hands accepted email work to
+ * the same normalized-event entry point as every other platform, but it is
+ * ONLY ever set for email work — Discord and Misskey events never carry it.
+ */
+export interface EmailWorkReceipt {
+  /** Typed discriminant; only `"email-work"` marks receipt-bearing work. */
+  kind: "email-work";
+  /** Hand-off work id; recorded as the journal `started` receipt. */
+  workId: string;
+  /** Durable mailbox identity of the accepted source entry. */
+  mailboxKey: {
+    /** Mailbox fingerprint (`host=...;account=...;folder=...`). */
+    fingerprint: string;
+    /** IMAP UIDVALIDITY the entry belongs to. */
+    uidValidity: number;
+    /** IMAP UID of the accepted source message. */
+    uid: number;
+  };
+  /** Durable message record id produced by the owner message store. */
+  recordId: string;
+}
+
+/**
+ * Type guard for the typed email work receipt discriminant.
+ */
+export function isEmailWorkReceipt(value: unknown): value is EmailWorkReceipt {
+  if (typeof value !== "object" || value === null) return false;
+  const receipt = value as Partial<EmailWorkReceipt>;
+  if (receipt.kind !== "email-work") return false;
+  if (typeof receipt.workId !== "string" || receipt.workId.trim() === "") return false;
+  if (typeof receipt.recordId !== "string" || receipt.recordId.trim() === "") return false;
+  const key = receipt.mailboxKey;
+  if (typeof key !== "object" || key === null) return false;
+  const { fingerprint, uidValidity, uid } = key as {
+    fingerprint?: unknown;
+    uidValidity?: unknown;
+    uid?: unknown;
+  };
+  return (
+    typeof fingerprint === "string" &&
+    fingerprint.trim() !== "" &&
+    Number.isInteger(uidValidity) &&
+    Number.isInteger(uid)
+  );
+}
+
+/**
  * Normalized event from any platform
  * All platform-specific events are converted to this format
  */
@@ -127,8 +180,26 @@ export interface NormalizedEvent {
    */
   quotedNote?: QuotedNote;
 
+  /**
+   * Internal typed email work receipt for email-platform work accepted by the
+   * mailbox poller. Absent for every non-email platform and for email events
+   * that are not bound to an accepted mailbox record.
+   */
+  emailWork?: EmailWorkReceipt;
+
   /** Raw platform-specific data for reference */
   raw?: unknown;
+}
+
+/**
+ * Resolves the typed email work receipt carried by an event, enforcing BOTH
+ * discriminators: the event must come from the email platform AND carry a
+ * well-formed receipt. Every receipt sink uses this single resolver, so no
+ * Discord/Misskey event can ever reach the mailbox journal.
+ */
+export function emailWorkReceiptOf(event: NormalizedEvent): EmailWorkReceipt | undefined {
+  if (event.platform !== "email") return undefined;
+  return isEmailWorkReceipt(event.emailWork) ? event.emailWork : undefined;
 }
 
 /**

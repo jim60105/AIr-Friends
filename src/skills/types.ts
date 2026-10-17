@@ -81,6 +81,11 @@ export interface SkillContext {
    * policy; when not set, channel writes are rejected.
    */
   canWriteChannelMemory?: boolean;
+  /**
+   * Durable email work id of this session's inbound email work (row 14).
+   * Undefined for every non-email session.
+   */
+  emailWorkId?: string;
 }
 
 /**

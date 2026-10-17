@@ -116,6 +116,12 @@ export interface ActiveSession {
    * skill context to gate `memory-save --scope channel`.
    */
   canWriteChannelMemory?: boolean;
+  /**
+   * Durable email work id of this session's inbound email work (row 14), copied
+   * from the typed event receipt at registration and exposed to skill handlers
+   * through the skill context. Undefined for every non-email session.
+   */
+  emailWorkId?: string;
 }
 
 /**

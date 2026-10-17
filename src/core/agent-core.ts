@@ -2,6 +2,7 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { SessionOrchestrator } from "./session-orchestrator.ts";
+import type { SessionResponse } from "./session-orchestrator.ts";
 import { MessageHandler } from "./message-handler.ts";
 import { ReplyDispatcher } from "./reply-dispatcher.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
@@ -15,8 +16,10 @@ import { SessionRegistry } from "../skill-api/session-registry.ts";
 import { SkillAPIServer } from "../skill-api/server.ts";
 import { AgentProcessPool } from "./agent-process-pool.ts";
 import type { Config } from "../types/config.ts";
-import type { NormalizedEvent } from "../types/events.ts";
+import { emailWorkReceiptOf } from "../types/events.ts";
+import type { EmailWorkReceipt, NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
 
 const logger = createLogger("AgentCore");
 
@@ -47,6 +50,11 @@ export class AgentCore {
    * Shared ACP process pool (shared-process mode). Null in per-spawn mode.
    */
   private processPool: AgentProcessPool | null = null;
+  /**
+   * Durable email work receipt sink (row 14). Null until email ingress wires it;
+   * while null no email admission decision is recorded.
+   */
+  private emailSessionReceipts: EmailSessionReceipts | null = null;
 
   constructor(config: Config, yolo = false, skillApiSecret?: string) {
     this.config = config;
@@ -191,15 +199,29 @@ export class AgentCore {
   }
 
   /**
+   * Install (or clear) the durable email work receipt sink and forward it to
+   * the orchestrator. Email ingress wires this before its first poll; receipts
+   * are recorded only for email-typed work carrying a typed receipt.
+   */
+  setEmailSessionReceipts(receipts: EmailSessionReceipts | null): void {
+    this.emailSessionReceipts = receipts;
+    this.orchestrator.setEmailSessionReceipts(receipts);
+  }
+
+  /**
    * Handle an incoming event from any platform
    */
   async handleEvent(event: NormalizedEvent): Promise<void> {
     const platform = this.platformAdapters.get(event.platform);
+    const emailReceipt = emailWorkReceiptOf(event);
     if (!platform) {
       logger.error("No adapter registered for platform: {platform}", {
         platform: event.platform,
         messageId: event.messageId,
       });
+      // Accepted email work that nothing can execute is terminally ignored:
+      // leaving it accepted would re-emit the same unprocessable work forever.
+      await this.denyEmailAdmission(emailReceipt, "no-platform-adapter");
       return;
     }
 
@@ -218,6 +240,8 @@ export class AgentCore {
         messageId: event.messageId,
         policy: this.config.replyPolicy,
       });
+      // A rejected admission is a terminal decision, recorded as ignored.
+      await this.denyEmailAdmission(emailReceipt, "access-policy-denied");
       return;
     }
 
@@ -227,12 +251,96 @@ export class AgentCore {
     // If processing failed and no reply was sent, dispatch error message
     // (also skipped when a file was delivered — the user already received output)
     if (!response.success && !response.replySent && !response.fileSent) {
-      await this.replyDispatcher.dispatchErrorIfNeeded(
-        platform,
-        event.channelId,
-        response,
-        event.messageId,
-      );
+      await this.dispatchErrorNotice(platform, event, response, emailReceipt);
+    }
+  }
+
+  /**
+   * Dispatches the generic error notice for a failed session, keeping email work
+   * inside its durable receipt lifecycle.
+   *
+   * The notice is an external delivery on behalf of the work item. When the
+   * session failed BEFORE the agent could act (context assembly or agent
+   * connect), the entry is still unstarted, so the durable fence is taken here
+   * first and the notice's own outcome is recorded terminally — an unrecorded
+   * notice would otherwise be replayed by the next poll. Once the orchestrator
+   * has fenced and decided the outcome, the recorded receipt is never rewritten
+   * by a notification. Other platforms keep the existing dispatcher behavior.
+   */
+  private async dispatchErrorNotice(
+    platform: PlatformAdapter,
+    event: NormalizedEvent,
+    response: SessionResponse,
+    receipt: EmailWorkReceipt | undefined,
+  ): Promise<void> {
+    const receipts = this.emailSessionReceipts;
+    if (receipt && receipts) {
+      let fenced = false;
+      try {
+        fenced = receipts.isUnstarted(receipt);
+        if (fenced) await receipts.beginEmailWork(receipt);
+      } catch (error) {
+        // Fail open to the plain notice: the entry stays accepted and the next
+        // poll re-emits it instead of losing the delivery silently.
+        fenced = false;
+        logger.error("Failed to fence email work before its error notice", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (fenced) {
+        const delivered = await this.replyDispatcher.dispatchErrorIfNeeded(
+          platform,
+          event.channelId,
+          response,
+          event.messageId,
+        );
+        try {
+          if (delivered) {
+            await receipts.finishEmailWork(receipt, {
+              outcome: "completed",
+              detail: "error-notice-delivered",
+              settle: () => Promise.resolve(true),
+            });
+          } else {
+            await receipts.requireReview(receipt, "error-notice-undelivered");
+          }
+        } catch (error) {
+          // The entry stays `started`: startup recovery quarantines it.
+          logger.error("Failed to record the error-notice receipt", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return;
+      }
+    }
+
+    await this.replyDispatcher.dispatchErrorIfNeeded(
+      platform,
+      event.channelId,
+      response,
+      event.messageId,
+    );
+  }
+
+  /**
+   * Records a terminally ignored receipt for rejected email work.
+   *
+   * A receipt failure is logged and swallowed: the adapter already swallows
+   * event-handler errors, and the entry stays `accepted` on failure, so the
+   * next poll re-emits it rather than losing the admission decision silently.
+   */
+  private async denyEmailAdmission(
+    receipt: EmailWorkReceipt | undefined,
+    reason: string,
+  ): Promise<void> {
+    if (!receipt || !this.emailSessionReceipts) return;
+    try {
+      await this.emailSessionReceipts.denyAdmission(receipt, reason);
+    } catch (error) {
+      logger.error("Failed to record denied email admission: {reason}", {
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
