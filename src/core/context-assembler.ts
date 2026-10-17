@@ -18,6 +18,7 @@ import type {
   AssembledSpontaneousContext,
   ContextAssemblyConfig,
   FormattedContext,
+  MessageAttachmentPreparer,
   MessageFetcher,
 } from "../types/context.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
@@ -201,6 +202,7 @@ export class ContextAssembler {
     model?: string,
     yolo?: boolean,
     agentWorkspacePath?: string,
+    prepareAttachments?: MessageAttachmentPreparer,
   ): Promise<AssembledContext> {
     logger.info("Assembling context", {
       workspaceKey: workspace.key,
@@ -295,13 +297,17 @@ export class ContextAssembler {
     logger.debug("Fetched {count} recent messages", { count: rawRecentMessages.length });
 
     // Apply /clear command: drop everything before (and including) the last /clear message
-    const recentMessages = this.applyClearCommand(rawRecentMessages);
+    let recentMessages = this.applyClearCommand(rawRecentMessages);
     if (recentMessages.length !== rawRecentMessages.length) {
       logger.info("Applied /clear command: {originalCount} → {filteredCount} messages", {
         originalCount: rawRecentMessages.length,
         filteredCount: recentMessages.length,
       });
     }
+    recentMessages = await this.prepareMessageAttachments(
+      recentMessages,
+      prepareAttachments,
+    );
 
     // Fast Recall needs the previous message, so it runs after the history is
     // fetched. A failure leaves the session without the section.
@@ -315,7 +321,7 @@ export class ContextAssembler {
     );
 
     // Fetch related messages if available and in guild context
-    let relatedMessages: PlatformMessage[] | undefined;
+    let fetchedRelatedMessages: PlatformMessage[] | undefined;
     if (
       event.guildId &&
       !event.isDm &&
@@ -323,14 +329,14 @@ export class ContextAssembler {
     ) {
       try {
         // Use trigger message content as search query
-        relatedMessages = await messageFetcher.searchRelatedMessages(
+        fetchedRelatedMessages = await messageFetcher.searchRelatedMessages(
           event.guildId,
           event.channelId,
           event.content,
           10, // Limit related messages
         );
         logger.debug("Fetched {count} related messages", {
-          count: relatedMessages?.length ?? 0,
+          count: fetchedRelatedMessages?.length ?? 0,
         });
       } catch (error) {
         logger.warn("Failed to fetch related messages", {
@@ -338,6 +344,12 @@ export class ContextAssembler {
         });
       }
     }
+    // Preparation sits OUTSIDE the recoverable adapter fetch: a fetched
+    // message whose required attachment cannot be staged must fail the context
+    // explicitly instead of being silently dropped or rendered unstaged.
+    const relatedMessages = fetchedRelatedMessages === undefined
+      ? undefined
+      : await this.prepareMessageAttachments(fetchedRelatedMessages, prepareAttachments);
 
     // Fetch available emojis
     let availableEmojis: PlatformEmoji[] | undefined;
@@ -366,6 +378,13 @@ export class ContextAssembler {
       attachments: event.attachments,
       ...(event.quotedNote === undefined ? {} : { quotedNote: event.quotedNote }),
     };
+    if (triggerMessage.attachments?.some((attachment) => attachment.kind === "email-local")) {
+      const [preparedTrigger] = await this.prepareMessageAttachments(
+        [triggerMessage],
+        prepareAttachments,
+      );
+      triggerMessage.attachments = preparedTrigger.attachments;
+    }
 
     // Estimate token count
     const allMemories = [
@@ -460,6 +479,31 @@ export class ContextAssembler {
       logger.warn("Fast Recall failed", { error: String(error) });
       return undefined;
     }
+  }
+
+  /**
+   * Stage every local email attachment of the supplied messages.
+   *
+   * A message that carries an owner-scoped local reference is NEVER rendered
+   * staged-less: without the session-bound capability the assembly fails with
+   * the fixed content-free error, so no opaque identifier or stale
+   * other-session path can reach a prompt.
+   */
+  private async prepareMessageAttachments(
+    messages: readonly PlatformMessage[],
+    prepare?: MessageAttachmentPreparer,
+  ): Promise<PlatformMessage[]> {
+    if (
+      !messages.some((message) =>
+        message.attachments?.some((attachment) => attachment.kind === "email-local")
+      )
+    ) {
+      return [...messages];
+    }
+    if (prepare === undefined) {
+      throw new Error("email_attachment_unavailable");
+    }
+    return await prepare(messages);
   }
 
   /**
@@ -1057,6 +1101,7 @@ export class ContextAssembler {
     sessionId?: string,
     model?: string,
     yolo?: boolean,
+    prepareAttachments?: MessageAttachmentPreparer,
   ): Promise<AssembledSpontaneousContext> {
     logger.info("Assembling spontaneous context", {
       platform,
@@ -1104,10 +1149,10 @@ export class ContextAssembler {
     );
     const importantMemories = coreMemories;
 
-    let recentMessages: PlatformMessage[] = [];
+    let fetchedRecentMessages: PlatformMessage[] = [];
     if (options.fetchRecentMessages) {
       try {
-        recentMessages = await messageFetcher.fetchRecentMessages(
+        fetchedRecentMessages = await messageFetcher.fetchRecentMessages(
           channelId,
           this.config.recentMessageLimit,
         );
@@ -1119,6 +1164,12 @@ export class ContextAssembler {
         });
       }
     }
+    // Preparation is kept outside the recoverable fetch: an unavailable
+    // required attachment fails this context explicitly.
+    const recentMessages = await this.prepareMessageAttachments(
+      fetchedRecentMessages,
+      prepareAttachments,
+    );
 
     let availableEmojis: PlatformEmoji[] | undefined;
     if (messageFetcher.fetchEmojis) {

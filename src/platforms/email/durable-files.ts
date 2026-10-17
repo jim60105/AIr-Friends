@@ -217,6 +217,109 @@ export async function canonicalizeRoot(rootPath: string): Promise<string> {
 }
 
 /**
+ * Authorize one session staging directory against the host-trusted workspace
+ * boundary BEFORE any canonicalization, directory creation, file write or
+ * private archive read.
+ *
+ * The trusted root itself is the anchor: it must be an existing, real
+ * directory. A symlink at that anchor is refused, because a redirected root
+ * would otherwise authorize its own outside target. Every EXISTING component
+ * from the root down to (and including) the staging directory is inspected
+ * with `lstat` and any symlink is refused; a missing suffix is left to the
+ * caller's authenticated creation path. When the staging directory exists, its
+ * real path must still stay inside the root's real path.
+ *
+ * Ancestors ABOVE the trusted root are deliberately not inferred: the host
+ * established that root (a workspace the deployment created), and
+ * `canonicalizeRoot` still refuses any symlinked ancestor when it resolves the
+ * destination.
+ */
+export async function assertStagingRootBoundary(
+  trustedRoot: string,
+  stagingDir: string,
+): Promise<void> {
+  const resolvedRoot = resolve(trustedRoot);
+  const resolvedStaging = resolve(stagingDir);
+  const stagingRel = relative(resolvedRoot, resolvedStaging);
+  if (stagingRel.startsWith("..") || isAbsolute(stagingRel)) {
+    throw new DurableFileError(
+      DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+      "Staging directory is outside the trusted workspace boundary",
+    );
+  }
+
+  let rootStat: Deno.FileInfo;
+  try {
+    rootStat = await Deno.lstat(resolvedRoot);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new DurableFileError(
+        DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+        "Trusted workspace boundary does not exist",
+      );
+    }
+    throw new DurableFileError(
+      DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+      "Failed to inspect the trusted workspace boundary",
+    );
+  }
+  if (rootStat.isSymlink) {
+    throw new DurableFileError(
+      DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
+      "Trusted workspace boundary is an unauthorized symlink",
+    );
+  }
+  if (!rootStat.isDirectory) {
+    throw new DurableFileError(
+      DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+      "Trusted workspace boundary is not a directory",
+    );
+  }
+
+  let current = resolvedRoot;
+  for (const part of stagingRel.split("/").filter(Boolean)) {
+    current = resolve(current, part);
+    let stat: Deno.FileInfo;
+    try {
+      stat = await Deno.lstat(current);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) break;
+      throw new DurableFileError(
+        DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+        "Failed to inspect the staging path hierarchy",
+      );
+    }
+    if (stat.isSymlink) {
+      throw new DurableFileError(
+        DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
+        "Staging path component is an unauthorized symlink",
+      );
+    }
+    if (!stat.isDirectory) {
+      throw new DurableFileError(
+        DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+        "Staging path component is not a directory",
+      );
+    }
+  }
+
+  try {
+    const realStaging = await Deno.realPath(resolvedStaging);
+    const realRoot = await Deno.realPath(resolvedRoot);
+    const realRel = relative(realRoot, realStaging);
+    if (realRel.startsWith("..") || isAbsolute(realRel)) {
+      throw new DurableFileError(
+        DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
+        "Staging directory resolves outside the trusted workspace boundary",
+      );
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+}
+
+/**
  * Validates that `relativePath` stays strictly within `canonicalRoot`,
  * does not escape via parent references, and no intermediate component or
  * destination is an unauthorized symlink.

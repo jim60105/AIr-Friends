@@ -7,6 +7,10 @@ import type { SkillContext, SkillResult } from "@skills/types.ts";
 import { emailComposeAuditParams } from "@skills/email-handler.ts";
 import { buildEmailReminderOrigin } from "@skills/reminder-handler.ts";
 import { reminderOperationKey, sessionEmailOperation } from "@core/reminder-store.ts";
+import {
+  type EmailAttachmentPreparation,
+  emailAttachmentScope,
+} from "../platforms/email/attachment-preparation.ts";
 import { spontaneousOperationKey } from "@platforms/email/spontaneous-store.ts";
 import { projectEmailAuditData } from "@core/audit-logger.ts";
 import { EMAIL_AUDIT_PLATFORM } from "../types/audit.ts";
@@ -111,6 +115,12 @@ export class SkillAPIServer {
    * pre-activation behavior.
    */
   private emailSubmissionEvidence: EmailSubmissionEvidenceSource | null = null;
+  /**
+   * Session-bound email attachment staging, injected by email ingress. While
+   * null an email retrieval of messages with local references fails closed in
+   * the handlers instead of returning opaque identifiers.
+   */
+  private emailAttachmentPreparation: EmailAttachmentPreparation | null = null;
 
   constructor(
     sessionRegistry: SessionRegistry,
@@ -132,6 +142,11 @@ export class SkillAPIServer {
    */
   setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
     this.emailSubmissionEvidence = source;
+  }
+
+  /** Install (or clear) the session-bound email attachment preparation capability. */
+  setEmailAttachmentPreparation(preparation: EmailAttachmentPreparation | null): void {
+    this.emailAttachmentPreparation = preparation;
   }
 
   /**
@@ -841,11 +856,25 @@ export class SkillAPIServer {
     const deliveryAnchor = session.platform === "email" && session.emailSpontaneous !== undefined
       ? undefined
       : replyAnchor;
+    // Session-bound attachment staging: capture the capability and the
+    // host-derived scope once for this call. Handlers receive only this bound
+    // function, never owner/staging parameters supplied by the caller.
+    const attachmentPreparation = this.emailAttachmentPreparation;
+    let prepareEmailMessages: SkillContext["prepareEmailMessages"];
+    if (attachmentPreparation !== null && session.platform === "email") {
+      const scope = emailAttachmentScope({
+        workspace: session.workspace,
+        sessionOwner: session.userId,
+        skillSessionId: session.id,
+      });
+      prepareEmailMessages = (messages) => attachmentPreparation.prepareMessages(scope, messages);
+    }
     const skillContext: SkillContext = {
       // The Skill API session id IS the literal the session prompt renders as
       // `--session-id`, and it keys the payload staging directory; handlers that
       // must resolve staged files read it here rather than re-deriving an id.
       sessionId: session.id,
+      prepareEmailMessages,
       workspace: session.workspace,
       channelId: session.channelId,
       userId: session.userId,

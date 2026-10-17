@@ -8,6 +8,7 @@ import type {
   SkillHandler,
   SkillResult,
 } from "./types.ts";
+import type { PlatformMessage } from "../types/events.ts";
 
 const logger = createLogger("ContextHandler");
 
@@ -136,6 +137,29 @@ export class ContextHandler {
             success: false,
             error: `Unsupported context type: ${params.type}`,
           };
+      }
+
+      // Alternate retrieval stages owner-scoped attachment references into
+      // THIS session before they are serialized. A required attachment that
+      // cannot be staged fails explicitly; no unstaged/opaque reference is
+      // returned as a usable location.
+      if (result.type === "recent_messages" || result.type === "search_messages") {
+        const messages = result.data as PlatformMessage[];
+        if (
+          messages.some((message) =>
+            message.attachments?.some((attachment) => attachment.kind === "email-local")
+          )
+        ) {
+          const prepare = context.prepareEmailMessages;
+          if (prepare === undefined) {
+            return { success: false, error: "email_attachment_unavailable" };
+          }
+          try {
+            result = { ...result, data: await prepare(messages) };
+          } catch {
+            return { success: false, error: "email_attachment_unavailable" };
+          }
+        }
       }
 
       return {
