@@ -538,8 +538,9 @@ applied **once**, after body cleanup and before MIME construction:
 - an absent, empty, or whitespace-only signature adds nothing at all (no separator);
 - the configured text is inserted literally — `${...}` template syntax and multiline
   line structure are preserved; changing it requires a bot restart;
-- no heuristic de-duplication runs, so model-written signature-like tails are kept and
-  the configured signature appears exactly once.
+- no heuristic de-duplication runs, so the signature is applied once by construction and
+  model-written signature-like tails are kept verbatim (authored text that already
+  contains the literal signature keeps it, and the central application adds one more).
 
 Prompts and skills MUST tell the model not to generate the configured signature. Sent
 history stores the actual signed outgoing content (`historyBody`), including the
@@ -556,14 +557,18 @@ signature and, for forwards, the quoted original section.
   order with the parent appended once, and `Message-ID` is generated per construction.
 - Every message carries `Auto-Submitted: auto-generated` to limit automatic-response
   loops; `Subject` uses RFC 2047 encoded words when needed.
-- Bodies are plain text (with a text/plain part) and attachments produce
-  `multipart/mixed`; binary attachments use base64 transfer encoding. Attachment
-  filenames are display-only, strips paths and control characters, and never address
-  the filesystem.
+- Bodies are plain text (always with a `text/plain` part, even when the authored body is
+  empty) and attachments produce `multipart/mixed`; binary attachments use base64
+  transfer encoding. Attachment filenames are display-only, strip paths and control
+  characters, and never address the filesystem.
+- Attached messages (`message/*`, e.g. a raw source `.eml`) are sent unencoded, so they
+  must already be CRLF-terminated: content containing bare line feeds cannot be
+  preserved byte-for-byte and is rejected instead of being silently rewritten.
 - A forward places the signature after its authored commentary and before a labeled
   `---------- Forwarded message ---------` section that carries the original metadata
-  and body verbatim; original signature text and attachment bytes are preserved
-  exactly. The incoming provenance parser classifies that section as forwarded text.
+  and body verbatim; original signature text and byte-preservable attachment bytes are
+  kept exactly (attached messages follow the CRLF rule above). The incoming provenance
+  parser classifies that section as forwarded text.
 
 ### Acceptance Scenarios
 
