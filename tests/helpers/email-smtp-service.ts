@@ -32,6 +32,8 @@ export interface SmtpFixtureOptions {
   rejectDataCommand?: boolean;
   /** Final DATA response code; 4xx/5xx mean explicit rejection. */
   finalResponseCode?: number;
+  /** Raw final DATA response text (e.g. `2500 2.0.0 Ok`), overriding the code form. */
+  finalResponseText?: string;
   /** Consume the DATA payload, then close the socket without any final reply. */
   closeAfterPayload?: boolean;
   /** Consume the DATA payload and stay silent (no final reply, socket stays open). */
@@ -407,8 +409,13 @@ export class EmailSmtpTestService {
         return;
       }
       if (this.options.truncatedResponseAfterPayload !== undefined) {
-        currentSocket.write(this.options.truncatedResponseAfterPayload);
-        currentSocket.destroy();
+        // `end()` flushes the deliberately incomplete reply before closing the stream,
+        // so the client observes the reply rather than an empty connection loss.
+        currentSocket.end(this.options.truncatedResponseAfterPayload);
+        return;
+      }
+      if (this.options.finalResponseText !== undefined) {
+        write(this.options.finalResponseText);
         return;
       }
       const code = this.options.finalResponseCode ?? 250;

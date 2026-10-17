@@ -165,6 +165,11 @@ interface SmtpConnectionLike {
   ): void;
   close(): void;
   on(event: "error" | "end", listener: (err?: unknown) => void): void;
+  /**
+   * Live socket, read the same way nodemailer's own `close()` resolves its teardown target
+   * (`tlsSocket.socket ?? socket`); `undefined` while a connect is still resolving.
+   */
+  readonly _socket?: { destroy(): void; socket?: { destroy(): void } };
 }
 
 /** Fields nodemailer reports for a completed envelope transaction. */
@@ -221,16 +226,21 @@ function readErrorFields(err: unknown): {
   };
 }
 
-function parseResponseCode(response: unknown): number | undefined {
+/**
+ * Parse a syntactically valid positive (2xx) final reply.
+ * A success callback whose reply is missing, non-numeric, or outside 2xx cannot confirm
+ * acceptance and must not be reported as `submitted`.
+ */
+function parsePositiveResponseCode(response: unknown): number | undefined {
   if (typeof response !== "string") {
     return undefined;
   }
-  const match = response.match(/^(\d{3})\b/);
+  const match = response.match(/^(\d{3})(?:[ -]|\r?\n|$)/);
   if (!match) {
     return undefined;
   }
   const code = Number(match[1]);
-  return Number.isInteger(code) ? code : undefined;
+  return code >= 200 && code <= 299 ? code : undefined;
 }
 
 /**
@@ -335,7 +345,7 @@ export class EmailSmtpClient implements SmtpTransport {
     // Bridge nodemailer's event-based failures into the awaited submission: `onError`
     // emits `error` and closes the socket without invoking a pending stage callback.
     connection.on("error", (err) => {
-      record(this.classifyFailure(err, stage, startedAt, sizeBytes));
+      record(this.classifyFailure(err, stage, startedAt, sizeBytes, envelope.to));
     });
     connection.on("end", () => {
       record(
@@ -355,24 +365,33 @@ export class EmailSmtpClient implements SmtpTransport {
       );
     });
 
-    const watchdog = setTimeout(() => {
-      record(
-        stage === "send"
-          ? this.failureResult(
-            SmtpDiagnosticCode.CONNECTION_TIMEOUT,
-            "unknown",
-            startedAt,
-            sizeBytes,
-          )
-          : this.failureResult(
-            SmtpDiagnosticCode.CONNECTION_TIMEOUT,
-            "failed",
-            startedAt,
-            sizeBytes,
-          ),
-      );
-      connection.close();
-    }, this.timeoutMs);
+    // The overall deadline is armed only once the connection is established: nodemailer
+    // bounds its own DNS, connect, and greeting phases (each settled through the bridged
+    // error event), and cancelling a connect that is still resolving can leave a socket it
+    // creates afterwards unmanaged.
+    // Deno's own timer type is `number`, but node typings leaking in through npm
+    // dependencies are the reason this is written as the platform's timer type.
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const armWatchdog = (): void => {
+      watchdog = setTimeout(() => {
+        record(
+          stage === "send"
+            ? this.failureResult(
+              SmtpDiagnosticCode.CONNECTION_TIMEOUT,
+              "unknown",
+              startedAt,
+              sizeBytes,
+            )
+            : this.failureResult(
+              SmtpDiagnosticCode.CONNECTION_TIMEOUT,
+              "failed",
+              startedAt,
+              sizeBytes,
+            ),
+        );
+        this.teardownConnection(connection);
+      }, this.timeoutMs);
+    };
 
     try {
       const connectOutcome = await Promise.race([
@@ -383,8 +402,15 @@ export class EmailSmtpClient implements SmtpTransport {
         return connectOutcome;
       }
       if ("err" in connectOutcome) {
-        return this.classifyFailure(connectOutcome.err, "connect", startedAt, sizeBytes);
+        return this.classifyFailure(
+          connectOutcome.err,
+          "connect",
+          startedAt,
+          sizeBytes,
+          envelope.to,
+        );
       }
+      armWatchdog();
 
       stage = "login";
       const loginOutcome = await Promise.race([
@@ -397,7 +423,13 @@ export class EmailSmtpClient implements SmtpTransport {
         return loginOutcome;
       }
       if ("err" in loginOutcome) {
-        return this.classifyFailure(loginOutcome.err, "login", startedAt, sizeBytes);
+        return this.classifyFailure(
+          loginOutcome.err,
+          "login",
+          startedAt,
+          sizeBytes,
+          envelope.to,
+        );
       }
 
       // Constructed bytes are written verbatim into DATA; the envelope is transport-owned
@@ -416,15 +448,31 @@ export class EmailSmtpClient implements SmtpTransport {
         return sendOutcome;
       }
       if (isSendOutcomeFailure(sendOutcome)) {
-        return this.classifyFailure(sendOutcome.failed, "send", startedAt, sizeBytes);
+        return this.classifyFailure(
+          sendOutcome.failed,
+          "send",
+          startedAt,
+          sizeBytes,
+          envelope.to,
+        );
       }
 
-      const responseCode = parseResponseCode(sendOutcome.info?.response);
+      // Acceptance is claimed only for a syntactically valid positive final reply; an
+      // unusable reply means the acknowledgement cannot be confirmed.
+      const responseCode = parsePositiveResponseCode(sendOutcome.info?.response);
+      if (responseCode === undefined) {
+        return this.failureResult(
+          SmtpDiagnosticCode.MALFORMED_RESPONSE,
+          "unknown",
+          startedAt,
+          sizeBytes,
+        );
+      }
       const accepted = [...(sendOutcome.info?.accepted ?? [])];
       const result: SmtpSubmitResult = {
         phase: "submitted",
         safeCode: SmtpDiagnosticCode.ACCEPTED,
-        ...(responseCode !== undefined ? { responseCode } : {}),
+        responseCode,
         accepted: accepted.length > 0 ? accepted : [...envelope.to],
         rejected: [...(sendOutcome.info?.rejected ?? [])],
         sizeBytes,
@@ -443,14 +491,12 @@ export class EmailSmtpClient implements SmtpTransport {
     } catch (err) {
       // Defensive: an unexpected synchronous throw is classified, never rethrown as a
       // submission outcome and never retried.
-      return this.classifyFailure(err, stage, startedAt, sizeBytes);
+      return this.classifyFailure(err, stage, startedAt, sizeBytes, envelope.to);
     } finally {
-      clearTimeout(watchdog);
-      try {
-        connection.close();
-      } catch {
-        // Socket teardown failures cannot change an already classified outcome.
+      if (watchdog !== undefined) {
+        clearTimeout(watchdog);
       }
+      this.teardownConnection(connection);
     }
   }
 
@@ -538,6 +584,26 @@ export class EmailSmtpClient implements SmtpTransport {
   }
 
   /**
+   * Terminate the submission connection and its socket.
+   *
+   * The connection is never reused or pooled, so teardown is final: a graceful end alone
+   * would leave the handle open against a peer that stops reading.
+   */
+  private teardownConnection(connection: SmtpConnectionLike): void {
+    try {
+      connection.close();
+    } catch {
+      // Socket teardown failures cannot change an already classified outcome.
+    }
+    try {
+      const liveSocket = connection._socket?.socket ?? connection._socket;
+      liveSocket?.destroy();
+    } catch {
+      // Ignore: the socket may already be gone.
+    }
+  }
+
+  /**
    * Classify a failure into the outcome taxonomy.
    *
    * `connect`/`login` failures are definite `failed`: no message bytes were submitted.
@@ -549,6 +615,7 @@ export class EmailSmtpClient implements SmtpTransport {
     stage: SubmissionStage,
     startedAt: number,
     sizeBytes: number,
+    recipients: string[],
   ): SmtpSubmitResult {
     const { code, command, responseCode, hasResponse, systemFailure } = readErrorFields(err);
     const explicitRejection = responseCode !== undefined && responseCode >= 400 &&
@@ -597,7 +664,15 @@ export class EmailSmtpClient implements SmtpTransport {
       safeCode = SmtpDiagnosticCode.PROTOCOL_ERROR;
     }
 
-    return this.failureResult(safeCode, "failed", startedAt, sizeBytes, responseCode);
+    return this.failureResult(
+      safeCode,
+      "failed",
+      startedAt,
+      sizeBytes,
+      responseCode,
+      // Only our own binding is reported; server-supplied recipient text is never echoed.
+      command === "RCPT TO" ? [...recipients] : [],
+    );
   }
 
   private failureResult(
@@ -606,13 +681,14 @@ export class EmailSmtpClient implements SmtpTransport {
     startedAt: number,
     sizeBytes: number,
     responseCode?: number,
+    rejected: string[] = [],
   ): SmtpSubmitResult {
     return {
       phase,
       safeCode,
       ...(responseCode !== undefined ? { responseCode } : {}),
       accepted: [],
-      rejected: [],
+      rejected,
       sizeBytes,
       durationMs: Date.now() - startedAt,
     };

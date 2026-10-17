@@ -289,6 +289,8 @@ Deno.test("EmailSmtpClient - envelope rejections are failures with zero DATA tra
       assertEquals(result.phase, "failed");
       assertEquals(result.safeCode, SmtpDiagnosticCode.REJECTED);
       assertEquals(result.responseCode, 550);
+      assertEquals(result.rejected, [RECIPIENT]);
+      assertEquals(result.accepted, []);
       assertEquals(service.dataTransactionCount, 0);
     },
   );
@@ -400,6 +402,87 @@ Deno.test("EmailSmtpClient - unparseable final reply is unknown", async () => {
       assertEquals(result.safeCode, SmtpDiagnosticCode.MALFORMED_RESPONSE);
       assertEquals(service.dataTransactionCount, 1);
     },
+  );
+});
+
+Deno.test("EmailSmtpClient - unusable positive final replies are unknown, not accepted", async () => {
+  for (const finalResponseText of ["2500 2.0.0 Ok", "2 garbage", "25 2.0.0 Ok"]) {
+    await withService(
+      { tlsMode: "tls", username: USERNAME, password: PASSWORD, finalResponseText },
+      async (service) => {
+        const result = await client(service, { timeoutMs: 800 }).submit(submission());
+
+        assertEquals(result.phase, "unknown");
+        assertEquals(result.safeCode, SmtpDiagnosticCode.MALFORMED_RESPONSE);
+        assertEquals(service.dataTransactionCount, 1);
+      },
+    );
+  }
+});
+
+Deno.test("EmailSmtpClient - a valid 2xx final reply is accepted", async () => {
+  await withService(
+    {
+      tlsMode: "tls",
+      username: USERNAME,
+      password: PASSWORD,
+      finalResponseText: "251 2.1.5 User not local; will forward",
+    },
+    async (service) => {
+      const result = await client(service).submit(submission());
+
+      assertEquals(result.phase, "submitted");
+      assertEquals(result.safeCode, SmtpDiagnosticCode.ACCEPTED);
+      assertEquals(result.responseCode, 251);
+      assertEquals(result.accepted, [RECIPIENT]);
+      assertEquals(service.dataTransactionCount, 1);
+    },
+  );
+});
+
+Deno.test("EmailSmtpClient - credentials never appear in emitted diagnostics", async () => {
+  const captured: string[] = [];
+  const originalConsole = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+  };
+  console.log = console.warn = console.error = (...args: unknown[]) => {
+    captured.push(args.map((arg) => String(arg)).join(" "));
+  };
+
+  try {
+    await withService(
+      { tlsMode: "tls", username: USERNAME, password: PASSWORD, rejectAuth: true },
+      async (service) => {
+        const rejected = await client(service).submit(submission());
+        assertEquals(rejected.phase, "failed");
+      },
+    );
+    await withService(
+      { tlsMode: "tls", username: USERNAME, password: PASSWORD, finalResponseCode: 550 },
+      async (service) => {
+        const rejected = await client(service).submit(submission());
+        assertEquals(rejected.phase, "failed");
+      },
+    );
+    await withService(
+      { tlsMode: "tls", username: USERNAME, password: PASSWORD },
+      async (service) => {
+        const accepted = await client(service).submit(submission());
+        assertEquals(accepted.phase, "submitted");
+      },
+    );
+  } finally {
+    console.log = originalConsole.log;
+    console.warn = originalConsole.warn;
+    console.error = originalConsole.error;
+  }
+
+  assert(captured.length > 0, "no diagnostics were emitted to inspect");
+  assert(
+    !captured.some((line) => line.includes(PASSWORD)),
+    "diagnostics leaked the SMTP password",
   );
 });
 

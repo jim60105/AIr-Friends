@@ -613,11 +613,15 @@ submission service (row 13) owns preparing an operation before invoking this tra
 
 Every `submit` call reports `phase: "submitted" | "failed" | "unknown"` plus a safe
 `safeCode`, an optional numeric `responseCode`, the envelope recipients the server
-`accepted`/`rejected`, the exact `sizeBytes`, and `durationMs`:
+`accepted`/`rejected`, the exact `sizeBytes`, and `durationMs`. Recipient metadata is always
+the transport-owned envelope: a rejected recipient is reported from our own binding, never
+echoed from server text.
 
-- **`submitted`** requires a positive final DATA acknowledgement from the server. This
-  means the provider **accepted** the message for delivery; it never means the recipient
-  received it, and it is not an exactly-once guarantee.
+- **`submitted`** requires a syntactically valid positive final DATA acknowledgement (2xx)
+  from the server. This means the provider **accepted** the message for delivery; it never
+  means the recipient received it, and it is not an exactly-once guarantee. A success reply
+  that cannot be validated as a 2xx acknowledgement (for example `2500`, or non-numeric
+  text) yields `unknown`, never an unconfirmed `submitted`.
 - **`failed`** is definite rejection and carries no delivery uncertainty: an explicit
   4xx/5xx server reply (authentication, `MAIL FROM`, `RCPT TO`, the DATA command, or the
   final response), a local envelope or payload refusal, an advertised provider size
@@ -628,9 +632,11 @@ Every `submit` call reports `phase: "submitted" | "failed" | "unknown"` plus a s
   reply that cannot be confirmed as acceptance. An unknown outcome requires manual review
   and MUST NOT be automatically resubmitted.
 
-The transport NEVER retries, reconnects, or resubmits. A submission in progress is bounded
-by 30-second connection, greeting, socket, and overall deadlines; when a deadline elapses
-after the DATA transaction began the result is `unknown`, never a second attempt.
+The transport NEVER retries, reconnects, or resubmits. DNS, connection, greeting, and socket
+phases are bounded by 30-second deadlines, and once the connection is established the whole
+submission is additionally bounded by a 30-second overall deadline; when a deadline elapses
+after the DATA transaction began the result is `unknown`, never a second attempt. The
+connection and its socket are torn down before `submit` returns.
 
 ### Pre-Submit Size Bounds
 
@@ -684,7 +690,8 @@ Acceptance requirements and scenarios are defined in
 RCPT, DATA with dot-unstuffing, QUIT) plus scripted fault modes: refused STARTTLS, rejected
 authentication, rejected sender/recipient/DATA command, explicit final response codes,
 socket close or stall after the payload, truncated or unparseable final replies, an
-advertised `SIZE` limit, and an immediate greeting refusal. It records received commands,
+advertised `SIZE` limit, raw final response text (including deliberately malformed codes),
+and an immediate greeting refusal. It records received commands,
 authentication attempts, and each decoded DATA transaction so tests can assert the exact
 wire behaviour.
 
