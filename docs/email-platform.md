@@ -1369,3 +1369,133 @@ The native leg is UNEXERCISED (ignored) without `EMAIL_INTENT_OPENCODE_ACCEPTANC
 every unavailable prerequisite fails the test naming the reason instead of claiming native
 success. It uses the real installed executable plus a test-owned loopback provider and never a
 paid or public model. Production email remains unavailable until the final activation change.
+
+## Email Platform Adapter (Owned by `email-adapter`)
+
+`src/platforms/email/email-adapter.ts` is the single platform-facing face of the email platform.
+`EmailAdapter` composes the serialized IMAP poller (receiving), the owner message store (thread
+history) and the durable mail service (every outbound path); it never talks to IMAP or SMTP itself
+and never invents durable state. It is intentionally NOT registered in the production bootstrap —
+production email stays unavailable until the final activation change.
+
+### Receiving
+
+- Accepted mailbox work is emitted through the same normalized-event entry point as Discord and
+  Misskey: `platform: "email"`, `channelId` = `mail:<owner>:<thread>` (both components validated),
+  `userId` = the verified sender's canonical owner id (`e_<sha256>`), `username` = the verified
+  sender address, `messageId` = the stored record id, `isDm: true`, empty `guildId`, the stored
+  body as `content`, owner-scoped `LocalEmailAttachment` references as `attachments`, and the
+  typed durable work receipt (`kind: "email-work"`, `workId`, `mailboxKey`, `recordId`).
+- A work item whose stored record is unreadable emits NOTHING: the hand-off fails, the poller logs
+  it and the durable acceptance survives, so the next round re-emits the same work instead of a
+  fabricated or empty message.
+- `connect()` runs the poller's startup recovery and then its serialized rounds; `disconnect()`
+  stops accepting work, lets the in-flight round and its hand-off settle, clears the round timer
+  and disconnects. `connect()` is idempotent, so a repeated call never arms a second timer.
+- `poll()` exposes exactly one round for controlled smoke checks and deterministic tests; rounds
+  still never overlap and still honour `disconnect()`.
+
+### What email supports, and what it refuses to pretend
+
+| Capability | Email | Behavior |
+| ---------- | ----- | -------- |
+| Owner-thread history | yes | `fetchRecentMessages`/`fetchMessage` are owner+thread gated by the channel id |
+| Ordinary replies | yes | threaded reply to the verified original sender, via the mail service |
+| File delivery | yes | one email carrying the whole batch; the existing count/aggregate limits apply |
+| Private messages | yes | every email event is `isDm: true`; channels are `mail:<owner>:<thread>` |
+| Editing a sent message | **no** | explicit unsupported result; NEVER emulated by another send |
+| Reactions | **no** | explicit unsupported result; no message is sent |
+| Typing indicator | **no** | `supportsTypingIndicator()` is `false`; `sendTyping` performs no network action |
+| Guilds / message search | **no** | no `searchRelatedMessages`; `canSearchMessages` is `false` |
+| Custom emoji catalog | **no** | `fetchEmojis()` returns an empty list; Unicode emoji need no listing |
+
+Discord and Misskey declare `supportsEditing: true`; email declares `false`, so `edit-reply` on an
+email session fails explicitly (`SKILL_EDIT_UNSUPPORTED`) before any adapter call, and a failed or
+uncertain submission is never recorded as a delivered reply.
+
+### Outbound operation context (host-assigned only)
+
+Every email send requires `EmailSendContext` (`{ workId, owner, actionSlot? }`) from the host
+session/scheduler — carried on `ReplyOptions.emailSend` / `SendFileOptions.emailSend`, which the
+skill handlers copy from `SkillContext.emailSend`. It is never read from tool parameters or a
+request's `platformSpecific` data, so a model cannot choose the logical operation its mail is
+bound to. A send without it is refused before any construction or SMTP work.
+
+The operation slot is bound as follows:
+
+| Send | Slot |
+| ---- | ---- |
+| Ordinary reply (`send-reply`) | `reply` |
+| Ordinary file delivery (`send-file`) | `files` |
+| Host-assigned partitioned operation | `third-party:<grantId>` / `reminder:<id>` / `spontaneous:<tickId>`, used verbatim |
+
+A reply and a file delivery in one session therefore never share an operation key (which would
+silently reuse the first result instead of sending the second message). A caller performing several
+sends for one `workId` must give each send a distinct slot.
+
+### Recipient, thread and outcome rules
+
+- The recipient is the verified original sender, re-derived from the owner thread: the newest
+  inbound record's stored address is re-normalized and accepted only when its owner id matches the
+  thread owner. `Reply-To`/`Cc`/`Bcc` are never consulted, the stored address is never trusted
+  unchecked, and the mail service re-checks the allowlist immediately before submission.
+- The reply stays in the thread: `In-Reply-To`/`References` come from the thread anchor the session
+  resolved. A source that carries no wire identifiers at all is refused rather than answered
+  unthreaded.
+- Outcome reporting never over-claims: only `submitted` is reported as a delivered reply/file; a
+  `failed` or `unknown` submission is reported as such with its `emailSubmission` metadata
+  (`operationId`, `phase`, `safeCode`), is never marked as a delivered reply and is never retried
+  blindly. A repeated request for the same logical operation returns the recorded result with zero
+  additional SMTP transactions.
+- File delivery reports at most one delivered message id (one email carries the whole batch), and a
+  batch that exceeds the message size bound fails entirely before construction or SMTP.
+
+### Threads for scheduled and spontaneous use
+
+`getDmChannelId(owner)` allocates a NEW internal owner thread and returns `mail:<owner>:<thread>`,
+but only for a canonical owner id that currently has an enabled `email/account/<owner>` channel;
+anything else returns `null`. `determineSpontaneousTarget` selects among enabled accounts opted
+into spontaneous posting and resolves each through the same path (the durable occurrence identity
+that binds such a thread is owned by `email-spontaneous-targets`).
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-adapter/specs/platform-abstraction/spec.md`:
+
+- **Threaded reply smoke**: valid source is loaded and the adapter replies through the local
+  services; `In-Reply-To`/`References` preserve the thread and the SMTP recipient is the verified
+  sender only.
+- **Edit delivered email**: editing targets email; an explicit unsupported result is returned and
+  zero SMTP transactions occur.
+- **Batch too large**: the file count or the total size exceeds the configured send-file limits;
+  the entire request fails before construction or SMTP and no partial delivery is claimed.
+
+### Exported API
+
+- `EmailAdapter` with options
+  `{ config, transport, mailboxStore, messageStore, mailService, channels, onReviewRequired?, onCycleError?, batchLimit?, historyLimit?, workIdFactory? }`
+  - `connect()` / `disconnect()` — poller lifecycle (idempotent connect; draining stop)
+  - `poll()` — one deterministic round through the owned poller
+  - `sendReply(channelId, content, options?)`, `sendFile(channelId, files, options?)`
+  - `fetchRecentMessages(channelId, limit)`, `fetchMessage(channelId, messageId)`
+  - `getDmChannelId(owner)`, `determineSpontaneousTarget(config)`
+  - unsupported results: `editMessage`, `addReaction`, `sendTyping`, `fetchEmojis`,
+    `hasBotReaction`, `hasBotMention`; `supportsTypingIndicator()` is `false`
+- Constants: `EMAIL_REPLY_ACTION_SLOT` (`"reply"`), `EMAIL_FILES_ACTION_SLOT` (`"files"`)
+- Types: `EmailAdapterOptions`; `EmailSendContext` and the optional
+  `PlatformCapabilities.supportsEditing` live in `src/types/platform.ts`, and
+  `SkillContext.emailSend` in `src/skills/types.ts`
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/email-adapter.test.ts
+```
+
+The tests use the real stores, the real poller, the real mail service, the in-process IMAP fixture
+and a scripted SMTP double; no production credential or mailbox is used. Production email remains
+unavailable until the final activation change.
