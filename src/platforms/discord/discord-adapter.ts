@@ -52,6 +52,7 @@ export class DiscordAdapter extends PlatformAdapter {
     supportsDm: true,
     supportsGuild: true,
     supportsReactions: true,
+    supportsEditing: true,
     maxMessageLength: 2000,
   };
 

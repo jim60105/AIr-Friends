@@ -125,7 +125,12 @@ export class ReplyHandler {
       const result = await context.platformAdapter.sendReply(
         context.channelId,
         formattedMessage,
-        { replyToMessageId: context.replyToMessageId },
+        {
+          replyToMessageId: context.replyToMessageId,
+          // Host-assigned email operation context only; a send without it is refused by the
+          // email adapter instead of being guessed. Non-email platforms ignore it.
+          emailSend: context.emailSend,
+        },
       );
 
       if (!result.success) {
@@ -138,6 +143,9 @@ export class ReplyHandler {
         return {
           success: false,
           error: result.error ?? "Failed to send reply",
+          // A failed or uncertain email submission is reported to the caller as such and is
+          // never marked as a delivered reply (no `markReplySent` above).
+          emailSubmission: result.emailSubmission,
         };
       }
 
@@ -159,6 +167,7 @@ export class ReplyHandler {
           timestamp: new Date().toISOString(),
           nextAction: "You have done your job. EXIT IMMEDIATELY",
         },
+        emailSubmission: result.emailSubmission,
       };
     } catch (error) {
       logger.error("Failed to send reply", {
@@ -182,6 +191,19 @@ export class ReplyHandler {
     context: SkillContext,
   ): Promise<SkillResult> => {
     try {
+      // A platform that cannot edit an already-sent message fails explicitly here, before the
+      // session-state check: the capability is a platform fact, so even an edit attempted before
+      // the first reply reports the real reason. No adapter call is made and no replacement
+      // message is ever sent in place of an edit.
+      if (context.platformAdapter.capabilities.supportsEditing === false) {
+        return {
+          success: false,
+          code: "SKILL_EDIT_UNSUPPORTED",
+          error:
+            "Editing a sent message is not supported on this platform. The message was not changed and no replacement message was sent.",
+        };
+      }
+
       // Must have sent a reply first
       if (!this.hasReplySentInternal(context)) {
         return {

@@ -5,7 +5,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { NoteRecallResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
-import type { EmailSubmissionMetadata } from "../types/platform.ts";
+import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platform.ts";
 
 /**
  * Skill call parameters (from external Agent)
@@ -86,6 +86,17 @@ export interface SkillContext {
    * Undefined for every non-email session.
    */
   emailWorkId?: string;
+  /**
+   * Host-assigned email operation context for outbound email sends
+   * (`{ workId, actionSlot?, owner }`).
+   *
+   * Populated ONLY by the host session/scheduler that owns the work item; it is
+   * never populated from tool parameters or platform-specific request data, so a
+   * model cannot choose the logical operation an outgoing mail is bound to.
+   * Undefined for every non-email session and for email sessions the host has
+   * not bound (the email adapter then refuses to send).
+   */
+  emailSend?: EmailSendContext;
 }
 
 /**
