@@ -69,6 +69,18 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** Byte-level subsequence search; proves exact preservation of arbitrary bytes. */
+function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
+  outer:
+  for (let i = 0; i + needle.byteLength <= haystack.byteLength; i++) {
+    for (let j = 0; j < needle.byteLength; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
 function assertChain(result: ConstructedOutgoingEmail): void {
   assertEquals(result.messageId, `<${result.messageId.slice(1, 33)}@example.com>`);
   assertEquals(result.envelope, { from: "bot@example.com", to: [result.to] });
@@ -475,13 +487,29 @@ Deno.test("construct: preserved message/rfc822 attachments round-trip byte-exact
   );
   // The unencoded attached message must survive byte-for-byte inside the wire bytes.
   assertMatch(decode(result.emlBytes), /Content-Type: message\/rfc822/);
-  assertEquals(decode(result.emlBytes).includes(new TextDecoder().decode(rawSource)), true);
+  assertEquals(containsBytes(result.emlBytes, rawSource), true);
   // The predecessor parser inlines the attached message content, keeping the same text.
   const parsed = await parseIncomingMime(result.emlBytes);
   assertEquals(
     parsed.plainBody.includes("From: src@example.com\nSubject: original\n\nbody line"),
     true,
   );
+});
+
+Deno.test("construct: attached message preserves non-UTF-8 bytes exactly", async () => {
+  const header = new TextEncoder().encode("From: src@example.com\r\n\r\n");
+  const rawSource = new Uint8Array([...header, 0x00, 0xff, 0xfe, 0x80, 0x0d, 0x0a]);
+  const result = await builder().construct(
+    draft({
+      attachments: [{
+        filename: "binary.eml",
+        contentType: "message/rfc822",
+        content: rawSource,
+      }],
+    }),
+    "Sig",
+  );
+  assertEquals(containsBytes(result.emlBytes, rawSource), true);
 });
 
 Deno.test("construct: rejects message attachments whose bytes cannot be preserved", async () => {
