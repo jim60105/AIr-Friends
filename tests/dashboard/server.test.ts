@@ -1,10 +1,10 @@
 // tests/dashboard/server.test.ts
 
 import { assertEquals } from "@std/assert";
-import { DashboardServer } from "../../src/dashboard/server.ts";
+import { DashboardServer, type DashboardServerDeps } from "../../src/dashboard/server.ts";
 import { CompletedSessionStore } from "../../src/dashboard/completed-session-store.ts";
 import type { ActiveSession, SessionRegistry } from "../../src/skill-api/session-registry.ts";
-import type { Config, DashboardConfig } from "../../src/types/config.ts";
+import type { AuditConfig, Config, DashboardConfig } from "../../src/types/config.ts";
 import type { Registry } from "prom-client";
 
 // --- Helpers ---
@@ -57,9 +57,9 @@ function createMockMemoryStore() {
   } as never;
 }
 
-function createMockWorkspaceManager() {
+function createMockWorkspaceManager(channelWorkspaces: string[] = []) {
   return {
-    listChannelWorkspaces: () => Promise.resolve([]),
+    listChannelWorkspaces: () => Promise.resolve(channelWorkspaces),
     getOrCreateChannelWorkspace: (platform: string, channelId: string) =>
       Promise.resolve({ key: `${platform}/${channelId}`, platform, channelId, path: "/tmp" }),
   } as never;
@@ -89,6 +89,7 @@ interface TestServer {
   port: number;
   baseUrl: string;
   agentWorkspacePath: string;
+  auditBasePath: string;
   cleanup: () => Promise<void>;
 }
 
@@ -98,6 +99,8 @@ async function createTestServer(overrides?: {
   metricsRegistry?: Registry | null;
   appConfig?: Config;
   dashboard?: Partial<DashboardConfig>;
+  auditConfig?: AuditConfig;
+  workspaceManager?: DashboardServerDeps["workspaceManager"];
 }): Promise<TestServer> {
   const dashboardConfig: DashboardConfig = {
     enabled: true,
@@ -120,12 +123,13 @@ async function createTestServer(overrides?: {
     completedSessionStore: overrides?.completedSessionStore ?? new CompletedSessionStore(),
     agentWorkspacePath,
     auditBasePath: `${tempDir}/audit`,
+    auditConfig: overrides?.auditConfig,
     metricsRegistry: overrides?.metricsRegistry === null
       ? undefined
       : (overrides?.metricsRegistry ?? createMockMetricsRegistry()),
     skillRegistry: createMockSkillRegistry(),
     memoryStore: createMockMemoryStore(),
-    workspaceManager: createMockWorkspaceManager(),
+    workspaceManager: overrides?.workspaceManager ?? createMockWorkspaceManager(),
   });
 
   // Let the OS assign a free port (port 0). This avoids the probe-and-reuse
@@ -148,6 +152,7 @@ async function createTestServer(overrides?: {
     port,
     baseUrl: `http://localhost:${port}`,
     agentWorkspacePath,
+    auditBasePath: `${tempDir}/audit`,
     cleanup: async () => {
       await server.stop();
       await Deno.remove(tempDir, { recursive: true });
@@ -2758,4 +2763,206 @@ Deno.test({
   };
   await t.cleanup();
   assertEquals(serverAny.chatSession, null);
+});
+
+// ============================
+// Email platform surfaces (email-platform-surfaces)
+// ============================
+//
+// Email joins the existing administration surfaces: the session monitor, the workspace
+// audit history and the channel selector read the platform identifier from the data
+// they are given, so no email-specific route, selector list or authorization path is
+// added — and no mail workflow appears in the dashboard at all.
+
+/** One canonical email user id (the message store's owner-name shape). */
+const EMAIL_OWNER = `e_${"12".repeat(32)}`;
+
+Deno.test({
+  name: "DashboardServer - an email session appears in the authenticated active and history views",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const activeSession: ActiveSession = {
+    id: "sess_email1",
+    callerToken: "tok_email1",
+    lastActivityAt: new Date(),
+    platform: "email",
+    channelId: `mail:${EMAIL_OWNER}:th-1`,
+    userId: EMAIL_OWNER,
+    isDm: false,
+    workspace: {
+      key: `email/${EMAIL_OWNER}`,
+      path: "/tmp/ws",
+      tmpPath: "/tmp/ws/tmp",
+      components: { platform: "email", userId: EMAIL_OWNER },
+      isDm: false,
+    },
+    platformAdapter: {} as never,
+    triggerEvent: {
+      platform: "email",
+      channelId: `mail:${EMAIL_OWNER}:th-1`,
+      userId: EMAIL_OWNER,
+      messageId: "msg-1",
+      isDm: false,
+      guildId: "",
+      content: "hello",
+      timestamp: new Date(),
+    },
+    startedAt: new Date(),
+    replySent: false,
+    fileSent: false,
+    replyCount: 0,
+    editCount: 0,
+    fileSendCount: 0,
+  };
+  const store = new CompletedSessionStore();
+  store.add({
+    auditSessionId: "sess_email0",
+    type: "message",
+    platform: "email",
+    userId: EMAIL_OWNER,
+    startedAt: new Date().toISOString(),
+    endedAt: new Date().toISOString(),
+    status: "success",
+    durationMs: 250,
+  });
+
+  const t = await createTestServer({
+    sessionRegistry: createMockSessionRegistry([activeSession]),
+    completedSessionStore: store,
+  });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+
+    const active = await fetch(`${t.baseUrl}/api/sessions/active`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(active.status, 200);
+    const activeBody = await active.json();
+    assertEquals(activeBody.length, 1);
+    assertEquals(activeBody[0].platform, "email");
+    assertEquals(activeBody[0].userId, EMAIL_OWNER);
+
+    const history = await fetch(`${t.baseUrl}/api/sessions/history`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(history.status, 200);
+    const historyBody = await history.json();
+    assertEquals(historyBody.length, 1);
+    assertEquals(historyBody[0].platform, "email");
+    assertEquals(historyBody[0].auditSessionId, "sess_email0");
+
+    // The same views stay closed without a session cookie.
+    for (const path of ["/api/sessions/active", "/api/sessions/history"]) {
+      const unauth = await fetch(`${t.baseUrl}${path}`);
+      assertEquals(unauth.status, 401, path);
+      await unauth.body?.cancel();
+    }
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - an email audit log resolves through the authenticated admin history",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer({
+    auditConfig: { enabled: true, retentionDays: 7, hashContent: false, includedPhases: [] },
+  });
+  try {
+    const auditDir = `${t.auditBasePath}/email/${EMAIL_OWNER}`;
+    await Deno.mkdir(auditDir, { recursive: true });
+    const entry = { phase: "session_end", ts: "2026-10-17T00:00:00Z" };
+    await Deno.writeTextFile(`${auditDir}/sess_emailaudit.jsonl`, JSON.stringify(entry) + "\n");
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/sessions/sess_emailaudit/audit`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.length, 1);
+    assertEquals(body[0].phase, "session_end");
+
+    const unauth = await fetch(`${t.baseUrl}/api/sessions/sess_emailaudit/audit`);
+    assertEquals(unauth.status, 401);
+    await unauth.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - the channel selector passes every platform key through unchanged",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const keys = ["discord/chan1", "misskey/chan2", `email/mail_${EMAIL_OWNER}_th-1`];
+  const t = await createTestServer({ workspaceManager: createMockWorkspaceManager(keys) });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/channel-memory/channels`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    // No platform allow-list: every reported key is selectable, email included.
+    assertEquals(body.channels, keys);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - no mail workflow endpoint exists and none appears in the served UI",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const mailRequests: Array<[string, string]> = [
+      ["GET", "/api/mail/messages"],
+      ["GET", "/api/email/inbox"],
+      ["POST", "/api/mail/send"],
+      ["POST", "/api/email/send"],
+    ];
+    for (const [method, path] of mailRequests) {
+      const res = await fetch(`${t.baseUrl}${path}`, {
+        method,
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: method === "POST" ? JSON.stringify({}) : undefined,
+      });
+      assertEquals(res.status, 404, `${method} ${path}`);
+      await res.body?.cancel();
+    }
+
+    // The served UI and the server module carry no mail route or navigation entry.
+    const publicDir = new URL("../../src/dashboard/public/", import.meta.url);
+    const uiFiles = ["index.html", "js/sessions.js", "style.css"];
+    for (const file of uiFiles) {
+      const source = await Deno.readTextFile(new URL(file, publicDir));
+      for (const forbidden of ["/api/mail", "/api/email", "mail/send"]) {
+        assertEquals(
+          source.includes(forbidden),
+          false,
+          `${file} must not reference ${forbidden}`,
+        );
+      }
+    }
+    const serverSource = await Deno.readTextFile(
+      new URL("../../src/dashboard/server.ts", import.meta.url),
+    );
+    for (const forbidden of ['"/api/mail', '"/api/email']) {
+      assertEquals(
+        serverSource.includes(forbidden),
+        false,
+        `the dashboard router must not declare a mail route: ${forbidden}`,
+      );
+    }
+  } finally {
+    await t.cleanup();
+  }
 });

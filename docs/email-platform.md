@@ -1129,3 +1129,134 @@ temporary state roots, counting callbacks, and the real `SubmissionStore` journa
 startup recovery (no SMTP transport or native executable is involved in this slice, and no
 network access is used), so the recorded evidence here is deterministic local durability and
 scheduler behavior rather than native dispatch.
+
+## Platform-Aware Surfaces (Owned by `email-platform-surfaces`)
+
+Email joins every existing platform-union consumer through the union itself
+(`Platform`, `VALID_PLATFORMS`, `isValidPlatform`) and through data shapes that are
+already platform-generic. No consumer keeps a second platform allow-list, and no
+email-only surface or abstraction is added.
+
+### Recognized surfaces
+
+| Surface | Where | Email behavior |
+| ------- | ----- | -------------- |
+| Workspace recognition and reclamation | `src/core/workspace-manager.ts` | `{workspacesDir}/email/{e_<sha256>}` is recognized by the existing shape rules; the startup pass recognizes it, never treats it as foreign |
+| Memory maintenance enumeration | `src/bootstrap.ts` callback, `src/core/memory-maintenance-scheduler.ts` | The email workspace key passes the `isValidPlatform` gate, so its enabled memories are counted and maintained like any other platform's |
+| Model routing | `src/core/model-router.ts` | `email/account/{userId}` rules resolve for email sessions; routing is keyed on the platform identifier plus the canonical user id |
+| Metrics | `src/utils/metrics.ts` | Platform-labelled counters/histograms carry `platform="email"`; no user id, address or channel becomes a label |
+| Administration (session monitor, history, audit, workspace/channel selectors) | `src/dashboard/` | Existing authenticated endpoints accept email sessions, audit directories (`{auditBasePath}/email/{e_<sha256>}/{sessionId}.jsonl`) and platform/channel keys; authorization is unchanged |
+| Data-directory backup | `src/core/git-backup-service.ts` | The whole data tree is staged, so email state, signed sent history and source/attachment bytes are included |
+| Startup/shutdown, registry connection status, platform validation | `src/bootstrap.ts`, `src/platforms/platform-registry.ts`, `src/core/config-loader.ts` | Email is a member of the union those consumers iterate; registration and its connection status remain owned by `email-activation` |
+
+### Workspace shape and reclamation
+
+- A sender's workspace lives at `{workspacesDir}/email/{e_<sha256>}`, named with the
+  canonical hashed id — never the raw address.
+- The durable archive lives below `<workspace>/email/` (`threads.jsonl`, `source/`,
+  `parsed/`, `attachments/`). It is **persistent**: reclamation only ever removes
+  entries inside `<workspace>/tmp/`, so archive, source and attachment bytes survive
+  every cleanup pass.
+- Inside `tmp/`, the existing policy is unchanged: session staging payloads, browser
+  profiles and session-local attachment copies are disposable, while the reserved
+  engine-state entries (`omp-agent`, `opencode-data`) are preserved verbatim.
+- The startup reclamation pass recognizes `email/{user}` from the directory shape, so
+  no email workspace is skipped, and nothing outside the workspace layout is visited.
+
+### Model routing for the canonical email user
+
+- Channel entries are normalized at load time to `email/account/<userId>`, so a routing
+  rule must be written as `email/account/e_<sha256>` — the same key form the session
+  context carries.
+- A rule naming a raw address (`email/account/owner@example.com`) never matches a
+  canonical session, and an email rule never matches another email user or another
+  platform. Discord and Misskey rule behavior is unchanged.
+- Email sessions pass `platform` and the canonical `userId` to the resolver; the
+  memory-maintenance and channel-memory-maintenance sessions keep their existing
+  section-model fallback chain.
+
+### Metric label cardinality
+
+- Platform-labelled metrics (`messages_received_total`, `replies_sent_total`,
+  `sessions_total`, `session_duration_seconds`, …) use the platform identifier only.
+  Email therefore adds exactly the series of one platform.
+- A canonical email user id, address or mail channel id must never be added as a label;
+  the declared label sets are asserted in `tests/utils/metrics.test.ts`.
+
+### Private correspondence backup
+
+- The data backup stages the whole data directory, so `data/email/**` (mailbox,
+  processing, submission journals, outbound `.eml` evidence and its metadata) and
+  `data/workspaces/email/**` (thread journal, inbound and signed outbound source bytes,
+  parsed snapshots, attachments) are included, with no `.eml` or attachment exclusion.
+- The only staged exclusions are the reserved OMP native-cache shapes
+  (`omp-pools/**/omp-agent/<mode>/xdg-data/omp/natives/**` and `**/tmp/...`), which a
+  deployment must keep out because they are large runtime bytes.
+- The authenticated backup remote URL and the configured `authPassword` are never
+  logged: a failing git invocation records `[REDACTED_URL]` for the credential-bearing
+  argument and masks `//user:password@` inside git output.
+- The backup stores the bytes it was given: every git invocation the service runs
+  carries `-c core.autocrlf=false`, so git's implicit line-ending conversion no longer
+  rewrites the `.eml` wire bytes or attachment payloads in the index, whatever the
+  host's `core.autocrlf` setting is. Restored evidence therefore still matches its
+  recorded SHA-256 digest. The operator's own line-ending configuration is left
+  untouched; initialization still writes the service's own author, remote and
+  safe-directory settings, as before.
+- **Operator requirement — no transforming attributes on durable email paths**: this
+  guarantee covers git's implicit conversion only. Explicit conversion attributes have
+  higher precedence than `-c core.autocrlf=false`: an operator `.gitattributes` in the
+  data repository (`* text=auto`, `*.eml text`), a `$GIT_DIR/info/attributes` entry, a
+  `core.attributesFile` rule, or a clean/smudge filter would still rewrite evidence
+  bytes and make restored evidence fail its digest verification. Keep the durable email
+  paths (`email/**`, `workspaces/email/**`) free of transforming attributes and
+  filters.
+- **WARNING — private backup**: the backup repository contains private correspondence
+  in cleartext, including message bodies and attachment bytes. Keep that repository
+  private (private remote, access-controlled credential, no public fork or mirror), and
+  treat disabling the backup as losing the only durable copy of that archive.
+
+### Administration boundaries
+
+- Email is **not** a public posting surface: the dashboard keeps its existing
+  authenticated session monitor, history, audit, workspace and channel-memory surfaces
+  and gains **no** mail workflow, inbox view or send endpoint.
+- Admin endpoints keep their authorization boundaries: every one of them still returns
+  `401` without a valid dashboard session, and unknown `/api/mail/...` or
+  `/api/email/...` paths resolve to the ordinary static fallback (`404`).
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-platform-surfaces/specs/email-platform-integration/spec.md`:
+
+- **Workspace lifecycle**: an email workspace containing memory, archive files and
+  orphan tmp copies is recognized, cleanup removes eligible tmp only and maintenance
+  sees its memory — `tests/core/workspace-tmp-lifecycle.test.ts`,
+  `tests/core/memory-maintenance-scheduler.test.ts`.
+- **Backup scope**: backup enumeration includes every durable email file without
+  exposing credentials through backup logs — `tests/core/git-backup-service.test.ts`.
+- **Selector regression**: authenticated administration surfaces recognize email where
+  platform selection exists and the other platforms remain functional —
+  `tests/dashboard/server.test.ts`, `tests/core/model-router.test.ts`,
+  `tests/utils/metrics.test.ts`.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/workspace-tmp-lifecycle.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/memory-maintenance-scheduler.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/model-router.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/git-backup-service.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/dashboard/server.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/utils/metrics.test.ts
+```
+
+Exercised evidence layers: these cases drive the real `WorkspaceManager`,
+`MemoryStore`, `GitBackupService` (real `git` against a local bare remote; one case
+forces an unreachable remote) and `DashboardServer` (real HTTP over a per-test
+temporary tree). No IMAP/SMTP transport, model call, ACP agent or production mailbox
+participates in this change: transport, provider and production evidence is owned by
+those slices and is not claimed here.

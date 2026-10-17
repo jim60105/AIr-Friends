@@ -476,3 +476,107 @@ Deno.test("resolveReasoningEffort - explicit 'default' on matched rule terminate
   // Explicit "default" is a concrete value -> returned (terminates), not fallthrough.
   assertEquals(resolveReasoningEffort(config, context, "high"), "default");
 });
+
+// --- Email platform routing (email-platform-surfaces) ---
+//
+// Email users are identified by their canonical hashed id (`e_<sha256>`), which is
+// exactly what the `channels` account entry and the routing rule carry, so an
+// `email/account/<userId>` rule must resolve without any email-specific branch.
+
+/** One canonical email user id (shape-checked by the message store's owner regex). */
+const EMAIL_USER_ID = `e_${"a1".repeat(32)}`;
+/** A different, valid email user id of the same shape. */
+const OTHER_EMAIL_USER_ID = `e_${"7f".repeat(32)}`;
+
+Deno.test("resolveModel - should match an email account rule on the canonical user id", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" }],
+  };
+  const context: ModelRoutingContext = {
+    sessionType: "message",
+    platform: "email",
+    userId: EMAIL_USER_ID,
+    channelId: "mail:owner:thread",
+  };
+  assertEquals(resolveModel(config, context, FALLBACK_MODEL), "email-model");
+});
+
+Deno.test("resolveModel - email account rule does not match another email user", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" }],
+  };
+  const context: ModelRoutingContext = {
+    sessionType: "message",
+    platform: "email",
+    userId: OTHER_EMAIL_USER_ID,
+  };
+  assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
+});
+
+Deno.test("resolveModel - an email account rule does not match a non-email platform", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" }],
+  };
+  const context: ModelRoutingContext = {
+    sessionType: "message",
+    platform: "discord",
+    userId: EMAIL_USER_ID,
+  };
+  assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
+});
+
+Deno.test("resolveModel - an email rule keyed on the raw address never matches the hashed user id", () => {
+  // Channel entries are normalized to `email/account/<userId>` at load time, so a rule
+  // written with the raw address must not silently match the canonical session context.
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{
+      match: { channel: "email/account/owner@example.com" },
+      model: "raw-address-model",
+    }],
+  };
+  const context: ModelRoutingContext = {
+    sessionType: "message",
+    platform: "email",
+    userId: EMAIL_USER_ID,
+  };
+  assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
+});
+
+Deno.test("resolveModel - email account, discord and misskey rules stay independent", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [
+      { match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" },
+      { match: { channel: "discord/account/12345678901234567" }, model: "discord-model" },
+      { match: { channel: "misskey/account/9abc" }, model: "misskey-model" },
+    ],
+  };
+  assertEquals(
+    resolveModel(config, {
+      sessionType: "message",
+      platform: "email",
+      userId: EMAIL_USER_ID,
+    }, FALLBACK_MODEL),
+    "email-model",
+  );
+  assertEquals(
+    resolveModel(config, {
+      sessionType: "message",
+      platform: "discord",
+      userId: "12345678901234567",
+    }, FALLBACK_MODEL),
+    "discord-model",
+  );
+  assertEquals(
+    resolveModel(config, {
+      sessionType: "message",
+      platform: "misskey",
+      userId: "9abc",
+    }, FALLBACK_MODEL),
+    "misskey-model",
+  );
+});

@@ -9,6 +9,20 @@ import type { GitBackupConfig } from "../types/config.ts";
 const logger = createLogger("GitBackupService");
 
 /**
+ * Command-scoped configuration every git invocation carries: disable git's implicit
+ * line-ending conversion so the backup stores the bytes it was given. Passed as `-c`
+ * rather than as environment configuration so it works on every supported git version
+ * and cannot displace a deployment's own runtime configuration.
+ *
+ * This covers `core.autocrlf` only. Explicit conversion attributes an operator writes
+ * into the data repository (`* text=auto`, `*.eml text`, `$GIT_DIR/info/attributes`,
+ * `core.attributesFile`) or clean/smudge filters still take precedence; the durable
+ * email paths must therefore stay free of transforming attributes
+ * (`docs/email-platform.md`, "Private correspondence backup").
+ */
+const BYTE_PRESERVING_GIT_ARGS = ["-c", "core.autocrlf=false"] as const;
+
+/**
  * Encapsulates all Git operations for backing up the data/ directory.
  */
 export class GitBackupService {
@@ -374,13 +388,20 @@ export class GitBackupService {
    * state-probe result for this invocation (e.g. `diff --cached --quiet` exits
    * 1 when staged changes exist). Those are logged at DEBUG instead of ERROR so
    * the normal "needs backup" signal does not raise false alarms.
+   *
+   * Every invocation carries {@link BYTE_PRESERVING_GIT_ARGS}, including the
+   * clone/init that creates the repository. A backup stores the bytes it was
+   * given: git's implicit line-ending conversion must never rewrite
+   * digest-protected private evidence (email `.eml` wire bytes, attachment
+   * payloads) in the index, or a restored backup would fail its own evidence
+   * verification. The operator's own line-ending configuration is not modified.
    */
   private async runGit(
     args: string[],
     expectedExitCodes: number[] = [0],
   ): Promise<{ success: boolean; output: string; errorOutput: string }> {
     const command = new Deno.Command("git", {
-      args,
+      args: [...BYTE_PRESERVING_GIT_ARGS, ...args],
       cwd: this.dataDir,
       env: {
         GIT_TERMINAL_PROMPT: "0",

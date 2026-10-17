@@ -11,7 +11,13 @@ const logger = createLogger("ModelRouter");
 export interface ModelRoutingContext {
   /** Current session type */
   sessionType: SessionType;
-  /** Platform name ("discord" | "misskey") */
+  /**
+   * Platform identifier — every member of the `Platform` union ("discord" |
+   * "misskey" | "email"). A routing rule's `channel` entry is compared against
+   * `${platform}/account/${userId}` / `${platform}/channel/${channelId}`, so a
+   * platform whose users are identified by a canonical id (email's
+   * `email/account/e_<sha256>`) routes through the same rule shape.
+   */
   platform?: string;
   /** User ID on the platform */
   userId?: string;
