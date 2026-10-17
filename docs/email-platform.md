@@ -136,6 +136,59 @@ Detailed acceptance requirements and scenarios are defined in `specs/email-mailb
   - `getEntry(key: MailboxKey): MailboxEntrySnapshot | undefined`
   - `close(): void`
 
+## Sender-Scoped Message & Thread History Store (Owned by `email-message-history`)
+
+Private correspondence archives, immutable source/attachment bytes, and RFC 5322 thread derivations are durably managed under each user's workspace directory (`<userWorkspace>/email/`) via `EmailMessageStore` in `src/platforms/email/message-store.ts`.
+
+### Files & Layout
+
+Inside the user's workspace under `email/`:
+
+- **`threads.jsonl`**: Append-only transition journal containing thread associations, wire Message-ID references, review flags, and outbound operations.
+- **`source/<recordId>.eml`**: Immutable raw RFC 5322 source email bytes preserved with exclusive create semantics (`0600`).
+- **`parsed/<recordId>.json`**: Atomically replaced snapshot containing parsed message text, provenance, and attachment metadata.
+- **`attachments/<recordId>/<attachmentId>`**: Immutable attachment binary payload bytes indexed by internal UUIDs.
+
+### Invariants & Semantics
+
+- **Sender & Thread Isolation**: Lookups require both initiating owner (`e_<sha256>`) and internal thread UUID (`mail:<userId>:<threadId>`). Both identifiers are strictly validated; cross-owner lookups or access attempts are rejected.
+- **Thread Derivation**: Thread relationships are derived strictly from RFC 5322 `Message-ID`, `In-Reply-To`, and `References`. Subjects NEVER join threads: identical subjects without matching references form separate threads, while differing subjects with valid references join the existing thread.
+- **Evidence Preservation on Conflict**: Duplicate wire `Message-ID` claims preserve both immutable source records under distinct internal UUIDs and mark the ambiguity as `review-required`. Conflicting references matching multiple existing threads do not merge threads destructively and flag `review-required`.
+- **Unresolved References**: References to messages not locally present are retained as unresolved metadata; no placeholder or fabricated content is invented.
+- **Third-Party Conversation Separation**: Outbound third-party sends (`targetKind: "third-party"`) are never inserted into the initiating user's reply thread, retaining separate thread context.
+- **Durable Crash Recovery**: In-memory indexes (`Message-ID` -> threads/records, thread membership, operation keys) are replayed from disk on startup; if `threads.jsonl` exhibits torn-tail or interior corruption, mutations are fenced (`STORE_DAMAGED_APPEND_REFUSED`) without erasing evidence.
+- **Privacy in Diagnostics**: Diagnostic codes and error logs contain safe enums (`INVALID_OWNER`, `INVALID_CHANNEL_ID`, `STORE_DAMAGED_APPEND_REFUSED`, `CROSS_OWNER_DENIED`) and opaque UUIDs; private message bodies, recipients, and attachments are never disclosed in logs.
+
+### Acceptance Scenarios
+
+Acceptance requirements and test scenarios defined in `specs/email-history/spec.md`:
+
+- **Forged reference**: User B referencing User A's wire `Message-ID` returns no User A messages, and User B cannot join User A's thread.
+- **Duplicate wire ID**: Distinct raw messages claiming the same `Message-ID` both survive as immutable records, and ambiguous threading flags review-required.
+- **Forward later**: Even when the originating session's disposable `tmp/` area is reclaimed, original source bytes and attachments remain available by internal ID.
+
+### Exported API
+
+- `parseEmailChannelId(channelId: string): { owner: string; threadId: string }`
+- `formatEmailChannelId(owner: string, threadId: string): string`
+- `validateOwnerId(owner: string): string`
+- `validateUuid(id: string, code?: MessageStoreDiagnosticCode): string`
+- `MessageStoreDiagnosticCode`: Safe enum diagnostic codes (`CLEAN`, `INVALID_OWNER`, `INVALID_THREAD_ID`, `INVALID_RECORD_ID`, `INVALID_CHANNEL_ID`, `INVALID_ATTACHMENT_ID`, `CROSS_OWNER_DENIED`, `MESSAGE_NOT_FOUND`, `ATTACHMENT_NOT_FOUND`, `SOURCE_NOT_FOUND`, `STORE_CORRUPT`, `STORE_CLOSED`, `STORE_DAMAGED_APPEND_REFUSED`, `CONFLICTING_OPERATION_PAYLOAD`, `PATH_ESCAPE_DETECTED`, `WRITE_FAILED`)
+- `MessageStoreError`: BaseError subclass with safe diagnostic codes
+- `EmailMessageStore`:
+  - `getOwnerEmailRoot(owner: string): Promise<string>`
+  - `resolveThread(owner: string, identifiers: EmailMessageIdentifiers): Promise<ThreadResolutionResult>`
+  - `putSource(owner: string, boundedSource: Uint8Array | string, parsed: ParsedEmailData): Promise<string>`
+  - `putSent(owner: string, constructedMessage: ConstructedEmailData, operation: EmailOperationKey): Promise<{ recordId: string; threadId: string }>`
+  - `get(owner: string, threadId: string, recordId: string): Promise<StoredEmailRecord | undefined>`
+  - `getByOwnerRecord(owner: string, recordId: string): Promise<StoredEmailRecord | undefined>`
+  - `getSourceBytes(owner: string, recordId: string): Promise<Uint8Array | undefined>`
+  - `history(owner: string, threadId: string, limit?: number): Promise<StoredEmailRecord[]>`
+  - `attachment(owner: string, recordId: string, attachmentId: string): Promise<Uint8Array | undefined>`
+  - `toPlatformMessages(records: StoredEmailRecord[]): PlatformMessage[]`
+  - `recover(owner: string): Promise<void>`
+  - `close(): void`
+
 ## Durable Submission Operations Journal (Owned by `email-submission-journal`)
 
 Outbound email operations, deduplication reservation keys, and sending lifecycle states are durably tracked under the email state directory (`data/email/submissions.jsonl`) via `SubmissionStore` in `src/platforms/email/submission-store.ts`.
