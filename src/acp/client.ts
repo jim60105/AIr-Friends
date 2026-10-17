@@ -919,6 +919,23 @@ export class ChatbotClient implements acp.Client {
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
     this.updateActivity();
+
+    // INTERNAL email-intent profile (`email-intent-runtime`): the interpreter
+    // session owns NO tool surface at all, so EVERY request is refused here —
+    // before the reserved-state guard and before every ordinary shortcut
+    // (YOLO blanket approval, registered-skill approval, read admission,
+    // edit/write evaluation). The attempt itself is reported to the runtime,
+    // which fails the interpretation closed, so a blocked tool can never turn
+    // into returned text. Nothing about the request is logged, recorded as a
+    // rejection or audited: this session's prompt must not reach any sink.
+    if (this.config.intentCapture !== undefined) {
+      this.config.intentCapture.onToolAttempt();
+      const rejecting = params.options.find((option) => option.kind === "reject_once");
+      return rejecting
+        ? { outcome: { outcome: "selected", optionId: rejecting.optionId } }
+        : { outcome: { outcome: "cancelled" } };
+    }
+
     this.logger.debug("Permission requested", {
       toolCall: params.toolCall,
       kind: params.toolCall.kind,
@@ -1586,6 +1603,40 @@ export class ChatbotClient implements acp.Client {
     this.updateActivity();
     const update = params.update;
 
+    // INTERNAL email-intent profile (`email-intent-runtime`): the interpreter
+    // session's private stream is never logged, buffered or audited. Final
+    // agent text reaches the runtime's bounded capture only; a tool-call
+    // notification is a tool attempt and fails the interpretation closed;
+    // every other update kind is drained silently. The forwarded
+    // config-option update keeps its ordinary cache-refresh meaning without
+    // logging its payload.
+    if (this.config.intentCapture !== undefined) {
+      switch (update.sessionUpdate) {
+        case "agent_message_chunk":
+          if (update.content.type === "text") {
+            this.config.intentCapture.onText(update.content.text, params.sessionId);
+          }
+          break;
+        case "tool_call":
+        case "tool_call_update":
+          this.config.intentCapture.onToolAttempt();
+          break;
+        case "config_option_update": {
+          const configOptions = "configOptions" in update ? update.configOptions : undefined;
+          if (Array.isArray(configOptions)) {
+            const sessionId = "sessionId" in update && typeof update.sessionId === "string"
+              ? update.sessionId
+              : "";
+            this.configOptionsListener?.(sessionId, configOptions);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+      return Promise.resolve();
+    }
+
     switch (update.sessionUpdate) {
       case "agent_message_chunk":
         this.flushThoughtBuffer();
@@ -1758,6 +1809,16 @@ export class ChatbotClient implements acp.Client {
     params: acp.ReadTextFileRequest,
   ): Promise<acp.ReadTextFileResponse> {
     this.updateActivity();
+
+    // INTERNAL email-intent profile (`email-intent-runtime`): no private
+    // workspace is exposed to an interpreter session, so every filesystem
+    // callback is refused before any path is resolved, logged or audited. The
+    // refusal message deliberately carries NO path spelling.
+    if (this.config.intentCapture !== undefined) {
+      this.config.intentCapture.onToolAttempt();
+      throw new acp.RequestError(-32600, "Filesystem request denied: rejected_intent_no_tools");
+    }
+
     this.logger.debug("Read file requested", { path: params.path });
 
     const gateCtx = this.gateCtx(params.sessionId);
@@ -1861,6 +1922,15 @@ export class ChatbotClient implements acp.Client {
     params: acp.WriteTextFileRequest,
   ): Promise<acp.WriteTextFileResponse> {
     this.updateActivity();
+
+    // INTERNAL email-intent profile (`email-intent-runtime`): identical
+    // refusal to `readTextFile` — no write callback can reach a workspace, a
+    // staging directory or any other sink, and no path is logged or audited.
+    if (this.config.intentCapture !== undefined) {
+      this.config.intentCapture.onToolAttempt();
+      throw new acp.RequestError(-32600, "Filesystem request denied: rejected_intent_no_tools");
+    }
+
     this.logger.debug("Write file requested", { path: params.path });
 
     const gateCtx = this.gateCtx(params.sessionId);

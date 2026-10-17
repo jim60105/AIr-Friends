@@ -2,7 +2,7 @@
 
 import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "./client.ts";
-import { buildSkillAutoApproveList } from "./skill-inventory.ts";
+import { buildSkillAutoApproveList, type SkillAutoApproveList } from "./skill-inventory.ts";
 import {
   type AgentCapabilities,
   type AgentConnectorOptions,
@@ -10,6 +10,11 @@ import {
   isSupportedAgentType,
   type MCPServerConfig,
 } from "./types.ts";
+import { EMAIL_INTENT_AGENT_NAME, EMAIL_INTENT_PROFILE } from "./agent-factory.ts";
+import {
+  OMP_INTENT_PROFILE_FLAG,
+  OMP_INTENT_PROFILE_FLAG_VALUE,
+} from "./omp/extension/native-registration.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import {
@@ -27,6 +32,7 @@ import {
   findOptionByCategory,
   formatAdvertisedValuesPreview,
   KNOWN_REASONING_EFFORT_TOKENS,
+  MODEL_CATEGORY,
   resolveModelSelection,
   resolveReasoningValue,
   THOUGHT_LEVEL_CATEGORY,
@@ -104,6 +110,52 @@ export class RecoveryHookError extends Error {
 }
 
 /**
+ * Bounded machine-readable causes of an intent-profile identity failure. Each
+ * names a contract that was NOT observed positively; none of them is a
+ * permission decision.
+ */
+export type EmailIntentProfileMismatchReason =
+  /** The factory-produced launch did not carry the intent-profile identity at all. */
+  | "launch_profile"
+  /** The intent profile was not paired with the intent capture seam (or vice versa). */
+  | "capture_agreement"
+  /** The host-only OMP launch marker was missing or carried a foreign value. */
+  | "omp_launch_marker"
+  /** The OpenCode session advertised no session-mode selector at all. */
+  | "mode_selector_missing"
+  /** The OpenCode session's active mode was not the authored intent agent. */
+  | "mode_mismatch"
+  /** The OpenCode session advertised a selectable mode other than the intent agent. */
+  | "mode_selector_roster"
+  /** The requested model selection is not offered by the advertised catalog. */
+  | "model_selection_rejected";
+
+/**
+ * An internal email-intent profile launch did not prove its own identity, or
+ * the session it created could not be pinned to the requested model selection.
+ *
+ * Both cases are fail-closed BEFORE any prompt is sent: the interpretation
+ * runtime maps this error to an `unavailable` result instead of letting a
+ * session that may not be the authored deny-all profile interpret authored
+ * text. The message carries bounded diagnostics (session id, reason, counts)
+ * and never a path, a prompt or model output.
+ */
+export class EmailIntentProfileMismatchError extends Error {
+  readonly sessionId: string;
+  readonly reason: EmailIntentProfileMismatchReason;
+
+  constructor(sessionId: string, reason: EmailIntentProfileMismatchReason, detail?: string) {
+    super(
+      `Email intent profile identity check failed for session ${sessionId} (${reason})` +
+        (detail === undefined ? "" : `: ${detail}`),
+    );
+    this.name = "EmailIntentProfileMismatchError";
+    this.sessionId = sessionId;
+    this.reason = reason;
+  }
+}
+
+/**
  * Outcome of a reasoning-effort application attempt.
  * - `applied`: the value was sent to the agent.
  * - `unsupported`: the agent advertised no `thought_level` config option.
@@ -132,6 +184,19 @@ export { KNOWN_REASONING_EFFORT_TOKENS };
 export interface AgentProcessEvidence {
   generations: number;
   pid: number | undefined;
+  /**
+   * Whether the LAST `disconnect()` POSITIVELY observed the wrapper it had
+   * spawned exiting within `DISCONNECT_TIMEOUT_MS`. `undefined` means no
+   * disconnect has run since the last spawn, so termination is unproven.
+   *
+   * A consumer that must decide whether files a live producer could still be
+   * reading are safe to reclaim may treat `terminationConfirmed === true` (or
+   * `generations === 0`, i.e. no producer ever started) as evidence of
+   * quiescence. Anything else — including a wrapper that required SIGKILL
+   * after the grace period, and a spawn whose `disconnect()` no longer exposes
+   * a PID — is UNCERTAIN teardown and must keep its workspace protection.
+   */
+  terminationConfirmed?: boolean;
 }
 
 /**
@@ -142,6 +207,12 @@ export class AgentConnector {
   private connection: acp.ClientSideConnection | null = null;
   private process: Deno.ChildProcess | null = null;
   private client: ChatbotClient | null = null;
+  /**
+   * Positive observation of the LAST spawned wrapper's exit, recorded by
+   * `disconnect()` (see `AgentProcessEvidence.terminationConfirmed`). Reset on
+   * every spawn so a stale confirmation can never vouch for a new generation.
+   */
+  private terminationConfirmed: boolean | undefined = undefined;
   private options: AgentConnectorOptions;
   private capabilities: AgentCapabilities | null = null;
   /**
@@ -194,28 +265,43 @@ export class AgentConnector {
   async connect(): Promise<void> {
     const { agentConfig, clientConfig, skillRegistry, logger } = this.options;
 
-    // MANDATORY root-exact inventory (`unify-skill-root-and-inventory` D2/D4,
-    // generalizing `unify-omp-skill-root-resolution` D1/D3, post-implementation
-    // review B6): built BEFORE the subprocess exists. The trusted root is the
-    // canonical observation the factory resolved for the deployment — the SAME
-    // one both agent types resolve — and the inventory carries no agent-type
-    // selector. A launch without it — or whose root cannot be enumerated —
-    // fails connect() explicitly with ZERO processes spawned, and no
-    // observation between spawn and the initialization try/catch can orphan a
-    // child. The connector NEVER re-discovers a root (no HOME, no
-    // `Deno.cwd()/skills`, no alternate observation).
-    const skillsRoot = agentConfig.skillsRoot;
-    if (skillsRoot === undefined) {
-      throw new Error(
-        `AgentConfig for agent type "${this.options.agentType}" is missing the mandatory ` +
-          "selected-agent skills-root observation — preparation fails explicitly " +
-          "instead of discovering another root",
-      );
+    // INTERNAL email-intent profile (`email-intent-runtime`): the profile
+    // provisions NO skill tree, so this launch has no trusted root to observe
+    // and no script inventory to build — an EMPTY one is the whole contract,
+    // because an interpreter session must never reach a skill surface. The two
+    // intent markers must agree in BOTH directions before anything is spawned:
+    // an intent-profile config paired with an ordinary client would otherwise
+    // spawn successfully and then use the ordinary logging and permission
+    // shortcuts, and an ordinary config carrying an intent capture would get
+    // the deny-all callbacks without the private launch shape.
+    const intentLaunch = agentConfig.executionProfile === EMAIL_INTENT_PROFILE;
+    const intentCapture = clientConfig.intentCapture !== undefined;
+    if (intentLaunch || intentCapture) {
+      if (intentLaunch !== intentCapture) {
+        throw new EmailIntentProfileMismatchError(
+          "(pre-spawn)",
+          "capture_agreement",
+          intentLaunch
+            ? "the intent profile launch carries no intent capture seam"
+            : "an intent capture seam was supplied for a non-intent launch",
+        );
+      }
+      if (this.options.agentType === "omp") {
+        this.assertOmpIntentLaunchMarker(agentConfig);
+      }
     }
-    const autoApproveList = buildSkillAutoApproveList({
-      rootObservation: skillsRoot,
-      configuredSkills: clientConfig.autoApproveSkills,
-    });
+
+    const autoApproveList: SkillAutoApproveList = intentLaunch
+      ? {
+        // Never consulted for a grant: the client's intent branches refuse every
+        // permission and filesystem callback before any inventory decision, and
+        // both grant sets below are empty. The spelling is only the anchor the
+        // inventory type requires.
+        root: { root: agentConfig.cwd, canonicalPath: agentConfig.cwd },
+        scripts: [],
+        commandPrefixes: new Set<string>(),
+      }
+      : this.buildOrdinaryInventory(clientConfig);
 
     (logger as Logger).info("Spawning ACP agent via dumb-init", {
       command: agentConfig.command,
@@ -243,6 +329,8 @@ export class AgentConnector {
 
     this.process = command.spawn();
     this.spawnGeneration++;
+    // A new generation has no termination evidence yet.
+    this.terminationConfirmed = undefined;
 
     // Reset shutdown-intent tracking and build a fresh crash signal tied to this
     // subprocess (not any stale signal from a previously disconnected one).
@@ -252,8 +340,12 @@ export class AgentConnector {
     // Monitor for unexpected process exit
     this.monitorProcessExit(logger as Logger);
 
-    // Pipe stderr to logger (doesn't block the process)
-    this.readStderr(this.process.stderr, logger as Logger).catch((error) => {
+    // Pipe stderr to logger (doesn't block the process). An intent launch's
+    // stream is DRAINED but never logged: engine diagnostics can quote the
+    // authored text or model output, and no content of an interpretation may
+    // reach a log. The stream is still read to completion so the child never
+    // blocks on a full pipe.
+    this.readStderr(this.process.stderr, logger as Logger, intentLaunch).catch((error) => {
       (logger as Logger).error("Failed to read stderr", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -334,6 +426,174 @@ export class AgentConnector {
       // Clean up on initialization failure
       await this.disconnect();
       throw error;
+    }
+  }
+
+  /**
+   * The active select value of one config option, or `undefined` when the
+   * option is a group (no single active value). Narrowed rather than asserted,
+   * because the ACP `SessionConfigOption` union carries `currentValue` on its
+   * select arm only.
+   */
+  private static currentOptionValue(
+    option: acp.SessionConfigOption | undefined,
+  ): string | undefined {
+    if (option === undefined) return undefined;
+    if (!("currentValue" in option)) return undefined;
+    return typeof option.currentValue === "string" ? option.currentValue : undefined;
+  }
+
+  /**
+   * Build the ordinary root-exact auto-approve inventory. Unchanged behavior
+   * for every non-intent launch: a launch without the mandatory trusted-root
+   * observation fails here, with zero processes spawned.
+   *
+   * MANDATORY root-exact inventory (`unify-skill-root-and-inventory` D2/D4,
+   * generalizing `unify-omp-skill-root-resolution` D1/D3, post-implementation
+   * review B6): built BEFORE the subprocess exists. The trusted root is the
+   * canonical observation the factory resolved for the deployment — the SAME
+   * one both agent types resolve — and the inventory carries no agent-type
+   * selector. A launch without it — or whose root cannot be enumerated —
+   * fails connect() explicitly with ZERO processes spawned, and no
+   * observation between spawn and the initialization try/catch can orphan a
+   * child. The connector NEVER re-discovers a root (no HOME, no
+   * `Deno.cwd()/skills`, no alternate observation).
+   */
+  private buildOrdinaryInventory(
+    clientConfig: AgentConnectorOptions["clientConfig"],
+  ): SkillAutoApproveList {
+    const skillsRoot = this.options.agentConfig.skillsRoot;
+    if (skillsRoot === undefined) {
+      throw new Error(
+        `AgentConfig for agent type "${this.options.agentType}" is missing the mandatory ` +
+          "selected-agent skills-root observation — preparation fails explicitly " +
+          "instead of discovering another root",
+      );
+    }
+    return buildSkillAutoApproveList({
+      rootObservation: skillsRoot,
+      configuredSkills: clientConfig.autoApproveSkills,
+    });
+  }
+
+  /**
+   * Require the host-only OMP intent marker on an intent-profile launch, with
+   * its EXACT value. The marker is the OMP arm's launch identity: the pinned
+   * extension classifies an unobservable marker as an ORDINARY launch, which
+   * would select the restricted capability callback instead of the deny-all
+   * one. The connector spawns `agentConfig.env` verbatim under `clearEnv`
+   * semantics, so a marker present here is a marker the child observes.
+   */
+  private assertOmpIntentLaunchMarker(agentConfig: AgentConnectorOptions["agentConfig"]): void {
+    const observed = agentConfig.env?.[OMP_INTENT_PROFILE_FLAG];
+    if (observed !== OMP_INTENT_PROFILE_FLAG_VALUE) {
+      throw new EmailIntentProfileMismatchError(
+        "(pre-spawn)",
+        "omp_launch_marker",
+        `the launch environment carries ${JSON.stringify(observed)} instead of ` +
+          `${JSON.stringify(OMP_INTENT_PROFILE_FLAG_VALUE)} for "${OMP_INTENT_PROFILE_FLAG}"`,
+      );
+    }
+  }
+
+  /**
+   * Prove the intent session's own identity before it can interpret anything.
+   * OpenCode advertises the profile's authored agent as its only session mode,
+   * so the active mode AND the advertised roster are both pinned here to that
+   * single value: a missing selector, a different active mode, an empty roster
+   * and a roster offering anything else are all mismatches rather than silent
+   * passes. OMP owns no ACP session-mode override (the launch's native settings
+   * document and the marker-verified extension are the identity), so it has
+   * nothing to assert beyond the pre-spawn marker check.
+   */
+  private assertIntentSessionProfile(sessionId: string): void {
+    if (this.options.agentType !== "opencode") return;
+
+    const modeOption = this.intentModeOption(sessionId);
+    if (modeOption === undefined) {
+      throw new EmailIntentProfileMismatchError(sessionId, "mode_selector_missing");
+    }
+    const current = AgentConnector.currentOptionValue(modeOption);
+    if (current !== EMAIL_INTENT_AGENT_NAME) {
+      throw new EmailIntentProfileMismatchError(
+        sessionId,
+        "mode_mismatch",
+        `the active session mode is ${JSON.stringify(current)}`,
+      );
+    }
+    const selectable = collectOptionValues(modeOption);
+    if (selectable.length !== 1 || selectable[0] !== EMAIL_INTENT_AGENT_NAME) {
+      throw new EmailIntentProfileMismatchError(
+        sessionId,
+        "mode_selector_roster",
+        `the session advertises ${selectable.length} selectable mode` +
+          `${selectable.length === 1 ? "" : "s"}`,
+      );
+    }
+  }
+
+  /** The session-mode config option of one intent session, or `undefined`. */
+  private intentModeOption(
+    sessionId: string,
+  ): acp.SessionConfigOption | undefined {
+    return this.sessionConfigOptions.get(sessionId)?.find((option) =>
+      option.category === "mode" || option.id === "mode"
+    );
+  }
+
+  /** The session's model config option, or `undefined` when none is advertised. */
+  private intentModelOption(
+    sessionId: string,
+  ): acp.SessionConfigOption | undefined {
+    const options = this.sessionConfigOptions.get(sessionId);
+    return findOptionByCategory(options, MODEL_CATEGORY) ??
+      options?.find((option) => option.id === "model");
+  }
+
+  /**
+   * Pin the session to the requested `${providerID}/${modelID}` selection when
+   * the engine advertises a model selector that is not already on it.
+   *
+   * A session that advertises NO model selector is NOT an error: the profile's
+   * own provisioning (the OpenCode configuration override, or the byte-copied
+   * OMP model file) is then the whole model contract. When a selector IS
+   * advertised, a refused selection fails the session closed before the
+   * prompt instead of interpreting with an engine default.
+   */
+  private async applyIntentModelSelection(sessionId: string, selection: string): Promise<void> {
+    const modelOption = this.intentModelOption(sessionId);
+    if (modelOption === undefined) return;
+    const current = AgentConnector.currentOptionValue(modelOption);
+    if (current !== undefined && current.toLowerCase() === selection.toLowerCase()) return;
+    try {
+      await this.setSessionModel(sessionId, selection);
+    } catch (error) {
+      throw new EmailIntentProfileMismatchError(
+        sessionId,
+        "model_selection_rejected",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  /**
+   * Require the session's ACTIVE model selector to be the requested selection.
+   * Runs after the pin, because `setSessionModel()` replaces the cached option
+   * set with the engine's response: an engine that answers with another active
+   * model (or replaces the verified profile) must not reach the prompt. A
+   * session advertising no model selector keeps the profile's own provisioning
+   * as its whole model contract.
+   */
+  private assertIntentModelActive(sessionId: string, selection: string): void {
+    const modelOption = this.intentModelOption(sessionId);
+    if (modelOption === undefined) return;
+    const current = AgentConnector.currentOptionValue(modelOption);
+    if (current === undefined || current.toLowerCase() !== selection.toLowerCase()) {
+      throw new EmailIntentProfileMismatchError(
+        sessionId,
+        "model_selection_rejected",
+        `the active model is ${JSON.stringify(current)}`,
+      );
     }
   }
 
@@ -419,6 +679,24 @@ export class AgentConnector {
     // Capture initial config options (session-scoped); refreshed later via
     // config_option_update notifications and set_config_option responses.
     this.refreshSessionConfigOptions(result.sessionId, result.configOptions);
+
+    // INTERNAL email-intent profile (`email-intent-runtime`): the session must
+    // PROVE the profile identity and the requested model selection BEFORE any
+    // prompt is sent. A mismatch throws out of `createSession`, so the
+    // interpretation runtime tears the session down without ever dispatching
+    // the authored text.
+    if (this.options.agentConfig.executionProfile === EMAIL_INTENT_PROFILE) {
+      this.assertIntentSessionProfile(result.sessionId);
+      const selection = this.options.intentModelSelection;
+      if (selection !== undefined) {
+        await this.applyIntentModelSelection(result.sessionId, selection);
+        // The pin's response replaced the cached option set, so the profile
+        // identity and the resulting active model are re-verified against THAT
+        // evidence before any prompt can be dispatched.
+        this.assertIntentSessionProfile(result.sessionId);
+        this.assertIntentModelActive(result.sessionId, selection);
+      }
+    }
 
     logger.info("Session {sessionId} created with {mcpServerCount} MCP servers", {
       sessionId: result.sessionId,
@@ -858,6 +1136,11 @@ export class AgentConnector {
           }),
         ]).finally(() => clearTimeout(disconnectTimer));
         await statusRace;
+        // The ONLY positive termination observation this connector can offer:
+        // the wrapper exited within its own grace period. A wrapper that had to
+        // be SIGKILLed (or whose exit was never observed) records `false`, so a
+        // consumer never treats an unproven teardown as quiescence.
+        this.terminationConfirmed = exited;
         if (!exited) {
           logger.warn("Agent process did not exit within SIGTERM timeout, sending SIGKILL", {
             timeoutMs: DISCONNECT_TIMEOUT_MS,
@@ -866,6 +1149,23 @@ export class AgentConnector {
             this.process.kill("SIGKILL");
           } catch {
             // Best effort — the process may have exited between the race and here.
+          }
+          // An intent-profile launch additionally observes the SIGKILLed
+          // wrapper's exit, because its consumer may reclaim private roots
+          // ONLY on proven quiescence. Ordinary launches keep their unchanged
+          // disconnect timing.
+          if (this.options.agentConfig.executionProfile === EMAIL_INTENT_PROFILE) {
+            let killedExited = false;
+            const escalated = Promise.withResolvers<void>();
+            const escalatedTimer = setTimeout(() => escalated.resolve(), DISCONNECT_TIMEOUT_MS);
+            await Promise.race([
+              this.process.status.then(() => {
+                killedExited = true;
+              }),
+              escalated.promise,
+            ]);
+            clearTimeout(escalatedTimer);
+            this.terminationConfirmed = killedExited;
           }
         }
       } catch (error) {
@@ -1090,10 +1390,16 @@ export class AgentConnector {
   /**
    * Read stderr stream from the agent process and log errors
    * This runs asynchronously in the background
+   *
+   * `privateStream` (the internal email-intent profile) drains the same bytes
+   * and logs NONE of them: not the engine's diagnostics and not the read
+   * error's own message, which can quote stream content on some decoders.
+   * Ordinary launches keep their existing WARN/ERROR logging unchanged.
    */
   private async readStderr(
     stderr: ReadableStream<Uint8Array>,
     logger: Logger,
+    privateStream = false,
   ): Promise<void> {
     try {
       const decoder = new TextDecoder();
@@ -1102,6 +1408,8 @@ export class AgentConnector {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
+        if (privateStream) continue;
 
         const text = decoder.decode(value, { stream: true });
         if (text.trim()) {
@@ -1112,9 +1420,15 @@ export class AgentConnector {
     } catch (error) {
       // Only log if it's not a cancellation error
       if (error instanceof Error && error.message !== "operation canceled") {
-        logger.error("Error reading stderr stream", {
-          error: error.message,
-        });
+        if (privateStream) {
+          logger.warn(
+            "Agent stderr stream ended with a read error (intent profile; contents withheld)",
+          );
+        } else {
+          logger.error("Error reading stderr stream", {
+            error: error.message,
+          });
+        }
       }
     }
   }
@@ -1144,7 +1458,13 @@ export class AgentConnector {
    * tool children were never drained and the workspace must stay protected.
    */
   getProcessEvidence(): AgentProcessEvidence {
-    return { generations: this.spawnGeneration, pid: this.process?.pid };
+    return {
+      generations: this.spawnGeneration,
+      pid: this.process?.pid,
+      ...(this.terminationConfirmed === undefined
+        ? {}
+        : { terminationConfirmed: this.terminationConfirmed }),
+    };
   }
 
   /**
