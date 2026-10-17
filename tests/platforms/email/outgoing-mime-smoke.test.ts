@@ -3,10 +3,11 @@
 // Controlled integration smoke test for `email-message-construction` with the
 // real predecessor implementations (no transport):
 // 1. Construct once, then reserve submission evidence with the constructed digest.
-// 2. Persist the identical bytes/history through EmailMessageStore.putSent.
-// 3. Re-read stored bytes and re-parse them, proving signature-once and original
+// 2. Verify that evidence by digest, refuse tampered evidence, and consume the operation.
+// 3. Persist the identical bytes/history through EmailMessageStore.putSent with attachment payloads.
+// 4. Re-read stored bytes and attachments and re-parse them, proving signature-once and original
 //    forward bytes survive the file-backed round trip.
-// 4. Repeated prepare/putSent for the same logical operation is idempotent while a
+// 5. Repeated prepare/putSent for the same logical operation is idempotent while a
 //    changed payload is rejected, with zero remaining external side effects.
 
 import { assertEquals, assertRejects } from "@std/assert";
@@ -46,7 +47,7 @@ async function withIsolatedState(
   }
 }
 
-Deno.test("Smoke: constructed bytes gate evidence, storage and re-parsing", async () => {
+Deno.test("Smoke: verified constructed bytes gate evidence, storage and re-parsing", async () => {
   await withIsolatedState(async (emailRoot, workspacesRoot) => {
     await Deno.mkdir(emailRoot, { recursive: true });
     const externalSmtpSendCalls = 0;
@@ -98,10 +99,35 @@ Deno.test("Smoke: constructed bytes gate evidence, storage and re-parsing", asyn
     );
     // Refusal happened before any external submission side effect.
     assertEquals(externalSmtpSendCalls, 0);
+
+    // Evidence must exist and match the constructed digest before submission.
+    await Deno.mkdir(`${emailRoot}/sent`, { recursive: true });
+    await Deno.writeFile(`${emailRoot}/${emlRef}`, constructed.emlBytes);
+    await submissionStore2.verifySubmissionEvidence(OWNER, key);
+    const submitting = await submissionStore2.markSubmitting(OWNER, key);
+    assertEquals(submitting.phase, "submitting");
+
+    // Corrupted evidence is refused instead of allowing an automatic send.
+    await Deno.writeFile(`${emailRoot}/${emlRef}`, new TextEncoder().encode("tampered"));
+    const mismatch = await assertRejects(
+      () => submissionStore2.verifySubmissionEvidence(OWNER, key),
+      SubmissionStoreError,
+    );
+    assertEquals(
+      (mismatch as SubmissionStoreError).diagnosticCode,
+      SubmissionDiagnosticCode.EVIDENCE_DIGEST_MISMATCH,
+    );
+    await Deno.writeFile(`${emailRoot}/${emlRef}`, constructed.emlBytes);
+    await submissionStore2.verifySubmissionEvidence(OWNER, key);
+    const consumed = await submissionStore2.recordOutcome(OWNER, key, "submitted", {
+      wireMessageId: constructed.messageId,
+    });
+    assertEquals(consumed.phase, "submitted");
     submissionStore2.close();
 
     // 2. Persist the identical constructed message in sent history.
     const threadId = crypto.randomUUID().toLowerCase();
+    const attachmentId = crypto.randomUUID().toLowerCase();
     const messageStore = new EmailMessageStore({ workspacesRoot });
     const { recordId, threadId: storedThreadId } = await messageStore.putSent(
       OWNER,
@@ -115,12 +141,12 @@ Deno.test("Smoke: constructed bytes gate evidence, storage and re-parsing", asyn
         targetKind: "user",
         threadId,
         wireIds: constructed.wireIds,
-        attachments: [{
-          id: crypto.randomUUID().toLowerCase(),
+        attachmentPayloads: [{
+          id: attachmentId,
           displayName: "orig.bin",
           filename: "orig.bin",
           mimeType: "application/octet-stream",
-          size: originalAttachment.byteLength,
+          content: originalAttachment,
         }],
       },
       key,
@@ -152,6 +178,12 @@ Deno.test("Smoke: constructed bytes gate evidence, storage and re-parsing", asyn
     const storedRecord = await messageStore.getByOwnerRecord(OWNER, recordId);
     assertEquals(storedRecord?.body, constructed.historyBody);
     assertEquals(storedRecord?.wireMessageId, constructed.messageId);
+    assertEquals(storedRecord?.attachments.length, 1);
+    assertEquals(storedRecord?.attachments[0].id, attachmentId);
+    assertEquals(
+      await messageStore.attachment(OWNER, recordId, attachmentId),
+      originalAttachment,
+    );
 
     // 4. Re-parsing stored bytes preserves signature-once and original content.
     const parsed = await parseIncomingMime(storedBytes!);

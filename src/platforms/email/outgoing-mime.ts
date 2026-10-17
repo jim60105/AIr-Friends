@@ -28,6 +28,7 @@
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { createHash } from "node:crypto";
 import type { Hash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
 import { normalizeEmailMailbox } from "./email-identity.ts";
 import { sanitizeAttachmentDisplayName } from "./incoming-mime.ts";
@@ -150,9 +151,15 @@ export interface OutgoingMimeBuilderOptions {
 
 const MSG_ID_TOKEN_REGEX = /^<[^<>\s]+>$/;
 const MEDIA_TYPE_REGEX = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/;
-/** Strict dot-atom addr-spec; rejects group/route/quoted syntax MailComposer reinterprets. */
-const STRICT_ADDR_SPEC_REGEX =
-  /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
+/**
+ * Strict dot-atom addr-spec; rejects group/route/quoted syntax MailComposer
+ * reinterprets, and requires every local-part atom to be non-empty so
+ * consecutive dots are refused too.
+ */
+const ATEXT = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]";
+const STRICT_ADDR_SPEC_REGEX = new RegExp(
+  `^${ATEXT}+(\\.${ATEXT}+)*@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`,
+);
 const CONTROL_CHARS_REGEX = /[\r\n\0]/;
 
 /** Normalize CRLF/CR to LF without touching any other character. */
@@ -304,6 +311,20 @@ function toMimeAttachment(
       "Attachment rejected: content must be bytes",
     );
   }
+  // Attached messages are sent unencoded, so whole-message CRLF normalization
+  // would rewrite bare LF bytes inside them. Refuse content that cannot be
+  // preserved byte-for-byte instead of silently modifying the original.
+  if (attachment.contentType.toLowerCase().startsWith("message/")) {
+    const bytes = attachment.content;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0x0a && (i === 0 || bytes[i - 1] !== 0x0d)) {
+        throw new OutgoingMimeError(
+          OutgoingMimeDiagnosticCode.INVALID_ATTACHMENT,
+          "Attachment rejected: message content contains bare line feeds that cannot be preserved",
+        );
+      }
+    }
+  }
   return {
     filename: sanitizeAttachmentDisplayName(attachment.filename, index),
     contentType: attachment.contentType,
@@ -379,6 +400,9 @@ export class OutgoingMimeBuilder {
     const forwardAttachments = (draft.forwardSource?.attachments ?? []).map((att, i) =>
       toMimeAttachment(att, draftAttachments.length + i)
     );
+    // One ordered list drives both identity hashing and serialization, so the
+    // Message-ID cannot diverge from the wire bytes on attachment ordering.
+    const attachments = [...forwardAttachments, ...draftAttachments];
 
     const signedBody = applyOutgoingSignature(draft.authoredBody, signature);
     const forwardSection = draft.forwardSource
@@ -409,14 +433,15 @@ export class OutgoingMimeBuilder {
     lengthPrefixed(idHash, "date", date.toISOString());
     lengthPrefixed(idHash, "parent", wireIds.inReplyTo ?? "");
     lengthPrefixed(idHash, "references", references.join(" "));
-    for (const att of [...draftAttachments, ...forwardAttachments]) {
+    for (const att of attachments) {
       lengthPrefixed(idHash, "attachmentName", att.filename);
       lengthPrefixed(idHash, "attachmentType", att.contentType);
       lengthPrefixed(idHash, "attachmentBytes", Buffer.from(att.content).toString("base64"));
     }
     const idHex = idHash.digest("hex");
     const domain = this.fromAddress.slice(this.fromAddress.indexOf("@") + 1);
-    // 128 bits keeps the header within the fold-free 78-column budget.
+    // 128 bits keeps typical headers short; long domains may still fold, which
+    // stays within RFC 5322 limits and remains parseable.
     const messageId = `<${idHex.slice(0, 32)}@${domain}>`;
 
     const composer = new MailComposer({
@@ -424,7 +449,9 @@ export class OutgoingMimeBuilder {
       to: { address: to },
       envelope: { from: this.fromAddress, to: [to] },
       subject: draft.subject,
-      text: historyBody,
+      // An empty string would drop the text alternative entirely; a zero-length
+      // buffer keeps the documented multipart/mixed + text/plain topology.
+      text: historyBody.length === 0 ? Buffer.alloc(0) : historyBody,
       date,
       messageId,
       ...(wireIds.inReplyTo ? { inReplyTo: wireIds.inReplyTo } : {}),
@@ -432,9 +459,7 @@ export class OutgoingMimeBuilder {
       headers: { "Auto-Submitted": "auto-generated" },
       newline: "windows",
       baseBoundary: `af${idHex.slice(0, 32)}`,
-      ...(draftAttachments.length + forwardAttachments.length > 0
-        ? { attachments: [...forwardAttachments, ...draftAttachments] }
-        : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     });
 
     let emlBytes: Uint8Array;

@@ -412,11 +412,130 @@ Deno.test("construct: empty body with attachment and blank signature stays valid
     }),
     "",
   );
+  // The documented topology holds even without a body: multipart/mixed with an
+  // empty text/plain part plus the attachment.
+  assertMatch(decode(result.emlBytes), /Content-Type: multipart\/mixed;/);
+  assertMatch(decode(result.emlBytes), /Content-Type: text\/plain; charset=utf-8/);
   const parsed = await parseIncomingMime(result.emlBytes);
   assertEquals(parsed.attachments.length, 1);
   assertEquals(parsed.attachments[0].content, new Uint8Array([7, 8, 9]));
   assertEquals(result.historyBody, "");
   assertChain(result);
+});
+
+Deno.test("construct: signed source forward preserves the original signature section", async () => {
+  const sourceSignatureBody = "Original text.\n\n-- \nOriginal Sender Signature\nSecond line";
+  const result = await builder().construct(
+    draft({
+      authoredBody: "",
+      forwardSource: {
+        from: "src@example.com",
+        subject: "signed source",
+        body: sourceSignatureBody,
+      },
+    }),
+    "Bot Signature",
+  );
+
+  // Marker appears before the original body, and the original `-- ` section survives.
+  const markerIndex = result.historyBody.indexOf(FORWARD_SECTION_MARKER);
+  const originalSignatureIndex = result.historyBody.indexOf(
+    "-- \nOriginal Sender Signature\nSecond line",
+  );
+  assertEquals(markerIndex > 0, true);
+  assertEquals(originalSignatureIndex > markerIndex, true);
+  assertEquals(result.historyBody.startsWith(`${SIGNATURE_SEPARATOR}\nBot Signature`), true);
+  assertEquals(result.historyBody.includes(sourceSignatureBody), true);
+
+  const parsed = await parseIncomingMime(result.emlBytes);
+  assertEquals(parsed.provenance.authoredText, "-- \nBot Signature");
+  assertEquals(parsed.provenance.forwardedText?.includes(sourceSignatureBody), true);
+});
+
+Deno.test("construct: newline-ended commentary keeps its bytes before the separator", async () => {
+  const authored = "Commentary line.\n\n";
+  const result = await builder().construct(draft({ authoredBody: authored }), "Sig");
+  assertEquals(result.historyBody, `${authored}\n${SIGNATURE_SEPARATOR}\nSig`);
+  assertEquals(result.historyBody.includes(authored), true);
+});
+
+Deno.test("construct: preserved message/rfc822 attachments round-trip byte-exact", async () => {
+  const rawSource = new TextEncoder().encode(
+    "From: src@example.com\r\nSubject: original\r\n\r\nbody line\r\n",
+  );
+  const result = await builder().construct(
+    draft({
+      attachments: [{
+        filename: "original.eml",
+        contentType: "message/rfc822",
+        content: rawSource,
+      }],
+    }),
+    "Sig",
+  );
+  // The unencoded attached message must survive byte-for-byte inside the wire bytes.
+  assertMatch(decode(result.emlBytes), /Content-Type: message\/rfc822/);
+  assertEquals(decode(result.emlBytes).includes(new TextDecoder().decode(rawSource)), true);
+  // The predecessor parser inlines the attached message content, keeping the same text.
+  const parsed = await parseIncomingMime(result.emlBytes);
+  assertEquals(
+    parsed.plainBody.includes("From: src@example.com\nSubject: original\n\nbody line"),
+    true,
+  );
+});
+
+Deno.test("construct: rejects message attachments whose bytes cannot be preserved", async () => {
+  const error = await assertRejects(
+    () =>
+      builder().construct(
+        draft({
+          attachments: [{
+            filename: "original.eml",
+            contentType: "message/rfc822",
+            content: new TextEncoder().encode("From: src@example.com\nSubject: x\n\nbody\n"),
+          }],
+        }),
+        "Sig",
+      ),
+    OutgoingMimeError,
+  );
+  assertEquals(error.diagnosticCode, OutgoingMimeDiagnosticCode.INVALID_ATTACHMENT);
+});
+
+Deno.test("construct: attachment partition changes identity as well as bytes", async () => {
+  const attA = {
+    filename: "a.bin",
+    contentType: "application/octet-stream",
+    content: new Uint8Array([1]),
+  };
+  const attB = {
+    filename: "b.bin",
+    contentType: "application/octet-stream",
+    content: new Uint8Array([2]),
+  };
+  const split = await builder().construct(
+    draft({
+      attachments: [attA],
+      forwardSource: { from: "src@example.com", body: "orig", attachments: [attB] },
+    }),
+    "Sig",
+  );
+  const merged = await builder().construct(
+    draft({
+      forwardSource: { from: "src@example.com", body: "orig", attachments: [attA, attB] },
+    }),
+    "Sig",
+  );
+  assertNotEquals(split.messageId, merged.messageId);
+  assertNotEquals(split.digest, merged.digest);
+});
+
+Deno.test("construct: consecutive-dot local parts are rejected", async () => {
+  const error = await assertRejects(
+    () => builder().construct(draft({ to: "a..b@example.com" }), "Sig"),
+    OutgoingMimeError,
+  );
+  assertEquals(error.diagnosticCode, OutgoingMimeDiagnosticCode.INVALID_MAILBOX);
 });
 
 Deno.test("construct: round-trip through parseIncomingMime for reply and forward", async () => {
