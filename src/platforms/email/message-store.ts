@@ -818,6 +818,51 @@ export class EmailMessageStore {
   }
 
   /**
+   * The verified inbound source of ONE owner thread (durable explicit reply anchors).
+   *
+   * An explicit reply anchor may itself be an outbound record; its recipient is then
+   * still the thread's own initiating sender, never an owner-wide "latest sender"
+   * fallback outside this thread. The existing thread index is walked newest-first
+   * under the owner lock and only the matching address is returned: no whole-thread
+   * record clone, no new index and no persistence change.
+   *
+   * Returns `undefined` when the thread has no stored INBOUND record whose normalized
+   * `From` maps to `owner`; the caller must refuse instead of guessing a recipient.
+   */
+  async threadInboundRecipient(
+    owner: string,
+    threadId: string,
+  ): Promise<string | undefined> {
+    const validOwner = validateOwnerId(owner);
+    const validThread = validateUuid(
+      threadId,
+      MessageStoreDiagnosticCode.INVALID_THREAD_ID,
+    );
+
+    return await this.withOwnerLock(validOwner, (state) => {
+      const recordIds = state.threads.get(validThread);
+      if (!recordIds || recordIds.length === 0) return undefined;
+
+      for (let i = recordIds.length - 1; i >= 0; i--) {
+        const record = state.records.get(recordIds[i]);
+        if (
+          !record || record.owner !== validOwner || record.threadId !== validThread ||
+          record.direction !== "inbound"
+        ) {
+          continue;
+        }
+        try {
+          const sender = normalizeEmailMailbox(record.from);
+          if (sender.userId === validOwner) return sender.canonicalAddress;
+        } catch {
+          // An unparseable stored sender cannot verify this thread's recipient.
+        }
+      }
+      return undefined;
+    });
+  }
+
+  /**
    * Retrieve attachment binary payload bytes for a specific owner, record, and attachmentId.
    */
   async attachment(

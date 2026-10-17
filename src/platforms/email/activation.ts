@@ -49,6 +49,10 @@ import {
   createEmailAttachmentPreparation,
   type EmailAttachmentPreparation,
 } from "./attachment-preparation.ts";
+import {
+  createEmailReplyEligibilityResolver,
+  type EmailReplyEligibilityResolver,
+} from "./reply-eligibility.ts";
 
 const logger = createLogger("EmailActivation");
 
@@ -88,6 +92,11 @@ export interface EmailPlatformServices {
   readonly submissionEvidence: EmailSubmissionEvidenceSource;
   /** Durable mail service; the only outbound path. */
   readonly mailService: EmailComposeMailService;
+  /**
+   * Durable explicit-reply-anchor eligibility, shared by the adapter and the
+   * scheduled-reminder preflight so both resolve a retained anchor the same way.
+   */
+  readonly replyEligibility: EmailReplyEligibilityResolver;
   /** Owner-scoped store a forward reads its designated source through. */
   readonly forwardSourceStore?: EmailForwardSourceStore;
   /**
@@ -305,6 +314,8 @@ export async function composeEmailPlatform(
     recoveryResult: submissionRecovery,
   });
 
+  const replyEligibility = createEmailReplyEligibilityResolver(messageStore);
+
   const adapter = new EmailAdapter({
     config: email,
     transport: imap,
@@ -312,6 +323,7 @@ export async function composeEmailPlatform(
     mailboxRecovery,
     messageStore,
     mailService,
+    replyEligibility,
     channels,
     onReviewRequired: (item) => {
       // Safe reason code only: never message content, addresses or header values.
@@ -341,6 +353,7 @@ export async function composeEmailPlatform(
     submissionStore,
     submissionEvidence: mailService,
     mailService,
+    replyEligibility,
     forwardSourceStore: messageStore,
     attachmentPreparation: createEmailAttachmentPreparation(messageStore),
     preflight,
