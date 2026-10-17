@@ -1518,3 +1518,141 @@ deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow
 The tests use the real stores, the real poller, the real mail service, the in-process IMAP fixture
 and a scripted SMTP double; no production credential or mailbox is used. Production email remains
 unavailable until the final activation change.
+
+## Native OMP Intent Profile (Owned by `email-omp-intent-profile`)
+
+`src/acp/agent-factory.ts#createEmailIntentAgentConfig("omp", ...)` owns the INTERNAL native
+deny-all OMP profile an approved email interpretation launch runs under. It exists because the
+OpenCode document cannot constrain native OMP, and because the pinned native settings schema has
+NO wildcard default-deny key: a single layer can never close names it cannot enumerate.
+
+### It is not a mode anyone can select
+
+The profile is the `omp` arm of the SAME separate factory entry point
+`createEmailIntentAgentConfig`; `createAgentConfig` never reaches it, and no configuration field,
+dashboard request, environment variable or ACP request can name it. OMP has no ACP session-mode
+selector at all, so the profile is fixed at process launch. The returned `AgentConfig` carries
+`executionProfile: "email-intent"` for the consumer's fail-closed check. Ordinary OMP launches are
+byte-compatible: restricted and native-YOLO keep their existing `--config`/`--system-prompt`/
+`--trusted-extension` argv, their inherited HOME and their mode-scoped native data roots, and
+carry no profile identity and no intent marker.
+
+### Two denial layers
+
+- **Native layer** — `agent-config/omp/email-intent.yml`, installed by the Containerfile at
+  `/opt/air/omp/config/email-intent.yml` (beside the ordinary mode documents, never in the native
+  config home). It pins the non-YOLO `approvalMode: write`, denies every shipped native surface by
+  EXACT name (`read`, `grep`, `glob`, `find`, `todo`, `web_search`, `bash`, `edit`, `write`,
+  `delete`, `move`, `lsp`), disables skills with no skill directory, and authors no permissive
+  (`allow`) or prompting (`ask`) record. The contracted surface list is derived from the
+  deployment's own frozen `OMP_TOOL_CAPABILITY_MAP` plus `lsp`, and the factory validates it in
+  BOTH directions: an authored denial outside the contract, a missing denial, a permissive entry,
+  a drifted approval mode or an unprovisioned key refuses the launch.
+- **Pre-dispatch layer** — the SAME generated trusted-extension bundle the ordinary restricted
+  launch loads (`deno task bundle:omp-extension`; no second bundle, no generated YAML, no runtime
+  fallback). The pinned synchronous `api.on("tool_call")` hook returns
+  `{block: true, reason: "rejected_email_intent_profile"}` for EVERY name when the host-only child
+  marker `OMP_INTENT_PROFILE=1` is observed, so shipped, unknown, deployment-extension and
+  prototype-shaped names are all stopped before dispatch, independently of any ACP permission
+  callback. Ordinary restricted launches keep their capability callback unchanged. The marker is
+  read exactly once per process and the classification FAILS CLOSED: only a positively observed
+  absent marker selects the restricted callback, so a launch whose environment cannot be read at
+  all attaches the deny-all callback instead.
+
+The marker is a factory-set child variable only: it is not a configuration field, not an
+`ENV_MAPPINGS` entry, not reachable from a prompt or tool request, and every ordinary launch builds
+its child environment from scratch. The consumer must therefore spawn this config with `clearEnv`
+semantics and the returned `env` VERBATIM: the marker is the launch's own identity, so it must
+never be routed through an environment allow-list or filter (the ordinary sandbox's `filterEnv`
+pass keeps only a permitted subset and would drop it) — and a launch whose marker is absent
+classifies as an ordinary one, which would silently select the restricted capability callback and
+lose the pre-dispatch denial layer. `tests/acp/email-omp-profile.test.ts` pins the launch's exact
+environment key set so an accidental addition is visible too.
+
+### Provider-only provisioning
+
+The selected provider is validated against the deployment-authored native model configuration and
+then provisioned ALONE:
+
+- the authored bytes (`agent-config/omp/models.yml`, or the deployed
+  `~/.omp/agent/models.yml` when present) are copied BYTE-FOR-BYTE into the launch's private native
+  config home and read back to prove the copy — the document is never parsed into a second
+  document, reserialized or generated;
+- the catalog must declare exactly the selected provider, and the selected model when that
+  provider declares one; any other declared provider refuses the launch, because the authored file
+  is the provider-scoping trust boundary;
+- the selected provider's model credential is forwarded through a closed deployment mapping
+  (`openrouter` → `OPENROUTER_API_KEY`, `gemini`/`google` → `GEMINI_API_KEY`); a provider outside
+  that mapping launches only when its authored entry declares `auth: none`, and then receives no
+  credential. A required credential the environment lacks refuses the launch.
+
+No skill tree, no `SKILL_JWT_DIR`, no mailbox or platform secret, no engine config selector, no
+prompt mount and no previous auth/session state exist on this path. Native extras are not
+extracted per launch either: the private data root's reserved `natives` entry is linked to the ONE
+prepared shared payload (`src/utils/omp-native-cache.ts`), whose location, completeness and
+executable identity are validated before launch.
+
+### Private runtime roots
+
+Every launch allocates a FRESH private HOME (mode 0700) with its XDG data/cache/state and `TMPDIR`
+beneath it, plus an EMPTY working directory. Both must be absolute, must not be symlinks or
+redirect through one, must not already contain entries, must not lie inside any repository
+ancestry, and must not overlap the daemon's own home — the same private-root contract the
+OpenCode arm uses. `XDG_CONFIG_HOME` is deliberately NOT relocated: native OMP resolves its agent
+directory from HOME (`~/.omp/agent/models.yml`), so a moved config home would put the authored
+model file out of reach. The private HOME is writable in its entirety, so the copied model file is
+the engine's own; the authored source document and the generated bundle stay read-only inputs and
+the shared payload is a read-only bind.
+
+### Exported API
+
+- `createEmailIntentAgentConfig("omp", providerSelection, temporaryRoots, options?) -> AgentConfig`
+  - `providerSelection`: `{ providerID, modelID }`
+  - `temporaryRoots`: `{ home, cwd }` (allocated by the factory; must be fresh)
+  - `options`: the shared profile seams (`exists?`, `readFile?`, `env?`, `catalogPath?` for the
+    authored model file, `authoredConfigPath?` for the authored settings document) plus the OMP
+    additions `ompNativeCache?` (`{ installRoot?, launchExecutableVersion? }`) and
+    `ompNativeCacheForbiddenRoots?` (the backup/workspace roots a payload must not live inside)
+- Constants: `EMAIL_INTENT_OMP_CONFIG_PATH`, `EMAIL_INTENT_OMP_IMAGE_CONFIG_PATH`,
+  `EMAIL_INTENT_OMP_MODELS_PATH`, `EMAIL_INTENT_OMP_NATIVE_SURFACES`,
+  `EMAIL_INTENT_OMP_APPROVAL_MODE`, `EMAIL_INTENT_OMP_PROVIDER_CREDENTIALS` (plus the shared
+  `EMAIL_INTENT_PROFILE`)
+- Helpers: `ompHomeModelsPath`, `ompIntentXdgDataHome`, `ompIntentNativeDataDir`,
+  `ompIntentNativesLinkPath` (`src/utils/omp-paths.ts`), `observeOmpLaunchMarker`,
+  `createOmpIntentToolCallHandler`, `createOmpToolCallHandler`, `OMP_INTENT_PROFILE_FLAG`,
+  `OMP_INTENT_PROFILE_FLAG_VALUE`, `OMP_INTENT_BLOCKED_REASON`
+  (`src/acp/omp/extension/native-registration.ts`)
+
+Consumers: `email-intent-runtime` drives this launch shape and owns the ACP callback layer;
+`email-spontaneous-targets` and the final activation apply to the occurrence/guard APIs, not here.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-omp-intent-profile/specs/email-omp-intent-profile/spec.md`:
+
+- **Mapped and unknown tools**: real native OMP receives scripted read, bash, `web_search`, a
+  deployment-extension tool and custom unknown tool calls; every call is blocked before execution
+  with zero file/network/skill effects.
+- **Development and image launch**: the intent launch starts from the authored native settings,
+  the existing generated bundle and a private copy of the authored model configuration, without
+  importing user sessions or mailbox credentials; normal restricted/native-YOLO launches keep
+  their existing behavior.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/acp/email-omp-profile.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/acp/omp-native-registration.test.ts
+EMAIL_INTENT_OMP_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/integration/email-intent/omp-native.test.ts
+```
+
+The native leg is UNEXERCISED (ignored) without `EMAIL_INTENT_OMP_ACCEPTANCE=1`; with it, every
+unavailable prerequisite fails the test naming the reason instead of claiming native success. It
+requires the real pinned executable (`omp` 18.6.1), the generated extension bundle and a prepared
+native payload, uses a test-owned loopback provider plus the tracked loopback model fixture, and
+never contacts a paid or public model. Production email remains unavailable until the final
+activation change.

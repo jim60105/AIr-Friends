@@ -127,8 +127,10 @@ export interface AgentConfig {
    * factory and the internal email-intent profile (`ExecutionProfile`) populate
    * it: the OMP branch exposes the selected authored native assets read-only and
    * the selected native mode data child read-write; the email-intent profile
-   * exposes its private launch HOME read-write. Every ORDINARY OpenCode launch
-   * leaves it unset and keeps its existing mounts unchanged.
+   * exposes its private launch HOME read-write (on the OMP arm, beside the
+   * authored settings document, the generated extension bundle and the shared
+   * native payload as read-only inputs). Every ORDINARY OpenCode launch leaves
+   * it unset and keeps its existing mounts unchanged.
    */
   runtimeMounts?: AgentRuntimeMounts;
 
@@ -201,10 +203,13 @@ export type AgentType = "opencode" | "omp";
  * A profile is a factory-side identity, never a dashboard- or
  * configuration-selectable mode: no configuration field, request field or
  * environment variable can name one. `email-intent` launches the authored
- * deny-all OpenCode intent profile (fresh private HOME/cwd, provider-only
- * configuration); its consumer is the email-intent runtime, which reads the
- * identity back off `AgentConfig.executionProfile` and fails closed on any
- * mismatch.
+ * deny-all intent profile of the SELECTED engine — the OpenCode document
+ * injected as that engine's final configuration override, or the OMP authored
+ * native settings document plus the deny-all pre-dispatch extension branch
+ * (`email-omp-intent-profile`) — under fresh private HOME/cwd roots and
+ * provider-only provisioning either way; its consumer is the email-intent
+ * runtime, which reads the identity back off `AgentConfig.executionProfile`
+ * and fails closed on any mismatch.
  */
 export type ExecutionProfile = "email-intent";
 

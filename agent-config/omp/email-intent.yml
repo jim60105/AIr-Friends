@@ -1,0 +1,47 @@
+# Hand-authored native OMP settings for the INTERNAL email-intent profile
+# (`email-omp-intent-profile`). Launched ONLY by
+# `createEmailIntentAgentConfig("omp", ...)`; no configuration field, dashboard
+# request or environment variable can select this document.
+# Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
+#
+# The profile is DENY-ALL, in two layers:
+#
+#   1. THIS document is the native layer. `tools.approvalMode` is the pinned
+#      non-YOLO value (`write`, the same value the restricted document authors —
+#      the intent profile is never a YOLO launch), and every shipped native
+#      ability is denied by EXACT name. No permissive (`allow`) record and no
+#      prompt (`ask`) record is authored anywhere, and skills are off, so native
+#      discovery has nothing to admit.
+#   2. The trusted capability extension is the pre-dispatch layer: on an
+#      intent-profile launch it blocks EVERY `tool_call` name — known, unknown,
+#      deployment-extension or prototype-shaped — before dispatch. See
+#      `src/acp/omp/extension/native-registration.ts`.
+#
+# The native schema has no wildcard default-deny key, so the extension (layer 2)
+# is what closes names this document cannot enumerate. Only keys already authored
+# by the deployment's ordinary mode documents appear here.
+tools:
+  approvalMode: write
+  approval:
+    read: deny
+    grep: deny
+    glob: deny
+    find: deny
+    todo: deny
+    web_search: deny
+    bash: deny
+    edit: deny
+    write: deny
+    delete: deny
+    move: deny
+    lsp: deny
+skills:
+  enabled: false
+startup:
+  checkUpdate: false
+marketplace:
+  autoUpdate: off
+update:
+  channel: stable
+compaction:
+  enabled: true

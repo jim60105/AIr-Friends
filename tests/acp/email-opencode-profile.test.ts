@@ -795,14 +795,6 @@ Deno.test("profile - falls back to the development-tree catalog outside an image
   });
 });
 
-Deno.test("profile - the OMP intent profile is not implemented on this path", async () => {
-  await withWorkspace((ctx) => {
-    assertRefused(() =>
-      createEmailIntentAgentConfig(
-        "omp",
-        OPENROUTER_SELECTION,
-        { home: ctx.home, cwd: ctx.cwd },
-        seams(ctx),
-      ), /email-omp-intent-profile/);
-  });
-});
+// The OMP arm of this SAME entry point is owned and covered by
+// `email-omp-intent-profile` (`tests/acp/email-omp-profile.test.ts`); nothing
+// about the OpenCode launch shape changes for it.

@@ -364,6 +364,11 @@ COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/
 # way, and the build synthesizes or rewrites no OMP YAML.
 COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
 COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
+# INTERNAL email-intent profile settings (`email-omp-intent-profile`): the
+# authored DENY-ALL native document the intent launch selects with `--config`.
+# It lands beside the two ordinary mode documents, never in the native config
+# home (`~/.omp/agent`), so no ordinary launch ever discovers it.
+COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/email-intent.yml /opt/air/omp/config/email-intent.yml
 # Row-8 prompt mapping: the SYSTEM.md prompt artifact installs under its
 # contracted name; operator prompt mounts keep their existing semantics and
 # are never relocated (src/utils/omp-paths.ts resolveOmpSystemPromptPath).
