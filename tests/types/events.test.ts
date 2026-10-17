@@ -6,6 +6,7 @@ import { isValidPlatform, VALID_PLATFORMS } from "../../src/types/events.ts";
 Deno.test("isValidPlatform - returns true for valid platforms", () => {
   assertEquals(isValidPlatform("discord"), true);
   assertEquals(isValidPlatform("misskey"), true);
+  assertEquals(isValidPlatform("email"), true);
 });
 
 Deno.test("isValidPlatform - returns false for invalid platforms", () => {
@@ -17,5 +18,6 @@ Deno.test("isValidPlatform - returns false for invalid platforms", () => {
 Deno.test("VALID_PLATFORMS - contains expected platforms", () => {
   assertEquals(VALID_PLATFORMS.includes("discord"), true);
   assertEquals(VALID_PLATFORMS.includes("misskey"), true);
-  assertEquals(VALID_PLATFORMS.length, 2);
+  assertEquals(VALID_PLATFORMS.includes("email"), true);
+  assertEquals(VALID_PLATFORMS.length, 3);
 });
