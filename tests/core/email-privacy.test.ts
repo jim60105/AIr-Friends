@@ -19,7 +19,11 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import * as acp from "@agentclientprotocol/sdk";
-import { projectEmailAuditData, SessionAuditWriter } from "../../src/core/audit-logger.ts";
+import {
+  projectEmailAuditData,
+  projectEmailOperationData,
+  SessionAuditWriter,
+} from "../../src/core/audit-logger.ts";
 import type { AuditConfig } from "../../src/types/config.ts";
 import type { AuditPhase, SessionAuditEntry } from "../../src/types/audit.ts";
 import { Logger, LogLevel, runWithPrivateEmailScope } from "../../src/utils/logger.ts";
@@ -36,6 +40,7 @@ import { emailComposeAuditParams } from "../../src/skills/email-handler.ts";
 import type { EmailComposeMailService } from "../../src/skills/email-handler.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import { formatEmailChannelId } from "../../src/platforms/email/message-store.ts";
+import type { EmailSubmissionEvidenceSource } from "../../src/core/email-response-accounting.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { SkillAPIServer } from "../../src/skill-api/server.ts";
 import { SkillRegistry as RealSkillRegistry } from "../../src/skills/registry.ts";
@@ -327,7 +332,14 @@ Deno.test("email audit - projection is idempotent and a canonical digest always 
     count: 2,
     sessionId: SESSION_ID,
     userId: ADDRESS_SENTINEL,
-    nested: { error: PASSWORD_SENTINEL, operation: "save" },
+    // An unknown wrapper must be dropped whole, however many of its fields would
+    // have survived on their own.
+    nested: { error: PASSWORD_SENTINEL, operation: "save", count: 1 },
+    // Property names are untrusted too: a private string must not survive as a
+    // key holding a boolean, an object or a digest.
+    [ADDRESS_SENTINEL]: true,
+    [FILENAME_SENTINEL]: { count: 1 },
+    [PASSWORD_SENTINEL]: `sha256:${PLACEHOLDER_HASH}`,
   });
   assertNoSentinel(JSON.stringify(first), "the projected email data");
   assertEquals(first.messageHash, canonical);
@@ -343,8 +355,10 @@ Deno.test("email audit - projection is idempotent and a canonical digest always 
   assertEquals(first.sessionId, SESSION_ID);
   assertEquals(first.userId, undefined);
   assertEquals(first.message, undefined);
-  assertEquals((first.nested as Record<string, unknown>).operation, "save");
-  assertEquals((first.nested as Record<string, unknown>).error, undefined);
+  assertEquals(first.nested, undefined);
+  assertEquals(first[ADDRESS_SENTINEL], undefined);
+  assertEquals(first[FILENAME_SENTINEL], undefined);
+  assertEquals(first[PASSWORD_SENTINEL], undefined);
 
   // A second pass returns exactly the same object (no `…HashHash` growth).
   assertEquals(await projectEmailAuditData(first), first);
@@ -352,6 +366,56 @@ Deno.test("email audit - projection is idempotent and a canonical digest always 
   // Key order must not change which digest wins.
   const reversed = await projectEmailAuditData({ messageHash: canonical, message: "raw body" });
   assertEquals(reversed.messageHash, canonical);
+});
+
+Deno.test("email audit - agent payloads cannot impersonate host metadata", async () => {
+  // A model may name any key it likes; only the narrow param allowlist and the
+  // observable counters survive, so a recognized-looking name is not enough.
+  const projected = await projectEmailAuditData({
+    skillName: "send-reply",
+    skillParams: {
+      message: BODY_SENTINEL,
+      WorkId: PASSWORD_SENTINEL,
+      model: FILENAME_SENTINEL,
+      reason: "private-body",
+      visibility: "public",
+      success: true,
+      [PASSWORD_SENTINEL]: PASSWORD_SENTINEL,
+    },
+    skillResult: { success: false, code: "SKILL_EMAIL_COMPOSE_REQUEST" },
+  });
+  assertNoSentinel(JSON.stringify(projected), "the projected agent payload");
+  const params = projected.skillParams as Record<string, unknown>;
+  assertEquals(params.WorkId, undefined);
+  assertEquals(params.model, undefined);
+  assertEquals(params.reason, undefined);
+  assertEquals(params.visibility, undefined);
+  assertEquals(params.success, true);
+  assertEquals(params.messageHash, `sha256:${await sha256Hash(BODY_SENTINEL)}`);
+  assertEquals(params.messageLength, BODY_SENTINEL.length);
+  assertEquals(
+    (projected.skillResult as Record<string, unknown>).code,
+    "SKILL_EMAIL_COMPOSE_REQUEST",
+  );
+
+  // The operation allowlist validates each field's own enum, and a canonical
+  // digest never substitutes for a classification.
+  const operation = projectEmailOperationData({
+    operationId: `op_${"f".repeat(24)}`,
+    workId: WORK_ID,
+    phase: "private-body",
+    // A canonical digest is not a target class, and neither is a private word:
+    // only the exact enum survives.
+    targetKind: `sha256:${PLACEHOLDER_HASH}` as "user",
+    sentCopy: "failed",
+    safeCode: "APPEND_FAILED",
+  });
+  assertEquals(operation.operationId, `op_${"f".repeat(24)}`);
+  assertEquals(operation.workId, WORK_ID);
+  assertEquals(operation.sentCopy, "failed");
+  assertEquals(operation.phase, undefined);
+  assertEquals(operation.targetKind, undefined);
+  assertEquals(operation.safeCode, "APPEND_FAILED");
 });
 
 Deno.test("email audit - a failing private write reports a code, never the exception text", async () => {
@@ -422,6 +486,15 @@ Deno.test("logger - email module loggers and email session loggers are private",
     new Logger("SkillAPIServer", { level: LogLevel.DEBUG })
       .withPrivateEmail()
       .info("private context", { message: BODY_SENTINEL });
+    // A workspace-keyed maintenance logger of the email workspace, and a log
+    // context whose private strings arrive as property names.
+    new Logger("SessionOrchestrator", { level: LogLevel.DEBUG })
+      .child(`memory-maintenance:email/${OWNER}`)
+      .error("Memory maintenance failed", {
+        error: PASSWORD_SENTINEL,
+        [ADDRESS_SENTINEL]: true,
+        [FILENAME_SENTINEL]: `sha256:${PLACEHOLDER_HASH}`,
+      });
     return Promise.resolve();
   });
 
@@ -447,6 +520,68 @@ Deno.test("logger - email module loggers and email session loggers are private",
   // The opted-in mixed logger is private; the ordinary one is untouched.
   assertEquals(entries[3].message, "private context");
   assertEquals(entries[3].context, undefined);
+  // The canonical owner id is already a digest, so the module name stays as-is;
+  // the private context is what gets dropped.
+  assertEquals(entries[4].module, `SessionOrchestrator:memory-maintenance:email/${OWNER}`);
+  assertEquals(entries[4].context, undefined);
+});
+
+Deno.test("logger - GELF receives the projected entry, not the raw context", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const logger = new Logger("EmailMailService", {
+    level: LogLevel.DEBUG,
+    gelfTransport: {
+      send: (entry) => {
+        sent.push(entry as unknown as Record<string, unknown>);
+      },
+    },
+  });
+  const { logs } = await capturingLogs(() => {
+    logger.info("Email submission finished: {Phase}", {
+      Phase: "submitted",
+      OperationId: `op_${"a".repeat(24)}`,
+      error: PASSWORD_SENTINEL,
+    });
+    return Promise.resolve();
+  });
+  assertNoSentinel(logs.join("\n"), "the private console stream");
+  assertEquals(sent.length, 1);
+  assertNoSentinel(JSON.stringify(sent[0]), "the GELF payload");
+  assertEquals((sent[0].context as Record<string, unknown>).OperationId, `op_${"a".repeat(24)}`);
+  assertEquals((sent[0].context as Record<string, unknown>).error, undefined);
+});
+
+Deno.test("logger - concurrent email and non-email executions cannot leak into each other", async () => {
+  const { logs } = await capturingLogs(async () => {
+    const emailLogger = new Logger("SkillRegistry", { level: LogLevel.DEBUG });
+    const discordLogger = new Logger("SkillRegistry", { level: LogLevel.DEBUG });
+    await Promise.all([
+      runWithPrivateEmailScope(async () => {
+        await Promise.resolve();
+        emailLogger.error("Skill {skillName} execution error", {
+          skillName: "send-email",
+          error: PASSWORD_SENTINEL,
+        });
+      }),
+      (async () => {
+        await Promise.resolve();
+        discordLogger.error("Skill {skillName} execution error", {
+          skillName: "send-reply",
+          error: PASSWORD_SENTINEL,
+        });
+      })(),
+    ]);
+  });
+  const entries = logs.map((line) =>
+    JSON.parse(line) as { message: string; context?: Record<string, unknown> }
+  );
+  assertEquals(entries.length, 2);
+  const emailEntry = entries.find((entry) => (entry.context?.skillName as string) === "send-email");
+  const discordEntry = entries.find((entry) =>
+    (entry.context?.skillName as string) === "send-reply"
+  );
+  assertEquals(emailEntry?.context?.error, undefined);
+  assertEquals(discordEntry?.context?.error, PASSWORD_SENTINEL);
 });
 
 Deno.test("logger - a non-email logger keeps its ordinary context", async () => {
@@ -713,10 +848,18 @@ function mailServiceDouble(): EmailComposeMailService & { drafts: number } {
 
 async function withEmailEndpoint(
   port: number,
-  options: { mailService: EmailComposeMailService; failFileSend?: boolean },
+  options: {
+    mailService?: EmailComposeMailService;
+    failFileSend?: boolean;
+    platform?: "email" | "discord";
+    evidence?: EmailSubmissionEvidenceSource;
+  },
   body: (harness: EmailHarness) => Promise<void>,
 ): Promise<void> {
   const dir = await Deno.makeTempDir();
+  const platform = options.platform ?? "email";
+  const isEmail = platform === "email";
+  const userId = isEmail ? OWNER : "123";
   const registry = new SessionRegistry();
   const workspaceManager = new WorkspaceManager({ repoPath: dir, workspacesDir: "workspaces" });
   const memoryStore = new MemoryStore(workspaceManager, {});
@@ -726,10 +869,10 @@ async function withEmailEndpoint(
     undefined,
     { enabled: true, allowedExtensions: [".pdf"], maxFilesPerInvocation: 10 } as never,
     undefined,
-    { mailService: options.mailService },
+    options.mailService === undefined ? undefined : { mailService: options.mailService },
   );
   const auditPath = join(dir, "audit");
-  const channelId = formatEmailChannelId(OWNER, THREAD_ID);
+  const channelId = isEmail ? formatEmailChannelId(OWNER, THREAD_ID) : "456";
   const adapter = {
     sendReply: () =>
       Promise.resolve({
@@ -759,25 +902,31 @@ async function withEmailEndpoint(
     },
   };
   const sessionId = registry.register({
-    platform: "email",
+    platform,
     channelId,
-    userId: OWNER,
+    userId,
     isDm: true,
     workspace: {
-      key: `email/${OWNER}`,
-      components: { platform: "email" as const, userId: OWNER },
+      key: isEmail ? `email/${OWNER}` : "discord/123",
+      components: { platform, userId },
       path: dir,
       tmpPath: join(dir, "tmp"),
       isDm: true,
     },
     platformAdapter: adapter as unknown as PlatformAdapter,
     agentWorkspacePath: dir,
-    emailWorkId: WORK_ID,
-    auditWriter: new SessionAuditWriter(auditPath, "email", OWNER, SESSION_ID, auditConfig(false)),
+    ...(isEmail ? { emailWorkId: WORK_ID } : {}),
+    auditWriter: new SessionAuditWriter(
+      auditPath,
+      platform,
+      userId,
+      SESSION_ID,
+      auditConfig(false),
+    ),
     triggerEvent: {
-      platform: "email",
+      platform,
       channelId,
-      userId: OWNER,
+      userId,
       messageId: "msg_trigger",
       isDm: true,
       guildId: "",
@@ -797,6 +946,7 @@ async function withEmailEndpoint(
     { port, host: "127.0.0.1" },
     TEST_SKILL_SECRET,
   );
+  if (options.evidence) server.setEmailSubmissionEvidence(options.evidence);
   server.start();
   await assertServerReachable(port);
 
@@ -970,5 +1120,115 @@ Deno.test("skill API - a malformed email request body is reported without its co
     });
     assertNoSentinel(logs.join("\n"), "the malformed-body log stream");
     assertStringIncludes(logs.join("\n"), "SKILL_API_INVALID_JSON_BODY");
+  });
+});
+
+Deno.test("skill API - a valid null body keeps the structured error response", async () => {
+  const port = 34773;
+  await withEmailEndpoint(port, { mailService: mailServiceDouble() }, async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/skill/send-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+    assertEquals(response.status, 400);
+    assertEquals(await response.json(), { success: false, error: "Missing sessionId" });
+  });
+});
+
+Deno.test("skill API - durable evidence recovered for a lost response is audited", async () => {
+  const port = 34774;
+  await withEmailEndpoint(port, {
+    mailService: mailServiceDouble(),
+    failFileSend: true,
+    evidence: {
+      lookup: (_owner, key) =>
+        key.actionSlot === "files"
+          ? {
+            operationId: `op_${"a".repeat(24)}`,
+            phase: "submitted",
+            targetKind: "user",
+            sentCopy: "failed",
+            safeCode: "APPEND_FAILED",
+            reused: false,
+          }
+          : undefined,
+    },
+  }, async (h) => {
+    // The adapter throws, so the skill result carries no metadata at all; only
+    // the durable journal knows the mail was accepted.
+    const files = await postSkill(port, h.registry, h.sessionId, "send-file", {
+      filePaths: [FILENAME_SENTINEL],
+    });
+    assertEquals(files.status, 400);
+
+    const entries = await readEntries(
+      join(h.auditPath, "email", OWNER, `${SESSION_ID}.jsonl`),
+    );
+    const operation = entries.find((entry) => entry.phase === "email_operation");
+    assert(operation, "the recovered durable evidence was audited");
+    assertEquals(operation.data.operationId, `op_${"a".repeat(24)}`);
+    assertEquals(operation.data.workId, WORK_ID);
+    assertEquals(operation.data.phase, "submitted");
+    assertEquals(operation.data.sentCopy, "failed");
+    assertEquals(operation.data.safeCode, "APPEND_FAILED");
+    assertNoSentinel(JSON.stringify(entries), "the recovered-evidence audit entries");
+  });
+});
+
+Deno.test("skill API - a successful email file send audits counts, not names", async () => {
+  const port = 34775;
+  await withEmailEndpoint(port, { mailService: mailServiceDouble() }, async (h) => {
+    const files = await postSkill(port, h.registry, h.sessionId, "send-file", {
+      filePaths: [FILENAME_SENTINEL],
+    });
+    assertEquals(files.status, 200);
+    const job = await postSkill(port, h.registry, h.sessionId, "send-email", {
+      request: { to: ADDRESS_SENTINEL, subject: SUBJECT_SENTINEL, body: BODY_SENTINEL },
+    });
+    assertEquals(job.status, 200);
+
+    const entries = await readEntries(
+      join(h.auditPath, "email", OWNER, `${SESSION_ID}.jsonl`),
+    );
+    assertNoSentinel(JSON.stringify(entries), "the successful email audit entries");
+    const fileEntry = entries.find((entry) => entry.phase === "file_sent");
+    assert(fileEntry, "the email file send was audited");
+    assertEquals(fileEntry.data.filesCount, 1);
+    assertEquals(fileEntry.data.fileNames, undefined);
+    assertStringIncludes(String(fileEntry.data.fileNamesHash), "sha256:");
+    // A submitted operation without a reported copy state records no sentCopy.
+    const operations = entries.filter((entry) => entry.phase === "email_operation");
+    assertEquals(operations.length, 2);
+  });
+});
+
+Deno.test("skill API - non-email skill results stay byte-compatible", async () => {
+  const port = 34776;
+  await withEmailEndpoint(port, { platform: "discord" }, async (h) => {
+    // A workspace-prefixed path that exists only as the redundant spelling
+    // yields the typed guidance code on top of the error text; the audit must
+    // keep the pre-change `{success, error}` shape.
+    await Deno.mkdir(join(h.auditPath, "..", "data", "workspaces", "discord", "123"), {
+      recursive: true,
+    });
+
+    const response = await postSkill(port, h.registry, h.sessionId, "send-file", {
+      filePaths: ["data/workspaces/discord/123/report.pdf"],
+    });
+    assertEquals(response.status, 400);
+    assertEquals(response.body.code, "SKILL_FILE_PATH_WORKSPACE_PREFIXED");
+
+    const entries = await readEntries(
+      join(h.auditPath, "discord", "123", `${SESSION_ID}.jsonl`),
+    );
+    const call = entries.find((entry) => entry.phase === "skill_call");
+    assert(call, "the discord skill call was audited");
+    assertEquals(call.data.skillResult, {
+      success: false,
+      error: String(response.body.error),
+    });
+    assertEquals("code" in (call.data.skillResult as Record<string, unknown>), false);
+    assertEquals(entries.some((entry) => entry.phase === "email_operation"), false);
   });
 });

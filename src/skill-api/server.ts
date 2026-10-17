@@ -14,7 +14,7 @@ import {
   emailSessionOwner,
   type EmailSubmissionEvidenceSource,
 } from "@core/email-response-accounting.ts";
-import type { EmailSendContext } from "../types/platform.ts";
+import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platform.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
@@ -208,41 +208,46 @@ export class SkillAPIServer {
     session: ActiveSession,
     skillName: string,
     result: SkillResult,
-  ): boolean {
-    if (session.platform !== "email") return false;
+  ): { slotConsumed: boolean; outcomes: EmailSubmissionMetadata[] } {
+    if (session.platform !== "email") return { slotConsumed: false, outcomes: [] };
     const actionSlot = this.hostEmailSkillSlot(session, skillName);
     const metadata = result.emailSubmission;
     if (metadata) {
       this.sessionRegistry.recordEmailSubmission(session.id, metadata, actionSlot);
-      return metadata.phase === "submitted";
+      return { slotConsumed: metadata.phase === "submitted", outcomes: [metadata] };
     }
     // No metadata: only a failure needs the durable second opinion (a success
     // that reported nothing recorded no email effect).
-    if (result.success) return false;
-    return this.reconcileDurableEmailEvidence(session);
+    if (result.success) return { slotConsumed: false, outcomes: [] };
+    const recorded = this.reconcileDurableEmailEvidence(session);
+    return {
+      slotConsumed: recorded.some((outcome) => outcome.phase === "submitted"),
+      outcomes: recorded,
+    };
   }
 
   /**
    * Read this session's durable email evidence for its own logical slots — the
    * ordinary slots plus one partition per immutable grant — and record every
-   * result that is not a recorded non-delivery. Returns true when a CONFIRMED
-   * submission was found.
+   * result that is not a recorded non-delivery. The recorded outcomes are
+   * returned so the caller can audit the evidence it just recovered: a lost
+   * skill response must not lose the operator's operation record with it.
    */
-  private reconcileDurableEmailEvidence(session: ActiveSession): boolean {
+  private reconcileDurableEmailEvidence(session: ActiveSession): EmailSubmissionMetadata[] {
     const evidence = this.emailSubmissionEvidence;
     const owner = emailSessionOwner(session);
     const identity = sessionEmailOperation(session);
     if (!evidence || owner === undefined || identity === undefined) {
-      return false;
+      return [];
     }
-    let submitted = false;
+    const recorded: EmailSubmissionMetadata[] = [];
     for (const actionSlot of identity.slots) {
-      const recorded = evidence.lookup(owner, { workId: identity.workId, actionSlot });
-      if (!recorded || recorded.phase === "prepared" || recorded.phase === "failed") continue;
-      this.sessionRegistry.recordEmailSubmission(session.id, recorded, actionSlot);
-      if (recorded.phase === "submitted") submitted = true;
+      const outcome = evidence.lookup(owner, { workId: identity.workId, actionSlot });
+      if (!outcome || outcome.phase === "prepared" || outcome.phase === "failed") continue;
+      this.sessionRegistry.recordEmailSubmission(session.id, outcome, actionSlot);
+      recorded.push(outcome);
     }
-    return submitted;
+    return recorded;
   }
 
   /**
@@ -331,9 +336,9 @@ export class SkillAPIServer {
     skillName: string,
     headers: Record<string, string>,
   ): Promise<Response> {
-    let body: SkillRequest;
+    let parsed: unknown;
     try {
-      body = await request.json() as SkillRequest;
+      parsed = await request.json();
     } catch (error) {
       // Never log the parser message: it embeds a snippet of the request body,
       // which for email codecs is private correspondence (recipient, subject,
@@ -348,7 +353,17 @@ export class SkillAPIServer {
       );
     }
 
-    if (!body.sessionId) {
+    // The envelope is validated before it is dereferenced: a valid `null` (or
+    // any other non-object) body must reach the same structured 400 as a
+    // missing session id instead of escaping as a server-level rejection.
+    if (parsed === null || typeof parsed !== "object") {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing sessionId" }),
+        { status: 400, headers },
+      );
+    }
+    const body = parsed as SkillRequest;
+    if (typeof body.sessionId !== "string" || body.sessionId.length === 0) {
       return new Response(
         JSON.stringify({ success: false, error: "Missing sessionId" }),
         { status: 400, headers },
@@ -891,40 +906,46 @@ export class SkillAPIServer {
       skillName,
       skillParams: sanitizedParams,
       // An email failure is reported by its typed code: the message text can echo
-      // a provider/agent error and has no place in a private audit entry.
+      // a provider/agent error and has no place in a private audit entry. The
+      // `code` field itself stays email-only, so non-email `skillResult`
+      // serialization is byte-identical to what it was.
       skillResult: {
         success: result.success,
-        ...(result.code === undefined ? {} : { code: result.code }),
+        ...(privateEmail && result.code !== undefined ? { code: result.code } : {}),
         ...(privateEmail || result.error === undefined ? {} : { error: result.error }),
       },
       skillDurationMs: Date.now() - skillStartTime,
     });
     auditWriter?.incrementSkillCalls();
 
-    // Audit: email_operation — the operator's stable correlation of one submitted,
-    // failed or unknown email (and its sent-copy state) without any content.
-    const emailSubmission = result.emailSubmission;
-    if (privateEmail && auditWriter && emailSubmission) {
-      await auditWriter.writeEmailOperation({
-        ...(emailSubmission.operationId === undefined
-          ? {}
-          : { operationId: emailSubmission.operationId }),
-        ...(session.emailWorkId === undefined ? {} : { workId: session.emailWorkId }),
-        phase: emailSubmission.phase,
-        ...(emailSubmission.targetKind === undefined
-          ? {}
-          : { targetKind: emailSubmission.targetKind }),
-        ...(emailSubmission.sentCopy === undefined ? {} : { sentCopy: emailSubmission.sentCopy }),
-        ...(emailSubmission.safeCode === undefined ? {} : { safeCode: emailSubmission.safeCode }),
-      });
-    }
-
     // Row 22: classify this result into the session's explicit email response
     // accounting before anything is rolled back. `emailSlotConsumed` is true only
     // for a confirmed submission, whose reservation must survive the rollback;
     // unresolved evidence keeps its `unknown` latch (which suppresses automatic
     // retry) while the existing rollback still clears unconfirmed delivery state.
-    const emailSlotConsumed = this.accountEmailSkillOutcome(session, skillName, result);
+    const emailAccounting = this.accountEmailSkillOutcome(session, skillName, result);
+    const emailSlotConsumed = emailAccounting.slotConsumed;
+
+    // Audit: email_operation — the operator's stable correlation of one submitted,
+    // failed or unknown email (and its sent-copy state) without any content. A
+    // result that reported nothing but whose durable evidence the accounting just
+    // recovered is audited from that same evidence.
+    if (privateEmail && auditWriter) {
+      for (const emailSubmission of emailAccounting.outcomes) {
+        await auditWriter.writeEmailOperation({
+          ...(emailSubmission.operationId === undefined
+            ? {}
+            : { operationId: emailSubmission.operationId }),
+          ...(session.emailWorkId === undefined ? {} : { workId: session.emailWorkId }),
+          phase: emailSubmission.phase,
+          ...(emailSubmission.targetKind === undefined
+            ? {}
+            : { targetKind: emailSubmission.targetKind }),
+          ...(emailSubmission.sentCopy === undefined ? {} : { sentCopy: emailSubmission.sentCopy }),
+          ...(emailSubmission.safeCode === undefined ? {} : { safeCode: emailSubmission.safeCode }),
+        });
+      }
+    }
 
     // Rollback if send-reply failed
     if (skillName === "send-reply" && !result.success && !emailSlotConsumed) {

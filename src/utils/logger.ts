@@ -2,7 +2,7 @@
 
 import type { GelfTransportLike, LogEntry, LoggerConfig } from "../types/logger.ts";
 import { LogLevel } from "../types/logger.ts";
-import { isSafeEmailAuditScalar } from "../types/audit.ts";
+import { isEmailMetadataScalarKey, isSafeEmailAuditScalar } from "../types/audit.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 // Default patterns for sensitive data detection
@@ -34,7 +34,10 @@ const MAIL_ADDRESS_PATTERN = /[^\s:@{}\/]+@[^\s:@{}\/]+/g;
 export function isPrivateEmailLogModule(module: string): boolean {
   const segments = module.split(":");
   if (segments[0].startsWith("Email")) return true;
-  return segments.slice(1).some((segment) => segment.trim().toLowerCase() === "email");
+  return segments.slice(1).some((segment) => {
+    const normalized = segment.trim().toLowerCase();
+    return normalized === "email" || normalized.startsWith("email/");
+  });
 }
 
 /**
@@ -151,7 +154,9 @@ export class Logger {
     const projected: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(context)) {
       if (typeof value === "number" || typeof value === "boolean") {
-        projected[key] = value;
+        // The KEY is validated, not just the value: an attacker-supplied
+        // property name must not become a place to hide text.
+        if (isEmailMetadataScalarKey(key)) projected[key] = value;
         continue;
       }
       if (

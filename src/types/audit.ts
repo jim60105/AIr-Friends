@@ -283,12 +283,126 @@ const EMAIL_SAFE_TEXT_FIELDS: Record<string, RegExp> = {
 };
 
 /**
- * Whether a scalar string value may be recorded under `key` in the private
- * email context. Already-canonical digests are always accepted; everything else
- * must match its field's own host-assigned format.
+ * Scalar (number/boolean) metadata fields that may be recorded verbatim. Keys
+ * are the contract here — a private email sink records a number only under a
+ * name it knows, so an attacker-supplied property name cannot smuggle text
+ * through the value type.
  */
-export function isSafeEmailAuditScalar(key: string, value: string): boolean {
-  if (EMAIL_HASH_VALUE_PATTERN.test(value)) return true;
-  const pattern = EMAIL_SAFE_TEXT_FIELDS[key.toLowerCase()];
+export const EMAIL_METADATA_SCALAR_KEYS: Record<string, true> = {
+  // session/turn shape
+  isdm: true,
+  yolo: true,
+  pooled: true,
+  isretry: true,
+  success: true,
+  repliesent: true,
+  reactionsent: true,
+  filesent: true,
+  reused: true,
+  // counts and durations
+  contentlength: true,
+  attachmentcount: true,
+  filescount: true,
+  durationms: true,
+  memoriescount: true,
+  recentmessagescount: true,
+  relatedmessagescount: true,
+  estimatedtokens: true,
+  requestcount: true,
+  maxrequests: true,
+  cooldownremainingms: true,
+  promptlength: true,
+  imagecount: true,
+  messagelength: true,
+  thoughtlength: true,
+  replylength: true,
+  chunkcount: true,
+  retrycount: true,
+  maxretries: true,
+  repliescount: true,
+  skillcallscount: true,
+  memoryopscount: true,
+  permissiondecisionscount: true,
+  resultcount: true,
+  skilldurationms: true,
+  subjectlength: true,
+  bodylength: true,
+  // `attachments` is the attachment COUNT in the compose handler's log context.
+  attachments: true,
+  attachmentscount: true,
+  // operational counters of the modules that log email work
+  count: true,
+  size: true,
+  used: true,
+  index: true,
+  total: true,
+  threshold: true,
+  attempt: true,
+  attempts: true,
+  cacheage: true,
+  filesendcount: true,
+  replycount: true,
+  editcount: true,
+  maxfilesends: true,
+  maxreplies: true,
+};
+
+/** Suffix rule for the projection's own derived scalar fields. */
+const EMAIL_DERIVED_SCALAR_KEY = /^[a-z][A-Za-z0-9]*(Length|Count|Counts|Ms|Bytes|Tokens|Age)$/;
+
+/** Structural fields whose nested payload is projected recursively. */
+export const EMAIL_STRUCTURAL_FIELD_NAMES: Record<string, true> = {
+  skillparams: true,
+  skillresult: true,
+};
+
+/**
+ * The only text fields an agent-supplied payload (skill params/results) may
+ * carry verbatim. Host metadata fields are excluded on purpose: a model that
+ * sends `workId`/`model`/`reason` must not have those values recorded just
+ * because the key looks recognized.
+ */
+export const EMAIL_PARAM_SAFE_TEXT_KEYS: Record<string, true> = {
+  action: true,
+  grantid: true,
+  sourcerecordid: true,
+  code: true,
+};
+
+/** Exact formats of the `email_operation` allowlist fields. */
+export const EMAIL_OPERATION_FIELD_VALIDATORS: Record<
+  keyof EmailOperationAuditData,
+  RegExp
+> = {
+  operationId: OPERATION_ID_VALUE,
+  workId: HOST_ID_VALUE,
+  phase: /^(prepared|submitting|submitted|failed|unknown)$/,
+  targetKind: /^(user|third-party)$/,
+  sentCopy: /^(pending|appended|failed)$/,
+  safeCode: UPPER_CODE_VALUE,
+};
+
+/** Whether a number/boolean may be recorded under `key`. */
+export function isEmailMetadataScalarKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return EMAIL_METADATA_SCALAR_KEYS[lower] === true || EMAIL_DERIVED_SCALAR_KEY.test(key);
+}
+
+/**
+ * Whether the value of a text field may be recorded under `key` in a private
+ * email context. Host metadata is validated by its own field format;
+ * agent-supplied payloads (`paramScope`) may only carry the narrow param
+ * allowlist. An already-canonical digest is accepted under a digest-bearing key
+ * only.
+ */
+export function isSafeEmailAuditScalar(
+  key: string,
+  value: string,
+  paramScope: boolean = false,
+): boolean {
+  if (EMAIL_HASH_VALUE_PATTERN.test(value)) return EMAIL_HASH_FIELD_PATTERN.test(key);
+  const lower = key.toLowerCase();
+  if (paramScope && EMAIL_PARAM_SAFE_TEXT_KEYS[lower] !== true) return false;
+  const pattern = EMAIL_SAFE_TEXT_FIELDS[lower];
   return pattern !== undefined && pattern.test(value);
 }

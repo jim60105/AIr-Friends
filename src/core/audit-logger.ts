@@ -12,6 +12,9 @@ import {
   EMAIL_HASH_FIELD_PATTERN,
   EMAIL_HASH_VALUE_PATTERN,
   EMAIL_OPERATION_AUDIT_FIELDS,
+  EMAIL_OPERATION_FIELD_VALIDATORS,
+  EMAIL_STRUCTURAL_FIELD_NAMES,
+  isEmailMetadataScalarKey,
   isSafeEmailAuditScalar,
 } from "../types/audit.ts";
 import { auditEntriesTotal } from "@utils/metrics.ts";
@@ -30,6 +33,12 @@ const AUDIT_WRITE_FAILED_CODE = "AUDIT_WRITE_FAILED";
  * are replaced by their `sha256:` digest (and length/count), an already-canonical
  * digest is kept verbatim, and every other key is dropped.
  *
+ * KEYS are part of the contract, not just values: a scalar is recorded only
+ * under a known metadata name, so a private string cannot ride through as a
+ * property name or as the wrapper of a surviving nested field. Everything below
+ * the top level is agent-supplied (`skillParams`/`skillResult`) and is held to
+ * the narrower param allowlist.
+ *
  * The projection is idempotent: projecting its own output again returns the same
  * object, and a canonical `<field>Hash` supplied by the caller always wins over
  * the digest derived from a sibling content field.
@@ -39,6 +48,7 @@ export async function projectEmailAuditData(
   depth: number = 0,
 ): Promise<Record<string, unknown>> {
   const projected: Record<string, unknown> = {};
+  const paramScope = depth > 0;
 
   const hashInto = async (hashKey: string, value: string | Uint8Array) => {
     if (projected[hashKey] !== undefined) return;
@@ -48,12 +58,14 @@ export async function projectEmailAuditData(
   for (const [key, value] of Object.entries(data)) {
     const lower = key.toLowerCase();
     if (typeof value === "number" || typeof value === "boolean") {
-      projected[key] = value;
+      if (isEmailMetadataScalarKey(key)) projected[key] = value;
       continue;
     }
     if (typeof value === "string") {
+      // A canonical digest is kept only under a digest-bearing key; under any
+      // other key the key itself is untrusted, so the pair is dropped.
       if (EMAIL_HASH_VALUE_PATTERN.test(value)) {
-        projected[key] = value;
+        if (EMAIL_HASH_FIELD_PATTERN.test(key)) projected[key] = value;
         continue;
       }
       if (EMAIL_CONTENT_FIELD_NAMES[lower] || EMAIL_HASH_FIELD_PATTERN.test(key)) {
@@ -63,7 +75,7 @@ export async function projectEmailAuditData(
         if (EMAIL_CONTENT_FIELD_NAMES[lower]) projected[`${key}Length`] = value.length;
         continue;
       }
-      if (isSafeEmailAuditScalar(key, value)) projected[key] = value;
+      if (isSafeEmailAuditScalar(key, value, paramScope)) projected[key] = value;
       continue;
     }
     if (Array.isArray(value)) {
@@ -73,7 +85,10 @@ export async function projectEmailAuditData(
       }
       continue;
     }
-    if (value !== null && typeof value === "object" && depth < EMAIL_PROJECTION_MAX_DEPTH) {
+    if (
+      value !== null && typeof value === "object" &&
+      depth < EMAIL_PROJECTION_MAX_DEPTH && EMAIL_STRUCTURAL_FIELD_NAMES[lower] === true
+    ) {
       const nested = await projectEmailAuditData(
         value as Record<string, unknown>,
         depth + 1,
@@ -97,7 +112,11 @@ export function projectEmailOperationData(
   const projected: Record<string, unknown> = {};
   for (const field of EMAIL_OPERATION_AUDIT_FIELDS) {
     const value = input[field];
-    if (typeof value === "string" && isSafeEmailAuditScalar(field, value)) projected[field] = value;
+    // Exact enum/format membership per field: a canonical digest is NOT a
+    // substitute for a `phase`/`targetKind`/`sentCopy` value.
+    if (typeof value === "string" && EMAIL_OPERATION_FIELD_VALIDATORS[field].test(value)) {
+      projected[field] = value;
+    }
   }
   return projected as EmailOperationAuditData;
 }
