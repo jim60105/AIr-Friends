@@ -225,6 +225,20 @@ export interface SendReplyParams {
  * script read — never as a shell argument.
  */
 export interface SendEmailRequest {
+  /**
+   * The requested operation (`email-forward-skill`, row 21). Absent means the
+   * original compose operation (`email-compose-skill`); `"forward"` asks the
+   * handler to quote a designated stored source. It is a request MODE, never an
+   * authorization: the grant decides whether the action may happen at all.
+   */
+  action?: "forward";
+  /**
+   * The stored source record the forward designates, as the host published it in
+   * this session (its grant's `sourceRecordId`). Opaque internal identifier: the
+   * handler resolves it through the owner-scoped message store only, and it
+   * authorizes nothing by itself.
+   */
+  sourceRecordId?: string;
   /** Single mailbox address of the requested destination. */
   to: string;
   /** Single-line subject of the composed message. */

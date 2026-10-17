@@ -1,8 +1,9 @@
 // src/skills/email-handler.ts
 //
-// User-directed third-party email composition (`email-compose-skill`, row 20).
+// User-directed third-party email composition (`email-compose-skill`, row 20) and
+// user-directed source-preserving forwarding (`email-forward-skill`, row 21).
 //
-// Contract (design `Owned interfaces and callsites`, row 20):
+// Contract (design `Owned interfaces and callsites`, rows 20 and 21):
 // - This handler is the HOST AUTHORIZATION PRODUCER for `EmailMailService.send(draft)`: it
 //   matches the requested destination against the session's IMMUTABLE destination grants
 //   (row 19), which the host recorded before the agent started, and only then constructs the
@@ -11,6 +12,20 @@
 // - All free text (recipient, subject, body) arrives through the session-contained request file
 //   the script read; the request is re-validated here. `Cc`/`Bcc` and arbitrary headers have no
 //   representation at all: an unknown request key is refused.
+// - A forward (`request.action === "forward"`) is the SAME endpoint with one extra, host-bound
+//   input: `request.sourceRecordId`, the stored source the commentary quotes. It requires a
+//   `forward` grant whose `sourceRecordId` is exactly that record, and the record is then read
+//   ONLY through the owner scope of the forwarded source store: a source another user owns, a
+//   record the grant does not name, and a source whose archived bytes are missing, unreadable or
+//   no longer match their recorded size are all refused before any SMTP submission. The original
+//   body and every original attachment travel byte-for-byte (the immutable `.eml` is attached as
+//   `message/rfc822`), the central signature is applied once BEFORE the original reference
+//   section, and the source's own addresses, bodies and attachments never authorize anything:
+//   the destination comes from the grant alone.
+// - Attachment accounting is all-or-nothing: the returned `.eml` reference, every original
+//   attachment and every added attachment are checked together against the existing send-file
+//   count, per-file and aggregate limits BEFORE any byte is read, and any failure rejects the
+//   whole operation instead of truncating or dropping material.
 // - The operation key is host-derived: the session's durable email work id plus either
 //   `third-party:<grantId>` (a granted third-party send) or the ordinary `compose` slot (a
 //   compose addressed to the session's own verified sender, i.e. the ordinary reply target).
@@ -28,8 +43,18 @@ import { isAbsolute, resolve, SEPARATOR } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
 import { sessionStagingDir } from "@core/session-staging.ts";
+import type { DestinationGrant } from "@core/email-intent-preflight.ts";
 import { normalizeEmailMailbox } from "@platforms/email/email-identity.ts";
-import type { EmailDraft, EmailOutgoingAttachment } from "@platforms/email/outgoing-mime.ts";
+import { DEFAULT_MAX_MESSAGE_BYTES } from "@platforms/email/incoming-mime.ts";
+import type {
+  EmailDraft,
+  EmailForwardSource,
+  EmailOutgoingAttachment,
+} from "@platforms/email/outgoing-mime.ts";
+import type {
+  StoredAttachmentMetadata,
+  StoredEmailRecord,
+} from "@platforms/email/message-store.ts";
 import type { EmailSendOutcome } from "@platforms/email/mail-service.ts";
 import type { SendFileSkillConfig } from "../types/config.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
@@ -46,8 +71,27 @@ export const EMAIL_COMPOSE_ACTION_SLOT = "compose";
 /** Host operation-slot prefix naming a whole granted third-party operation (row 15 vocabulary). */
 const EMAIL_THIRD_PARTY_SLOT_PREFIX = "third-party:";
 
+/**
+ * Request `action` value that asks for a forward (`email-forward-skill`, row 21). The forwarded
+ * source record travels in the same request file as `sourceRecordId`.
+ */
+export const EMAIL_FORWARD_REQUEST_ACTION = "forward";
+
 /** Request keys the compose contract accepts; anything else (Cc/Bcc/headers/…) is refused. */
 const ALLOWED_REQUEST_KEYS: Readonly<Record<string, true>> = Object.freeze({
+  to: true,
+  subject: true,
+  body: true,
+  attachments: true,
+});
+
+/**
+ * Request keys the forward extension accepts: the compose keys plus the action selector and the
+ * designated source record. Cc/Bcc/arbitrary headers stay unavailable in both modes.
+ */
+const ALLOWED_FORWARD_REQUEST_KEYS: Readonly<Record<string, true>> = Object.freeze({
+  action: true,
+  sourceRecordId: true,
   to: true,
   subject: true,
   body: true,
@@ -63,10 +107,30 @@ export const EMAIL_COMPOSE_CODES = {
   ATTACHMENT: "SKILL_EMAIL_COMPOSE_ATTACHMENT",
 } as const;
 
+/**
+ * Stable typed error codes of the forward extension (row 21).
+ *
+ * `SOURCE` covers every incomplete or unauthorized designated source: an absent store, a record
+ * the owner scope does not expose, archived bytes that are missing/unreadable, and archived bytes
+ * that no longer match their recorded size. It never names the source and never carries content.
+ * The shared request-shape, session and destination refusals keep their row-20 codes.
+ */
+export const EMAIL_FORWARD_CODES = {
+  UNAVAILABLE: "SKILL_EMAIL_FORWARD_UNAVAILABLE",
+  SOURCE: "SKILL_EMAIL_FORWARD_SOURCE",
+} as const;
+
 /** Default attachment limits, mirroring the send-file skill's documented defaults. */
 const DEFAULT_MAX_FILES = 10;
 const DEFAULT_MAX_FILE_SIZE_MB = 25;
 const DEFAULT_MAX_TOTAL_SIZE_MB = 50;
+
+/** Display name and media type of the immutable raw source carried by a forward. */
+const FORWARD_SOURCE_FILENAME = "original-message.eml";
+const FORWARD_SOURCE_CONTENT_TYPE = "message/rfc822";
+
+/** One bracketed RFC 5322 wire identifier, as `OutgoingMimeBuilder` requires for references. */
+const WIRE_ID_REGEX = /^<[^<>\s]+>$/;
 
 /**
  * Display media type for an outgoing attachment filename. The wire builder only echoes this
@@ -106,6 +170,42 @@ export interface EmailComposeMailService {
   send(draft: EmailDraft): Promise<EmailSendOutcome>;
 }
 
+/**
+ * The only source-access surface a forward may use (row 05 `EmailMessageStore`). The real store
+ * satisfies it structurally, so production wiring passes the durable store while tests pass a
+ * scripted double.
+ *
+ * Every method is OWNER-SCOPED by contract: a record another owner owns is not reachable through
+ * it, so a foreign source can only ever come back as `undefined`. This handler never accepts a
+ * filesystem path or a wire Message-ID in place of a record id.
+ */
+export interface EmailForwardSourceStore {
+  /** Owner-scoped record lookup; `undefined` for an unknown or foreign-owner record. */
+  getByOwnerRecord(owner: string, recordId: string): Promise<StoredEmailRecord | undefined>;
+  /** Raw immutable `.eml` source bytes; `undefined` when the archive no longer holds them. */
+  getSourceBytes(owner: string, recordId: string): Promise<Uint8Array | undefined>;
+  /** Decoded original attachment bytes; `undefined` when the archive no longer holds them. */
+  attachment(
+    owner: string,
+    recordId: string,
+    attachmentId: string,
+  ): Promise<Uint8Array | undefined>;
+}
+
+/** One resolved (metadata only) forward source plus the byte accounting reserved for it. */
+interface ForwardSource {
+  readonly record: StoredEmailRecord;
+  /** Recorded bytes of the raw source and of every original attachment, summed. */
+  readonly reservedBytes: number;
+}
+
+/** One loaded forward source: the archived bytes that will actually be serialized. */
+interface ForwardSourcePayload {
+  readonly record: StoredEmailRecord;
+  readonly sourceBytes: Uint8Array;
+  readonly attachments: EmailOutgoingAttachment[];
+}
+
 /** Construction inputs of {@link EmailComposeHandler}. */
 export interface EmailComposeHandlerOptions {
   /**
@@ -113,6 +213,13 @@ export interface EmailComposeHandlerOptions {
    * Registry only registers it with a service) and an accidental direct call fails closed.
    */
   mailService?: EmailComposeMailService;
+  /**
+   * The owner-scoped message store a forward resolves and reads its designated source from
+   * (row 21). Absent means forwarding fails closed with
+   * {@link EMAIL_FORWARD_CODES.UNAVAILABLE}: composing still works, and no source is ever read
+   * through another seam.
+   */
+  forwardSourceStore?: EmailForwardSourceStore;
   /**
    * The existing send-file skill limits, reused verbatim for compose attachments (count,
    * per-file size, aggregate size, extension whitelist). The `enabled` flag is NOT consulted:
@@ -127,7 +234,8 @@ export interface EmailComposeHandlerOptions {
  * Every refusal happens BEFORE any attachment byte is read, and the destination authorization
  * is decided BEFORE any file read at all: the request file was already consumed by the script,
  * and nothing here touches the filesystem until the grant (or the reply-to-sender identity)
- * has been matched.
+ * has been matched. A forward resolves and reads its designated source only AFTER that same
+ * grant match, and only through the owner-scoped source store.
  */
 export class EmailComposeHandler {
   constructor(private readonly options: EmailComposeHandlerOptions) {}
@@ -155,6 +263,8 @@ export class EmailComposeHandler {
     const { sessionId, owner, workId } = identity;
 
     // 3. Request shape. Cc/Bcc/headers have no representation: an unknown key is refused.
+    //    `action: "forward"` selects the row-21 extension; every other action is refused, and an
+    //    absent action keeps the row-20 compose contract byte-for-byte.
     const request = parameters?.request;
     if (!isPlainObject(request)) {
       return refuse(
@@ -164,8 +274,21 @@ export class EmailComposeHandler {
           "Nothing was sent.",
       );
     }
+    const declaredAction = request.action === undefined
+      ? undefined
+      : readOptionalString(request.action);
+    if (request.action !== undefined && declaredAction !== EMAIL_FORWARD_REQUEST_ACTION) {
+      return refuse(
+        EMAIL_COMPOSE_CODES.REQUEST,
+        'The request carries an unsupported "action": the only operation this skill accepts ' +
+          `beyond composing a new message is "${EMAIL_FORWARD_REQUEST_ACTION}" (forwarding a ` +
+          "designated stored source). Nothing was sent.",
+      );
+    }
+    const isForward = declaredAction === EMAIL_FORWARD_REQUEST_ACTION;
+    const allowedKeys = isForward ? ALLOWED_FORWARD_REQUEST_KEYS : ALLOWED_REQUEST_KEYS;
     const unknownKeys = Object.keys(request).filter(
-      (key) => !Object.hasOwn(ALLOWED_REQUEST_KEYS, key),
+      (key) => !Object.hasOwn(allowedKeys, key),
     );
     if (unknownKeys.length > 0) {
       // Only identifier-shaped names are named: a JSON key is model-supplied and could itself
@@ -173,11 +296,31 @@ export class EmailComposeHandler {
       const named = unknownKeys.filter(isOpaqueIdentifierToken);
       return refuse(
         EMAIL_COMPOSE_CODES.REQUEST,
-        `The compose request carries ${unknownKeys.length} unsupported field(s)` +
+        `The ${isForward ? "forward" : "compose"} request carries ${unknownKeys.length} ` +
+          "unsupported field(s)" +
           (named.length > 0 ? ` (${named.join(", ")})` : "") +
-          ". A composed message accepts exactly to, subject, body and optional attachments — " +
-          "additional recipients (Cc/Bcc) and arbitrary headers are not available. Nothing was sent.",
+          (isForward
+            ? ". A forward accepts exactly action, sourceRecordId, to, subject, body and " +
+              "optional attachments — additional recipients (Cc/Bcc) and arbitrary headers are " +
+              "not available. Nothing was sent."
+            : ". A composed message accepts exactly to, subject, body and optional attachments — " +
+              "additional recipients (Cc/Bcc) and arbitrary headers are not available. " +
+              "Nothing was sent."),
       );
+    }
+
+    // The designated source is an opaque host identifier, never a path or a wire Message-ID.
+    let sourceRecordId: string | undefined;
+    if (isForward) {
+      sourceRecordId = readHeaderValue(request.sourceRecordId);
+      if (sourceRecordId === undefined) {
+        return refuse(
+          EMAIL_COMPOSE_CODES.REQUEST,
+          'A forward requires a non-empty single-line "sourceRecordId": the stored message the ' +
+            "user designated, exactly as the host published it in this session's grant. " +
+            "Nothing was sent.",
+        );
+      }
     }
 
     const to = readHeaderValue(request.to);
@@ -212,10 +355,20 @@ export class EmailComposeHandler {
           "session staging directory. Nothing was sent.",
       );
     }
-    if (body.trim() === "" && attachmentPaths.length === 0) {
+    if (!isForward && body.trim() === "" && attachmentPaths.length === 0) {
       return refuse(
         EMAIL_COMPOSE_CODES.REQUEST,
         "Refusing an empty message: the request must carry body text or at least one attachment. " +
+          "Nothing was sent.",
+      );
+    }
+    // A forwarded message carries the designated original, so empty commentary is a valid pure
+    // forward; the attachment set of a forward must still reference an added file at most once.
+    if (isForward && firstDuplicatePath(attachmentPaths, context) !== undefined) {
+      return refuse(
+        EMAIL_COMPOSE_CODES.ATTACHMENT,
+        "The forward request references the same staged attachment file more than once, so the " +
+          "forwarded set would duplicate material. Reference each staged file at most once. " +
           "Nothing was sent.",
       );
     }
@@ -239,23 +392,34 @@ export class EmailComposeHandler {
     let actionSlot: string;
     let targetKind: EmailDraft["targetKind"];
     if (grantId !== undefined) {
-      const granted = matchComposeGrant(context, grantId, {
+      const granted = matchDestinationGrant(context, grantId, {
         sessionId,
         owner,
         workId,
+        action: isForward ? "forward" : "compose",
         canonicalRecipient: canonicalTo,
+        ...(sourceRecordId === undefined ? {} : { sourceRecordId }),
       });
       if (!granted.ok) {
         return refuse(granted.code, granted.error);
       }
       actionSlot = granted.slot;
       targetKind = "third-party";
-    } else if (canonicalToUserId === owner) {
+    } else if (!isForward && canonicalToUserId === owner) {
       // The session's own verified sender is the ordinary reply target: it needs no
       // third-party grant, and `targetKind: "user"` keeps the mail service's own current
       // allowlist recheck in force for it.
       actionSlot = EMAIL_COMPOSE_ACTION_SLOT;
       targetKind = "user";
+    } else if (isForward) {
+      return refuse(
+        EMAIL_COMPOSE_CODES.GRANT,
+        "Forwarding is not authorized for this destination. A forward needs a dedicated grant " +
+          "the host recorded from the user's own current message: it names this session, work " +
+          "item and owner, the destination, the action forward AND the exact stored source " +
+          "record, and you must pass its grant id with --grant-id. Forwarding never happens " +
+          "without one. Nothing was sent.",
+      );
     } else {
       return refuse(
         EMAIL_COMPOSE_CODES.GRANT,
@@ -267,14 +431,73 @@ export class EmailComposeHandler {
       );
     }
 
-    // 5. Attachments: two-pass preflight (validate + stat every path and the aggregate size,
-    //    then read bytes), so a rejected batch never reads anything.
-    const attachments = await this.loadAttachments(attachmentPaths, context, sessionId);
+    // 5. Attachments. A forward first resolves its designated source (metadata only) and folds
+    //    the immutable `.eml` reference plus every original attachment into the SAME count and
+    //    aggregate accounting as the added files, so one combined preflight decides the whole
+    //    operation before any byte is read.
+    const source = isForward
+      ? await this.resolveForwardSource(owner, sourceRecordId ?? "")
+      : undefined;
+    if (source !== undefined && !source.ok) {
+      return refuse(source.code, source.error);
+    }
+    const reserved = source?.ok
+      ? { count: source.value.record.attachments.length + 1, bytes: source.value.reservedBytes }
+      : undefined;
+    const attachments = await this.loadAttachments(attachmentPaths, context, sessionId, reserved);
     if (!attachments.ok) {
       return refuse(EMAIL_COMPOSE_CODES.ATTACHMENT, attachments.error);
     }
+    const sourcePayload = source?.ok
+      ? await this.loadForwardSourcePayload(owner, source.value)
+      : undefined;
+    if (sourcePayload !== undefined && !sourcePayload.ok) {
+      return refuse(sourcePayload.code, sourcePayload.error);
+    }
+    if (sourcePayload?.ok && !this.withinForwardLimits(sourcePayload.value, attachments.value)) {
+      return refuse(
+        EMAIL_COMPOSE_CODES.ATTACHMENT,
+        "The forwarded source and the added attachments together exceed the configured " +
+          "attachment limits, so the operation was rejected as a whole. Nothing was sent.",
+      );
+    }
 
-    // 6. Submit through the durable service under the host-derived operation key.
+    // 6. Submit through the durable service under the host-derived operation key. The raw source
+    //    is attached as `message/rfc822` (unencoded by the composer) so the original headers,
+    //    signatures and encoding survive the forward byte-for-byte; the original decoded
+    //    attachments ride along as themselves, and the builder places the signature BEFORE the
+    //    original reference section it derives from `forwardSource.body`.
+    const forwardPart = sourcePayload?.ok
+      ? [{
+        filename: FORWARD_SOURCE_FILENAME,
+        contentType: FORWARD_SOURCE_CONTENT_TYPE,
+        content: sourcePayload.value.sourceBytes,
+      }]
+      : [];
+    const draftAttachments = [...forwardPart, ...attachments.value];
+    let forwardSource: EmailForwardSource | undefined;
+    let thread: EmailDraft["thread"];
+    if (sourcePayload?.ok) {
+      const record = sourcePayload.value.record;
+      const date = new Date(record.timestamp);
+      forwardSource = {
+        from: record.from,
+        ...(record.to === undefined ? {} : { to: record.to }),
+        subject: record.subject,
+        ...(isNaN(date.getTime()) ? {} : { date }),
+        body: record.body,
+        ...(sourcePayload.value.attachments.length === 0
+          ? {}
+          : { attachments: sourcePayload.value.attachments }),
+      };
+      // References to the source and its ancestors, deliberately WITHOUT In-Reply-To: a forward
+      // starts a new header chain, so the builder mints a fresh Message-ID for it.
+      const chain = [...record.references, ...(record.wireMessageId ? [record.wireMessageId] : [])]
+        .filter((id, index, all) => WIRE_ID_REGEX.test(id) && all.indexOf(id) === index);
+      if (chain.length > 0) {
+        thread = { references: chain };
+      }
+    }
     const draft: EmailDraft = {
       owner,
       operationKey: { workId, actionSlot },
@@ -282,14 +505,34 @@ export class EmailComposeHandler {
       to: canonicalTo,
       subject,
       authoredBody: body,
-      ...(attachments.value.length > 0 ? { attachments: attachments.value } : {}),
+      ...(forwardSource === undefined ? {} : { forwardSource }),
+      ...(thread === undefined ? {} : { thread }),
+      ...(draftAttachments.length === 0 ? {} : { attachments: draftAttachments }),
     };
 
+    return await this.submitDraft(mailService, draft, context, {
+      attachmentsCount: draftAttachments.length +
+        (sourcePayload?.ok ? sourcePayload.value.attachments.length : 0),
+      ...(sourcePayload?.ok ? { forwardSourceRecordId: sourcePayload.value.record.recordId } : {}),
+    });
+  };
+
+  /**
+   * Submit one fully authorized draft through the durable service and map its outcome to the
+   * skill result. Both operations share this tail so their refusal and result contracts cannot
+   * drift apart.
+   */
+  private async submitDraft(
+    mailService: EmailComposeMailService,
+    draft: EmailDraft,
+    context: SkillContext,
+    data: Record<string, unknown>,
+  ): Promise<SkillResult> {
     let outcome: EmailSendOutcome;
     try {
       outcome = await mailService.send(draft);
     } catch (error) {
-      logger.error("Compose submission failed to execute", {
+      logger.error("Email submission failed to execute", {
         workspaceKey: context.workspace?.key,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -302,7 +545,7 @@ export class EmailComposeHandler {
     }
 
     if (outcome.phase !== "submitted") {
-      logger.warn("Compose submission is not confirmed delivered: {Phase}", {
+      logger.warn("Email submission is not confirmed delivered: {Phase}", {
         Phase: outcome.phase,
         SafeCode: outcome.safeCode ?? "none",
         workspaceKey: context.workspace?.key,
@@ -314,15 +557,15 @@ export class EmailComposeHandler {
           operationId: outcome.operationId,
           phase: outcome.phase,
           reused: outcome.reused,
-          attachmentsCount: attachments.value.length,
+          ...data,
         },
         emailSubmission: outcome,
       };
     }
 
-    logger.info("Composed email submitted ({TargetKind}, {Attachments} attachments)", {
-      TargetKind: targetKind,
-      Attachments: attachments.value.length,
+    logger.info("Email submitted ({TargetKind}, {Attachments} attachments)", {
+      TargetKind: draft.targetKind,
+      Attachments: data.attachmentsCount,
       Reused: outcome.reused,
       workspaceKey: context.workspace?.key,
     });
@@ -334,14 +577,200 @@ export class EmailComposeHandler {
         operationId: outcome.operationId,
         phase: outcome.phase,
         reused: outcome.reused,
-        attachmentsCount: attachments.value.length,
+        ...data,
         nextAction:
           "The message is submitted. Exit immediately; do not send it again — a repeated call " +
-          "returns this recorded result instead of resubmitting.",
+          "returns this recorded result instead of resubmitting, and a repeated call with " +
+          "different commentary does NOT send that commentary.",
       },
       emailSubmission: outcome,
     };
-  };
+  }
+
+  /**
+   * Resolve one designated forward source through the OWNER SCOPE only.
+   *
+   * Metadata first (so the combined attachment accounting can include the source before any
+   * byte is read), then the immutable raw bytes and each decoded attachment. Every absent,
+   * unreadable or size-mismatched part is one content-free `SOURCE` refusal: a forward is
+   * complete or it does not happen.
+   */
+  private async resolveForwardSource(
+    owner: string,
+    recordId: string,
+  ): Promise<
+    { ok: true; value: ForwardSource } | { ok: false; code: string; error: string }
+  > {
+    const store = this.options.forwardSourceStore;
+    if (!store || typeof store.getByOwnerRecord !== "function") {
+      return {
+        ok: false,
+        code: EMAIL_FORWARD_CODES.UNAVAILABLE,
+        error:
+          "Forwarding is unavailable: this deployment has no owner-scoped message store wired " +
+          "for source access, so no stored message can be designated. Nothing was sent.",
+      };
+    }
+
+    let record: StoredEmailRecord | undefined;
+    try {
+      record = await store.getByOwnerRecord(owner, recordId);
+    } catch {
+      record = undefined;
+    }
+    if (!record) {
+      return {
+        ok: false,
+        code: EMAIL_FORWARD_CODES.SOURCE,
+        error:
+          "The designated source is not a stored message in YOUR OWN accessible history, so it " +
+          "cannot be forwarded. Only a message the user can already read may be forwarded, and " +
+          "the grant must name that exact record. Nothing was sent.",
+      };
+    }
+
+    const reservedBytes = record.rawSize +
+      record.attachments.reduce((sum, attachment) => sum + attachment.size, 0);
+
+    // The raw message bound and the per-file bound are decided on the recorded sizes, before the
+    // archived bytes (which the combined aggregate check below also bounds) are read.
+    const limits = this.options.limits;
+    const maxFileSizeMb = limits?.maxFileSizeMb ?? DEFAULT_MAX_FILE_SIZE_MB;
+    if (
+      record.rawSize > DEFAULT_MAX_MESSAGE_BYTES ||
+      (maxFileSizeMb > 0 && record.rawSize / (1024 * 1024) > maxFileSizeMb)
+    ) {
+      return {
+        ok: false,
+        code: EMAIL_FORWARD_CODES.SOURCE,
+        error:
+          "The designated source's raw message is over the configured email message size limit, " +
+          "so it cannot be forwarded as a whole. Nothing was sent.",
+      };
+    }
+    if (
+      record.attachments.some((attachment) =>
+        maxFileSizeMb > 0 && attachment.size / (1024 * 1024) > maxFileSizeMb
+      )
+    ) {
+      return {
+        ok: false,
+        code: EMAIL_FORWARD_CODES.SOURCE,
+        error: "An original attachment of the designated source is over the configured per-file " +
+          "attachment limit, so it cannot be forwarded as a whole. Nothing was sent.",
+      };
+    }
+    return { ok: true, value: { record, reservedBytes } };
+  }
+
+  /**
+   * Read the archived bytes of one already-resolved source and prove they are the recorded ones.
+   *
+   * Length identity is the byte-preservation evidence: a `.eml` or an attachment whose archived
+   * bytes no longer match the recorded `rawSize`/`size` is refused as an incomplete source
+   * instead of being forwarded as if the original had been preserved.
+   */
+  private async loadForwardSourcePayload(
+    owner: string,
+    source: ForwardSource,
+  ): Promise<
+    { ok: true; value: ForwardSourcePayload } | { ok: false; code: string; error: string }
+  > {
+    const store = this.options.forwardSourceStore as EmailForwardSourceStore;
+    const { record } = source;
+
+    let sourceBytes: Uint8Array | undefined;
+    try {
+      sourceBytes = await store.getSourceBytes(owner, record.recordId);
+    } catch {
+      sourceBytes = undefined;
+    }
+    if (!sourceBytes) {
+      return {
+        ok: false,
+        code: EMAIL_FORWARD_CODES.SOURCE,
+        error: "The designated source's original message bytes are unavailable in the owner's " +
+          "archive, so the forward would be incomplete. Nothing was sent.",
+      };
+    }
+    if (sourceBytes.byteLength !== record.rawSize) {
+      return {
+        ok: false,
+        code: EMAIL_FORWARD_CODES.SOURCE,
+        error: "The designated source's archived message bytes no longer match the recorded " +
+          "size, so the original cannot be preserved exactly. Nothing was sent.",
+      };
+    }
+
+    const attachments: EmailOutgoingAttachment[] = [];
+    for (const attachment of record.attachments) {
+      const bytes = await this.readSourceAttachment(owner, record.recordId, attachment);
+      if (!bytes.ok) {
+        return { ok: false, code: EMAIL_FORWARD_CODES.SOURCE, error: bytes.error };
+      }
+      attachments.push({
+        filename: attachment.filename ?? attachment.displayName ?? attachment.id,
+        contentType: attachment.mimeType,
+        content: bytes.value,
+      });
+    }
+    return { ok: true, value: { record, sourceBytes, attachments } };
+  }
+
+  /** Read ONE original attachment, or return the safe refusal text. */
+  private async readSourceAttachment(
+    owner: string,
+    recordId: string,
+    attachment: StoredAttachmentMetadata,
+  ): Promise<{ ok: true; value: Uint8Array } | { ok: false; error: string }> {
+    const store = this.options.forwardSourceStore as EmailForwardSourceStore;
+    let bytes: Uint8Array | undefined;
+    try {
+      bytes = await store.attachment(owner, recordId, attachment.id);
+    } catch {
+      bytes = undefined;
+    }
+    if (!bytes) {
+      return {
+        ok: false,
+        error: "An original attachment of the designated source is unavailable in the owner's " +
+          "archive, so the forward would be incomplete. Nothing was sent.",
+      };
+    }
+    if (bytes.byteLength !== attachment.size) {
+      return {
+        ok: false,
+        error: "An original attachment of the designated source no longer matches its recorded " +
+          "size, so the original cannot be preserved exactly. Nothing was sent.",
+      };
+    }
+    return { ok: true, value: bytes };
+  }
+
+  /**
+   * The final combined accounting over the ACTUAL bytes that will be serialized: the raw source
+   * reference, every original attachment and every added attachment. It is decided after the
+   * loads (which proved each part matches its recorded size) and before submission, so a forward
+   * can never be truncated or delivered without part of its material.
+   */
+  private withinForwardLimits(
+    source: ForwardSourcePayload,
+    added: readonly EmailOutgoingAttachment[],
+  ): boolean {
+    const limits = this.options.limits;
+    const maxFiles = limits?.maxFilesPerInvocation ?? DEFAULT_MAX_FILES;
+    if (source.attachments.length + 1 + added.length > maxFiles) {
+      return false;
+    }
+    const totalBytes = source.sourceBytes.byteLength +
+      source.attachments.reduce((sum, attachment) => sum + attachment.content.byteLength, 0) +
+      added.reduce((sum, attachment) => sum + attachment.content.byteLength, 0);
+    const maxTotalSizeMb = limits?.maxTotalSizeMb ?? DEFAULT_MAX_TOTAL_SIZE_MB;
+    if (maxTotalSizeMb > 0 && totalBytes / (1024 * 1024) > maxTotalSizeMb) {
+      return false;
+    }
+    return true;
+  }
 
   /**
    * Preflight and read the session-contained attachments of one compose request.
@@ -351,27 +780,41 @@ export class EmailComposeHandler {
    * re-checked, so neither `..` escapes nor a staging symlink pointing outside can read
    * workspace memory, notes or another session's files. The existing send-file limits (count,
    * per-file size, aggregate size, extension whitelist) are applied before any byte is read.
+   *
+   * `reserved` is the count and byte total a forward already holds for the designated source
+   * (its raw `.eml` reference plus every original attachment). It is folded into the SAME count
+   * and aggregate checks, and it is checked even when no added file was requested, so a forward's
+   * limits are decided over the complete outgoing set.
    */
   private async loadAttachments(
     paths: readonly string[],
     context: SkillContext,
     sessionId: string,
+    reserved?: { count: number; bytes: number },
   ): Promise<
     { ok: true; value: EmailOutgoingAttachment[] } | { ok: false; error: string }
   > {
-    if (paths.length === 0) {
-      return { ok: true, value: [] };
-    }
-
     const limits = this.options.limits;
     const maxFiles = limits?.maxFilesPerInvocation ?? DEFAULT_MAX_FILES;
-    if (paths.length > maxFiles) {
+    const reservedCount = reserved?.count ?? 0;
+    const reservedBytes = reserved?.bytes ?? 0;
+    const maxTotalSizeMb = limits?.maxTotalSizeMb ?? DEFAULT_MAX_TOTAL_SIZE_MB;
+    if (paths.length + reservedCount > maxFiles) {
       return {
         ok: false,
-        error:
-          `Too many attachments: ${paths.length} exceeds the limit of ${maxFiles} per message. ` +
-          "Nothing was sent.",
+        error: `Too many attachments: ${paths.length + reservedCount} exceeds the limit of ` +
+          `${maxFiles} per message. Nothing was sent.`,
       };
+    }
+    if (maxTotalSizeMb > 0 && reservedBytes / (1024 * 1024) > maxTotalSizeMb) {
+      return {
+        ok: false,
+        error: "The designated source alone is over the configured aggregate attachment size " +
+          "limit. Nothing was sent.",
+      };
+    }
+    if (paths.length === 0) {
+      return { ok: true, value: [] };
     }
 
     const configuredExtensions = limits?.allowedExtensions ?? [];
@@ -383,7 +826,6 @@ export class EmailComposeHandler {
     const stagingBase = resolve(sessionStagingDir(context.workspace ?? { tmpPath: "" }, sessionId));
 
     const maxFileSizeMb = limits?.maxFileSizeMb ?? DEFAULT_MAX_FILE_SIZE_MB;
-    const maxTotalSizeMb = limits?.maxTotalSizeMb ?? DEFAULT_MAX_TOTAL_SIZE_MB;
 
     const validated: Array<{ fullPath: string; fileName: string; size: number }> = [];
     let totalBytes = 0;
@@ -464,12 +906,12 @@ export class EmailComposeHandler {
       validated.push({ fullPath: realPath, fileName, size });
     }
 
-    const totalSizeMb = totalBytes / (1024 * 1024);
+    const totalSizeMb = (totalBytes + reservedBytes) / (1024 * 1024);
     if (maxTotalSizeMb > 0 && totalSizeMb > maxTotalSizeMb) {
       return {
         ok: false,
-        error:
-          `The attachments total ${totalSizeMb.toFixed(2)} MB, over the ${maxTotalSizeMb} MB ` +
+        error: `The outgoing attachments total ${totalSizeMb.toFixed(2)} MB, over the ` +
+          `${maxTotalSizeMb} MB ` +
           "aggregate limit. Nothing was sent.",
       };
     }
@@ -524,9 +966,11 @@ export class EmailComposeHandler {
  * object into its `skill_call` audit entry).
  *
  * The compose request carries private correspondence: recipient, subject and body are NEVER
- * recorded, not even with content hashing disabled — the projection keeps an opaque grant id (a
- * non-identifier-shaped value is hashed instead), always-hashed digests, lengths and the attachment
- * count only.
+ * recorded, not even with content hashing disabled — the projection keeps opaque host identifiers
+ * (a non-identifier-shaped value is hashed instead), always-hashed digests, lengths and the
+ * attachment count only. A forward additionally records its action and designated source record
+ * under the same identifier-or-hash rule: both are opaque internal ids, and neither the source's
+ * body nor its addresses can reach the audit through them.
  */
 export async function emailComposeAuditParams(
   parameters: Record<string, unknown>,
@@ -537,13 +981,25 @@ export async function emailComposeAuditParams(
   const subject = typeof request?.subject === "string" ? request.subject : undefined;
   const body = typeof request?.body === "string" ? request.body : undefined;
   const attachments = request && Array.isArray(request.attachments) ? request.attachments : [];
+  const action = request ? readOptionalString(request.action) : undefined;
+  const sourceRecordId = request ? readOptionalString(request.sourceRecordId) : undefined;
 
   return {
+    ...(action === undefined
+      ? {}
+      : isOpaqueIdentifierToken(action)
+      ? { action }
+      : { actionHash: `sha256:${await sha256Hash(action)}` }),
     ...(grantId === undefined
       ? {}
       : isOpaqueIdentifierToken(grantId)
       ? { grantId }
       : { grantIdHash: `sha256:${await sha256Hash(grantId)}` }),
+    ...(sourceRecordId === undefined
+      ? {}
+      : isOpaqueIdentifierToken(sourceRecordId)
+      ? { sourceRecordId }
+      : { sourceRecordIdHash: `sha256:${await sha256Hash(sourceRecordId)}` }),
     ...(to !== undefined ? { destinationHash: `sha256:${await sha256Hash(to)}` } : {}),
     ...(subject !== undefined
       ? { subjectHash: `sha256:${await sha256Hash(subject)}`, subjectLength: subject.length }
@@ -634,18 +1090,30 @@ function resolveSessionIdentity(context: SkillContext): SessionIdentity {
   return { ok: true, sessionId, owner: sessionOwner, workId };
 }
 
-/** Outcome of matching one request against the session's immutable compose grants. */
+/** Outcome of matching one request against the session's immutable destination grants. */
 type GrantMatch = { ok: true; slot: string } | { ok: false; code: string; error: string };
 
 /**
- * Match the requested destination, action and session/work/owner binding against the immutable
- * grants this session holds. The list is read-only: a handler can only USE a grant it already
- * has, and the grant must be a `compose` grant of exactly this session, work item and owner.
+ * Match the requested action, destination, designated source and session/work/owner binding
+ * against the immutable grants this session holds. The list is read-only: a handler can only USE
+ * a grant it already has, and the grant must be of exactly this session, work item and owner.
+ *
+ * The action and the source record are matched here, so a `compose` grant can never authorize a
+ * forward, a `forward` grant can never authorize a compose, and a forward grant authorizes
+ * exactly the one source the host proved owner-accessible. Every mismatch is the same typed
+ * refusal and never discloses the requested or granted source.
  */
-function matchComposeGrant(
+function matchDestinationGrant(
   context: SkillContext,
   grantId: string,
-  expected: { sessionId: string; owner: string; workId: string; canonicalRecipient: string },
+  expected: {
+    sessionId: string;
+    owner: string;
+    workId: string;
+    action: DestinationGrant["action"];
+    canonicalRecipient: string;
+    sourceRecordId?: string;
+  },
 ): GrantMatch {
   const grants = context.emailDestinationGrants ?? [];
   const grant = grants.find((candidate) => candidate.grantId === grantId);
@@ -659,13 +1127,13 @@ function matchComposeGrant(
         "skill. Nothing was sent.",
     };
   }
-  if (grant.action !== "compose") {
+  if (grant.action !== expected.action) {
     return {
       ok: false,
       code: EMAIL_COMPOSE_CODES.GRANT,
       error:
-        "That grant authorizes a different action than composing a new message, so it cannot " +
-        "authorize this send. Nothing was sent.",
+        "That grant authorizes a different action than the one requested, so it cannot authorize " +
+        "this send. Nothing was sent.",
     };
   }
   if (
@@ -688,6 +1156,27 @@ function matchComposeGrant(
       error:
         "The requested destination is a different address than the granted one, so the grant " +
         "does not authorize it. A grant authorizes exactly one destination. Nothing was sent.",
+    };
+  }
+  if (expected.sourceRecordId === undefined && grant.sourceRecordId !== undefined) {
+    return {
+      ok: false,
+      code: EMAIL_COMPOSE_CODES.GRANT,
+      error:
+        "That grant authorizes forwarding one designated stored message, not composing a new " +
+        "one, so it cannot authorize this send. Nothing was sent.",
+    };
+  }
+  if (
+    expected.sourceRecordId !== undefined && grant.sourceRecordId !== expected.sourceRecordId
+  ) {
+    return {
+      ok: false,
+      code: EMAIL_COMPOSE_CODES.GRANT,
+      error:
+        "That grant authorizes forwarding a DIFFERENT stored message than the one this request " +
+        "designated, so it cannot authorize it. A forward grant binds exactly one source record, " +
+        "and the source must be the one the user's own current message selected. Nothing was sent.",
     };
   }
   return { ok: true, slot: `${EMAIL_THIRD_PARTY_SLOT_PREFIX}${grant.grantId}` };
@@ -741,6 +1230,28 @@ function readAttachmentPaths(value: unknown): string[] | null {
     paths.push(path);
   }
   return paths;
+}
+
+/**
+ * The first path of an attachment list that names the same file as an earlier entry, or
+ * `undefined` when every reference is distinct.
+ *
+ * Resolution mirrors the preflight's own lexical resolution (absolute stays absolute, relative
+ * resolves against the workspace), so two spellings of one staged file are one duplicate. A
+ * forward refuses a duplicated reference instead of serializing the same material twice.
+ */
+function firstDuplicatePath(
+  paths: readonly string[],
+  context: SkillContext,
+): string | undefined {
+  const workspacePath = context.workspace?.path;
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const resolved = isAbsolute(path) ? resolve(path) : resolve(workspacePath ?? ".", path);
+    if (seen.has(resolved)) return resolved;
+    seen.add(resolved);
+  }
+  return undefined;
 }
 
 /** Boundary-safe containment: equal to `base` or prefixed by `base` + separator. */
