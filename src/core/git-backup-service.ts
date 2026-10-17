@@ -374,6 +374,13 @@ export class GitBackupService {
    * state-probe result for this invocation (e.g. `diff --cached --quiet` exits
    * 1 when staged changes exist). Those are logged at DEBUG instead of ERROR so
    * the normal "needs backup" signal does not raise false alarms.
+   *
+   * Command-scoped config pins `core.autocrlf=false` for every invocation,
+   * including the clone/init that creates the repository. A backup stores the
+   * bytes it was given: the host's global line-ending policy must never rewrite
+   * digest-protected private evidence (email `.eml` wire bytes, attachment
+   * payloads) in the index, or a restored backup would fail its own evidence
+   * verification. The operator's repository config is deliberately not modified.
    */
   private async runGit(
     args: string[],
@@ -384,6 +391,9 @@ export class GitBackupService {
       cwd: this.dataDir,
       env: {
         GIT_TERMINAL_PROMPT: "0",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.autocrlf",
+        GIT_CONFIG_VALUE_0: "false",
         GIT_AUTHOR_NAME: this.config.authorName,
         GIT_AUTHOR_EMAIL: this.config.authorEmail,
         GIT_COMMITTER_NAME: this.config.authorName,

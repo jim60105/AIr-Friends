@@ -1007,16 +1007,6 @@ async function writeEmailDurableFiles(dataDir: string): Promise<void> {
   }
 }
 
-/**
- * Make the data directory an existing Git repository that stores bytes verbatim.
- * `core.autocrlf` is pinned per repository: the host's global Git configuration must
- * not decide whether the private `.eml` bytes in a byte-identity assertion change.
- */
-async function initDataRepo(dataDir: string): Promise<void> {
-  await gitText(dataDir, ["init", "-b", "master"]);
-  await gitText(dataDir, ["config", "core.autocrlf", "false"]);
-}
-
 /** Run one git command in `cwd`, failing loudly with git's own stderr. */
 async function gitText(cwd: string, args: string[]): Promise<string> {
   const command = new Deno.Command("git", {
@@ -1063,7 +1053,11 @@ function captureAllConsole(): { lines: string[]; restore: () => void } {
 
 Deno.test("GitBackupService - email state, signed sent history and archive bytes are all backed up", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
-    await initDataRepo(dataDir);
+    // An existing backup repository configured with the host's normalizing line-ending
+    // policy: the SERVICE must still store the private bytes verbatim, because restored
+    // `.eml` evidence is verified against its recorded SHA-256 digest.
+    await gitText(dataDir, ["init", "-b", "master"]);
+    await gitText(dataDir, ["config", "core.autocrlf", "input"]);
     await writeEmailDurableFiles(dataDir);
     // A reserved native-cache payload stays out of the index; email data is not affected.
     const reserved =
@@ -1090,6 +1084,9 @@ Deno.test("GitBackupService - email state, signed sent history and archive bytes
       false,
       "the reserved native-cache payload must stay out of the backup",
     );
+    // The service pins byte preservation per invocation; the operator's repository
+    // configuration is left exactly as it was.
+    assertEquals(await gitText(dataDir, ["config", "--get", "core.autocrlf"]), "input\n");
   });
 });
 

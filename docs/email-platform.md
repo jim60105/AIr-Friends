@@ -1195,6 +1195,11 @@ email-only surface or abstraction is added.
 - The authenticated backup remote URL and the configured `authPassword` are never
   logged: a failing git invocation records `[REDACTED_URL]` for the credential-bearing
   argument and masks `//user:password@` inside git output.
+- The backup stores the bytes it was given: every git invocation it runs pins
+  `core.autocrlf=false` as command-scoped configuration, so a host or repository with a
+  normalizing line-ending policy cannot rewrite the `.eml` wire bytes or attachment
+  payloads in the index. Restored evidence therefore still matches its recorded
+  SHA-256 digest, and the operator's own repository configuration is never modified.
 - **WARNING — private backup**: the backup repository contains private correspondence
   in cleartext, including message bodies and attachment bytes. Keep that repository
   private (private remote, access-controlled credential, no public fork or mirror), and
