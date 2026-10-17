@@ -672,6 +672,7 @@ export class AgentConnector {
       yolo: this.options.clientConfig?.yolo,
       canWriteAgentWorkspace: this.options.clientConfig?.canWriteAgentWorkspace,
       allowedWriteExtensions: this.options.clientConfig?.allowedWriteExtensions,
+      hiddenSkills: this.options.clientConfig?.hiddenSkills,
       trustedSkills: this.options.clientConfig?.trustedSkills,
       ompNativeState: await this.resolveOmpNativeState(result.sessionId, sessionCwd),
     });
@@ -1688,6 +1689,8 @@ export class AgentConnector {
           this.options.clientConfig?.canWriteAgentWorkspace,
         allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
           this.options.clientConfig?.allowedWriteExtensions,
+        hiddenSkills: this.sessionGateContexts.get(sessionId)?.hiddenSkills ??
+          this.options.clientConfig?.hiddenSkills,
         trustedSkills: this.options.clientConfig?.trustedSkills,
         ompNativeState: await this.resolveOmpNativeState(sessionId, cwd),
       });

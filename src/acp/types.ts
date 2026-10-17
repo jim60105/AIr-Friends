@@ -49,6 +49,15 @@ export interface ClientConfig {
   autoApproveSkills?: string[];
 
   /**
+   * Skill NAMES this session may not use (`email-tool-guidance`). They are
+   * refused at BOTH permission-gate shapes — a registered-skill call and a
+   * direct/interpreted script invocation — so a hidden tool is never
+   * auto-approved. The Skill API handler remains the authoritative denial for
+   * an invocation that happens anyway. Default: nothing hidden.
+   */
+  hiddenSkills?: readonly string[];
+
+  /**
    * The deployment-configured `agent.skillsDir` value the trusted-root resolver
    * is called with (`unify-skill-root-and-inventory`): the ONE skill-root input
    * for BOTH agent types — never a HOME or arbitrary cwd scan, and never a

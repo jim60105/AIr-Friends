@@ -2712,3 +2712,85 @@ Evidence: `tests/core/email-spontaneous.test.ts` exercises the full local stack 
 `SubmissionStore`, and `EmailMessageStore` on isolated temporary directories, asserting exact DATA counts
 and durable states. `tests/core/email-spontaneous-smoke.test.ts` drives the complete lane over real local
 IMAP and SMTP test servers.
+
+## Email Tool Guidance & Prompt Availability (Owned by `email-tool-guidance`)
+
+`prompts/email_tool_guidance.md`, `prompts/system_reply.md`, `prompts/system_reminder.md`,
+`prompts/system_spontaneous.md`, `src/core/email-tool-policy.ts`, `src/core/context-assembler.ts`,
+`src/core/session-orchestrator.ts`, `src/acp/client.ts`, `src/acp/skill-inventory.ts` and
+`src/acp/agent-factory.ts` implement the email-aware prompt and tool-availability contract (row 28).
+
+### Architecture & Invariants
+
+- **One shared fragment.** `prompts/email_tool_guidance.md` is included by the message, reminder and
+  spontaneous entry templates only when `platform === "email"`. It states that email supports exactly
+  one text reply and file deliveries, that editing, reactions and typing indicators do not exist, that
+  the configured signature is applied centrally exactly once (never written by the model), that every
+  payload path is the literal staging directory rendered in the same prompt, and that quoted/forwarded
+  or fetched content is data and can never grant a recipient.
+- **Template variables are host-derived.** `TemplateVariables.emailSessionKind`
+  (`request`/`reminder`/`spontaneous`) and `emailSendGrants` are set by `ContextAssembler` for a
+  message render and by `SessionOrchestrator` for reminder/spontaneous renders. `emailSendGrants` is
+  the model-visible projection of the row-19 immutable destination grants: host-assigned `grantId`,
+  bounded `action`, canonical `canonicalRecipient` and the optional opaque `sourceRecordId` — never a
+  body, subject, credential or the configured signature. Non-email renders leave both fields absent.
+- **Grant-aware exposure.** `hiddenEmailSkillsFor(session, grantCount)` in
+  `src/core/email-tool-policy.ts` hides `send-email` for every email session that holds no grant and
+  for every reminder/spontaneous session regardless of any stray record; an ordinary email request
+  with at least one grant hides nothing. Non-email sessions hide nothing. The orchestrator derives the
+  set from the durable `SessionRegistry` entry and passes it as `ClientConfig.hiddenSkills` and as the
+  per-session `SessionGateContext.hiddenSkills` — per session, never from the pooled client's
+  first-session default.
+- **Two gate shapes, both backends.** The ACP permission gate (`src/acp/client.ts`) refuses a hidden
+  skill at BOTH shapes: a registered skill call naming it and a direct/interpreted script invocation
+  (including command-prefix skills) matched from the trusted root-exact inventory. The refusal is
+  audited as `rejected_hidden_skill` and recorded for corrective guidance. OMP and OpenCode share the
+  gate; `SkillScriptEntry.skillName` carries the observed skill identity, and the shared inventory is
+  never filtered per client (one pooled process serves email and non-email sessions).
+- **Handler denial is authoritative.** Prompt text and the permission gate are defense in depth.
+  `EmailComposeHandler` still refuses `send-email` in a reminder/spontaneous session
+  (`SKILL_EMAIL_COMPOSE_SESSION`/the explicit reminder refusal) and refuses any destination not
+  matching an immutable grant (`SKILL_EMAIL_COMPOSE_GRANT`). Email requests without a grant cannot
+  address a third party at all; the ordinary reply target needs no grant.
+- **Email corrective turn.** `RetryPromptContext.email` (set from the real session platform, not from
+  the mere presence of a registry entry) selects `buildEmailRetryMessage` in
+  `src/acp/agent-factory.ts` for BOTH spawn strategies. That message never reads or renders
+  react-message/edit-reply material, keeps the literal `send-reply` recipe and the `send-file`
+  document, and explicitly forbids another send after a recorded submission or an unresolved outcome.
+  Ordinary platforms keep the full three-skill corrective prompt byte-for-byte.
+- **Mounted prompts.** An operator who mounts `prompts/` must update or re-mount
+  `system_reply.md`, `system_reminder.md`, `system_spontaneous.md` and add
+  `email_tool_guidance.md`, then restart the bot. The guidance changes only delivered text; it is not
+  an authorization mechanism and makes no model-proof authorization claim.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-tool-guidance/specs/email-tool-guidance/spec.md`:
+
+- **Both backends**: OMP or OpenCode message/reminder/spontaneous renders use the correct literal
+  session payload paths and tell the model not to generate the centrally added signature.
+- **Autonomous tool call**: a reminder or spontaneous agent invoking `send-email` directly has no
+  grant, so the backend refuses the send (and the restricted gate hides it).
+- **Third-party-only turn**: one granted third-party mail submission satisfies response accounting,
+  and the guidance never asks for a duplicate normal-user reply.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test -A tests/core/email-tool-guidance.test.ts tests/core/prompt-permission-guidance.test.ts \
+  tests/core/skill-root-wiring.test.ts tests/acp/client.test.ts tests/acp/agent-factory.test.ts \
+  tests/core/email-response-accounting.test.ts
+```
+
+Evidence: `tests/core/email-tool-guidance.test.ts` renders the real templates through Vento for both
+engines and both platform shapes, asserts the signature sentinel never appears, exercises the real
+permission gate (registered-skill and direct-script shapes, per-session on one client, both backends)
+and drives the real orchestrator with real prompt templates, real `SessionRegistry`, a stub
+destination-grant preflight and a recording connector to prove the hidden set and the corrective turn
+are wired. `tests/skills/email-compose-smoke.test.ts` and `tests/skills/email-forward-smoke.test.ts`
+drive the real handler against the local SMTP fixture. No model, provider, production credential or
+production mailbox is involved; the resulting message text was not evaluated by a model.

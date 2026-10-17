@@ -12,7 +12,7 @@ import { renderFixedMemoryLine, selectFixedMemories } from "./memory-recall/fixe
 import { renderFastRecallSection, renderNoteEntry } from "./memory-recall/fast-recall.ts";
 import { MemoryRetriever } from "./memory-recall/retriever.ts";
 import type { FixedMemoryBudgets } from "./memory-recall/fixed-selection.ts";
-import type { TemplateVariables } from "../types/template.ts";
+import type { EmailPromptGrant, TemplateVariables } from "../types/template.ts";
 import type {
   AssembledContext,
   AssembledSpontaneousContext,
@@ -129,6 +129,7 @@ export class ContextAssembler {
     model?: string,
     yolo?: boolean,
     workspace?: WorkspaceInfo,
+    emailSendGrants?: readonly EmailPromptGrant[],
   ): Promise<string> {
     const templateVars: TemplateVariables = {
       isDm: event.isDm,
@@ -150,6 +151,16 @@ export class ContextAssembler {
       tmpDir: workspace ? sessionStagingDir(workspace, sessionId) : undefined,
       // Current skill-API session id (shared mode: NOT the frozen $SESSION_ID).
       sessionId,
+      // `email-tool-guidance`: an email request session renders the immutable
+      // host-recorded destination grants (ids, actions, canonical recipients
+      // only — never message content or the configured signature). Every
+      // non-email render leaves both fields absent.
+      ...(event.platform === "email"
+        ? {
+          emailSessionKind: "request" as const,
+          emailSendGrants: emailSendGrants ?? [],
+        }
+        : {}),
     };
 
     // Classified skill-instructing render: the required trusted root is

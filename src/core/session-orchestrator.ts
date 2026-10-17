@@ -64,6 +64,7 @@ import {
   hasEmailUncertaintyEvidence,
   recordEmailUncertainty,
 } from "./email-response-accounting.ts";
+import { hiddenEmailSkillsFor } from "./email-tool-policy.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { EmailSendContext } from "../types/platform.ts";
 import type {
@@ -1051,6 +1052,13 @@ export class SessionOrchestrator {
         resolvedModel,
         yoloDecision.enabled,
         workspace,
+        // `email-tool-guidance`: the immutable grants recorded above are the
+        // ONLY third-party authorization this prompt may advertise. The
+        // projection carries host-derived ids/actions/recipients, never body
+        // content or the configured signature; non-email sessions pass none.
+        event.platform === "email" && shellSessionId !== null
+          ? this.sessionRegistry.emailDestinationGrantsOf(shellSessionId)
+          : undefined,
       );
 
       sessionLogger.debug("Prompt built", {
@@ -1114,6 +1122,9 @@ export class SessionOrchestrator {
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: this.skillSessionId(shellSessionId),
+        // Row 28: an email session without a third-party grant hides
+        // `send-email` from the permission gate too; the handler still refuses.
+        hiddenSkills: this.emailHiddenSkills(shellSessionId),
       };
 
       // 5. Build ACP connector
@@ -1241,6 +1252,9 @@ export class SessionOrchestrator {
               yolo: yoloDecision.enabled,
               canWriteAgentWorkspace: false,
               allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+              // Per-session, never the pooled client's first-session default:
+              // one process serves email and non-email sessions alike.
+              hiddenSkills: this.emailHiddenSkills(options.shellSessionId),
               trustedSkills: clientConfig.trustedSkills,
             });
             await this.applyReasoningEffort(connector, acpSessionId, resolvedReasoningEffort, sl2);
@@ -1351,7 +1365,12 @@ export class SessionOrchestrator {
               // literal Skill API session id and the rendered staging dir
               // (`$TMPDIR/$SESSION_ID` shell tokens are stale/absent on a
               // pooled process and must not be depended on per-spawn either).
-              const retryCtx = this.retryPromptContext(workspace, options.shellSessionId, true);
+              const retryCtx = this.retryPromptContext(
+                workspace,
+                options.shellSessionId,
+                true,
+                emailSession !== null && emailSessionOwner(emailSession) !== undefined,
+              );
               const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
               for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
                 replyHandler.clearReplyState(workspace.key, event.channelId);
@@ -1778,7 +1797,12 @@ export class SessionOrchestrator {
             "Agent completed without sending reply, reaction, or file, retrying with special prompt",
           );
 
-          const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
+          const retryCtx = this.retryPromptContext(
+            workspace,
+            shellSessionId,
+            !!this.processPool,
+            emailSession !== null && emailSessionOwner(emailSession) !== undefined,
+          );
           const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
 
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
@@ -2306,6 +2330,9 @@ export class SessionOrchestrator {
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: this.skillSessionId(shellSessionId),
+        // Row 28: a spontaneous email session never holds a grant, so the gate
+        // hides `send-email` alongside the prompt's explicit refusal.
+        hiddenSkills: this.emailHiddenSkills(shellSessionId),
       };
 
       // 6. Build and execute ACP connector
@@ -2542,7 +2569,12 @@ export class SessionOrchestrator {
         ) {
           sessionLogger.warn("Agent completed without reply, retrying");
 
-          const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
+          const retryCtx = this.retryPromptContext(
+            workspace,
+            shellSessionId,
+            !!this.processPool,
+            emailSession !== null && emailSessionOwner(emailSession) !== undefined,
+          );
           const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
@@ -3903,6 +3935,9 @@ export class SessionOrchestrator {
         skillsDir: this.config.agent.skillsDir,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
+        // Row 28: a channel-lurk session is never a third-party email entry
+        // point; the resolver hides `send-email` whenever the session is email.
+        hiddenSkills: this.emailHiddenSkills(shellSessionId),
       };
 
       const agentType = getDefaultAgentType(this.config);
@@ -4423,6 +4458,8 @@ export class SessionOrchestrator {
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: this.skillSessionId(shellSessionId),
+        // Row 28: no destination grant is ever carried into a reminder.
+        hiddenSkills: this.emailHiddenSkills(shellSessionId),
       };
 
       // 6. Build and execute ACP connector
@@ -4598,7 +4635,12 @@ export class SessionOrchestrator {
         ) {
           sessionLogger.warn("Agent completed without reply, retrying");
 
-          const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
+          const retryCtx = this.retryPromptContext(
+            workspace,
+            shellSessionId,
+            !!this.processPool,
+            emailSession !== null && emailSessionOwner(emailSession) !== undefined,
+          );
           const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
@@ -4878,6 +4920,7 @@ export class SessionOrchestrator {
           yolo: yoloEnabled,
           canWriteAgentWorkspace: connectorOptions.clientConfig?.canWriteAgentWorkspace,
           allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+          hiddenSkills: this.emailHiddenSkills(shellSessionId),
           trustedSkills: connectorOptions.clientConfig?.trustedSkills,
         });
         await this.applyReasoningEffort(connector, acpSessionId, resolvedReasoningEffort, sl);
@@ -4958,7 +5001,12 @@ export class SessionOrchestrator {
 
         if (!hasResponded && !emailSuppressed && response.stopReason === "end_turn") {
           // Shared-process retry guidance: literal session id + staging dir.
-          const retryCtx = this.retryPromptContext(workspace, shellSessionId, true);
+          const retryCtx = this.retryPromptContext(
+            workspace,
+            shellSessionId,
+            true,
+            emailSession !== null && emailSessionOwner(emailSession) !== undefined,
+          );
           const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             await auditWriter?.write("retry_triggered", {
@@ -5789,6 +5837,7 @@ export class SessionOrchestrator {
     workspace: { tmpPath: string },
     registrySessionId: string | null,
     sharedProcess: boolean,
+    email = false,
   ): RetryPromptContext {
     return {
       sharedProcess,
@@ -5799,7 +5848,30 @@ export class SessionOrchestrator {
       // HOME expression or the untrusted CWD (`repair-omp-owned-skill-handoff`
       // task 3.3).
       skillsDir: this.trustedSkillsDir(),
+      // Row 28: email sessions get the email corrective contract (no reaction
+      // or edit guidance, no demand for a second send after submission or
+      // uncertainty). Ordinary platforms keep the full three-skill prompt.
+      email,
     };
+  }
+
+  /**
+   * The per-session `hiddenSkills` set for the ACP permission gate (row 28).
+   *
+   * Derived from the durable session record, never from a prompt or a tool
+   * call: an email session exposes `send-email` only while at least one
+   * immutable destination grant exists, and a reminder or spontaneous session
+   * never exposes it. Non-email sessions hide nothing. The Skill API handler
+   * still refuses a hidden call independently.
+   */
+  private emailHiddenSkills(registrySessionId: string | null): readonly string[] | undefined {
+    if (registrySessionId === null) return undefined;
+    const session = this.sessionRegistry.get(registrySessionId);
+    if (session === undefined) return undefined;
+    return hiddenEmailSkillsFor(
+      session,
+      this.sessionRegistry.emailDestinationGrantsOf(registrySessionId).length,
+    );
   }
 
   /**
@@ -6365,6 +6437,11 @@ export class SessionOrchestrator {
       availableEmojis: availableEmojisText,
       sessionId: sessionId ?? undefined,
       tmpDir,
+      ...(emailSpontaneous === undefined ? {} : {
+        emailSessionKind: "spontaneous" as const,
+        // Row 28: a spontaneous session can never hold a third-party grant.
+        emailSendGrants: [] as const,
+      }),
     };
 
     return await this.renderClassifiedSkillPrompt(
@@ -6565,6 +6642,13 @@ export class SessionOrchestrator {
       // absolute staging directory like every other payload-staging prompt.
       sessionId: sessionId ?? undefined,
       tmpDir,
+      ...(reminder.platform === "email"
+        ? {
+          emailSessionKind: "reminder" as const,
+          // Row 28: no destination grant is ever carried into a reminder.
+          emailSendGrants: [] as const,
+        }
+        : {}),
     };
 
     return await this.renderClassifiedSkillPrompt(

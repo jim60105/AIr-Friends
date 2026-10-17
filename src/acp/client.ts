@@ -52,7 +52,7 @@ import {
   mapRootPathFailureToDenial,
   type TrustedSkillsSource,
 } from "./filesystem-policy.ts";
-import { matchesScriptEntrypoint, type SkillAutoApproveList } from "./skill-inventory.ts";
+import { matchScriptEntrypoint, type SkillAutoApproveList } from "./skill-inventory.ts";
 import { normalizeOmpDestructivePermissionInput } from "./omp/destructive-ingress.ts";
 
 /**
@@ -274,6 +274,13 @@ export interface SessionGateContext {
   canWriteAgentWorkspace?: boolean;
   /** This session's allowed write extensions (restricted-mode edit/write gate). */
   allowedWriteExtensions?: string[];
+  /**
+   * Skill NAMES this session may not use (`email-tool-guidance`). The
+   * permission gate refuses both a direct script invocation (including a
+   * command-based skill prefix) and a registered skill call naming them; the
+   * Skill API handler still denies independently.
+   */
+  hiddenSkills?: readonly string[];
   /** Deployment-owned trusted skills provenance */
   trustedSkills?: TrustedSkillsSource;
   /**
@@ -611,6 +618,15 @@ export class ChatbotClient implements acp.Client {
 
   private gateYolo(acpSessionId?: string): boolean {
     return this.gateCtx(acpSessionId)?.yolo ?? this.config.yolo ?? false;
+  }
+
+  /** Resolved hidden skills for this session, with per-session context taking precedence. */
+  private gateHiddenSkills(acpSessionId?: string): ReadonlySet<string> {
+    const ctx = this.gateCtx(acpSessionId);
+    if (ctx !== undefined) {
+      return new Set(ctx.hiddenSkills ?? []);
+    }
+    return new Set(this.config.hiddenSkills ?? []);
   }
 
   /**
@@ -1026,7 +1042,74 @@ export class ChatbotClient implements acp.Client {
       );
     }
 
-    // YOLO mode: auto-approve everything (per-session decision in shared mode)
+    // Hidden skill enforcement precedes YOLO blanket approval: a hidden skill is
+    // never approved in either backend or under any execution mode.
+    const hiddenSkills = this.gateHiddenSkills(params.sessionId);
+    if (hiddenSkills.size > 0) {
+      let skillName = "";
+      if ("rawInput" in params.toolCall && params.toolCall.rawInput) {
+        skillName = this.extractSkillName(params.toolCall as acp.ToolCall);
+      }
+      if (skillName && this.skillRegistry.hasSkill(skillName) && hiddenSkills.has(skillName)) {
+        this.logger.warn("Rejecting hidden skill call: {skillName}", { skillName });
+        void this.writePermissionAudit(
+          "permission_denied",
+          skillName,
+          kind,
+          undefined,
+          "rejected_hidden_skill",
+        );
+        this.recordPermissionRejection(skillName, kind, undefined, "rejected_hidden_skill");
+        const rejecting = params.options.find((o) => o.kind === "reject_once");
+        return Promise.resolve(
+          rejecting
+            ? { outcome: { outcome: "selected", optionId: rejecting.optionId } }
+            : { outcome: { outcome: "cancelled" } },
+        );
+      }
+    }
+    if (hiddenSkills.size > 0 && (kind === "execute" || title === "bash" || title === "terminal")) {
+      const rawInput = params.toolCall.rawInput as
+        | { command?: string; commands?: string[] }
+        | undefined;
+      const commands = rawInput?.commands ?? (rawInput?.command ? [rawInput.command] : []);
+      const sessionCwd = this.gateWorkingDir(params.sessionId);
+      const registered = this.gateCtx(params.sessionId);
+      for (const cmd of commands) {
+        const segments = splitCommandSegments(cmd);
+        for (const seg of segments) {
+          const scriptEntry = matchScriptEntrypoint(seg, this.skillAutoApproveList, {
+            sessionCwd: registered ? sessionCwd : undefined,
+          });
+          const isHiddenScript = scriptEntry !== undefined &&
+            hiddenSkills.has(scriptEntry.skillName);
+          const isHiddenPrefix = Array.from(this.skillAutoApproveList.commandPrefixes).some(
+            (prefix) => matchesCommandPrefix(seg, prefix) && hiddenSkills.has(prefix),
+          );
+          if (isHiddenScript || isHiddenPrefix) {
+            this.logger.warn("Rejecting hidden skill command execution: {command}", {
+              command: seg,
+            });
+            void this.writePermissionAudit(
+              "permission_denied",
+              title,
+              kind,
+              commands.join("; "),
+              "rejected_hidden_skill",
+            );
+            this.recordPermissionRejection(title, kind, seg, "rejected_hidden_skill");
+            const rejecting = params.options.find((o) => o.kind === "reject_once");
+            return Promise.resolve(
+              rejecting
+                ? { outcome: { outcome: "selected", optionId: rejecting.optionId } }
+                : { outcome: { outcome: "cancelled" } },
+            );
+          }
+        }
+      }
+    }
+
+    // YOLO mode: auto-approve everything (hidden skills were refused above)
     if (this.gateYolo(params.sessionId)) {
       this.logger.info("YOLO mode: auto-approving permission for {title}", {
         kind: params.toolCall.kind,
@@ -1154,6 +1237,10 @@ export class ChatbotClient implements acp.Client {
         | { command?: string; commands?: string[] }
         | undefined;
       const commands = rawInput?.commands ?? (rawInput?.command ? [rawInput.command] : []);
+      // `email-tool-guidance`: a hidden skill is never an approved script,
+      // whatever the trusted root contains. The registered-skill branch below
+      // applies the SAME set to a direct skill tool call.
+      const hiddenSkills = this.gateHiddenSkills(params.sessionId);
 
       // Defense-in-depth (D5): reject commands that smuggle free text in a legacy
       // `--message` / `--content` / `--query` / `--caption` flag (either `--flag value`
@@ -1254,14 +1341,24 @@ export class ChatbotClient implements acp.Client {
           // a relative script spelling anchors ONLY at the requesting REGISTERED
           // session cwd — an unregistered session gets no session-relative
           // script authority (never the daemon cwd or `config.workingDir`).
-          const isScript = matchesScriptEntrypoint(segment, this.skillAutoApproveList, {
+          const scriptEntry = matchScriptEntrypoint(segment, this.skillAutoApproveList, {
             sessionCwd: registered ? sessionCwd : undefined,
           });
-          if (isScript) return { approved: true, viaSkill: true };
-          const isCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
+          if (scriptEntry !== undefined) {
+            return hiddenSkills.has(scriptEntry.skillName)
+              ? { approved: false, reason: "hidden_skill" }
+              : { approved: true, viaSkill: true };
+          }
+          const commandSkill = Array.from(this.skillAutoApproveList.commandPrefixes).find(
             (prefix) => matchesCommandPrefix(segment, prefix),
           );
-          if (isCommand) return { approved: true, viaSkill: true };
+          if (commandSkill !== undefined) {
+            // A hidden command skill (e.g. an email-unsupported tool) is never
+            // auto-approved either: the SAME per-session set gates both shapes.
+            return hiddenSkills.has(commandSkill)
+              ? { approved: false, reason: "hidden_skill" }
+              : { approved: true, viaSkill: true };
+          }
           // Generic-command gate.
           const reason = await genericCommandRejectionReason(segment, commandContext);
           return reason === null
@@ -1339,6 +1436,8 @@ export class ChatbotClient implements acp.Client {
         // preserved path code.
         const auditReason = reason === "path_outside_boundary"
           ? "rejected_generic_command_out_of_workspace"
+          : reason === "hidden_skill"
+          ? "rejected_hidden_skill"
           : reason === "shell_operator"
           ? "rejected_generic_command_shell_operator"
           : reason === "first_token_not_allowed"
@@ -1357,8 +1456,11 @@ export class ChatbotClient implements acp.Client {
 
         // Return reject immediately: falling through to default-deny would write a second,
         // contradictory `rejected_unknown` audit entry that misclassifies the cause.
-        const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
-          params.options[0];
+        const rejecting = params.options.find((o) => o.kind === "reject_once");
+        if (reason === "hidden_skill" && !rejecting) {
+          return Promise.resolve({ outcome: { outcome: "cancelled" } });
+        }
+        const rejectOption = rejecting ?? params.options[0];
 
         return Promise.resolve({
           outcome: {
@@ -1378,6 +1480,24 @@ export class ChatbotClient implements acp.Client {
 
     // Check if this is one of our registered skills
     if (skillName && this.skillRegistry.hasSkill(skillName)) {
+      const hiddenSkills = this.gateHiddenSkills(params.sessionId);
+      if (hiddenSkills.has(skillName)) {
+        this.logger.warn("Rejecting hidden skill call: {skillName}", { skillName });
+        void this.writePermissionAudit(
+          "permission_denied",
+          skillName,
+          kind,
+          undefined,
+          "rejected_hidden_skill",
+        );
+        this.recordPermissionRejection(skillName, kind, undefined, "rejected_hidden_skill");
+        const rejecting = params.options.find((o) => o.kind === "reject_once");
+        return Promise.resolve(
+          rejecting
+            ? { outcome: { outcome: "selected", optionId: rejecting.optionId } }
+            : { outcome: { outcome: "cancelled" } },
+        );
+      }
       this.logger.info("Auto-approving registered skill: {skillName}", { skillName });
 
       void this.writePermissionAudit(

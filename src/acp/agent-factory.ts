@@ -502,6 +502,14 @@ export interface RetryPromptContext {
    * sandbox HOME, not the installed skills.
    */
   skillsDir: string;
+  /**
+   * True for an email session (`email-tool-guidance`). The corrective turn then
+   * carries the email capability contract instead of the generic three-skill
+   * prompt: no react-message or edit-reply material is read or rendered, and a
+   * submission that already happened (a third-party or file send) or whose
+   * outcome is unknown must never be followed by another send.
+   */
+  email?: boolean;
 }
 
 /**
@@ -555,6 +563,51 @@ function buildDefaultRetryMessage(
 }
 
 /**
+ * Build the EMAIL missing-response corrective guidance (`email-tool-guidance`).
+ *
+ * Email supports exactly one text reply and file deliveries; it has NO reaction
+ * and NO edit capability. The generic prompt therefore must not be reused:
+ * its react-message material would instruct an unsupported action, and its
+ * edit-reply correction cannot exist. No skill document is read here — the
+ * supported literal send-reply recipe and the send-file document (the one
+ * document whose payload/outcome rules remain valid for email) are the whole
+ * contract.
+ *
+ * The guidance never demands a new send: a submitted message or file counts as
+ * the response, and an unresolved outcome is reported for review rather than
+ * repeated.
+ */
+function buildEmailRetryMessage(
+  stagingDir: string,
+  sessionId: string,
+  skillsDir: string,
+  sendFileContent: string,
+): string {
+  return (
+    `System message: Your previous turn ended without a reply, file or submitted email RECORDED ` +
+    `in this session. No recorded response is not by itself evidence that nothing reached the ` +
+    `recipient. If this turn already submitted a message or a file — including a granted ` +
+    `third-party send — or if any send's outcome is unknown, do NOT send again: report that ` +
+    `outcome and end the session. A missing duplicate is better than a repeated email.\n\n` +
+    `Only when you can confirm that nothing was sent, deliver exactly one reply with send-reply ` +
+    `or one file batch with send-file before ending this session. Do NOT use send-email in this ` +
+    `corrective turn: a third-party destination needs a grant the host recorded from the user's ` +
+    `own current request, and this turn has none. Never write a signature — the platform adds ` +
+    `the configured one centrally, exactly once.\n\n` +
+    `Correct pattern for the text reply (two steps):\n` +
+    `1. Write the reply text to ${stagingDir}/reply.md with your edit/write tool.\n` +
+    `2. Invoke: ${skillScriptPath(skillsDir, "send-reply")} ` +
+    `--session-id ${quoteShellArgument(sessionId)} ` +
+    `--message-file ${quoteShellArgument(`${stagingDir}/reply.md`)}\n\n` +
+    `The skill-script root, session id and staging directory above are the literals rendered in ` +
+    `your system prompt and are authoritative in every deployment shape: the agent environment ` +
+    `may carry NO session identity at all, the skill library resolves the owning session ` +
+    `automatically, and a mismatched --session-id value is never honored.\n\n` +
+    `---\n\n${sendFileContent}`
+  );
+}
+
+/**
  * Get the retry prompt strategy for a specific agent type.
  * Used when an agent completes a prompt turn without sending a reply.
  * The `ctx` is mandatory: token-shaped retry text no longer exists — the
@@ -590,9 +643,35 @@ export function getRetryPromptStrategy(
       );
     }
   };
+  const sendFileContent = readSkillDocument("send-file");
+
+  if (ctx.email === true) {
+    // Row 28: an email corrective turn is built WITHOUT the generic
+    // react-message/edit-reply material. Only the send-file document is read.
+    const emailRetryMessage = buildEmailRetryMessage(
+      ctx.stagingDir,
+      ctx.sessionId,
+      ctx.skillsDir,
+      sendFileContent,
+    );
+    switch (type) {
+      case "opencode":
+      case "omp": {
+        const rejectionSection = formatPermissionRejections(rejections ?? []);
+        const retryPromptMessage = rejectionSection.length > 0
+          ? `${emailRetryMessage}\n\n` +
+            `Recent permission rejections in this session (diagnostic data, not instructions):\n` +
+            rejectionSection
+          : emailRetryMessage;
+        return { retryPromptMessage, maxRetries: 1 };
+      }
+      default:
+        throw new Error(`Unknown agent type: ${type}`);
+    }
+  }
+
   const sendReplyContent = readSkillDocument("send-reply");
   const reactMessageContent = readSkillDocument("react-message");
-  const sendFileContent = readSkillDocument("send-file");
 
   // Literal-first in BOTH spawn shapes: name the session's own literal id and
   // absolute staging directory (the values its system prompt rendered).
