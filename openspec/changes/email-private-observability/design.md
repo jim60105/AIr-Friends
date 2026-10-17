@@ -16,6 +16,8 @@ The approved source is `docs/superpowers/specs/2026-10-17-email-platform-design.
 
 For email context enforce metadata-only operational/audit serialization regardless of general hashContent setting. Add contextual sensitivity propagation to ACP client and session logger; suppress raw headers, prompt/body chunks, tool parameters/output, credentials, file names and exception strings from email execution, including preflight. Map protocol/provider errors to safe enum codes. Preserve actual full private sent/source content only in archive/backup with private permissions.
 
+This slice also owns `src/core/reminder-store.ts` replay diagnostics. Pass trusted `workspace.components.platform` into parsing rather than infer privacy from possibly malformed JSON. For email workspaces log only a safe parse code and byte/line offset, with no line excerpt or content-bearing exception. This applies during due-reminder enumeration before any session logger exists. Existing non-email parsing/delivery behavior stays unchanged. Serialize this file with `email-reminder-threads`.
+
 ### Owned interfaces and callsites
 
 Own email_operation audit phase and sanitizer allowlist {operationId,workId,phase,targetKind,sentCopy,safeCode}; operator can inspect existing logs/audit for submitted/failed/unknown/copy outcomes without content. IDs are opaque safe strings; no address/subject in labels. Include stream/failure paths and dry-run output permissions; dry-run deliberately written prompts are private artifacts and must not be operational logs. No new dashboard UI workflow.
@@ -42,6 +44,8 @@ Reuse the established platform/workspace/skill boundaries rather than a second s
 ## Verification design
 
 Capture structured logger and audit output using sentinel address, subject, password, quoted body and filename. Assert absence in success and every failure branch and maintain non-email audit regressions.
+
+Call actual `ReminderStore.getDueReminders()` on malformed email JSONL before creating a session; private reminder text and parser exception contents must be absent from the module-global logger. This case is part of the existing privacy regression budget.
 
 The tasks' verification is planned implementation evidence, not exercised runtime evidence. Test doubles for ACP/model decisions are labeled separately from real IMAP/SMTP protocol-service exchanges. No production credentials or mailbox may be used by automated checks.
 

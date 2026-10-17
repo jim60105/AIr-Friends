@@ -6,6 +6,7 @@ Private email audit and operational outcomes supplies a bounded part of the appr
 
 ## What Changes
 
+- Sanitize malformed email reminder replay before session creation using trusted workspace identity; never log record excerpts or parser exception contents.
 - For email context enforce metadata-only operational/audit serialization regardless of general hashContent setting. Add contextual sensitivity propagation to ACP client and session logger; suppress raw headers, prompt/body chunks, tool parameters/output, credentials, file names and exception strings from email execution, including preflight. Map protocol/provider errors to safe enum codes. Preserve actual full private sent/source content only in archive/backup with private permissions.
 - Deliver executable acceptance scenarios, deterministic regression tests, controlled smoke verification and operator documentation within this change.
 - Keep production email unavailable until `email-activation`; dependencies are completed implementation prerequisites, not deferred work.
@@ -30,6 +31,7 @@ Total: **6.75 engineering hours**, strictly below 8 hours. See tasks.md for item
 
 ## Batch:
 
+- code-conflict: email-reminder-threads (src/core/reminder-store.ts)
 - depends-on: email-response-accounting
 - code-conflict: email-adapter (src/skills/file-handler.ts)
 - code-conflict: email-intent-runtime (src/acp/client.ts)
