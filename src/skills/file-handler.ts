@@ -157,6 +157,9 @@ export class FileHandler {
       {
         replyToMessageId: context.replyToMessageId,
         comment,
+        // Host-assigned email operation context only; a send without it is refused by the
+        // email adapter instead of being guessed. Non-email platforms ignore it.
+        emailSend: context.emailSend,
       },
     );
 
@@ -166,7 +169,11 @@ export class FileHandler {
     const deliveredCount = result.success ? files.length : (result.messageIds?.length ?? 0);
 
     if (deliveredCount === 0) {
-      return { success: false, error: result.error ?? "Failed to send files" };
+      return {
+        success: false,
+        error: result.error ?? "Failed to send files",
+        emailSubmission: result.emailSubmission,
+      };
     }
 
     // 9. Update metrics (once per delivered file). Session response state
@@ -192,6 +199,7 @@ export class FileHandler {
           messageId: result.messageId,
           filesCount: deliveredCount,
         },
+        emailSubmission: result.emailSubmission,
       };
     }
 
@@ -204,6 +212,7 @@ export class FileHandler {
         nextAction:
           "If your text reply is still pending, send it now with send-reply — then EXIT IMMEDIATELY.",
       },
+      emailSubmission: result.emailSubmission,
     };
   };
 
