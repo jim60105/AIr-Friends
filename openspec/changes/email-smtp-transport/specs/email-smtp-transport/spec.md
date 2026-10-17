@@ -11,6 +11,7 @@ Defines certificate-validated smtp submission so email users and operators recei
 SMTP SHALL validate certificates and require direct TLS or mandatory STARTTLS before password authentication.
 
 #### Scenario: Unsafe server
+
 - **WHEN** STARTTLS is missing or certificate validation fails
 - **THEN** no credentials or message bytes are submitted
 
@@ -19,6 +20,7 @@ SMTP SHALL validate certificates and require direct TLS or mandatory STARTTLS be
 A positive final SMTP acceptance SHALL mean submitted, an explicit rejection SHALL mean failed, and a lost acknowledgement after possible submission SHALL mean unknown.
 
 #### Scenario: Lost final reply
+
 - **WHEN** local SMTP server consumes DATA and closes before acceptance reaches the client
 - **THEN** result is unknown and client does not retry
 
@@ -27,6 +29,6 @@ A positive final SMTP acceptance SHALL mean submitted, an explicit rejection SHA
 SMTP submission SHALL be exercised with isolated controlled protocol services rather than method-forwarding mocks alone.
 
 #### Scenario: Accepted and rejected envelopes
+
 - **WHEN** real client submits fixture MIME through a local TLS SMTP service
 - **THEN** wire capture shows one envelope recipient and distinct accepted/rejected results
-
