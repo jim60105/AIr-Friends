@@ -107,4 +107,35 @@ export interface TemplateVariables {
    * payload-staging prompt path alongside `tmpDir`.
    */
   sessionId?: string;
+
+  /**
+   * Which email session shape this render belongs to (`email-tool-guidance`).
+   * Absent on every non-email render. Reminder and spontaneous sessions can
+   * never carry a third-party destination grant, so the shared email fragment
+   * states the send-email refusal explicitly instead of advertising it.
+   */
+  emailSessionKind?: "request" | "reminder" | "spontaneous";
+
+  /**
+   * The session's IMMUTABLE, host-recorded third-party destination grants.
+   * Present (possibly empty) only on an authenticated email request session;
+   * the shared email fragment renders each grant's host-assigned id, action
+   * and canonical recipient — never message content and never the configured
+   * signature. An empty/absent list means `send-email` is not exposed.
+   */
+  emailSendGrants?: readonly EmailPromptGrant[];
+}
+
+/**
+ * The model-visible projection of one immutable destination grant. Every field
+ * is host-derived: the id is host-assigned, the recipient is the canonical
+ * mailbox the user's own request named, and the source record is the opaque id
+ * the host proved owner-accessible. No email body, subject or signature text
+ * is ever part of this projection.
+ */
+export interface EmailPromptGrant {
+  readonly grantId: string;
+  readonly action: "compose" | "forward";
+  readonly canonicalRecipient: string;
+  readonly sourceRecordId?: string;
 }

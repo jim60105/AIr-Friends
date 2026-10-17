@@ -18,6 +18,7 @@ Send one or more files from your workspace to the current conversation channel i
 6. **This skill may be disabled**: The administrator may disable this skill. If you receive a "disabled" error, inform the user that file sending is not available.
 7. **Timeout**: The script won't run for more than 30 seconds. If it hangs, cancel the running command with the running-command controls your agent documents (if any). A stopped send may still have reached the platform, so never retry that send.
 8. **Threading**: The file message is sent as a reply to the user's trigger message. A subsequent `send-reply` in the same session will be threaded to this file message (keeping the conversation in one thread), not to the trigger.
+9. **Email delivery**: On the `email` platform each delivered file is its own email to the user (a text reply is a separate email), and the deployment's configured signature is appended centrally, exactly once — never write a signature or sign-off block yourself.
 
 ## Result
 

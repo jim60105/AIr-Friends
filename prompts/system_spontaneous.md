@@ -114,3 +114,5 @@ variable is not this session's staging area.
 {{- /set -}}
 
 {{ include "./skills_root.md" }}
+
+{{ if platform === "email" }}{{ include "./email_tool_guidance.md" }}{{ /if }}

@@ -91,7 +91,14 @@ export type GenericCommandRejection =
   | "shell_operator"
   | "first_token_not_allowed"
   | "dangerous_flag"
-  | "path_outside_boundary";
+  | "path_outside_boundary"
+  /**
+   * The segment matched a trusted skill grant whose skill NAME the current
+   * session hides (`email-tool-guidance`). Not produced by
+   * {@link genericCommandRejectionReason}: the permission gate applies it
+   * after the skill-whitelist matchers so a hidden tool is never approved.
+   */
+  | "hidden_skill";
 
 /** Existing registered session and process inputs; no new configuration fields. */
 export interface CommandGateContext extends SessionContext {

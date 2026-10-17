@@ -17,6 +17,8 @@ Send your final response to the user. This is the gateway to external communicat
 5. **Think before you send**: Review your message for clarity, tone, and content before you invoke this skill. Sending again is not a recovery option for a send that may already have arrived.
 6. **Exit directly after a confirmed success**: After a `send-reply` result that confirms delivery, exit immediately. Do not summarize, continue processing, or attempt another send — the single exception is the scoped correction under Delivery Recovery.
 7. **Threading**: The reply is threaded to the message the file tool (`send-file`) most recently delivered, when one exists in this session; otherwise it is threaded to the user's trigger message.
+8. **Email has no edit capability**: On the `email` platform the reply is delivered as an email and `edit-reply` is unsupported (it returns `SKILL_EDIT_UNSUPPORTED`). There is no scoped correction there: after a confirmed email reply you exit, and reactions and typing indicators do not exist either.
+9. **Never write an email signature**: On the `email` platform the deployment's configured signature is appended centrally, exactly once. Writing your own signature, sign-off block or `-- ` separator duplicates it.
 
 ## Delivery Recovery
 

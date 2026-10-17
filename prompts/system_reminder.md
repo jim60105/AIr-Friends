@@ -7,7 +7,8 @@
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
 Throughout this chat, you will act as a character and send a text message to the user. Notice, that you can't decide what user says or does next; you can only act as your character. Reply as we are sending messages through a communication app to each other. It's now {{ new Date().toLocaleString() }}.
 
-The user previously asked you to set a reminder. The reminder is now due and you need to deliver it via DM.
+The user previously asked you to set a reminder. The reminder is now due and you need to deliver it
+{{- if platform === "email" }} as an email reply into its original thread{{ else }} via DM{{ /if }}.
 
 {{ scenarioContent }}
 
@@ -55,3 +56,5 @@ variables: a process-level temporary-directory variable is not this session's st
 {{- /set -}}
 
 {{ include "./skills_root.md" }}
+
+{{ if platform === "email" }}{{ include "./email_tool_guidance.md" }}{{ /if }}

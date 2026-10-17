@@ -64,6 +64,8 @@ function statTuple(stat: Deno.FileInfo): { ctimeMs: number | null; size: number 
 
 /** A single enumerated canonical script grant with its observed identity. */
 export interface SkillScriptEntry {
+  /** The observed skill directory name this script belongs to. */
+  readonly skillName: string;
   /** Canonical absolute regular-file path (realpath). */
   readonly canonicalPath: string;
   readonly dev: number;
@@ -235,6 +237,7 @@ export function buildSkillAutoApproveList(
         if (!isUnderRoot(canonical, canonicalPath)) continue;
         if (stat.dev === null || stat.ino === null) continue;
         scripts.push({
+          skillName: name,
           canonicalPath: canonical,
           dev: stat.dev,
           ino: stat.ino,
@@ -449,28 +452,28 @@ function lexicallyNormalize(path: string): string {
  * never name a script grant here; a slashless positional after a genuine
  * `deno run` IS cwd-relative to Deno and remains eligible.
  */
-export function matchesScriptEntrypoint(
+export function matchScriptEntrypoint(
   segment: string,
   list: SkillAutoApproveList,
   ctx: ScriptEntrypointDecisionContext,
-): boolean {
+): SkillScriptEntry | undefined {
   const fs = ctx.fs ?? realFs;
-  if (containsShellOperators(commandWithoutFdRedirects(segment))) return false;
+  if (containsShellOperators(commandWithoutFdRedirects(segment))) return undefined;
   const tokens = tokenizeShellCommand(segment).filter((t) => t.length > 0);
   // A tolerated fd-to-fd redirect token is an operator artifact, never an
   // argument — skip it when locating the entrypoint, exactly as before.
   const entrypoint = resolveScriptEntrypoint(
     tokens.filter((t) => !FD_REDIRECT_TOKEN_PATTERN.test(t)),
   );
-  if (entrypoint === undefined) return false;
+  if (entrypoint === undefined) return undefined;
 
   const spelling = entrypoint.token;
-  if (spelling.includes("\0")) return false;
+  if (spelling.includes("\0")) return undefined;
 
   // Direct execution of a slashless token goes through the shell's PATH, not
   // the session cwd: only an explicit pathname can name a script grant.
   if (!entrypoint.viaInterpreter && !spelling.startsWith("/") && !spelling.includes("/")) {
-    return false;
+    return undefined;
   }
 
   let candidate: string;
@@ -478,7 +481,7 @@ export function matchesScriptEntrypoint(
     candidate = spelling;
   } else {
     // Relative: physical anchoring at the registered session cwd only.
-    if (ctx.sessionCwd === undefined) return false;
+    if (ctx.sessionCwd === undefined) return undefined;
     candidate = ctx.sessionCwd.endsWith(SEPARATOR)
       ? ctx.sessionCwd + spelling
       : ctx.sessionCwd + SEPARATOR + spelling;
@@ -489,26 +492,26 @@ export function matchesScriptEntrypoint(
   try {
     canonical = fs.realPath(candidate);
   } catch {
-    return false;
+    return undefined;
   }
 
   // Ambiguity guard (B1): a `..` spelling whose lexical normalization differs
   // from the physical traversal crosses a symlinked directory — the interpreter
   // would lexically load a DIFFERENT file than the one observed here. Deny.
   if (spelling.split(SEPARATOR).includes("..") && lexicallyNormalize(candidate) !== canonical) {
-    return false;
+    return undefined;
   }
 
   // Exact canonical membership among the enumerated grants.
   const entry = list.scripts.find((script) => script.canonicalPath === canonical);
-  if (entry === undefined) return false;
+  if (entry === undefined) return undefined;
 
   // Decision-time root/target observation: a replaced root identity, a root
   // that ceased to be its canonical directory, or a replaced script body all
   // deny without any suffix/home/cwd retry.
   try {
     const rootStat = fs.lstat(list.root.canonicalPath);
-    if (!rootStat.isDirectory) return false;
+    if (!rootStat.isDirectory) return undefined;
     const rootIdentity = list.root.identity;
     if (
       rootStat.dev !== rootIdentity?.dev ||
@@ -517,11 +520,11 @@ export function matchesScriptEntrypoint(
       statTuple(rootStat).ctimeMs !== rootIdentity.ctimeMs ||
       statTuple(rootStat).size !== rootIdentity.size
     ) {
-      return false;
+      return undefined;
     }
-    if (fs.realPath(list.root.canonicalPath) !== list.root.canonicalPath) return false;
+    if (fs.realPath(list.root.canonicalPath) !== list.root.canonicalPath) return undefined;
     const stat = fs.lstat(entry.canonicalPath);
-    if (!stat.isFile) return false;
+    if (!stat.isFile) return undefined;
     const tuple = statTuple(stat);
     if (
       stat.dev !== entry.dev ||
@@ -529,11 +532,23 @@ export function matchesScriptEntrypoint(
       tuple.ctimeMs !== entry.ctimeMs ||
       tuple.size !== entry.size
     ) {
-      return false;
+      return undefined;
     }
-    if (fs.realPath(entry.canonicalPath) !== entry.canonicalPath) return false;
+    if (fs.realPath(entry.canonicalPath) !== entry.canonicalPath) return undefined;
   } catch {
-    return false;
+    return undefined;
   }
-  return isUnderRoot(canonical, list.root.canonicalPath);
+  return isUnderRoot(canonical, list.root.canonicalPath) ? entry : undefined;
+}
+
+/**
+ * Whether a command segment's ENTRYPOINT is exactly one of the inventory's
+ * enumerated canonical scripts under the still-intact observed root.
+ */
+export function matchesScriptEntrypoint(
+  segment: string,
+  list: SkillAutoApproveList,
+  ctx: ScriptEntrypointDecisionContext,
+): boolean {
+  return matchScriptEntrypoint(segment, list, ctx) !== undefined;
 }
