@@ -8,7 +8,7 @@ Total **6.75 engineering hours**, strictly below 8 hours; an estimate, not a gua
 - [x] 1.2 (1.5h) Add typed scheduler/bootstrap occurrence handoff and atomic successor persistence; verify pre-selection persistence failures and existing platform schedule behavior.
 - [x] 1.3 (1.25h) Add/run deterministic regression and native-dispatch or durable scheduler cases. Verify: Use actual SpontaneousScheduler, temporary durable store and counting callback; restart after submitted/unknown evidence but before next-save, assert same owner/thread and zero reselection. Email target slice adds real SMTP DATA-count integration.
 - [x] 1.4 (0.5h) Document authoritative email occurrence file versus unchanged generic schedule file, integrity failure and restart review semantics. Verify docs match owned inputs/results and add scoped CHANGELOG entry.
-- [ ] 1.5 (0.75h contingency) Fix bounded owned integration defects and recheck the same acceptance cases, or record unused contingency without adding features.
+- [x] 1.5 (0.75h contingency) Fix bounded owned integration defects and recheck the same acceptance cases, or record unused contingency without adding features. Contingency used in review: closed the occurrence fence and lifecycle gaps found in review (`de5fe29`); no features added.
 
 ## 2. Controlled smoke
 
