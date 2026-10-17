@@ -30,6 +30,8 @@ Total: **7 engineering hours**, strictly below 8 hours. See tasks.md for itemize
 
 ## Batch:
 
+- code-conflict: email-private-observability (src/core/reminder-store.ts)
+- code-conflict: email-spontaneous-occurrences (src/bootstrap.ts)
 - depends-on: email-adapter
 - depends-on: email-response-accounting
 - code-conflict: email-local-attachments (src/core/session-orchestrator.ts)
