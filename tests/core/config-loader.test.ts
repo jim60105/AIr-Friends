@@ -117,10 +117,11 @@ workspace:
 `;
 
   await withTestConfig(validEmailConfig, async (dir) => {
+    // The config above is otherwise valid, so the production activation guard fires.
     await assertRejects(
       () => loadConfig(dir),
       ConfigError,
-      "platforms.email.receivingAuth.attestedStripping must be true when email is enabled",
+      "Email platform activation is unavailable in this release",
     );
   });
 });
@@ -193,10 +194,11 @@ workspace:
   workspacesDir: "workspaces"
 `;
   await withTestConfig(unauthenticatedConfig, async (dir) => {
+    // attestedStripping: false fails validation before the activation guard is consulted.
     await assertRejects(
       () => loadConfig(dir),
       ConfigError,
-      "Email platform activation is unavailable in this release",
+      "platforms.email.receivingAuth.attestedStripping must be true when email is enabled",
     );
   });
 });
