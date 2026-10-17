@@ -931,12 +931,16 @@ export class SkillAPIServer {
     // result that reported nothing but whose durable evidence the accounting just
     // recovered is audited from that same evidence.
     if (privateEmail && auditWriter) {
+      // The work id recorded here must be the one the durable evidence is filed
+      // under: a scheduled reminder session has no inbound work item, so its
+      // logical operation carries the reminder's own id.
+      const emailWorkId = sessionEmailOperation(session)?.workId;
       for (const emailSubmission of emailAccounting.outcomes) {
         await auditWriter.writeEmailOperation({
           ...(emailSubmission.operationId === undefined
             ? {}
             : { operationId: emailSubmission.operationId }),
-          ...(session.emailWorkId === undefined ? {} : { workId: session.emailWorkId }),
+          ...(emailWorkId === undefined ? {} : { workId: emailWorkId }),
           phase: emailSubmission.phase,
           ...(emailSubmission.targetKind === undefined
             ? {}
