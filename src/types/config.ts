@@ -38,11 +38,59 @@ export interface MisskeyConfig extends BasePlatformConfig {
 }
 
 /**
+ * IMAP configuration for email platform
+ */
+export interface EmailImapConfig {
+  host: string;
+  port?: number;
+  tlsMode?: "tls" | "starttls";
+  username: string;
+  password: string;
+}
+
+/**
+ * SMTP configuration for email platform
+ */
+export interface EmailSmtpConfig {
+  host: string;
+  port?: number;
+  tlsMode?: "tls" | "starttls";
+  username: string;
+  password: string;
+}
+
+/**
+ * Receiving authentication configuration for email platform
+ */
+export interface EmailReceivingAuthConfig {
+  authservId: string;
+  attestedStripping: boolean;
+}
+
+/**
+ * Email platform configuration
+ */
+export interface EmailConfig extends BasePlatformConfig {
+  address: string;
+  imap: EmailImapConfig;
+  smtp: EmailSmtpConfig;
+  incomingFolder: string;
+  sentFolder: string;
+  pollIntervalMs: number;
+  receivingAuth: EmailReceivingAuthConfig;
+  maxMessageBytes: number;
+  maxIncomingAttachments: number;
+  signature: string;
+  spontaneousPost?: SpontaneousPostConfig;
+}
+
+/**
  * Platform configurations
  */
 export interface PlatformsConfig {
   discord: DiscordConfig;
   misskey: MisskeyConfig;
+  email?: EmailConfig;
 }
 
 /**

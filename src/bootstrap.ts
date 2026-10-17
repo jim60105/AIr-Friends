@@ -311,6 +311,10 @@ export async function bootstrap(
   // Initialize Spontaneous Scheduler
   const spontaneousScheduler = new SpontaneousScheduler(config);
   spontaneousScheduler.setCallback(async (platform: Platform) => {
+    const platformConfig = config.platforms[platform];
+    if (!platformConfig?.spontaneousPost) {
+      return;
+    }
     const adapter = platformRegistry.getAdapter(platform);
     if (!adapter) {
       logger.warn("Platform adapter not found: {platform}", { platform });
@@ -334,7 +338,7 @@ export async function bootstrap(
       return;
     }
 
-    const sp = config.platforms[platform].spontaneousPost!;
+    const sp = platformConfig.spontaneousPost;
     const fetchRecentMessages = Math.random() < sp.contextFetchProbability;
 
     logger.info("Triggering spontaneous post", {

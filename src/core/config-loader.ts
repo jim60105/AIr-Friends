@@ -17,6 +17,7 @@ import type {
   IdleTimeoutConfig,
   MemoryMaintenanceConfig,
   MemoryRecallConfig,
+  PlatformsConfig,
   RateLimitConfig,
   RemindersConfig,
   SandboxConfig,
@@ -28,8 +29,13 @@ import { ConfigError, ErrorCode } from "../types/errors.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { DISCORD_WHITELIST_PATTERN } from "../platforms/discord/discord-config.ts";
 import { MISSKEY_WHITELIST_PATTERN } from "../platforms/misskey/misskey-config.ts";
+import {
+  EMAIL_WHITELIST_PATTERN,
+  normalizeEmailMailbox,
+} from "../platforms/email/email-identity.ts";
 
 const logger = createLogger("ConfigLoader");
+export { expandEnvVars };
 
 /** Validate channel ID format */
 const MISSKEY_TIMELINE_PATTERN = /^misskey\/timeline\/self$/;
@@ -38,6 +44,7 @@ function isValidChannelId(id: string): boolean {
   return (
     DISCORD_WHITELIST_PATTERN.test(id) ||
     MISSKEY_WHITELIST_PATTERN.test(id) ||
+    EMAIL_WHITELIST_PATTERN.test(id) ||
     MISSKEY_TIMELINE_PATTERN.test(id)
   );
 }
@@ -178,26 +185,52 @@ function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
 
   for (const raw of rawChannels) {
     if (typeof raw === "string") {
-      if (isValidChannelId(raw)) {
-        channels.push({
-          id: raw,
-          enabled: true,
-          spontaneousPost: false,
-          channelLurk: false,
-          rateLimitBypass: false,
-        });
-      } else {
+      let normalizedId = raw;
+      if (raw.startsWith("email/account/")) {
+        try {
+          const addr = raw.slice("email/account/".length);
+          const { userId } = normalizeEmailMailbox(addr);
+          normalizedId = `email/account/${userId}`;
+        } catch (err) {
+          logger.warn("Invalid email address in channel ID, ignoring", {
+            id: raw,
+            error: String(err),
+          });
+          continue;
+        }
+      } else if (!isValidChannelId(raw)) {
         logger.warn("Invalid channel ID format, ignoring", { id: raw });
-      }
-    } else if (typeof raw === "object" && raw !== null) {
-      const obj = raw as Record<string, unknown>;
-      const id = String(obj.id ?? "");
-      if (!isValidChannelId(id)) {
-        logger.warn("Invalid channel ID format, ignoring", { id });
         continue;
       }
       channels.push({
-        id,
+        id: normalizedId,
+        enabled: true,
+        spontaneousPost: false,
+        channelLurk: false,
+        rateLimitBypass: false,
+      });
+    } else if (typeof raw === "object" && raw !== null) {
+      const obj = raw as Record<string, unknown>;
+      const rawId = String(obj.id ?? "");
+      let normalizedId = rawId;
+      if (rawId.startsWith("email/account/")) {
+        try {
+          const addr = rawId.slice("email/account/".length);
+          const { userId } = normalizeEmailMailbox(addr);
+          normalizedId = `email/account/${userId}`;
+        } catch (err) {
+          logger.warn("Invalid email address in channel ID, ignoring", {
+            id: rawId,
+            error: String(err),
+          });
+          continue;
+        }
+      } else if (!isValidChannelId(rawId)) {
+        logger.warn("Invalid channel ID format, ignoring", { id: rawId });
+        continue;
+      }
+      channels.push({
+        id: normalizedId,
         enabled: obj.enabled !== false,
         spontaneousPost: obj.spontaneousPost === true,
         channelLurk: obj.channelLurk === true,
@@ -209,6 +242,34 @@ function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
 
   return channels;
 }
+
+/**
+ * Default email platform configuration
+ */
+export const DEFAULT_EMAIL_CONFIG = {
+  enabled: false,
+  address: "",
+  imap: {
+    host: "",
+    username: "",
+    password: "",
+  },
+  smtp: {
+    host: "",
+    username: "",
+    password: "",
+  },
+  incomingFolder: "INBOX",
+  sentFolder: "Sent",
+  pollIntervalMs: 300000,
+  receivingAuth: {
+    authservId: "",
+    attestedStripping: false,
+  },
+  maxMessageBytes: 26214400,
+  maxIncomingAttachments: 10,
+  signature: "",
+};
 
 /**
  * Default configuration values
@@ -238,6 +299,9 @@ const DEFAULT_CONFIG: Partial<Config> = {
   },
   replyPolicy: "channels" as const,
   channels: [],
+  platforms: {
+    email: DEFAULT_EMAIL_CONFIG,
+  } as unknown as PlatformsConfig,
 };
 
 /**
@@ -381,7 +445,6 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
  * Required configuration fields that must be present
  */
 const REQUIRED_FIELDS = [
-  "platforms.discord.token",
   "agent.model",
   "agent.systemPromptPath",
   "workspace.repoPath",
@@ -396,6 +459,151 @@ function expandEnvVars(value: string): string {
   return value.replace(/\$\{([^}]+)\}/g, (_match, varName) => {
     return Deno.env.get(varName) ?? "";
   });
+}
+
+/**
+ * Validate email platform configuration when enabled.
+ * Enforces secure transport (tls/starttls only), port defaults, required credentials,
+ * receiving authentication trust declaration, and the production activation guard.
+ */
+function validateEmailConfig(email: Record<string, unknown>): void {
+  if (email.enabled !== true) return;
+
+  // Address is required when enabled
+  if (!email.address || typeof email.address !== "string" || email.address.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.address is required when email platform is enabled",
+      { field: "platforms.email.address" },
+    );
+  }
+  try {
+    normalizeEmailMailbox(email.address);
+  } catch (err) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Invalid platforms.email.address: ${err instanceof Error ? err.message : String(err)}`,
+      { field: "platforms.email.address" },
+    );
+  }
+
+  const imap = (email.imap ?? {}) as Record<string, unknown>;
+
+  // Validate IMAP
+  if (!imap.host || typeof imap.host !== "string" || imap.host.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.imap.host is required when email is enabled",
+    );
+  }
+  if (!imap.username || typeof imap.username !== "string" || imap.username.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.imap.username is required when email is enabled",
+    );
+  }
+  if (!imap.password || typeof imap.password !== "string" || imap.password.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.imap.password is required when email is enabled",
+    );
+  }
+  const imapTlsMode = imap.tlsMode ?? "tls";
+  if (imapTlsMode !== "tls" && imapTlsMode !== "starttls") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Invalid platforms.email.imap.tlsMode "${imap.tlsMode}": must be "tls" or "starttls" (plaintext and opportunistic TLS are prohibited)`,
+    );
+  }
+  imap.tlsMode = imapTlsMode;
+  if (imap.port === undefined || imap.port === null || imap.port === "") {
+    imap.port = imapTlsMode === "tls" ? 993 : 143;
+  } else {
+    const p = Number(imap.port);
+    if (!Number.isInteger(p) || p <= 0 || p > 65535) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Invalid platforms.email.imap.port: must be an integer between 1 and 65535`,
+      );
+    }
+    imap.port = p;
+  }
+
+  // Validate pollIntervalMs
+  const pollMs = Number(email.pollIntervalMs ?? 300000);
+  if (!Number.isInteger(pollMs) || pollMs <= 0) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Invalid platforms.email.pollIntervalMs: must be a positive integer`,
+    );
+  }
+
+  // Validate SMTP
+  const smtpObj = (email.smtp ?? {}) as Record<string, unknown>;
+  if (!smtpObj.host || typeof smtpObj.host !== "string" || smtpObj.host.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.smtp.host is required when email is enabled",
+    );
+  }
+  if (!smtpObj.username || typeof smtpObj.username !== "string" || smtpObj.username.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.smtp.username is required when email is enabled",
+    );
+  }
+  if (!smtpObj.password || typeof smtpObj.password !== "string" || smtpObj.password.trim() === "") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.smtp.password is required when email is enabled",
+    );
+  }
+  const smtpTlsMode = smtpObj.tlsMode ?? "tls";
+  if (smtpTlsMode !== "tls" && smtpTlsMode !== "starttls") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Invalid platforms.email.smtp.tlsMode "${smtpObj.tlsMode}": must be "tls" or "starttls" (plaintext and opportunistic TLS are prohibited)`,
+    );
+  }
+  smtpObj.tlsMode = smtpTlsMode;
+  if (smtpObj.port === undefined || smtpObj.port === null || smtpObj.port === "") {
+    smtpObj.port = smtpTlsMode === "tls" ? 465 : 587;
+  } else {
+    const p = Number(smtpObj.port);
+    if (!Number.isInteger(p) || p <= 0 || p > 65535) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Invalid platforms.email.smtp.port: must be an integer between 1 and 65535`,
+      );
+    }
+    smtpObj.port = p;
+  }
+
+  // Validate receivingAuth
+  const receivingAuth = (email.receivingAuth ?? {}) as Record<string, unknown>;
+  if (
+    !receivingAuth.authservId ||
+    typeof receivingAuth.authservId !== "string" ||
+    receivingAuth.authservId.trim() === ""
+  ) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_MISSING_FIELD,
+      "platforms.email.receivingAuth.authservId is required when email is enabled",
+    );
+  }
+  if (receivingAuth.attestedStripping !== true) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "platforms.email.receivingAuth.attestedStripping must be true when email is enabled (requires attested MTA authentication header stripping)",
+    );
+  }
+
+  // Production activation guard: email platform cannot be activated in production until email-activation change
+  throw new ConfigError(
+    ErrorCode.CONFIG_INVALID,
+    "Email platform activation is unavailable in this release: production email remains disabled until final batch cutover",
+    { field: "platforms.email.enabled" },
+  );
 }
 
 /**
@@ -421,8 +629,17 @@ function validateConfig(config: Record<string, unknown>): void {
     }
   }
 
+  // Conditional platform requirements: discord.token required if discord is enabled
+  const platforms = config.platforms as
+    | Record<string, { enabled?: boolean; token?: string }>
+    | undefined;
+  if (platforms?.discord?.enabled === true) {
+    if (!platforms.discord.token || platforms.discord.token.trim() === "") {
+      missing.push("platforms.discord.token");
+    }
+  }
+
   // Special case: at least one platform must be enabled
-  const platforms = config.platforms as Record<string, { enabled?: boolean }> | undefined;
   const hasEnabledPlatform = platforms &&
     Object.values(platforms).some((p) => p?.enabled === true);
 
@@ -440,6 +657,26 @@ function validateConfig(config: Record<string, unknown>): void {
       `Missing required configuration fields: ${missing.join(", ")}`,
       { missingFields: missing },
     );
+  }
+
+  // Expand credentials in email config if references are used, keeping signature untouched
+  const emailCfg = (platforms as Record<string, unknown>)?.email as
+    | Record<string, unknown>
+    | undefined;
+  if (emailCfg) {
+    const imap = emailCfg.imap as Record<string, unknown> | undefined;
+    if (imap && typeof imap.password === "string") {
+      imap.password = expandEnvVars(imap.password);
+    }
+    const smtp = emailCfg.smtp as Record<string, unknown> | undefined;
+    if (smtp && typeof smtp.password === "string") {
+      smtp.password = expandEnvVars(smtp.password);
+    }
+  }
+
+  // Validate email platform configuration
+  if (emailCfg) {
+    validateEmailConfig(emailCfg);
   }
 
   // Validate replyPolicy value
