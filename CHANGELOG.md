@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Email platform identity and configuration foundation: added `email` to the platform union, safe `e_`+SHA-256 canonical mailbox hashing and channel account normalization (`email/account/<address>` to safe userId), complete typed `platforms.email` configuration with default-disabled posture, distinct IMAP and SMTP credential references, literal unexpanded email signature support, and full configuration trio parity across `config.example.yaml`, `.env.example`, and `helm/values.yaml`. Production activation remains guarded until final cutover.
+- Crash-safe email file primitives (`email-durable-files`): added generic file-backed durability primitives `appendDurable`, `replaceSnapshot`, and `readJournal` with per-state-root serialized concurrency, atomic sibling-temp+rename snapshot replacement, strict file and directory fsync ordering, path confinement refusing symlink escapes, mode 0700/0600 privacy, JSONL envelope versioning with CRC32 checksums, torn-tail and interior corruption detection, damaged-append refusal, and privacy-preserving diagnostics that never disclose line contents.
 
 ## [0.35.0] - 2026-10-16
 
