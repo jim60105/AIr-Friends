@@ -12,9 +12,11 @@
 //   complete-message flush) and a discord control client.
 // - The REAL `SkillAPIServer`/`SkillRegistry`/`EmailComposeHandler` over HTTP for a
 //   compose, a reply, a file send and a denied forward.
+// - The REAL `ReminderStore` due-reminder enumeration on a malformed email JSONL,
+//   which runs BEFORE any session logger exists.
 // Honesty boundary: no provider, credential, mailbox or model judgment is involved;
-// the malformed-reminder enumeration is owned by `email-reminder-threads` and is not
-// re-tested here.
+// the reminder's own restart-safe delivery is owned by `email-reminder-threads` and
+// is not re-tested here.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
@@ -46,6 +48,7 @@ import { SkillAPIServer } from "../../src/skill-api/server.ts";
 import { SkillRegistry as RealSkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
+import { ReminderStore } from "../../src/core/reminder-store.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { metricsRegistry } from "../../src/utils/metrics.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
@@ -1231,4 +1234,62 @@ Deno.test("skill API - non-email skill results stay byte-compatible", async () =
     assertEquals("code" in (call.data.skillResult as Record<string, unknown>), false);
     assertEquals(entries.some((entry) => entry.phase === "email_operation"), false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-session reminder replay (due-reminder enumeration)
+// ---------------------------------------------------------------------------
+
+Deno.test("reminder replay - a malformed email line logs a position, never content", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const store = new ReminderStore("reminders.jsonl");
+    // Line 1 parses (and holds the private body); line 2 is malformed AND carries
+    // every other sentinel. The parser's own message would quote it verbatim.
+    await Deno.writeTextFile(
+      join(dir, "reminders.jsonl"),
+      [
+        `{"type":"reminder","id":"rem_1","message":"${BODY_SENTINEL}","enabled":false}`,
+        `{"type":"reminder" ${ADDRESS_SENTINEL} ${PASSWORD_SENTINEL} ${FILENAME_SENTINEL}`,
+      ].join("\n") + "\n",
+    );
+    const emailWorkspace = {
+      key: `email/${OWNER}`,
+      components: { platform: "email", userId: OWNER },
+      path: dir,
+      tmpPath: join(dir, "tmp"),
+      isDm: true,
+    } as WorkspaceInfo;
+
+    const { result, logs } = await capturingLogs(() => store.getDueReminders(emailWorkspace));
+    assertEquals(result, []);
+
+    const logged = logs.join("\n");
+    // The safe code and the line/byte position are the whole diagnostic.
+    assertStringIncludes(logged, '"code":"REMINDER_LINE_PARSE_FAILED"');
+    assertStringIncludes(logged, '"line":2');
+    assert(/"offset":\d+/.test(logged), `the position must be reported: ${logged}`);
+    assertNoSentinel(logged, "the pre-session reminder replay log");
+    assertEquals(
+      /SyntaxError|Unexpected token|is not valid JSON/.test(logged),
+      false,
+      "a content-bearing parser exception must not be logged",
+    );
+
+    // A non-email workspace keeps the historical diagnostic unchanged.
+    const control = await capturingLogs(() =>
+      store.getDueReminders({
+        key: "discord/123",
+        components: { platform: "discord", userId: "123" },
+        path: dir,
+        tmpPath: join(dir, "tmp"),
+        isDm: true,
+      } as WorkspaceInfo)
+    );
+    const controlLog = control.logs.join("\n");
+    assertStringIncludes(controlLog, PASSWORD_SENTINEL);
+    assertStringIncludes(controlLog, "SyntaxError");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });

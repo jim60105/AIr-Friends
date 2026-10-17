@@ -2608,8 +2608,11 @@ Acceptance requirements and scenarios are defined in
 
 - **Adversarial errors**: a protocol or agent error carrying a private body or password records only
   a safe reason code and opaque operation/work identifiers, in both the audit entry and the log.
-- **Malformed reminder before session creation**: owned and covered by `email-reminder-threads`
-  (`src/core/reminder-store.ts`); the OS-level workspace identity decides replay sensitivity there.
+- **Malformed reminder before session creation**: `ReminderStore.parseLog()` decides replay
+  sensitivity from the trusted `workspace.components.platform`, so an email workspace's due-reminder
+  enumeration logs the safe `REMINDER_LINE_PARSE_FAILED` code with the line number and byte offset
+  only — never the line, and never the parser message that quotes it. That enumeration runs before
+  any session logger exists.
 - **APPEND failure**: an accepted email whose sent-folder copy fails shows `submitted` plus
   `sentCopy: failed` and never `unsent`.
 
@@ -2620,7 +2623,8 @@ deno fmt --check src/ tests/
 deno lint src/ tests/
 deno check src/main.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
-  tests/core/email-privacy.test.ts tests/core/audit-logger.test.ts tests/utils/logger.test.ts \
+  tests/core/email-privacy.test.ts tests/core/reminder-store.test.ts tests/core/audit-logger.test.ts \
+  tests/utils/logger.test.ts \
   tests/types/audit.test.ts tests/acp/client.test.ts tests/skill-api/server.test.ts \
   tests/skills/email-handler.test.ts tests/skills/email-forward.test.ts tests/skills/file-handler.test.ts
 ```
@@ -2630,5 +2634,7 @@ server over HTTP (with the real `SessionRegistry`, JWT issuance and `EmailCompos
 recording mail-service seam) using sentinel values for the address, subject, body, credentials and
 attachment name. It asserts their absence from every phase entry, every log line and the metrics
 output, the presence of digests and identifiers instead, the `email_operation` allowlist under an
-adversarial extra field, a thrown handler exception that crosses the skill registry's logger, and
-byte-compatible non-email entries. No model, provider or production credential is involved.
+adversarial extra field, a thrown handler exception that crosses the skill registry's logger, the
+real `ReminderStore` due-reminder enumeration on a malformed email JSONL (a position only, never the
+line or the parser message), and byte-compatible non-email entries. No model, provider or production
+credential is involved.
