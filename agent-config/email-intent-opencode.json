@@ -1,0 +1,57 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "default_agent": "email-intent",
+  "permission": {
+    "*": "deny"
+  },
+  "agent": {
+    "email-intent": {
+      "mode": "primary",
+      "description": "Internal email-intent interpretation profile. Every native tool is denied before dispatch.",
+      "permission": {
+        "*": "deny",
+        "read": "deny",
+        "edit": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "list": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "external_directory": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "lsp": "deny",
+        "skill": "deny",
+        "question": "deny",
+        "todoread": "deny",
+        "todowrite": "deny",
+        "doom_loop": "deny"
+      }
+    },
+    "build": {
+      "disable": true
+    },
+    "plan": {
+      "disable": true
+    },
+    "general": {
+      "disable": true
+    },
+    "explore": {
+      "disable": true
+    },
+    "scout": {
+      "disable": true
+    },
+    "compaction": {
+      "disable": true
+    },
+    "title": {
+      "disable": true
+    },
+    "summary": {
+      "disable": true
+    }
+  }
+}

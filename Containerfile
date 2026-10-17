@@ -317,6 +317,17 @@ COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /opt/air/omp/native-c
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
 
+# Authored deny-all OpenCode intent profile (`email-opencode-intent-profile`).
+# Installed at its OWN deployment path instead of beside the deployed global
+# configuration above: the engine merges every document in that directory, so a
+# second file there would silently change ORDINARY launches. The profile's
+# factory resolves exactly this installed path (falling back to the
+# development-tree spelling outside an image) and injects the document through
+# OPENCODE_CONFIG_CONTENT. The ordinary configuration above stays
+# byte-identical; directory modes are prepared in the post-COPY directory step
+# below, like every other linked copy in this stage.
+COPY --link --chown=$UID:0 --chmod=775 agent-config/email-intent-opencode.json /opt/air/opencode/config/email-intent-opencode.json
+
 # Authored native OMP model configuration. Native OMP reads `models.yml` from
 # `getAgentDir()/models.yml` (config HOME), so the authored provider header is
 # installed at the NATIVE config path instead of a second overlay tree,
@@ -393,6 +404,10 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
     install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
+    # OpenCode intent-profile deployment tree (`email-opencode-intent-profile`):
+    # holds the authored deny-all document installed above and nothing else.
+    install -d -m 775 -o $UID -g 0 /opt/air/opencode && \
+    install -d -m 775 -o $UID -g 0 /opt/air/opencode/config && \
     install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
     install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser && \
     # OMP artifact destinations (mode settings, prompt artifact, generated
