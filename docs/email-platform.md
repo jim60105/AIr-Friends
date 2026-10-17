@@ -1243,3 +1243,10 @@ deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/dashboard/server.test.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/utils/metrics.test.ts
 ```
+
+Exercised evidence layers: these cases drive the real `WorkspaceManager`,
+`MemoryStore`, `GitBackupService` (real `git` against a local bare remote; one case
+forces an unreachable remote) and `DashboardServer` (real HTTP over a per-test
+temporary tree). No IMAP/SMTP transport, model call, ACP agent or production mailbox
+participates in this change: transport, provider and production evidence is owned by
+those slices and is not claimed here.
