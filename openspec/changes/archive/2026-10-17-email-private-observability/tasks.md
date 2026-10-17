@@ -15,10 +15,12 @@ Total estimate: **6.75 engineering hours**, strictly below 8 hours. Estimates in
 - [x] 2.1 (0.75h) Exercise the completed boundary with its real predecessor implementations in isolated temporary state. Verify all scenarios in `specs/session-audit-log/spec.md`, checking external side-effect counts and failure outcomes; use the owned/predecessor local IMAP/SMTP fixtures when transport is involved. Record actual exercised layers separately from model/production evidence.
 
 Note on 1.2: the malformed-reminder replay diagnostics live in `src/core/reminder-store.ts`, which the
-parallel `email-reminder-threads` slice serializes; its content-free due-enumeration regression landed
-there and is NOT duplicated here. This slice's 1.2 evidence is the ACP/Skill API/file/pre-session log
-closure: `tests/core/email-privacy.test.ts` exercises the ACP client, the Skill API server (compose,
-deny-forward, reply, throwing file send), the file handler, the logger and the audit writer with
-sentinel material.
+parallel `email-reminder-threads` slice also owns (that slice supplied the workspace identity contract,
+not the sanitized diagnostic), so this slice implements the diagnostic here: `parseLog()` takes the
+trusted `workspace.components.platform`, and an email workspace logs only a safe code plus the line's
+byte offset instead of an excerpt and the parser message. This slice's 1.2 evidence is the
+ACP/Skill API/file/pre-session log closure: `tests/core/email-privacy.test.ts` exercises the ACP
+client, the Skill API server (compose, deny-forward, reply, throwing file send), the file handler, the
+logger, the audit writer and the `ReminderStore` due-reminder enumeration with sentinel material.
 
 Implementation checking policy: run local slice checks after its own edits settle; run the final repository formatting/lint/type/regression gate only once after the full integrated batch. During this planning assignment run only the final OpenSpec/artifact gate, with no application code tests.
