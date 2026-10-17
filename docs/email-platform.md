@@ -441,7 +441,9 @@ stays unavailable until the `email-activation` change removes the configuration 
   consumers must be idempotent.
 - **Per-message failure isolation**: a malformed or size-limited message becomes terminal
   (`failed`) or `review-required` without blocking later UIDs. Deterministic per-message transport
-  failures (oversized/expunged) are terminal too.
+  failures (oversized, or a UID positively confirmed absent from the folder) are terminal too; a
+  durable discovery found expunged after a crash is terminalized so later checkpoints are never
+  blocked.
 - **Serialization & fail-safe connection handling**: rounds never overlap (a concurrent `poll()`
   shares the in-flight round). A connection-level failure aborts the round with the checkpoint
   unchanged and retries on the next interval.
@@ -449,8 +451,9 @@ stays unavailable until the `email-activation` change removes the configuration 
   settles, so the default 300-second interval (`pollIntervalMs`) measures wall-clock between rounds
   and excludes server/agent processing time. Timer reconnects are IMAP-only, never SMTP retry.
 - **Startup recovery**: `recover()` is startup-only. Accepted-but-unstarted work resumes
-  (re-emitted with its original durable `recordId`); work that was `started` without a terminal
-  receipt is quarantined as `review-required` by the mailbox journal and is never auto-replayed.
+  (re-emitted with its original durable `recordId`) and is retried on later rounds after a
+  transient failure; work that was `started` without a terminal receipt is quarantined as
+  `review-required` by the mailbox journal and is never auto-replayed.
 
 ### UIDVALIDITY Replacement & Manual Review
 
@@ -459,8 +462,12 @@ reconciles every message of the replacement mailbox against durable message evid
 `Message-ID` plus raw-source SHA-256 digest):
 
 - an identical known source is provably not new work and is skipped silently;
-- conflicting content under the same identifier, multiple matching records, or unmatched
-  replacement content stops automatic work and is reported for manual review;
+- this requires both the archived source to be identical AND its record to be bound to a durable
+  acceptance/terminal receipt; an archived source that was never accepted is not treated as
+  processing evidence;
+- conflicting content under the same identifier, ambiguous/multiple matches, an unaccepted
+  archived source, or unmatched replacement content stops automatic work and is reported for
+  manual review;
 - the checkpoint is left unchanged, so no message is admitted under an unverified mailbox identity.
 
 Because a changed `UIDVALIDITY` is a security-relevant mailbox replacement, an operator must review

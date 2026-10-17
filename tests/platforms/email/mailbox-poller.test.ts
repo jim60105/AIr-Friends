@@ -17,7 +17,18 @@ import {
   MailboxStore,
 } from "../../../src/platforms/email/mailbox-store.ts";
 import { EmailMessageStore } from "../../../src/platforms/email/message-store.ts";
-import { EmailImapClient } from "../../../src/platforms/email/imap-client.ts";
+import {
+  EmailImapClient,
+  ImapAppendOptions,
+  ImapDiagnosticCode,
+  ImapFetchHeadersOptions,
+  ImapFetchSourceOptions,
+  ImapListOptions,
+  ImapMailboxPosition,
+  ImapMessage,
+  ImapTransport,
+  ImapTransportError,
+} from "../../../src/platforms/email/imap-client.ts";
 import {
   EmailMailboxPoller,
   IncomingWork,
@@ -414,6 +425,12 @@ Deno.test("EmailMailboxPoller - crash recovery resumes unstarted and quarantines
       // Started work is quarantined, never auto-replayed.
       assertEquals(env.store.getEntry(keyFor(500, 102))?.state, "review-required");
       assert(reviews.some((r) => r.mailboxKey.uid === 102));
+
+      // A subsequent round must not reprocess durably-covered work.
+      const afterRecoveryRound = await poller.poll();
+      assertEquals(emits.length, 1);
+      assertEquals(afterRecoveryRound.accepted, 0);
+      assertEquals(env.store.getSnapshot()?.cursor, 102);
     } finally {
       await service.stop();
     }
@@ -552,6 +569,271 @@ Deno.test("EmailMailboxPoller - start performs a round and stop settles cleanly"
       assertEquals(emits.length, 1);
 
       await poller.stop();
+    } finally {
+      await service.stop();
+    }
+  });
+});
+
+/**
+ * Thin fault-injecting decorator over the real IMAP transport, used only to schedule a
+ * connection-level failure at a deterministic UID boundary (a mid-batch drop).
+ */
+class FaultInjectingTransport implements ImapTransport {
+  failOnUid: number | null = null;
+
+  constructor(private readonly inner: ImapTransport) {}
+
+  connect(): Promise<void> {
+    return this.inner.connect();
+  }
+
+  disconnect(): Promise<void> {
+    return this.inner.disconnect();
+  }
+
+  status(folder?: string): Promise<ImapMailboxPosition> {
+    return this.inner.status(folder);
+  }
+
+  position(folder?: string): Promise<ImapMailboxPosition> {
+    return this.inner.position(folder);
+  }
+
+  listAfter(uid: number, options?: ImapListOptions): Promise<number[]> {
+    return this.inner.listAfter(uid, options);
+  }
+
+  fetchHeaders(uid: number, options?: ImapFetchHeadersOptions): Promise<string> {
+    return this.inner.fetchHeaders(uid, options);
+  }
+
+  fetchSource(uid: number, options?: ImapFetchSourceOptions): Promise<ImapMessage> {
+    if (this.failOnUid === uid) {
+      return Promise.reject(
+        new ImapTransportError(ImapDiagnosticCode.CONNECTION_CLOSED, "injected mid-batch drop"),
+      );
+    }
+    return this.inner.fetchSource(uid, options);
+  }
+
+  appendSent(rawMime: Uint8Array | string, options?: ImapAppendOptions): Promise<void> {
+    return this.inner.appendSent(rawMime, options);
+  }
+}
+
+Deno.test("EmailMailboxPoller - mid-batch connection drop preserves progress and resumes without duplication", async () => {
+  await withTempDir(async (base) => {
+    const mailboxRoot = `${base}/email`;
+    const workspacesRoot = `${base}/workspaces`;
+    const service = new EmailImapTestService({
+      tlsMode: "tls",
+      username: BOT_ADDRESS,
+      password: PASSWORD,
+      uidValidity: 500,
+      uidNext: 101,
+    });
+    await service.start();
+    try {
+      const env = buildEnv(service, mailboxRoot, workspacesRoot);
+      const fault = new FaultInjectingTransport(env.transport);
+      const emits: IncomingWork[] = [];
+      const errors: string[] = [];
+      const poller = new EmailMailboxPoller({
+        config: env.config,
+        transport: fault,
+        mailboxStore: env.store,
+        messageStore: env.messageStore,
+        channels: CHANNELS,
+        emit: (work) => {
+          emits.push(work);
+        },
+        onCycleError: (code) => {
+          errors.push(code);
+        },
+        workIdFactory: (() => {
+          let counter = 0;
+          return () => `fault-${++counter}`;
+        })(),
+      });
+
+      await poller.poll(); // first activation
+      service.addMessage({ uid: 101, rawMime: rawMessage({ messageId: "<d-101@x>" }) });
+      service.addMessage({ uid: 102, rawMime: rawMessage({ messageId: "<d-102@x>" }) });
+      service.addMessage({ uid: 103, rawMime: rawMessage({ messageId: "<d-103@x>" }) });
+
+      fault.failOnUid = 102;
+      const dropped = await poller.poll();
+      assert(dropped.halted);
+      assert(dropped.error);
+      assertEquals(errors.length, 1);
+      assertEquals(emits.map((w) => w.mailboxKey.uid), [101]);
+      assertEquals(env.store.getSnapshot()?.cursor, 101);
+
+      fault.failOnUid = null;
+      const resumed = await poller.poll();
+      assertEquals(resumed.accepted, 2);
+      assertEquals(emits.map((w) => w.mailboxKey.uid).sort((a, b) => a - b), [101, 102, 103]);
+      assertEquals(new Set(emits.map((w) => w.mailboxKey.uid)).size, 3);
+      assertEquals(env.store.getSnapshot()?.cursor, 103);
+    } finally {
+      await service.stop();
+    }
+  });
+});
+
+Deno.test("EmailMailboxPoller - wire-oversized message is terminal and later mail is admitted", async () => {
+  await withTempDir(async (base) => {
+    const mailboxRoot = `${base}/email`;
+    const workspacesRoot = `${base}/workspaces`;
+    const service = new EmailImapTestService({
+      tlsMode: "tls",
+      username: BOT_ADDRESS,
+      password: PASSWORD,
+      uidValidity: 500,
+      uidNext: 101,
+    });
+    await service.start();
+    try {
+      const env = buildEnv(service, mailboxRoot, workspacesRoot, { maxMessageBytes: 1000 });
+      const emits: IncomingWork[] = [];
+      const poller = buildPoller(env, (w) => emits.push(w));
+      await poller.poll();
+
+      // Understated RFC822.SIZE passes preflight, but the stream exceeds the bound.
+      service.addMessage({
+        uid: 101,
+        rawMime: rawMessage({ messageId: "<big-101@x>", body: "x".repeat(4000) }),
+        advertisedSize: 200,
+      });
+      service.addMessage({ uid: 102, rawMime: rawMessage({ messageId: "<ok-102@x>" }) });
+
+      const round = await poller.poll();
+      assertEquals(round.failed, 1);
+      assertEquals(round.accepted, 1);
+      assertEquals(emits.map((w) => w.mailboxKey.uid), [102]);
+      assertEquals(env.store.getEntry(keyFor(500, 101))?.state, "failed");
+      assertEquals(env.store.getSnapshot()?.cursor, 102);
+    } finally {
+      await service.stop();
+    }
+  });
+});
+
+Deno.test("EmailMailboxPoller - expunged durable discovery does not block later checkpoints", async () => {
+  await withTempDir(async (base) => {
+    const mailboxRoot = `${base}/email`;
+    const workspacesRoot = `${base}/workspaces`;
+    const service = new EmailImapTestService({
+      tlsMode: "tls",
+      username: BOT_ADDRESS,
+      password: PASSWORD,
+      uidValidity: 500,
+      uidNext: 103,
+      // UID 101 was durably discovered by a crashed round but is absent from the mailbox.
+      initialMessages: [{ uid: 102, rawMime: rawMessage({ messageId: "<survivor-102@x>" }) }],
+    });
+    await service.start();
+    try {
+      const seedStore = new MailboxStore({ emailRoot: mailboxRoot, fingerprint: fingerprint() });
+      await seedStore.recover();
+      await seedStore.initialize(100, 500);
+      await seedStore.discover(keyFor(500, 101));
+      seedStore.close();
+
+      const env = buildEnv(service, mailboxRoot, workspacesRoot);
+      const emits: IncomingWork[] = [];
+      const poller = buildPoller(env, (w) => emits.push(w));
+
+      const round = await poller.poll();
+      assertEquals(round.failed, 1);
+      assertEquals(round.accepted, 1);
+      assertEquals(env.store.getEntry(keyFor(500, 101))?.state, "failed");
+      assertEquals(env.store.getEntry(keyFor(500, 102))?.state, "accepted");
+      assertEquals(env.store.getSnapshot()?.cursor, 102);
+      assertEquals(emits.map((w) => w.mailboxKey.uid), [102]);
+    } finally {
+      await service.stop();
+    }
+  });
+});
+
+Deno.test("EmailMailboxPoller - processes more than one bounded UID batch", async () => {
+  await withTempDir(async (base) => {
+    const mailboxRoot = `${base}/email`;
+    const workspacesRoot = `${base}/workspaces`;
+    const service = new EmailImapTestService({
+      tlsMode: "tls",
+      username: BOT_ADDRESS,
+      password: PASSWORD,
+      uidValidity: 500,
+      uidNext: 1,
+    });
+    await service.start();
+    try {
+      const env = buildEnv(service, mailboxRoot, workspacesRoot);
+      const emits: IncomingWork[] = [];
+      const poller = buildPoller(env, (w) => emits.push(w));
+      await poller.poll(); // first activation at boundary 0
+
+      for (let uid = 1; uid <= 60; uid++) {
+        service.addMessage({
+          uid,
+          rawMime: rawMessage({ messageId: `<batch-${uid}@x>` }),
+        });
+      }
+
+      const round = await poller.poll();
+      assertEquals(round.accepted, 60);
+      assertEquals(emits.length, 60);
+      assertEquals(env.store.getEntry(keyFor(500, 60))?.state, "accepted");
+      assertEquals(env.store.getSnapshot()?.cursor, 60);
+    } finally {
+      await service.stop();
+    }
+  });
+});
+
+Deno.test("EmailMailboxPoller - replacement requires processing binding, not archived source alone", async () => {
+  await withTempDir(async (base) => {
+    const mailboxRoot = `${base}/email`;
+    const workspacesRoot = `${base}/workspaces`;
+    const oldRaw = rawMessage({ messageId: "<orphan-1@x>", body: "Archived body." });
+    const service = new EmailImapTestService({
+      tlsMode: "tls",
+      username: BOT_ADDRESS,
+      password: PASSWORD,
+      uidValidity: 777,
+      uidNext: 202,
+      initialMessages: [{ uid: 201, rawMime: oldRaw }],
+    });
+    await service.start();
+    try {
+      // The source was archived by a crashed round but never accepted or terminalized.
+      const seedMessages = new EmailMessageStore({ workspacesRoot });
+      await seedMessages.putSource(ALLOWED_USER_ID, new TextEncoder().encode(oldRaw), {
+        from: ALLOWED_ADDRESS,
+        subject: "Orphan",
+        wireIds: { messageId: "<orphan-1@x>" },
+        plainBody: "Archived body.",
+      });
+      const seedStore = new MailboxStore({ emailRoot: mailboxRoot, fingerprint: fingerprint() });
+      await seedStore.recover();
+      await seedStore.initialize(100, 500);
+      seedStore.close();
+
+      const env = buildEnv(service, mailboxRoot, workspacesRoot);
+      const emits: IncomingWork[] = [];
+      const reviews: ReviewItem[] = [];
+      const poller = buildPoller(env, (w) => emits.push(w), (i) => reviews.push(i));
+
+      const round = await poller.poll();
+      assert(round.replacementDetected);
+      assertEquals(emits.length, 0);
+      assertEquals(
+        reviews.map((r) => `${r.mailboxKey.uid}:${r.reason}`),
+        ["201:replacement-unaccepted-source"],
+      );
     } finally {
       await service.stop();
     }
