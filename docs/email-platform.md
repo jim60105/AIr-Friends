@@ -783,11 +783,11 @@ ls -l data/workspaces/email/<ownerId>/email/source/
 
 ### Outcomes, Uncertainty and Operator Duties
 
-| Phase       | Meaning                                                                             | Caller action                                                        |
-| ----------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `submitted` | Positive final DATA acknowledgement; `sentCopy` reports the remote copy separately.  | None.                                                                |
-| `failed`    | Definite rejection before acceptance (transport safe code).                          | No automatic retry; a new, explicitly authorized logical action only. |
-| `unknown`   | Crash, lost acknowledgement, or an acceptance that could not be persisted.           | Manual operator review; automatic resend is suppressed.               |
+| Phase       | Meaning                                                                             | Caller action                                                         |
+| ----------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `submitted` | Positive final DATA acknowledgement; `sentCopy` reports the remote copy separately. | None.                                                                 |
+| `failed`    | Definite rejection before acceptance (transport safe code).                         | No automatic retry; a new, explicitly authorized logical action only. |
+| `unknown`   | Crash, lost acknowledgement, or an acceptance that could not be persisted.          | Manual operator review; automatic resend is suppressed.               |
 
 - **Manual review of `unknown`**: the call returns `unknown` with the operation id and the
   persisted evidence, and a repeated request for the same key returns the recorded result with
@@ -979,3 +979,153 @@ deno check src/main.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/email-session-receipts.test.ts
 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/platforms/email/mailbox-store.test.ts
 ```
+
+## Durable Spontaneous Schedule Occurrences (Owned by `email-spontaneous-occurrences`)
+
+`src/platforms/email/spontaneous-store.ts` owns the authoritative schedule state of the email
+spontaneous lane. Discord and Misskey keep their existing best-effort schedule times in
+`data/scheduler-state.json` (`SchedulerStateStore`); the email lane does not use that file at
+all, so a stale `spontaneous:email` key there has no effect.
+
+### File & Layout
+
+- **`data/email/spontaneous.json`**: single fsynced JSON snapshot, written ONLY through
+  `replaceSnapshot` (sibling-temp + fsync + rename + directory fsync, mode `0600`):
+
+```json
+{
+  "v": 1,
+  "occurrence": {
+    "occurrenceId": "<uuid>",
+    "dueAt": "<ISO>",
+    "status": "started",
+    "target": { "owner": "e_...", "threadId": "..." }
+  },
+  "previous": { "occurrenceId": "<uuid>", "dueAt": "<ISO>", "status": "completed" }
+}
+```
+
+- `occurrence` is the only dispatchable record. Its status is `scheduled` (identity and due
+  time exist, no target yet), `selected` (owner/thread durably bound), or `started` (dispatch
+  durably claimed). `selected`/`started` always carry their bound target; a snapshot that loses
+  it is corrupt.
+- `previous` retains the immediately preceding occurrence with its terminal status
+  (`completed` or `review-required`) while its successor is planned. It is dropped in the same
+  write that terminalizes the successor. `submissions.jsonl` (row 04) remains the
+  authoritative ledger of outbound operation evidence; this snapshot keeps only the preceding
+  occurrence.
+- `data/email/` is the email state area; the whole platform is file-backed and single-owner.
+
+### Schedule Invariants
+
+- **Persist before any timer**: a scheduled occurrence is written and fsynced before the
+  scheduler arms a `setTimeout`, so no dispatch can ever run for an occurrence that is not
+  durable. A failed initial persistence arms no timer and fences the lane; because a rejection
+  can arrive after the rename, the snapshot may already have been replaced, so the file must be
+  inspected rather than assumed absent.
+- **Overdue identity**: on restore the original `occurrenceId` and `dueAt` are retained even
+  when overdue; the delay simply becomes zero. The persisted due time is authoritative and is
+  never rewritten to `now` (unlike `resolveScheduleTime`, which is used only for the non-email
+  best-effort lanes).
+- **Durable target binding**: `select()` persists owner/thread before any session or SMTP work
+  and refuses a different target for an occurrence that already bound one; `begin()` requires a
+  bound target, so no dispatch can run unbound.
+- **Atomic terminal + successor**: `finishAndScheduleNext()` computes the terminal status,
+  then replaces the snapshot in ONE write containing both the terminal result of the current
+  occurrence and a distinct new `scheduled` successor. The successor identity is always new, so
+  a restarted lane can never retry an occurrence under a replacement identity.
+- **Evidence forbids re-fire**: the terminal status of a `started` occurrence is derived from
+  the operation evidence of `spontaneousOperationKey(occurrenceId)`
+  (`{ workId: occurrenceId, actionSlot: "spontaneous:<occurrenceId>" }`, owner from the bound
+  target): `submitted` gives `completed`, `failed` gives `completed`, `submitting`/`unknown`
+  give `review-required`, and otherwise the dispatch outcome decides (`unavailable` gives
+  `review-required`). Downstream session and submission callers MUST derive the operation key
+  from `spontaneousOperationKey`, otherwise evidence can not be attributed to the occurrence.
+- **Fail closed without evidence**: an occurrence with a bound target is classified `uncertain`
+  when no evidence provider is attached. The attached provider is row 04's `SubmissionStore`,
+  which MUST have completed its own startup `recover()` first — a `lookup()` before recovery
+  cannot distinguish "no operation" from "evidence not loaded", and an unrecovered provider
+  would make an accepted send look unsent.
+- **Reader-visible atomicity**: `replaceSnapshot` performs the rename before the parent
+  directory fsync, so a rejected write is an uncertain commit. Readers always observe a
+  complete old or complete new document; a rejected write is therefore never rolled back, never
+  patched, and never followed by allocating another identity.
+
+### Restart Review Semantics
+
+- **Scheduled/selected restored**: the occurrence is dispatched with its original identity,
+  due time and bound target; the delay is `max(0, dueAt - now)`. A crash before any submission
+  attempt therefore resumes the same occurrence rather than skipping or replacing it.
+- **`started` restored**: the lane inspects the occurrence's operation evidence. When the
+  delivery is already resolved (`submitted` or `submitting`/`unknown`) the occurrence is
+  terminalized (`completed` / `review-required`) and its distinct successor is installed in one
+  write, with zero callback invocations — no replacement selection and no additional DATA
+  transaction for it. When the delivery is unresolved (`prepared`/`failed`/absent) the same
+  occurrence is resumed with its identity and target intact.
+- **Fenced lane**: a rejected snapshot write (`WRITE_FAILED`) or an unreadable/invalid snapshot
+  (`STORE_CORRUPT`) fences the state root for the remaining process lifetime (`STORE_BLOCKED`),
+  so selection, dispatch and successor scheduling all stop instead of allocating a replacement
+  identity. Refusals that only reject an illegal transition leave the state trustworthy and do
+  not fence. Automatic work resumes only after a restart re-reads the durable state.
+- **Serialized lane steps**: every durable lane step (startup restore/persist/arming and each
+  dispatch with its finalizing write) runs in one serialized queue, so a scheduler
+  `stop()`/`start()` cycle cannot dispatch the same occurrence twice, cannot race two startups
+  for the first persisted occurrence, and cannot leave a durable successor unarmed.
+- **Corruption blocks the lane**: malformed, semantically invalid, or unsupported snapshots
+  fail closed (`STORE_CORRUPT`); the file is never repaired, rewritten, or trimmed, and the
+  lane arms no timer. Inspect the file directly and restart to resume.
+- **Not a production flow yet**: bootstrap attaches the durable lane only while
+  `platforms.email.enabled` and `spontaneousPost.enabled` are both set, and email dispatch
+  itself (target resolution, session, delivery) is owned by `email-spontaneous-targets` and
+  enabled by `email-activation`. Until then the email callback fails closed, so an unimplemented
+  dispatch can never be recorded as a successful occurrence.
+
+### Acceptance Scenarios
+
+Acceptance requirements and scenarios are defined in
+`openspec/changes/email-spontaneous-occurrences/specs/email-spontaneous-occurrences/spec.md`:
+
+- **Crash before next schedule**: after SMTP accepted (or became uncertain) and the process
+  died before the successor was persisted, restart recovers the same occurrence and performs no
+  replacement selection and no additional DATA transaction.
+- **Snapshot failure**: when selection or successor persistence fails, automatic work stops for
+  review instead of allocating a replacement identity.
+
+### Exported API
+
+- `SPONTANEOUS_SNAPSHOT_FILENAME`, `SPONTANEOUS_SNAPSHOT_VERSION`
+- `SpontaneousOccurrenceStatus`, `SpontaneousTerminalStatus`, `SpontaneousTarget`,
+  `SpontaneousOccurrence`, `SpontaneousScheduleState`, `SpontaneousEvidenceClass`,
+  `SpontaneousDispatchOutcome`, `SpontaneousSubmissionEvidence`
+- `spontaneousOperationKey(occurrenceId): EmailOperationKey`
+- `SpontaneousDiagnosticCode`, `EmailSpontaneousStoreError`
+- `EmailSpontaneousStore`:
+  - `restore(): Promise<SpontaneousScheduleState>`
+  - `activeOccurrence(state): SpontaneousOccurrence | null`
+  - `schedule(dueAt: Date): Promise<SpontaneousOccurrence>`
+  - `select(occurrenceId: string, target: SpontaneousTarget): Promise<SpontaneousOccurrence>`
+  - `begin(occurrenceId: string): Promise<SpontaneousOccurrence>`
+  - `inspectEvidence(occurrence): SpontaneousEvidenceClass`
+  - `deliveryResolved(occurrence): boolean`
+  - `finishAndScheduleNext(occurrenceId, outcome, nextDueAt: Date): Promise<SpontaneousOccurrence>`
+- `SpontaneousScheduler` additions: `setOccurrenceStore(store)` (email lane only),
+  `whenReady(): Promise<void>`, and
+  `SpontaneousPostCallback = (platform, occurrence?) => Promise<void>` where `occurrence` is
+  supplied only for the durable lane. Bootstrap awaits `whenReady()` after `start()` so startup
+  never reports ready while schedule state is unpersisted.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/email-spontaneous-occurrences.test.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/core/spontaneous-scheduler.test.ts tests/core/scheduler-state-store.test.ts
+```
+
+Evidence: the suite uses the real `SpontaneousScheduler`, the real `EmailSpontaneousStore` on
+temporary state roots, counting callbacks, and the real `SubmissionStore` journal with genuine
+startup recovery (no SMTP transport or native executable is involved in this slice, and no
+network access is used), so the recorded evidence here is deterministic local durability and
+scheduler behavior rather than native dispatch.

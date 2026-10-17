@@ -15,6 +15,10 @@ export interface SchedulerState {
  * Persists and loads scheduler next-execution times from a JSON file.
  * Uses in-memory cache to avoid read-merge-write race conditions.
  * All I/O operations are fire-and-forget — errors are logged but never thrown.
+ *
+ * Best-effort schedule times only. The email spontaneous occurrence lane does NOT use
+ * this store: its authoritative, fsynced occurrence identity lives in
+ * `src/platforms/email/spontaneous-store.ts` (`data/email/spontaneous.json`).
  */
 export class SchedulerStateStore {
   private cache: SchedulerState = {};
