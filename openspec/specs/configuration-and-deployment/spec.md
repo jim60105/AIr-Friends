@@ -37,7 +37,7 @@ The system SHALL use Deno 2.x as the runtime environment with explicit permissio
 
 ### Requirement: YAML Configuration Loading
 
-The system SHALL load configuration from YAML files with a defined merge order: defaults → base config → environment-specific config → environment variables.
+The system SHALL load configuration from YAML files with a defined merge order: defaults → base config → environment-specific config → environment variables. The email signature SHALL remain literal decoded text and SHALL be excluded from generic environment expansion.
 
 #### Scenario: Default Config Path
 
@@ -48,16 +48,22 @@ The system SHALL load configuration from YAML files with a defined merge order: 
 #### Scenario: Environment-Specific Config Override
 
 - **GIVEN** `DENO_ENV` or `ENV` is set to `"production"`
-- **WHEN** configuration is loaded
+- **WHEN** the config is loaded
 - **THEN** the system SHALL load `config.yaml` first, then deep-merge `config.production.yaml` on top if it exists
 - **AND** the environment SHALL default to `"development"` when neither `DENO_ENV` nor `ENV` is set
 
 #### Scenario: Environment Variable Syntax in Config Values
 
-- **GIVEN** a config value contains `${DISCORD_TOKEN}`
+- **GIVEN** a config value outside `platforms.email.signature` contains `${DISCORD_TOKEN}`
 - **WHEN** the config is loaded
 - **THEN** the `expandEnvVars` function SHALL replace `${VAR_NAME}` with the corresponding environment variable value
 - **AND** unresolved references (env var not set) SHALL be replaced with empty string
+
+#### Scenario: Literal signature excludes expansion
+
+- **WHEN** `platforms.email.signature` contains the literal text `${DISCORD_TOKEN}` on one of several lines
+- **THEN** that text and its line structure SHALL remain unchanged even if DISCORD_TOKEN is set
+- **AND** changing the signature SHALL require a restart
 
 ### Requirement: Environment Variable Overrides via ENV_MAPPINGS
 
@@ -126,7 +132,7 @@ The system SHALL validate the final merged configuration and reject invalid conf
 
 - **GIVEN** the merged configuration is assembled
 - **WHEN** `validateConfig` runs
-- **THEN** it SHALL verify the presence of `platforms.discord.token`, `agent.model`, `agent.systemPromptPath`, `workspace.repoPath`, and `workspace.workspacesDir`
+- **THEN** it SHALL verify the presence of `agent.model`, `agent.systemPromptPath`, `workspace.repoPath`, and `workspace.workspacesDir`, plus credentials only for each enabled platform
 - **AND** missing required fields SHALL throw `ConfigError` with `ErrorCode.CONFIG_MISSING_FIELD`
 
 #### Scenario: At Least One Platform Enabled
@@ -146,7 +152,7 @@ The system SHALL validate the final merged configuration and reject invalid conf
 - **GIVEN** a channel entry has an invalid ID format
 - **WHEN** `loadChannels` processes it
 - **THEN** the invalid entry SHALL be logged as a warning and skipped
-- **AND** valid formats SHALL match `{platform}/account/{id}`, `{platform}/channel/{id}`, or `misskey/timeline/self`
+- **AND** valid formats SHALL match supported `{platform}/account/{id}`, supported non-email `{platform}/channel/{id}`, or `misskey/timeline/self`; email account address values SHALL be canonicalized into safe user identifiers
 
 #### Scenario: Spontaneous Post Interval Validation
 
@@ -168,6 +174,12 @@ The system SHALL validate the final merged configuration and reject invalid conf
 - **THEN** `dashboard.enabled` SHALL default to `false`
 - **AND** `dashboard.port` SHALL default to `8090`
 - **AND** `dashboard.passphrase` SHALL default to `""`
+
+#### Scenario: Email-only configuration
+
+- **WHEN** email is enabled with valid mail settings and Discord is disabled
+- **THEN** no Discord token SHALL be required
+- **AND** email activation SHALL remain subject to the production readiness guard until the activation change is applied
 
 ### Requirement: MCP Server Config Validation
 
