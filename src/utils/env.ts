@@ -50,6 +50,33 @@ export const ENV_MAPPINGS = {
   MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.misskey.spontaneousPost.contextFetchProbability",
 
+  // Email platform settings
+  EMAIL_ENABLED: "platforms.email.enabled",
+  EMAIL_ADDRESS: "platforms.email.address",
+  EMAIL_IMAP_HOST: "platforms.email.imap.host",
+  EMAIL_IMAP_PORT: "platforms.email.imap.port",
+  EMAIL_IMAP_TLS_MODE: "platforms.email.imap.tlsMode",
+  EMAIL_IMAP_USERNAME: "platforms.email.imap.username",
+  EMAIL_IMAP_PASSWORD: "platforms.email.imap.password",
+  EMAIL_SMTP_HOST: "platforms.email.smtp.host",
+  EMAIL_SMTP_PORT: "platforms.email.smtp.port",
+  EMAIL_SMTP_TLS_MODE: "platforms.email.smtp.tlsMode",
+  EMAIL_SMTP_USERNAME: "platforms.email.smtp.username",
+  EMAIL_SMTP_PASSWORD: "platforms.email.smtp.password",
+  EMAIL_INCOMING_FOLDER: "platforms.email.incomingFolder",
+  EMAIL_SENT_FOLDER: "platforms.email.sentFolder",
+  EMAIL_POLL_INTERVAL_MS: "platforms.email.pollIntervalMs",
+  EMAIL_AUTHSERV_ID: "platforms.email.receivingAuth.authservId",
+  EMAIL_AUTH_HEADER_STRIPPING_ATTESTED: "platforms.email.receivingAuth.attestedStripping",
+  EMAIL_MAX_MESSAGE_BYTES: "platforms.email.maxMessageBytes",
+  EMAIL_MAX_INCOMING_ATTACHMENTS: "platforms.email.maxIncomingAttachments",
+  EMAIL_SIGNATURE: "platforms.email.signature",
+  EMAIL_SPONTANEOUS_ENABLED: "platforms.email.spontaneousPost.enabled",
+  EMAIL_SPONTANEOUS_MIN_INTERVAL_MS: "platforms.email.spontaneousPost.minIntervalMs",
+  EMAIL_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.email.spontaneousPost.maxIntervalMs",
+  EMAIL_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
+    "platforms.email.spontaneousPost.contextFetchProbability",
+
   // GELF log output settings
   GELF_ENABLED: "logging.gelf.enabled",
   GELF_ENDPOINT: "logging.gelf.endpoint",
@@ -229,7 +256,21 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
     if (value !== undefined && value !== "") {
       // Handle special cases for boolean/number conversion
       let parsedValue: unknown = value;
-      if (value === "true") parsedValue = true;
+      if (
+        envName === "EMAIL_SIGNATURE" ||
+        envName === "EMAIL_ADDRESS" ||
+        envName === "EMAIL_IMAP_HOST" ||
+        envName === "EMAIL_IMAP_USERNAME" ||
+        envName === "EMAIL_IMAP_PASSWORD" ||
+        envName === "EMAIL_SMTP_HOST" ||
+        envName === "EMAIL_SMTP_USERNAME" ||
+        envName === "EMAIL_SMTP_PASSWORD" ||
+        envName === "EMAIL_INCOMING_FOLDER" ||
+        envName === "EMAIL_SENT_FOLDER" ||
+        envName === "EMAIL_AUTHSERV_ID"
+      ) {
+        parsedValue = value;
+      } else if (value === "true") parsedValue = true;
       else if (value === "false") parsedValue = false;
       else if (/^\d+$/.test(value)) parsedValue = parseInt(value, 10);
       else if (/^\d+\.\d+$/.test(value)) parsedValue = parseFloat(value);

@@ -79,7 +79,7 @@ export class SpontaneousScheduler extends BaseScheduler {
 
     for (const platformName of VALID_PLATFORMS) {
       const platformConfig = this.config.platforms[platformName];
-      if (!platformConfig.enabled || !platformConfig.spontaneousPost?.enabled) {
+      if (!platformConfig || !platformConfig.enabled || !platformConfig.spontaneousPost?.enabled) {
         continue;
       }
 
@@ -168,6 +168,9 @@ export class SpontaneousScheduler extends BaseScheduler {
    */
   private getRandomInterval(platform: Platform): number {
     const platformConfig = this.config.platforms[platform];
+    if (!platformConfig || !platformConfig.spontaneousPost) {
+      return 10800000;
+    }
     const sp = platformConfig.spontaneousPost!;
     const range = sp.maxIntervalMs - sp.minIntervalMs;
     return sp.minIntervalMs + Math.floor(Math.random() * range);

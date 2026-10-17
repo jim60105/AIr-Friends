@@ -54,6 +54,37 @@ platforms:
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
 
+  email:
+    enabled: false # true/false (default: false); override with env EMAIL_ENABLED
+    address: "${EMAIL_ADDRESS}" # Primary mailbox address (e.g., bot@example.com)
+    imap:
+      host: "${EMAIL_IMAP_HOST}" # IMAP server hostname
+      port: 993 # 993 (tls) or 143 (starttls); override with env EMAIL_IMAP_PORT
+      tlsMode: "tls" # "tls" (implicit TLS) or "starttls"; override with env EMAIL_IMAP_TLS_MODE
+      username: "${EMAIL_IMAP_USERNAME}" # IMAP login username
+      password: "${EMAIL_IMAP_PASSWORD}" # IMAP login password reference
+    smtp:
+      host: "${EMAIL_SMTP_HOST}" # SMTP server hostname
+      port: 465 # 465 (tls) or 587 (starttls); override with env EMAIL_SMTP_PORT
+      tlsMode: "tls" # "tls" (implicit TLS) or "starttls"; override with env EMAIL_SMTP_TLS_MODE
+      username: "${EMAIL_SMTP_USERNAME}" # SMTP login username
+      password: "${EMAIL_SMTP_PASSWORD}" # SMTP login password reference
+    incomingFolder: "INBOX" # IMAP folder to poll; override with env EMAIL_INCOMING_FOLDER
+    sentFolder: "Sent" # IMAP folder for sent message copies; override with env EMAIL_SENT_FOLDER
+    pollIntervalMs: 300000 # Polling interval in ms (default: 300000 = 5 minutes); override with env EMAIL_POLL_INTERVAL_MS
+    receivingAuth:
+      authservId: "${EMAIL_AUTHSERV_ID}" # Trusted receiving-server authentication service identifier
+      attestedStripping: false # true/false (default: false, required true when enabled); override with env EMAIL_AUTH_HEADER_STRIPPING_ATTESTED
+    maxMessageBytes: 26214400 # Maximum incoming message size in bytes (default: 26214400 = 25 MiB); override with env EMAIL_MAX_MESSAGE_BYTES
+    maxIncomingAttachments: 10 # Maximum incoming attachments per message (default: 10); override with env EMAIL_MAX_INCOMING_ATTACHMENTS
+    signature: "" # Literal multiline email signature (restart required, not expanded); override with env EMAIL_SIGNATURE
+    # Spontaneous posting: agent sends email on its own schedule to permitted accounts
+    spontaneousPost:
+      enabled: false # Enable spontaneous email (default: false); override with env EMAIL_SPONTANEOUS_ENABLED
+      minIntervalMs: 10800000 # Minimum interval: 3 hours (default: 10800000); override with env EMAIL_SPONTANEOUS_MIN_INTERVAL_MS
+      maxIntervalMs: 43200000 # Maximum interval: 12 hours (default: 43200000); override with env EMAIL_SPONTANEOUS_MAX_INTERVAL_MS
+      contextFetchProbability: 0.5 # Probability of including recent messages (default: 0.5); override with env EMAIL_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY
+
 # Agent/LLM configuration
 agent:
   model: "openrouter/deepseek/deepseek-v4-pro" # Model identifier (OpenCode provider/model)

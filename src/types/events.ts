@@ -3,10 +3,10 @@
 /**
  * Supported platform identifiers
  */
-export type Platform = "discord" | "misskey";
+export type Platform = "discord" | "misskey" | "email";
 
 /** All valid platform identifiers, kept in sync with Platform type */
-export const VALID_PLATFORMS: readonly Platform[] = ["discord", "misskey"] as const;
+export const VALID_PLATFORMS: readonly Platform[] = ["discord", "misskey", "email"] as const;
 
 /**
  * Type guard: check if a string is a valid Platform identifier.

@@ -12,6 +12,42 @@ Deno.test("setNestedProperty - sets deeply nested value", () => {
   );
 });
 
+Deno.test("applyEnvOverrides - EMAIL settings typed overrides", () => {
+  Deno.env.set("EMAIL_ENABLED", "true");
+  Deno.env.set("EMAIL_IMAP_PORT", "143");
+  Deno.env.set("EMAIL_POLL_INTERVAL_MS", "60000");
+  Deno.env.set("EMAIL_AUTH_HEADER_STRIPPING_ATTESTED", "true");
+  Deno.env.set("EMAIL_SIGNATURE", "Best regards,\nBot\n${DISCORD_TOKEN}");
+  Deno.env.set("EMAIL_IMAP_PASSWORD", "001234");
+
+  try {
+    const config: Record<string, unknown> = {
+      platforms: {
+        email: {
+          enabled: false,
+          imap: {},
+          receivingAuth: {},
+        },
+      },
+    };
+    applyEnvOverrides(config);
+    const email = (config.platforms as Record<string, unknown>).email as Record<string, unknown>;
+    assertEquals(email.enabled, true);
+    assertEquals((email.imap as Record<string, unknown>).port, 143);
+    assertEquals((email.imap as Record<string, unknown>).password, "001234"); // Preserves leading zeros string
+    assertEquals(email.pollIntervalMs, 60000);
+    assertEquals((email.receivingAuth as Record<string, unknown>).attestedStripping, true);
+    assertEquals(email.signature, "Best regards,\nBot\n${DISCORD_TOKEN}");
+  } finally {
+    Deno.env.delete("EMAIL_ENABLED");
+    Deno.env.delete("EMAIL_IMAP_PORT");
+    Deno.env.delete("EMAIL_POLL_INTERVAL_MS");
+    Deno.env.delete("EMAIL_AUTH_HEADER_STRIPPING_ATTESTED");
+    Deno.env.delete("EMAIL_SIGNATURE");
+    Deno.env.delete("EMAIL_IMAP_PASSWORD");
+  }
+});
+
 Deno.test("applyEnvOverrides - DISCORD_ENABLED=true sets platforms.discord.enabled to boolean true", () => {
   Deno.env.set("DISCORD_ENABLED", "true");
   try {

@@ -41,6 +41,34 @@ env:
   # Platform enable flags (true/false). These can override the corresponding
   DISCORD_ENABLED: 'true'
   MISSKEY_ENABLED: 'false'
+  EMAIL_ENABLED: 'false'
+
+  # Email platform configuration
+  EMAIL_ADDRESS: 'bot@example.com'
+  EMAIL_IMAP_HOST: 'imap.example.com'
+  EMAIL_IMAP_PORT: 993
+  EMAIL_IMAP_TLS_MODE: 'tls'
+  EMAIL_IMAP_USERNAME: 'bot@example.com'
+  EMAIL_IMAP_PASSWORD: 'secret-imap-password'
+  EMAIL_SMTP_HOST: 'smtp.example.com'
+  EMAIL_SMTP_PORT: 465
+  EMAIL_SMTP_TLS_MODE: 'tls'
+  EMAIL_SMTP_USERNAME: 'bot@example.com'
+  EMAIL_SMTP_PASSWORD: 'secret-smtp-password'
+  EMAIL_INCOMING_FOLDER: 'INBOX'
+  EMAIL_SENT_FOLDER: 'Sent'
+  EMAIL_POLL_INTERVAL_MS: 300000
+  EMAIL_AUTHSERV_ID: 'mail.example.com'
+  EMAIL_AUTH_HEADER_STRIPPING_ATTESTED: 'false'
+  EMAIL_MAX_MESSAGE_BYTES: 26214400
+  EMAIL_MAX_INCOMING_ATTACHMENTS: 10
+  EMAIL_SIGNATURE: ''
+
+  # Spontaneous post settings - Email
+  EMAIL_SPONTANEOUS_ENABLED: 'false'
+  EMAIL_SPONTANEOUS_MIN_INTERVAL_MS: 10800000
+  EMAIL_SPONTANEOUS_MAX_INTERVAL_MS: 43200000
+  EMAIL_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: 0.5
 
   # Agent configuration
   AGENT_MODEL: 'openrouter/deepseek/deepseek-v4-pro'

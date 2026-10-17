@@ -61,6 +61,202 @@ workspace:
   });
 });
 
+Deno.test("loadConfig - email disabled by default and loads without error", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.email?.enabled, false);
+    assertEquals(result.platforms.email?.pollIntervalMs, 300000);
+  });
+});
+
+Deno.test("loadConfig - email enabled triggers validation and activation guard", async () => {
+  const validEmailConfig = `
+platforms:
+  discord:
+    enabled: false
+  misskey:
+    enabled: false
+  email:
+    enabled: true
+    address: "bot@example.com"
+    imap:
+      host: "imap.example.com"
+      username: "bot"
+      password: "secret-imap-password"
+      tlsMode: "tls"
+    smtp:
+      host: "smtp.example.com"
+      username: "bot"
+      password: "secret-smtp-password"
+      tlsMode: "tls"
+    receivingAuth:
+      authservId: "mail.example.com"
+      attestedStripping: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(validEmailConfig, async (dir) => {
+    await assertRejects(
+      () => loadConfig(dir),
+      ConfigError,
+      "platforms.email.receivingAuth.attestedStripping must be true when email is enabled",
+    );
+  });
+});
+
+Deno.test("loadConfig - email enabled rejects plaintext or opportunistic TLS mode", async () => {
+  const invalidTlsConfig = `
+platforms:
+  discord:
+    enabled: false
+  email:
+    enabled: true
+    address: "bot@example.com"
+    imap:
+      host: "imap.example.com"
+      username: "bot"
+      password: "secret-imap-password"
+      tlsMode: "plaintext"
+    smtp:
+      host: "smtp.example.com"
+      username: "bot"
+      password: "secret-smtp-password"
+      tlsMode: "tls"
+    receivingAuth:
+      authservId: "mail.example.com"
+      attestedStripping: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+  await withTestConfig(invalidTlsConfig, async (dir) => {
+    await assertRejects(
+      () => loadConfig(dir),
+      ConfigError,
+      "plaintext and opportunistic TLS are prohibited",
+    );
+  });
+});
+
+Deno.test("loadConfig - email enabled rejects missing receivingAuth trust declaration", async () => {
+  const unauthenticatedConfig = `
+platforms:
+  discord:
+    enabled: false
+  email:
+    enabled: true
+    address: "bot@example.com"
+    imap:
+      host: "imap.example.com"
+      username: "bot"
+      password: "secret-imap-password"
+      tlsMode: "tls"
+    smtp:
+      host: "smtp.example.com"
+      username: "bot"
+      password: "secret-smtp-password"
+      tlsMode: "tls"
+    receivingAuth:
+      authservId: "mail.example.com"
+      attestedStripping: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+  await withTestConfig(unauthenticatedConfig, async (dir) => {
+    await assertRejects(
+      () => loadConfig(dir),
+      ConfigError,
+      "Email platform activation is unavailable in this release",
+    );
+  });
+});
+
+Deno.test("loadConfig - email channels normalized to safe userId", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+channels:
+  - id: "email/account/User+tag@EXAMPLE.COM"
+  - id: "email/account/invalid@@address"
+`;
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.channels.length, 1);
+    assertEquals(result.channels[0].id.startsWith("email/account/e_"), true);
+  });
+});
+
+Deno.test("loadConfig - email signature containing ${DISCORD_TOKEN} remains literal and unexpanded", () => {
+  Deno.env.set("DISCORD_TOKEN", "real-secret-token");
+  const configWithSignature = `
+platforms:
+  discord:
+    token: "token123"
+    enabled: true
+  email:
+    enabled: false
+    signature: |
+      Regards,
+      Bot
+      \${DISCORD_TOKEN}
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+  return withTestConfig(configWithSignature, async (dir) => {
+    const loaded = await loadConfig(dir);
+    assertEquals(loaded.platforms.email?.signature.includes("${DISCORD_TOKEN}"), true);
+    assertEquals(loaded.platforms.email?.signature.includes("real-secret-token"), false);
+  }).finally(() => {
+    Deno.env.delete("DISCORD_TOKEN");
+  });
+});
+
 // --- agent.defaultAgentType configuration tests ---
 
 async function withEnv(
