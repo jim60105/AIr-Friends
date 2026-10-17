@@ -9,6 +9,7 @@ import { ReactionHandler } from "./reaction-handler.ts";
 import { ContextHandler } from "./context-handler.ts";
 import { ReminderHandler } from "./reminder-handler.ts";
 import { FileHandler } from "./file-handler.ts";
+import { EmailComposeHandler, type EmailComposeMailService } from "./email-handler.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
@@ -28,6 +29,14 @@ export class SkillRegistry {
   private reminderHandler: ReminderHandler | null = null;
   private fileHandler: FileHandler | null = null;
   private readonly memoryRetriever: MemoryRetriever;
+  /**
+   * The existing send-file skill limits, reused for `send-email` attachments.
+   * Stored even when send-file itself is disabled: composing with an attachment
+   * must not depend on the send-file skill's own `enabled` flag.
+   */
+  private readonly sendFileConfig?: SendFileSkillConfig;
+  /** Durable email submission service; absent until email activation wires it. */
+  private readonly emailComposeMailService?: EmailComposeMailService;
 
   constructor(
     memoryStore: MemoryStore,
@@ -35,6 +44,7 @@ export class SkillRegistry {
     reminderStore?: ReminderStore,
     sendFileConfig?: SendFileSkillConfig,
     recallConfig?: MemoryRecallConfig,
+    emailCompose?: { mailService: EmailComposeMailService },
   ) {
     // One retriever per process: every session shares its snapshot cache.
     this.memoryRetriever = new MemoryRetriever(memoryStore, recallConfig ?? DEFAULT_RECALL_CONFIG);
@@ -42,6 +52,8 @@ export class SkillRegistry {
     this.replyHandler = new ReplyHandler();
     this.reactionHandler = new ReactionHandler();
     this.contextHandler = new ContextHandler();
+    this.sendFileConfig = sendFileConfig;
+    this.emailComposeMailService = emailCompose?.mailService;
 
     if (remindersConfig?.enabled && reminderStore) {
       this.reminderHandler = new ReminderHandler(reminderStore, remindersConfig);
@@ -86,6 +98,17 @@ export class SkillRegistry {
     // File skill (conditional)
     if (this.fileHandler) {
       this.handlers.set("send-file", this.fileHandler.handleSendFile);
+    }
+
+    // Email compose skill (conditional): registered ONLY once the durable submission
+    // service is wired (email activation). Until then the skill does not exist, so no
+    // session can reach an email send path.
+    if (this.emailComposeMailService) {
+      const handler = new EmailComposeHandler({
+        mailService: this.emailComposeMailService,
+        limits: this.sendFileConfig,
+      });
+      this.handlers.set("send-email", handler.handleSendEmail);
     }
 
     logger.info("Skills registered: {count} skills ({skillNames})", {

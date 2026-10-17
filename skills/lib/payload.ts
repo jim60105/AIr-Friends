@@ -47,6 +47,34 @@ export class PayloadError extends Error {
 export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|caption)(?:=|$)/;
 
 /**
+ * Additional free-text CLI flags forbidden for the `send-email` compose request
+ * contract (`email-compose-skill`): a composed recipient, subject or body passed
+ * as a shell argument would be expanded by the shell (silently corrupting `$`
+ * content and leaking subprocess environment variables) and would bypass the
+ * request-file containment boundary the compose contract is built on. They are
+ * rejected only for the scripts that pass
+ * `extraFreeTextFlags: EMAIL_COMPOSE_FREE_TEXT_FLAGS`, so every other script's
+ * behavior is unchanged.
+ */
+export const EMAIL_COMPOSE_FREE_TEXT_FLAGS: readonly string[] = Object.freeze([
+  "--to",
+  "--subject",
+  "--body",
+]);
+
+/**
+ * Whether `token` is one of the extra forbidden free-text flags, in either the
+ * exact (`--to`) or attached (`--to=a@b`) form. Bare-string flags such as
+ * `--to-file` do not match.
+ */
+function matchesExtraFreeTextFlag(token: string, flags: readonly string[]): string | undefined {
+  for (const flag of flags) {
+    if (token === flag || token.startsWith(`${flag}=`)) return flag;
+  }
+  return undefined;
+}
+
+/**
  * Boundary-safe containment check: true when `path` equals `base` or starts with
  * `base` followed by a path separator. Rejects sibling-prefix escapes such as
  * `{base}-2` and `{base}2`.
@@ -188,6 +216,9 @@ export function resolvePayloadPath(
  *
  * - Any token matching {@link LEGACY_FREE_TEXT_FLAG_PATTERN} raises
  *   `SKILL_LEGACY_FLAG` (both `--flag value` and `--flag=value` forms).
+ * - Any token matching a caller-supplied `extraFreeTextFlags` entry (for the
+ *   compose request contract: `--to` / `--subject` / `--body`) raises
+ *   `SKILL_LEGACY_FLAG` the same way, before any file is touched.
  * - The payload value comes from `--<flagName>-file` (or `--<flagName>-file=…`
  *   or the configured short alias).
  * - The value is resolved via {@link resolvePayloadPath}, read verbatim as
@@ -208,11 +239,17 @@ export async function readPayloadArg(
     alias?: string;
     required?: boolean;
     cwd?: string;
+    /**
+     * Additional free-text flags this script refuses (exact or `=value` form).
+     * Default: none, so existing scripts are unaffected.
+     */
+    extraFreeTextFlags?: readonly string[];
   },
 ): Promise<string | undefined> {
   const fileFlag = `--${flagName}-file`;
   const required = options.required ?? true;
   const cwd = options.cwd ?? Deno.cwd();
+  const extraFreeTextFlags = options.extraFreeTextFlags ?? [];
 
   let value: string | undefined;
 
@@ -220,6 +257,13 @@ export async function readPayloadArg(
     const token = args[i];
     if (LEGACY_FREE_TEXT_FLAG_PATTERN.test(token)) {
       throw new PayloadError("SKILL_LEGACY_FLAG", legacyFlagMessage(flagName, options));
+    }
+    const rejectedFlag = matchesExtraFreeTextFlag(token, extraFreeTextFlags);
+    if (rejectedFlag !== undefined) {
+      throw new PayloadError(
+        "SKILL_LEGACY_FLAG",
+        extraFreeTextFlagMessage(rejectedFlag, flagName, options),
+      );
     }
     if (token === fileFlag) {
       value = args[i + 1];
@@ -286,6 +330,20 @@ function legacyFlagMessage(
     `is expanded by the shell before the script runs, so a $ in your text (e.g. $0, $HOME, $API_KEY) ` +
     `is either corrupted or leaks subprocess environment variables into the message. You must NOT put ` +
     `message content on the command line. Instead, ${twoStepGuidance(flagName, options)}`
+  );
+}
+
+function extraFreeTextFlagMessage(
+  rejectedFlag: string,
+  flagName: string,
+  options: { fileName: string; example: string },
+): string {
+  return (
+    `The ${rejectedFlag} argument is not supported: recipient, subject and body of a composed message ` +
+    `must never be passed on the command line — the shell expands a $ in them (e.g. $0, $HOME, ` +
+    `$API_KEY) before the script runs, which corrupts the text and can leak subprocess environment ` +
+    `variables into the message, and a destination passed as an argument would bypass the ` +
+    `request-file containment boundary. Instead, ${twoStepGuidance(flagName, options)}`
   );
 }
 

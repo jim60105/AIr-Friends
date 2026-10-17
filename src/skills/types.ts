@@ -107,6 +107,14 @@ export interface SkillContext {
    * third-party send must be refused.
    */
   emailDestinationGrants?: readonly DestinationGrant[];
+  /**
+   * The Skill API session id of this call: the same literal the session prompt
+   * renders as `--session-id` and the id that keys the session's payload staging
+   * directory (`{workspace}/tmp/{sessionId}`). Handlers that must resolve that
+   * staging directory (e.g. `send-email`'s session-contained attachments) read it
+   * here instead of re-deriving an id from anything the model supplied.
+   */
+  sessionId?: string;
 }
 
 /**
@@ -209,6 +217,37 @@ export interface SendReplyParams {
     url: string;
     filename?: string;
   }>;
+}
+
+/**
+ * The composed message one `send-email` call asks for. Free text (recipient,
+ * subject, body) arrives only through the session-contained request file the
+ * script read — never as a shell argument.
+ */
+export interface SendEmailRequest {
+  /** Single mailbox address of the requested destination. */
+  to: string;
+  /** Single-line subject of the composed message. */
+  subject: string;
+  /** Composed message text (may be empty only when attachments are supplied). */
+  body: string;
+  /**
+   * Optional explicitly selected attachment paths, each staged inside this
+   * session's staging directory (`{workspace}/tmp/{sessionId}`).
+   */
+  attachments?: string[];
+}
+
+/**
+ * Parameters for send-email skill.
+ *
+ * `grantId` names the host-recorded immutable destination grant the send is
+ * matched against; omitting it is only valid when the destination is this
+ * session's own verified sender (the ordinary reply target).
+ */
+export interface SendEmailParams {
+  grantId?: string;
+  request: SendEmailRequest;
 }
 
 /**
