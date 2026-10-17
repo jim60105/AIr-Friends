@@ -36,4 +36,4 @@ Total: **7 engineering hours**, strictly below 8 hours. See tasks.md for itemize
 - depends-on: email-imap-transport
 - code-conflict: none
 
-Apply in the topological order in `../email-config-identity/batch-index.md`; serialize overlapping files even without semantic dependency. All affected callers belong to this slice or named predecessors/successors and are listed in the shared contract index.
+Apply in the topological order in [the proposal batch index](../../../docs/superpowers/specs/2026-10-17-email-platform-design.md#proposal-batch-index); serialize overlapping files even without semantic dependency. All affected callers belong to this slice or named predecessors/successors and are listed in the shared contract index.

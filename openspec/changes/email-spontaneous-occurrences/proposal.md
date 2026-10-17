@@ -36,4 +36,4 @@ Total **6.75 engineering hours**, including implementation, tests, smoke, docume
 - code-conflict: email-spontaneous-targets (src/core/spontaneous-scheduler.ts)
 - code-conflict: email-activation (src/bootstrap.ts)
 
-Apply according to `../email-config-identity/batch-index.md`, serializing shared-file conflicts.
+Apply according to [the proposal batch index](../../../docs/superpowers/specs/2026-10-17-email-platform-design.md#proposal-batch-index), serializing shared-file conflicts.

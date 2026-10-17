@@ -34,4 +34,4 @@ Total **7 engineering hours**, including implementation, tests, smoke, documenta
 - code-conflict: email-intent-runtime (src/acp/types.ts)
 - code-conflict: email-tool-guidance (src/acp/agent-factory.ts)
 
-Apply according to `../email-config-identity/batch-index.md`, serializing shared-file conflicts.
+Apply according to [the proposal batch index](../../../docs/superpowers/specs/2026-10-17-email-platform-design.md#proposal-batch-index), serializing shared-file conflicts.
