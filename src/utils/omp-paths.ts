@@ -9,6 +9,7 @@
 
 import { basename, join, resolve } from "@std/path";
 import type { OmpPermissionMode } from "../acp/types.ts";
+import { OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME } from "./omp-native-cache.ts";
 
 /**
  * Canonical SOURCE origin of the deployment-owned trusted extension. Shared with
@@ -164,4 +165,53 @@ export const OMP_AGENT_TMP_ENTRY = "omp-agent";
  */
 export function ompXdgDataHome(baseRoot: string, mode: OmpPermissionMode): string {
   return resolve(join(baseRoot, OMP_AGENT_TMP_ENTRY, mode, "xdg-data"));
+}
+
+/**
+ * Private native HOME of the INTERNAL email-intent OMP profile
+ * (`email-omp-intent-profile`).
+ *
+ * That profile allocates ONE fresh private HOME per launch and derives every
+ * other native root from it, so — unlike the two ordinary modes, whose roots
+ * live under a workspace `tmp/` and are keyed by approval mode — these shapes
+ * are HOME-relative and carry no mode segment. They exist here (next to the
+ * ordinary spellings) so the profile factory and its consumers never re-derive
+ * a native path independently.
+ */
+export function ompIntentXdgDataHome(home: string): string {
+  return resolve(join(home, ".local", "share"));
+}
+
+/**
+ * Native data application directory of the intent profile
+ * (`{XDG_DATA_HOME}/omp`): the directory native OMP redirects its data
+ * directory into when it already exists, and the parent of the loader's
+ * reserved `natives` entry.
+ */
+export function ompIntentNativeDataDir(home: string): string {
+  return resolve(join(ompIntentXdgDataHome(home), "omp"));
+}
+
+/**
+ * Loader-supported native-addon entry of the intent profile
+ * (`{XDG_DATA_HOME}/omp/natives`): linked to the one prepared shared payload so
+ * a fresh private root never re-extracts the pinned executable's natives.
+ */
+export function ompIntentNativesLinkPath(home: string): string {
+  return resolve(join(ompIntentNativeDataDir(home), OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME));
+}
+
+/**
+ * Native file name of the authored model configuration (`getAgentDir()` child).
+ */
+export const OMP_MODELS_FILE_NAME = "models.yml";
+
+/**
+ * Native model-configuration file under one HOME (`{home}/.omp/agent/models.yml`):
+ * native OMP's `getAgentDir()/models.yml`. It spells both the DEPLOYED file the
+ * ordinary launch reads (the Containerfile install target) and the private copy
+ * the intent profile writes, so neither side re-derives the native path.
+ */
+export function ompHomeModelsPath(home: string): string {
+  return resolve(join(home, ".omp", "agent", OMP_MODELS_FILE_NAME));
 }

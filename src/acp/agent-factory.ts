@@ -14,13 +14,24 @@ import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { opencodeGlobalConfigPath, sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
+  OMP_IMAGE_CONFIG_ROOT,
+  ompHomeModelsPath,
+  ompIntentNativeDataDir,
+  ompIntentNativesLinkPath,
+  ompIntentXdgDataHome,
   ompXdgDataHome,
   resolveOmpConfigPath,
   resolveOmpExtensionPath,
   resolveOmpSystemPromptPath,
 } from "@utils/omp-paths.ts";
 import {
+  assertOmpLaunchExecutableAgreement,
+  assertOmpNativeCacheComplete,
+  assertOmpNativeCacheLocationAllowed,
+  type OmpNativeCache,
   ompNativeCacheForbiddenRoots,
+  ompNativeCacheFromSelection,
+  type OmpNativeCacheSelection,
   prepareOmpNativeCacheRoot,
 } from "@utils/omp-native-cache.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
@@ -30,7 +41,13 @@ import {
   requireTrustedSkillsRoot,
   skillScriptPath,
 } from "@core/skills-root.ts";
+import {
+  OMP_INTENT_PROFILE_FLAG,
+  OMP_INTENT_PROFILE_FLAG_VALUE,
+} from "./omp/extension/native-registration.ts";
+import { OMP_TOOL_CAPABILITY_MAP } from "./omp/tool-inventory.ts";
 import { dirname, isAbsolute, join, resolve } from "@std/path";
+import { parse as parseYaml } from "@std/yaml";
 
 /**
  * Contracted authored native OMP settings documents (development-tree paths;
@@ -907,9 +924,28 @@ export interface EmailIntentProfileOptions {
   readonly catalogPath?: string;
   /**
    * Authored deny-all document source; defaults to the installed copy when
-   * present, otherwise the development tree.
+   * present, otherwise the development tree. On the OMP path this is the
+   * authored native settings document (`agent-config/omp/email-intent.yml`);
+   * on the OpenCode path the authored JSON document.
    */
   readonly authoredConfigPath?: string;
+  /**
+   * OMP only: the prepared shared native runtime payload the launch links its
+   * private root to. Defaults to the deployment's resolved cache (installed
+   * image root when present, otherwise the development cache) — the SAME
+   * selection the ordinary OMP launch consumes, so an intent launch never
+   * re-extracts natives into its fresh private root. `launchExecutableVersion`
+   * rides along as the launcher's own `omp --version`, which makes the cache
+   * identity agreement a check instead of a skip.
+   */
+  readonly ompNativeCache?: OmpNativeCacheSelection;
+  /**
+   * OMP only: roots a native-cache payload must NOT live inside (the backup
+   * data root and every configured workspace root). The profile factory carries
+   * no `Config`, so the ordinary launch's `ompNativeCacheForbiddenRoots()`
+   * derivation belongs to the caller that does.
+   */
+  readonly ompNativeCacheForbiddenRoots?: readonly (string | undefined)[];
 }
 
 /** One decoded JSON object (the shape every profile document must be). */
@@ -980,9 +1016,22 @@ const PROFILE_ENV_REFERENCE_PATTERN = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
 /** Any server-side file reference the profile must never carry. */
 const PROFILE_FILE_REFERENCE_MARKER = "{file:";
 
+/**
+ * Refusal prefixes. Every intent-profile refusal names the ENGINE whose
+ * contract was violated, so an operator reading a failed email launch is never
+ * sent to the wrong backend's documents. The OpenCode prefix is the default of
+ * the shared helpers (it is the pre-existing one); the OMP builder and its
+ * validators pass {@link EMAIL_INTENT_OMP_PREFIX} explicitly.
+ */
+const EMAIL_INTENT_OPENCODE_PREFIX = "email-intent OpenCode profile";
+const EMAIL_INTENT_OMP_PREFIX = "email-intent OMP profile";
+
 /** Refuse the launch, naming the contract the input violated. */
-function refuseEmailIntentProfile(reason: string): never {
-  throw new Error(`email-intent OpenCode profile: ${reason}`);
+function refuseEmailIntentProfile(
+  reason: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
+): never {
+  throw new Error(`${prefix}: ${reason}`);
 }
 
 function isProfileObject(value: unknown): value is ProfileObject {
@@ -1006,6 +1055,8 @@ function readProfileDocument(
   readFile: (path: string) => string,
   path: string,
   label: string,
+  remedy: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
 ): string {
   try {
     return readFile(path);
@@ -1013,24 +1064,33 @@ function readProfileDocument(
     refuseEmailIntentProfile(
       `${label} "${path}" is unreadable (${
         error instanceof Error ? error.message : String(error)
-      }); install agent-config/email-intent-opencode.json at ` +
-        `"${EMAIL_INTENT_OPENCODE_IMAGE_CONFIG_PATH}" or build from the repository tree`,
+      }); ${remedy}`,
+      prefix,
     );
   }
 }
 
+/** The packaging remedy of the OpenCode intent profile's authored document. */
+const EMAIL_INTENT_OPENCODE_REMEDY = `install agent-config/email-intent-opencode.json at ` +
+  `"${EMAIL_INTENT_OPENCODE_IMAGE_CONFIG_PATH}" or build from the repository tree`;
+
 /** Parse one JSON object document, refusing any other top-level shape. */
-function parseProfileObject(text: string, path: string): ProfileObject {
+function parseProfileObject(
+  text: string,
+  path: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
+): ProfileObject {
   let decoded: unknown;
   try {
     decoded = JSON.parse(text);
   } catch (error) {
     refuseEmailIntentProfile(
       `"${path}" is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+      prefix,
     );
   }
   if (!isProfileObject(decoded)) {
-    refuseEmailIntentProfile(`"${path}" must contain a JSON object`);
+    refuseEmailIntentProfile(`"${path}" must contain a JSON object`, prefix);
   }
   return decoded;
 }
@@ -1268,35 +1328,46 @@ function collectProviderEnvReferences(
  * platform tokens, engine/config selectors) or overwrite the profile's own
  * private roots. Only model-provider authentication may be provisioned.
  */
-function assertForwardableProviderCredential(name: string, providerID: string): void {
+function assertForwardableProviderCredential(
+  name: string,
+  providerID: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
+): void {
   if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
     refuseEmailIntentProfile(
       `provider "${providerID}" references "${name}", which is not an environment variable name`,
+      prefix,
     );
   }
   if (PROFILE_RESERVED_ENV[name] === true) {
     refuseEmailIntentProfile(
       `provider "${providerID}" references the reserved variable "${name}"; the profile ` +
         `sets its own isolation variables and engine configuration`,
+      prefix,
     );
   }
-  const prefix = PROFILE_FORBIDDEN_ENV_PREFIXES.find((candidate) => name.startsWith(candidate));
-  if (prefix !== undefined || PROFILE_FORBIDDEN_ENV_PATTERN.test(name)) {
+  const family = PROFILE_FORBIDDEN_ENV_PREFIXES.find((candidate) => name.startsWith(candidate));
+  if (family !== undefined || PROFILE_FORBIDDEN_ENV_PATTERN.test(name)) {
     refuseEmailIntentProfile(
       `provider "${providerID}" references the excluded credential family of "${name}"; ` +
         `only model-provider authentication may be provisioned`,
+      prefix,
     );
   }
 }
 
 /** Resolve and validate one private root's absolute spelling. */
-function resolveEmailIntentRoot(value: string, label: string): string {
+function resolveEmailIntentRoot(
+  value: string,
+  label: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
+): string {
   if (value === "" || !isAbsolute(value)) {
-    refuseEmailIntentProfile(`the private ${label} "${value}" must be an absolute path`);
+    refuseEmailIntentProfile(`the private ${label} "${value}" must be an absolute path`, prefix);
   }
   const resolved = resolve(value);
   if (resolved === "/") {
-    refuseEmailIntentProfile(`the private ${label} must not be the filesystem root`);
+    refuseEmailIntentProfile(`the private ${label} must not be the filesystem root`, prefix);
   }
   return resolved;
 }
@@ -1323,7 +1394,11 @@ function repositoryAncestor(path: string): string | undefined {
 }
 
 /** Refuse a root whose existing path components redirect through a symlink. */
-function assertNoSymlinkRedirect(path: string, label: string): void {
+function assertNoSymlinkRedirect(
+  path: string,
+  label: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
+): void {
   let existing = path;
   while (true) {
     try {
@@ -1331,6 +1406,7 @@ function assertNoSymlinkRedirect(path: string, label: string): void {
       if (physical !== existing) {
         refuseEmailIntentProfile(
           `the private ${label} "${path}" resolves through a symlink to "${physical}"`,
+          prefix,
         );
       }
       return;
@@ -1347,7 +1423,11 @@ function assertNoSymlinkRedirect(path: string, label: string): void {
  * empty directory, and it must not be a symlink. Its 0700 mode keeps the
  * profile's state unreadable to other users.
  */
-function prepareFreshPrivateDirectory(path: string, label: string): void {
+function prepareFreshPrivateDirectory(
+  path: string,
+  label: string,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
+): void {
   let info: Deno.FileInfo | undefined;
   try {
     info = Deno.lstatSync(path);
@@ -1356,14 +1436,18 @@ function prepareFreshPrivateDirectory(path: string, label: string): void {
   }
   if (info !== undefined) {
     if (info.isSymlink) {
-      refuseEmailIntentProfile(`the private ${label} "${path}" must not be a symlink`);
+      refuseEmailIntentProfile(`the private ${label} "${path}" must not be a symlink`, prefix);
     }
     if (!info.isDirectory) {
-      refuseEmailIntentProfile(`the private ${label} "${path}" exists and is not a directory`);
+      refuseEmailIntentProfile(
+        `the private ${label} "${path}" exists and is not a directory`,
+        prefix,
+      );
     }
     if (Deno.readDirSync(path).next().done !== true) {
       refuseEmailIntentProfile(
         `the private ${label} "${path}" is not fresh: it already contains entries`,
+        prefix,
       );
     }
   }
@@ -1379,9 +1463,10 @@ function prepareFreshPrivateDirectory(path: string, label: string): void {
 function prepareEmailIntentRoots(
   roots: EmailIntentTemporaryRoots,
   env: (name: string) => string | undefined,
+  prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
 ): EmailIntentTemporaryRoots {
-  const home = resolveEmailIntentRoot(roots.home, "HOME");
-  const cwd = resolveEmailIntentRoot(roots.cwd, "working directory");
+  const home = resolveEmailIntentRoot(roots.home, "HOME", prefix);
+  const cwd = resolveEmailIntentRoot(roots.cwd, "working directory", prefix);
   const daemonHome = env("HOME");
   if (daemonHome !== undefined && daemonHome !== "" && isAbsolute(daemonHome)) {
     const observed = resolve(daemonHome);
@@ -1392,6 +1477,7 @@ function prepareEmailIntentRoots(
         refuseEmailIntentProfile(
           `the private ${label} "${root}" overlaps the daemon home "${observed}"; the ` +
             `profile must not expose ordinary home state`,
+          prefix,
         );
       }
     }
@@ -1401,16 +1487,17 @@ function prepareEmailIntentRoots(
     if (repository !== undefined) {
       refuseEmailIntentProfile(
         `the private ${label} "${root}" lies inside the repository ancestry of "${repository}"`,
+        prefix,
       );
     }
-    assertNoSymlinkRedirect(root, label);
+    assertNoSymlinkRedirect(root, label, prefix);
   }
-  prepareFreshPrivateDirectory(home, "HOME");
-  prepareFreshPrivateDirectory(cwd, "working directory");
+  prepareFreshPrivateDirectory(home, "HOME", prefix);
+  prepareFreshPrivateDirectory(cwd, "working directory", prefix);
   for (
     const child of [".config", ".local", join(".local", "share"), ".cache", ".local/state", "tmp"]
   ) {
-    prepareFreshPrivateDirectory(join(home, child), `HOME/${child}`);
+    prepareFreshPrivateDirectory(join(home, child), `HOME/${child}`, prefix);
   }
   return { home, cwd };
 }
@@ -1438,14 +1525,24 @@ function buildEmailIntentOpencodeConfig(
 
   const assetPath = resolveEmailIntentAssetPath(exists, options.authoredConfigPath);
   const asset = parseProfileObject(
-    readProfileDocument(readFile, assetPath, "the authored deny-all profile document"),
+    readProfileDocument(
+      readFile,
+      assetPath,
+      "the authored deny-all profile document",
+      EMAIL_INTENT_OPENCODE_REMEDY,
+    ),
     assetPath,
   );
   assertEmailIntentAsset(asset, assetPath);
 
   const catalogPath = resolveEmailIntentCatalogPath(options, exists, env);
   const catalog = parseProfileObject(
-    readProfileDocument(readFile, catalogPath, "the ordinary provider catalog"),
+    readProfileDocument(
+      readFile,
+      catalogPath,
+      "the ordinary provider catalog",
+      EMAIL_INTENT_OPENCODE_REMEDY,
+    ),
     catalogPath,
   );
   const providerEntry = selectEmailIntentProvider(catalog, catalogPath, selection);
@@ -1461,16 +1558,13 @@ function buildEmailIntentOpencodeConfig(
     const value = env(name);
     if (value !== undefined && value !== "") childEnv[name] = value;
   }
-  for (const name of credentialNames) {
-    const value = env(name);
-    if (value === undefined || value === "") {
-      refuseEmailIntentProfile(
-        `the selected provider "${selection.providerID}" requires the model-provider ` +
-          `credential "${name}", which the environment does not provide`,
-      );
-    }
-    childEnv[name] = value;
-  }
+  provisionProfileCredentials(
+    childEnv,
+    selection.providerID,
+    credentialNames,
+    env,
+    EMAIL_INTENT_OPENCODE_PREFIX,
+  );
 
   // The authored deny-all document is the base; the ONLY additions are the
   // selected provider's declaration, the selected model and the provider
@@ -1507,12 +1601,623 @@ function buildEmailIntentOpencodeConfig(
   };
 }
 
+// ---------------------------------------------------------------------------
+// INTERNAL email-intent OMP profile (`email-omp-intent-profile`)
+//
+// The OMP arm of the SAME internal profile, reached only through the shared
+// `createEmailIntentAgentConfig` entry point — never from `createAgentConfig`,
+// and never from a configuration field, dashboard request, environment variable
+// or ACP request. Ordinary OMP launches (restricted and native-YOLO) are
+// byte-compatible: their branch above is untouched and carries no profile
+// identity and no intent marker.
+//
+// Denial is TWO layers, because the pinned native settings schema has no
+// wildcard default-deny key:
+//
+//   1. The authored native settings document (`agent-config/omp/email-intent.yml`,
+//      installed at `/opt/air/omp/config/email-intent.yml`) is the native layer:
+//      every shipped native surface is denied by EXACT name, skills are off and
+//      no permissive (`allow`) or prompting (`ask`) record is authored anywhere.
+//   2. The trusted capability extension is the PRE-DISPATCH layer: on an
+//      intent-profile launch it blocks EVERY `tool_call` name — shipped,
+//      deployment-extension, unknown or prototype-shaped — before dispatch,
+//      independent of any ACP permission callback.
+//
+// The profile provisions exactly one provider: the deployment-authored model
+// configuration is copied BYTE-FOR-BYTE into the launch's private native config
+// home (never parsed-and-rewritten into a second document), the selected
+// provider's API credential is forwarded, and a fresh private HOME/cwd plus an
+// empty working directory outside any repository ancestry keep ordinary auth
+// databases, sessions, skills, extensions, instructions and mailbox
+// credentials out of reach. `--trusted-extension` and `--config` resolve to the
+// SAME generated bundle and packaging layout the ordinary launch consumes, so
+// no second bundle and no generated YAML exist on this path.
+// ---------------------------------------------------------------------------
+
+/** Development-tree path of the authored deny-all OMP settings document. */
+export const EMAIL_INTENT_OMP_CONFIG_PATH = "agent-config/omp/email-intent.yml";
+
 /**
- * Create the INTERNAL native deny-all OpenCode intent profile for ONE
+ * Installed image path of the SAME authored settings document (Containerfile).
+ * It lands beside the ordinary mode documents under the deployment's OMP
+ * artifact root, never in the deployment's native config home — the pinned
+ * loader reads `getAgentDir()/models.yml` from there, and a settings document
+ * placed there would be discovered by OTHER launches.
+ */
+export const EMAIL_INTENT_OMP_IMAGE_CONFIG_PATH = join(
+  OMP_IMAGE_CONFIG_ROOT,
+  "email-intent.yml",
+);
+
+/** Development-tree path of the deployment's authored model configuration. */
+export const EMAIL_INTENT_OMP_MODELS_PATH = "agent-config/omp/models.yml";
+
+/**
+ * Packaging remedies named by a failed intent-profile launch: what an operator
+ * must install (or build) so the profile's documents exist where it looks.
+ */
+const EMAIL_INTENT_OMP_REMEDY = `install agent-config/omp/email-intent.yml at ` +
+  `"${EMAIL_INTENT_OMP_IMAGE_CONFIG_PATH}" or build from the repository tree`;
+const EMAIL_INTENT_OMP_MODELS_REMEDY =
+  `install agent-config/omp/models.yml at "~/.omp/agent/models.yml" ` +
+  `or build from the repository tree`;
+
+/**
+ * The pinned non-YOLO native approval mode the authored document must author —
+ * the exact value the ordinary restricted document uses. The intent profile is
+ * a deny-all ORDINARY-approval launch, never an auto-approving (YOLO) one.
+ */
+export const EMAIL_INTENT_OMP_APPROVAL_MODE = "write";
+
+/**
+ * Every shipped native surface the authored OMP settings document denies
+ * EXPLICITLY by exact name. Derived from the deployment's own frozen restricted
+ * capability inventory (`OMP_TOOL_CAPABILITY_MAP`) plus `lsp`, which the
+ * authored ordinary documents deny by name: a pinned release that teaches the
+ * inventory a new tool name enters this contract immediately, and the authored
+ * document must deny it before an intent launch is allowed again.
+ */
+export const EMAIL_INTENT_OMP_NATIVE_SURFACES: readonly string[] = [
+  ...Object.keys(OMP_TOOL_CAPABILITY_MAP),
+  "lsp",
+];
+
+/** The same contracted surface list as an own-key lookup for the validator. */
+const OMP_PROFILE_CONTRACTED_SURFACES: Record<string, true> = Object.fromEntries(
+  EMAIL_INTENT_OMP_NATIVE_SURFACES.map((surface) => [surface, true as const]),
+);
+
+/**
+ * Model-provider credentials the profile MAY forward, by declared provider id.
+ * The OMP path has no engine-level `{env:...}` reference to read, so the
+ * deployment's selectable providers are the contract: a provider outside this
+ * table is launchable only when its authored entry declares `auth: none` (an
+ * explicitly credential-free endpoint), and it then receives no credential.
+ */
+export const EMAIL_INTENT_OMP_PROVIDER_CREDENTIALS: Readonly<Record<string, readonly string[]>> =
+  Object.freeze({
+    openrouter: ["OPENROUTER_API_KEY"],
+    gemini: ["GEMINI_API_KEY"],
+    google: ["GEMINI_API_KEY"],
+  });
+
+/** The only top-level keys the authored deny-all OMP settings document may carry. */
+const OMP_PROFILE_ASSET_KEYS: Record<string, true> = {
+  tools: true,
+  skills: true,
+  startup: true,
+  marketplace: true,
+  update: true,
+  compaction: true,
+};
+
+/**
+ * The scalars the authored document must pin, section by section: update and
+ * marketplace traffic stay off, and the engine's own context compaction stays
+ * on (it calls no tool). A drifted document refuses the launch instead of
+ * silently changing the launch's network posture.
+ */
+const OMP_PROFILE_PINNED_SCALARS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  startup: { checkUpdate: false },
+  marketplace: { autoUpdate: "off" },
+  update: { channel: "stable" },
+  compaction: { enabled: true },
+};
+
+/** Parse one YAML object document, refusing any other top-level shape. */
+function parseProfileYamlObject(text: string, path: string): ProfileObject {
+  let decoded: unknown;
+  try {
+    decoded = parseYaml(text);
+  } catch (error) {
+    refuseEmailIntentProfile(
+      `"${path}" is not valid YAML (${error instanceof Error ? error.message : String(error)})`,
+      EMAIL_INTENT_OMP_PREFIX,
+    );
+  }
+  if (!isProfileObject(decoded)) {
+    refuseEmailIntentProfile(`"${path}" must contain a YAML mapping`, EMAIL_INTENT_OMP_PREFIX);
+  }
+  return decoded;
+}
+
+/** Refuse a selection that is not a provider/model identity at all. */
+function assertEmailIntentOmpSelection(selection: EmailIntentProviderSelection): void {
+  if (selection.providerID === "" || !/^[A-Za-z0-9._-]+$/.test(selection.providerID)) {
+    refuseEmailIntentProfile(
+      `the selected provider id ${JSON.stringify(selection.providerID)} is not a provider id`,
+      EMAIL_INTENT_OMP_PREFIX,
+    );
+  }
+  if (selection.modelID === "" || /\s/.test(selection.modelID)) {
+    refuseEmailIntentProfile(
+      `the selected model id ${JSON.stringify(selection.modelID)} is not a model id`,
+      EMAIL_INTENT_OMP_PREFIX,
+    );
+  }
+}
+
+/**
+ * Validate the authored deny-all native settings document: only the provisioned
+ * sections, the pinned non-YOLO approval mode, a whole map of EXACT-name
+ * denials that matches the contracted shipped surface list in BOTH directions
+ * (nothing uncontracted, nothing missing), skills off with no discovery key,
+ * and the pinned packaging scalars. A document that fails any of these never
+ * launches.
+ */
+function assertEmailIntentOmpAsset(document: ProfileObject, path: string): void {
+  const prefix = EMAIL_INTENT_OMP_PREFIX;
+  for (const key of Object.keys(document)) {
+    if (OMP_PROFILE_ASSET_KEYS[key] !== true) {
+      refuseEmailIntentProfile(
+        `"${path}" carries the unprovisioned key "${key}"; only ` +
+          `${Object.keys(OMP_PROFILE_ASSET_KEYS).join(", ")} are part of the profile`,
+        prefix,
+      );
+    }
+  }
+
+  const tools = document["tools"];
+  if (!isProfileObject(tools)) {
+    refuseEmailIntentProfile(`"${path}" must carry a tools mapping`, prefix);
+  }
+  for (const key of Object.keys(tools)) {
+    if (key !== "approvalMode" && key !== "approval") {
+      refuseEmailIntentProfile(
+        `the tools mapping of "${path}" carries the unprovisioned member "${key}"`,
+        prefix,
+      );
+    }
+  }
+  if (tools["approvalMode"] !== EMAIL_INTENT_OMP_APPROVAL_MODE) {
+    refuseEmailIntentProfile(
+      `"${path}" must pin "approvalMode": ${JSON.stringify(EMAIL_INTENT_OMP_APPROVAL_MODE)}, ` +
+        `the pinned non-YOLO value the ordinary restricted document authors`,
+      prefix,
+    );
+  }
+  const approval = tools["approval"];
+  if (!isProfileObject(approval)) {
+    refuseEmailIntentProfile(`"${path}" must carry the exact-name tools.approval mapping`, prefix);
+  }
+  for (const [name, action] of Object.entries(approval)) {
+    if (action !== "deny") {
+      refuseEmailIntentProfile(
+        `the tools.approval entry "${name}" of "${path}" is ${JSON.stringify(action)}; only ` +
+          `explicit denials are allowed`,
+        prefix,
+      );
+    }
+  }
+  for (const surface of EMAIL_INTENT_OMP_NATIVE_SURFACES) {
+    if (approval[surface] !== "deny") {
+      refuseEmailIntentProfile(
+        `"${path}" must deny the shipped native surface "${surface}" explicitly`,
+        prefix,
+      );
+    }
+  }
+  for (const name of Object.keys(approval)) {
+    if (OMP_PROFILE_CONTRACTED_SURFACES[name] !== true) {
+      refuseEmailIntentProfile(
+        `"${path}" denies the uncontracted native surface "${name}"; every authored denial must ` +
+          `name a contracted shipped surface`,
+        prefix,
+      );
+    }
+  }
+
+  const skills = document["skills"];
+  if (!isProfileObject(skills) || Object.keys(skills).length !== 1 || skills["enabled"] !== false) {
+    refuseEmailIntentProfile(
+      `"${path}" must disable native skills with exactly {"enabled": false} and declare no skill ` +
+        `directory`,
+      prefix,
+    );
+  }
+  for (const [section, expected] of Object.entries(OMP_PROFILE_PINNED_SCALARS)) {
+    const value = document[section];
+    if (!isProfileObject(value)) {
+      refuseEmailIntentProfile(`"${path}" must carry a ${section} mapping`, prefix);
+    }
+    for (const [key, pinned] of Object.entries(expected)) {
+      if (value[key] !== pinned) {
+        refuseEmailIntentProfile(
+          `"${path}" must pin ${section}.${key}: ${JSON.stringify(pinned)}`,
+          prefix,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Resolve the authored deny-all OMP settings document: an explicit source, else
+ * the installed image copy, else the development tree. Every resolved spelling
+ * is made absolute, because the child starts in the profile's private working
+ * directory.
+ */
+function resolveEmailIntentOmpConfigPath(
+  exists: (path: string) => boolean,
+  override: string | undefined,
+): string {
+  if (override !== undefined) return resolve(override);
+  return resolve(resolveOmpConfigPath(EMAIL_INTENT_OMP_CONFIG_PATH, { exists }));
+}
+
+/**
+ * Resolve the authored OMP model configuration: an explicit source, else the
+ * DEPLOYED native config file the ordinary launch already reads
+ * (`{daemon HOME}/.omp/agent/models.yml` — the Containerfile install target),
+ * else the development tree. The deployed document is read only.
+ */
+function resolveEmailIntentOmpModelsPath(
+  options: EmailIntentProfileOptions,
+  exists: (path: string) => boolean,
+  env: (name: string) => string | undefined,
+): string {
+  if (options.catalogPath !== undefined) return options.catalogPath;
+  const daemonHome = env("HOME");
+  if (daemonHome !== undefined && daemonHome !== "" && isAbsolute(daemonHome)) {
+    const deployed = ompHomeModelsPath(daemonHome);
+    if (exists(deployed)) return deployed;
+  }
+  return EMAIL_INTENT_OMP_MODELS_PATH;
+}
+
+/**
+ * Validate the authored model configuration against ONE selection and return
+ * the credential variables that selection may receive.
+ *
+ * The profile provisions EXACTLY the selected provider, so a catalog declaring
+ * any other provider — or one that does not declare the selection at all —
+ * refuses the launch instead of falling back. The authored bytes are the
+ * provider-scoping trust boundary: this validation never rewrites them.
+ */
+function selectEmailIntentOmpProvider(
+  models: ProfileObject,
+  path: string,
+  selection: EmailIntentProviderSelection,
+): readonly string[] {
+  const prefix = EMAIL_INTENT_OMP_PREFIX;
+  const providers = models["providers"];
+  if (!isProfileObject(providers)) {
+    refuseEmailIntentProfile(`"${path}" declares no provider catalog`, prefix);
+  }
+  const entry = providers[selection.providerID];
+  if (!isProfileObject(entry)) {
+    refuseEmailIntentProfile(
+      `the selected provider "${selection.providerID}" is not declared in "${path}"`,
+      prefix,
+    );
+  }
+  const others = Object.keys(providers).filter((id) => id !== selection.providerID);
+  if (others.length > 0) {
+    refuseEmailIntentProfile(
+      `"${path}" declares the unprovisioned provider${others.length === 1 ? "" : "s"} ${
+        others.join(", ")
+      }; the profile provisions the selected provider only`,
+      prefix,
+    );
+  }
+
+  const declaredModels = entry["models"];
+  if (Array.isArray(declaredModels)) {
+    const ids = declaredModels
+      .filter(isProfileObject)
+      .map((model) => model["id"])
+      .filter((id): id is string => typeof id === "string");
+    if (ids.length > 0 && !ids.includes(selection.modelID)) {
+      refuseEmailIntentProfile(
+        `the selected model "${selection.modelID}" is not in the "${selection.providerID}" ` +
+          `catalog of "${path}"`,
+        prefix,
+      );
+    }
+  } else if (isProfileObject(declaredModels)) {
+    if (
+      Object.keys(declaredModels).length > 0 && !Object.hasOwn(declaredModels, selection.modelID)
+    ) {
+      refuseEmailIntentProfile(
+        `the selected model "${selection.modelID}" is not in the "${selection.providerID}" ` +
+          `catalog of "${path}"`,
+        prefix,
+      );
+    }
+  } else if (declaredModels !== undefined) {
+    refuseEmailIntentProfile(
+      `the "${selection.providerID}" entry of "${path}" declares a neither-list-nor-mapping ` +
+        `model catalog`,
+      prefix,
+    );
+  }
+
+  const mapped = Object.hasOwn(EMAIL_INTENT_OMP_PROVIDER_CREDENTIALS, selection.providerID)
+    ? EMAIL_INTENT_OMP_PROVIDER_CREDENTIALS[selection.providerID]
+    : undefined;
+  if (mapped !== undefined) {
+    for (const name of mapped) {
+      assertForwardableProviderCredential(name, selection.providerID, prefix);
+    }
+    return mapped;
+  }
+  if (entry["auth"] === "none") return [];
+  return refuseEmailIntentProfile(
+    `the selected provider "${selection.providerID}" of "${path}" carries neither a mapped ` +
+      `model-provider credential nor an explicit "auth: none"; the profile launches no ` +
+      `unprovisionable provider`,
+    prefix,
+  );
+}
+
+/**
+ * Copy the authored model configuration BYTE-FOR-BYTE into the launch's private
+ * native config home. The bytes are never parsed into a second document, never
+ * reserialized and never generated, and the copy is read back to prove it.
+ */
+function writeEmailIntentOmpModels(home: string, bytes: string): string {
+  const prefix = EMAIL_INTENT_OMP_PREFIX;
+  prepareFreshPrivateDirectory(join(home, ".omp"), "HOME/.omp", prefix);
+  prepareFreshPrivateDirectory(join(home, ".omp", "agent"), "HOME/.omp/agent", prefix);
+  const target = ompHomeModelsPath(home);
+  Deno.writeTextFileSync(target, bytes, { mode: 0o600 });
+  Deno.chmodSync(target, 0o600);
+  if (Deno.readTextFileSync(target) !== bytes) {
+    refuseEmailIntentProfile(
+      `the private model configuration "${target}" does not carry the authored bytes`,
+      prefix,
+    );
+  }
+  return target;
+}
+
+/** The reserved `natives` entry of one private native data root, or `undefined`. */
+function readPathEntry(path: string): Deno.FileInfo | undefined {
+  try {
+    return Deno.lstatSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Install (atomically) the loader-supported `natives` entry of the profile's
+ * private native data root, pointing at the ONE prepared shared payload.
+ *
+ * This mirrors `installOmpNativeCacheLink`'s refusal discipline at this
+ * profile's HOME-relative layout: the ordinary helper's entry is mode-keyed
+ * under a workspace root (`{baseRoot}/omp-agent/{mode}/xdg-data/omp/natives`)
+ * and this profile is neither of those modes. The reserved entry is written
+ * through a temporary sibling and renamed into place, and a foreign entry is
+ * refused rather than followed, adopted or migrated — reachable only if
+ * something outside the launch wrote into a root that must be fresh, which is
+ * exactly the case that must never be silently accepted. (The private-root
+ * freshness rule already refuses such a root; this guard is what keeps the
+ * reserved entry's meaning local to its owner.)
+ */
+function installEmailIntentOmpNativesLink(home: string, payloadDir: string): string {
+  const prefix = EMAIL_INTENT_OMP_PREFIX;
+  const linkPath = ompIntentNativesLinkPath(home);
+  const existing = readPathEntry(linkPath);
+  if (existing !== undefined) {
+    const held = existing.isSymlink
+      ? `a symbolic link to "${Deno.readLinkSync(linkPath)}"`
+      : existing.isDirectory
+      ? "a real directory"
+      : "a non-symlink file";
+    refuseEmailIntentProfile(
+      `Refusing the native runtime cache entry "${linkPath}": it holds ${held} instead of the ` +
+        `selected shared payload "${payloadDir}". A private native root holds only the link ` +
+        `this launch installs; foreign entries there are never followed, removed or migrated`,
+      prefix,
+    );
+  }
+  const temporary = `${linkPath}.link-${Deno.pid}-${crypto.randomUUID()}`;
+  Deno.symlinkSync(payloadDir, temporary);
+  Deno.renameSync(temporary, linkPath);
+  const installed = readPathEntry(linkPath);
+  const installedTarget = installed?.isSymlink ? Deno.readLinkSync(linkPath) : null;
+  if (installedTarget !== payloadDir) {
+    refuseEmailIntentProfile(
+      `Refusing the native runtime cache entry "${linkPath}": it holds ` +
+        `${
+          installedTarget === null
+            ? "a non-symlink entry"
+            : `a symbolic link to "${installedTarget}"`
+        } instead of the selected shared payload "${payloadDir}"`,
+      prefix,
+    );
+  }
+  return linkPath;
+}
+
+/**
+ * Create the private native data root and connect it to the prepared shared
+ * native payload: select (or receive) the payload, refuse a forbidden location,
+ * require a complete and identity-matching payload, then install the reserved
+ * link. A fresh private HOME therefore never re-extracts the pinned
+ * executable's natives.
+ */
+function prepareEmailIntentOmpNativeData(
+  home: string,
+  options: EmailIntentProfileOptions,
+): OmpNativeCache {
+  const cache = ompNativeCacheFromSelection(options.ompNativeCache ?? {});
+  assertOmpNativeCacheLocationAllowed(
+    cache.installRoot,
+    options.ompNativeCacheForbiddenRoots ?? [],
+  );
+  assertOmpNativeCacheComplete(cache);
+  assertOmpLaunchExecutableAgreement(
+    cache,
+    options.ompNativeCache?.launchExecutableVersion ?? null,
+  );
+  // The application directory is created HERE, one level above the reserved
+  // entry, so the installer below is the single owner of what may live at that
+  // entry — the same split the ordinary mode root uses.
+  const appDir = ompIntentNativeDataDir(home);
+  Deno.mkdirSync(appDir, { recursive: true, mode: 0o700 });
+  Deno.chmodSync(appDir, 0o700);
+  installEmailIntentOmpNativesLink(home, cache.payloadDir);
+  return cache;
+}
+
+/**
+ * Provision exactly these credentials into one child environment, refusing the
+ * launch when the deployment does not provide one.
+ */
+function provisionProfileCredentials(
+  childEnv: Record<string, string>,
+  providerID: string,
+  credentialNames: readonly string[],
+  env: (name: string) => string | undefined,
+  prefix: string,
+): void {
+  for (const name of credentialNames) {
+    const value = env(name);
+    if (value === undefined || value === "") {
+      refuseEmailIntentProfile(
+        `the selected provider "${providerID}" requires the model-provider credential ` +
+          `"${name}", which the environment does not provide`,
+        prefix,
+      );
+    }
+    childEnv[name] = value;
+  }
+}
+
+/** Build the profile launch for the `omp` backend. */
+function buildEmailIntentOmpConfig(
+  selection: EmailIntentProviderSelection,
+  temporaryRoots: EmailIntentTemporaryRoots,
+  options: EmailIntentProfileOptions,
+): AgentConfig {
+  const prefix = EMAIL_INTENT_OMP_PREFIX;
+  const env = options.env ?? ((name: string) => Deno.env.get(name));
+  const exists = options.exists ?? profileFileExists;
+  const readFile = options.readFile ?? ((path: string) => Deno.readTextFileSync(path));
+
+  assertEmailIntentOmpSelection(selection);
+
+  const settingsPath = resolveEmailIntentOmpConfigPath(exists, options.authoredConfigPath);
+  const settings = parseProfileYamlObject(
+    readProfileDocument(
+      readFile,
+      settingsPath,
+      "the authored deny-all OMP settings document",
+      EMAIL_INTENT_OMP_REMEDY,
+      prefix,
+    ),
+    settingsPath,
+  );
+  assertEmailIntentOmpAsset(settings, settingsPath);
+
+  const modelsPath = resolve(resolveEmailIntentOmpModelsPath(options, exists, env));
+  const modelsBytes = readProfileDocument(
+    readFile,
+    modelsPath,
+    "the authored native model configuration",
+    EMAIL_INTENT_OMP_MODELS_REMEDY,
+    prefix,
+  );
+  const credentialNames = selectEmailIntentOmpProvider(
+    parseProfileYamlObject(modelsBytes, modelsPath),
+    modelsPath,
+    selection,
+  );
+
+  const privateRoots = prepareEmailIntentRoots(temporaryRoots, env, prefix);
+  writeEmailIntentOmpModels(privateRoots.home, modelsBytes);
+  const cache = prepareEmailIntentOmpNativeData(privateRoots.home, options);
+
+  // The generated native-loadable bundle is required, exactly as for the
+  // ordinary OMP launch: image artifact when installed, otherwise the
+  // deterministic development entry. A missing artifact fails here naming the
+  // build remedy instead of presenting an unloadable specifier.
+  const extensionPath = resolve(resolveOmpExtensionPath({ exists }));
+  if (!exists(extensionPath)) {
+    refuseEmailIntentProfile(
+      `Missing trusted extension module at "${extensionPath}" — build it first from canonical ` +
+        `source and locked dependencies with deno task bundle:omp-extension`,
+      prefix,
+    );
+  }
+
+  // Args: the AUTHORED deny-all settings plus that generated bundle, and
+  // nothing else. No `--system-prompt`: this launch mounts no operator or user
+  // prompt file (the pinned CLI does not require the flag — verified against
+  // the installed executable's `acp` command), so the interpretation
+  // instruction reaches the engine through its ACP session instead.
+  const args = ["acp", "--config", settingsPath, "--trusted-extension", extensionPath];
+
+  const childEnv: Record<string, string> = {};
+  for (const name of ["PATH", "LANG", "LC_ALL", "USER"]) {
+    const value = env(name);
+    if (value !== undefined && value !== "") childEnv[name] = value;
+  }
+  provisionProfileCredentials(childEnv, selection.providerID, credentialNames, env, prefix);
+
+  // Isolation variables are written LAST: they are the launch's own roots and
+  // the host-only intent marker, and no forwarded credential may shadow them.
+  // `XDG_CONFIG_HOME` is deliberately NOT set: native OMP resolves its agent
+  // (config) directory from HOME (`~/.omp/agent/models.yml`), so a relocated
+  // config home would put the authored model file the launch just copied out of
+  // reach. `SKILL_JWT_DIR` is deliberately NOT set either: the profile
+  // provisions no skill tree and no skill callback.
+  childEnv["HOME"] = privateRoots.home;
+  childEnv["TMPDIR"] = join(privateRoots.home, "tmp");
+  childEnv["XDG_DATA_HOME"] = ompIntentXdgDataHome(privateRoots.home);
+  childEnv["XDG_CACHE_HOME"] = join(privateRoots.home, ".cache");
+  childEnv["XDG_STATE_HOME"] = join(privateRoots.home, ".local", "state");
+  childEnv[OMP_INTENT_PROFILE_FLAG] = OMP_INTENT_PROFILE_FLAG_VALUE;
+
+  return {
+    command: "omp",
+    args,
+    cwd: privateRoots.cwd,
+    env: childEnv,
+    executionProfile: EMAIL_INTENT_PROFILE,
+    // Mount METADATA for a confinement builder (this factory applies no
+    // sandbox: its API carries no `Config`): the private roots are the only
+    // paths this launch may write, the authored settings document and the
+    // generated bundle are read-only inputs, and the shared native payload is a
+    // hard read-only bind — the same posture the ordinary OMP launch describes.
+    runtimeMounts: {
+      writableRuntimePaths: privateRoots.home === privateRoots.cwd
+        ? [privateRoots.home]
+        : [privateRoots.home, privateRoots.cwd],
+      readOnlyPaths: [settingsPath, extensionPath],
+      payloadReadOnlyPaths: [cache.payloadDir],
+    },
+  };
+}
+
+/**
+ * Create the INTERNAL native deny-all intent profile for ONE
  * interpretation launch. Every call allocates fresh private roots and
  * provisions exactly the selected provider (plus its model credential) beside
- * the authored deny-all agent — no ordinary agent, plugin, MCP server, skill,
- * instruction source or previous auth/session state.
+ * the authored deny-all document — no ordinary agent, plugin, MCP server,
+ * skill, instruction source or previous auth/session state.
  *
  * The returned `AgentConfig` carries `executionProfile === "email-intent"` for
  * the consumer's fail-closed mode check, and deliberately NO `skillsRoot`: the
@@ -1529,10 +2234,7 @@ export function createEmailIntentAgentConfig(
     case "opencode":
       return buildEmailIntentOpencodeConfig(providerSelection, temporaryRoots, options);
     case "omp":
-      throw new Error(
-        "email-intent OpenCode profile: the OMP intent profile is owned by the separate " +
-          "`email-omp-intent-profile` change and is not implemented on this path",
-      );
+      return buildEmailIntentOmpConfig(providerSelection, temporaryRoots, options);
     default:
       return refuseEmailIntentProfile(
         `unsupported backend ${JSON.stringify(backend)}`,
