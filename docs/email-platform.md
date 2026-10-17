@@ -1195,11 +1195,21 @@ email-only surface or abstraction is added.
 - The authenticated backup remote URL and the configured `authPassword` are never
   logged: a failing git invocation records `[REDACTED_URL]` for the credential-bearing
   argument and masks `//user:password@` inside git output.
-- The backup stores the bytes it was given: every git invocation it runs pins
-  `core.autocrlf=false` as command-scoped configuration, so a host or repository with a
-  normalizing line-ending policy cannot rewrite the `.eml` wire bytes or attachment
-  payloads in the index. Restored evidence therefore still matches its recorded
-  SHA-256 digest, and the operator's own repository configuration is never modified.
+- The backup stores the bytes it was given: every git invocation the service runs
+  carries `-c core.autocrlf=false`, so git's implicit line-ending conversion no longer
+  rewrites the `.eml` wire bytes or attachment payloads in the index, whatever the
+  host's `core.autocrlf` setting is. Restored evidence therefore still matches its
+  recorded SHA-256 digest. The operator's own line-ending configuration is left
+  untouched; initialization still writes the service's own author, remote and
+  safe-directory settings, as before.
+- **Operator requirement — no transforming attributes on durable email paths**: this
+  guarantee covers git's implicit conversion only. Explicit conversion attributes have
+  higher precedence than `-c core.autocrlf=false`: an operator `.gitattributes` in the
+  data repository (`* text=auto`, `*.eml text`), a `$GIT_DIR/info/attributes` entry, a
+  `core.attributesFile` rule, or a clean/smudge filter would still rewrite evidence
+  bytes and make restored evidence fail its digest verification. Keep the durable email
+  paths (`email/**`, `workspaces/email/**`) free of transforming attributes and
+  filters.
 - **WARNING — private backup**: the backup repository contains private correspondence
   in cleartext, including message bodies and attachment bytes. Keep that repository
   private (private remote, access-controlled credential, no public fork or mirror), and
