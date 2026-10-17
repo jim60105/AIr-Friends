@@ -7,6 +7,15 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { DestinationGrant } from "@core/email-intent-preflight.ts";
+import {
+  type EmailResponseAccounting,
+  EMPTY_EMAIL_RESPONSE,
+  hasEmailResponseOrUncertainty,
+  hasEmailSubmitted,
+  recordEmailSubmission,
+  recordEmailUncertainty,
+} from "@core/email-response-accounting.ts";
+import type { EmailSubmissionMetadata } from "../types/platform.ts";
 
 const logger = createLogger("SessionRegistry");
 
@@ -135,6 +144,17 @@ export interface ActiveSession {
    * and no caller can add, replace or widen one.
    */
   emailDestinationGrants?: readonly DestinationGrant[];
+  /**
+   * Explicit email response accounting of this session (row 22).
+   *
+   * Derived from recorded evidence only (`emailSubmission` metadata of an
+   * executed skill and/or the durable row-13 lookup), never from a skill's
+   * `success` flag: a lost HTTP response after SMTP acceptance must not read as
+   * "nothing was sent". `submitted` counts as a session response; `unknown`
+   * suppresses every automatic retry and is escalated to review-required by the
+   * orchestrator. Undefined for every non-email session.
+   */
+  emailResponse?: EmailResponseAccounting;
 }
 
 /**
@@ -198,6 +218,7 @@ export class SessionRegistry {
       | "fileSendCount"
       | "memorySaveCount"
       | "emailDestinationGrants"
+      | "emailResponse"
     >,
   ): string {
     const id = this.generateSessionId();
@@ -214,6 +235,7 @@ export class SessionRegistry {
       editCount: 0,
       fileSendCount: 0,
       memorySaveCount: 0,
+      emailResponse: EMPTY_EMAIL_RESPONSE,
     };
 
     this.sessions.set(id, activeSession);
@@ -378,6 +400,74 @@ export class SessionRegistry {
   hasFileSent(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
     return session?.fileSent ?? false;
+  }
+
+  /**
+   * Record one observed email submission into this session's accounting
+   * (row 22). Called for every executed skill result that carries
+   * `emailSubmission` metadata — whatever its success flag — and for a durable
+   * row-13 lookup of the session's own logical operation slots.
+   *
+   * The recorded result is immutable and monotonic: a later observation can
+   * never downgrade a `submitted`/`unknown` slot (see
+   * {@link recordEmailSubmission}). Delivery flags and message-ID roles are
+   * deliberately NOT touched here: a third-party submission must never write a
+   * user reply anchor.
+   *
+   * Uses the raw map (like {@link markReplySent}) so a recorded effect is never
+   * dropped because the entry idled past the expiry horizon.
+   *
+   * Returns true if the session exists.
+   */
+  recordEmailSubmission(
+    sessionId: string,
+    metadata: EmailSubmissionMetadata,
+    actionSlot?: string,
+  ): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    session.emailResponse = recordEmailSubmission(session.emailResponse, metadata, actionSlot);
+    logger.debug("Email submission recorded ({Phase}) for session {sessionId}", {
+      sessionId,
+      Phase: metadata.phase,
+      ActionSlot: actionSlot ?? "unknown",
+    });
+    return true;
+  }
+
+  /**
+   * Latch this session's email outcome as unresolved (row 22): the durable
+   * evidence could not be settled or read. No operation is invented — only the
+   * uncertainty flag is set, which suppresses every automatic retry and forces
+   * review-required instead of claiming success.
+   */
+  markEmailResponseUnknown(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    session.emailResponse = recordEmailUncertainty(session.emailResponse);
+    return true;
+  }
+
+  /**
+   * This session's email response accounting. A missing or expired session
+   * reads as {@link EMPTY_EMAIL_RESPONSE}, so a caller can never observe a
+   * partially recorded snapshot.
+   */
+  emailResponseOf(sessionId: string): EmailResponseAccounting {
+    return this.sessions.get(sessionId)?.emailResponse ?? EMPTY_EMAIL_RESPONSE;
+  }
+
+  /** True when this session certainly submitted at least one email. */
+  hasEmailSubmitted(sessionId: string): boolean {
+    return hasEmailSubmitted(this.sessions.get(sessionId)?.emailResponse);
+  }
+
+  /**
+   * True when this session's email state forbids an automatic retry: a
+   * submission already happened, or an outcome is unresolved.
+   */
+  hasEmailResponseOrUncertainty(sessionId: string): boolean {
+    return hasEmailResponseOrUncertainty(this.sessions.get(sessionId)?.emailResponse);
   }
 
   /**

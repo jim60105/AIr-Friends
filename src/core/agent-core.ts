@@ -20,6 +20,7 @@ import { emailWorkReceiptOf } from "../types/events.ts";
 import type { EmailWorkReceipt, NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { EmailSessionReceipts } from "../platforms/email/session-receipts.ts";
+import type { EmailSubmissionEvidenceSource } from "./email-response-accounting.ts";
 
 const logger = createLogger("AgentCore");
 
@@ -209,6 +210,18 @@ export class AgentCore {
   }
 
   /**
+   * Install (or clear) the durable email submission evidence source (row 22).
+   *
+   * Email ingress wires this once, before its first poll; it reaches both the
+   * orchestrator (retry/recovery decisions) and the Skill API server (the
+   * durable second opinion before an email quota rollback).
+   */
+  setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
+    this.orchestrator.setEmailSubmissionEvidence(source);
+    this.skillApiServer?.setEmailSubmissionEvidence(source);
+  }
+
+  /**
    * Handle an incoming event from any platform
    */
   async handleEvent(event: NormalizedEvent): Promise<void> {
@@ -249,8 +262,13 @@ export class AgentCore {
     const response = await this.messageHandler.handleEvent(event, platform);
 
     // If processing failed and no reply was sent, dispatch error message
-    // (also skipped when a file was delivered — the user already received output)
-    if (!response.success && !response.replySent && !response.fileSent) {
+    // (also skipped when a file was delivered — the user already received output
+    // — and for email whenever a submission was recorded or is unresolved, since
+    // a fallback mail could duplicate an accepted message; row 22).
+    if (
+      !response.success && !response.replySent && !response.fileSent &&
+      !response.emailSubmitted && !response.emailUnknown
+    ) {
       await this.dispatchErrorNotice(platform, event, response, emailReceipt);
     }
   }

@@ -2218,3 +2218,130 @@ nothing. `tests/skills/email-forward-smoke.test.ts` runs the same boundary with 
 `EmailSmtpClient` over a real TLS socket to the local SMTP fixture and asserts the peer-received
 original bytes and the rejected-peer outcome. No provider, credential, production mailbox or model
 judgment is claimed.
+
+## Email Response Accounting (Owned by `email-response-accounting`)
+
+The session's outbound email result is tracked explicitly instead of being inferred from a skill's
+boolean result. One session owns one `EmailResponseAccounting`:
+
+| field | meaning |
+| --- | --- |
+| `submittedToUser` | Mail certainly submitted to the initiating user (ordinary `reply`/`files`/`compose` slots). |
+| `submittedToThirdParty` | Mail certainly submitted to a third party (a granted `third-party:<grantId>` slot). |
+| `unknown` | At least one logical operation's outcome is unresolved (recorded `unknown`, an unclosed `submitting`, an unsettled in-flight effect, or an unreadable journal). |
+| `operations` | Every observed logical operation (`operationId`, recorded `phase`, `targetKind?`, `actionSlot?`, `reused?`), in first-seen order. |
+
+Evidence sources are the skill result's `emailSubmission` metadata (recorded regardless of its
+`success` flag) and the durable submission journal (`EmailMailService.lookup(owner, {workId, actionSlot})`)
+for the work item's own slots. Both are consulted only for the session's own owner/work item, and
+the journal is read only after the session's in-flight side effects settle.
+
+Decisions:
+
+- **Submitted counts as a response.** The orchestrator treats the agent as responded when
+  `replySent || reactionSent || fileSent || emailSubmitted`. A third-party submission satisfies that
+  requirement WITHOUT writing `lastSentMessageId`, `lastFileMessageId` or `lastReplyAnchorMessageId`,
+  and a third-party-only turn skips conversation-summary generation (the summary gate stays on
+  `replySent`).
+- **Unknown suppresses and escalates.** A missing-response corrective turn is sent only when nothing
+  responded AND no email submission or uncertainty exists. An unresolved outcome is never reported as
+  success: the response carries `emailUnknown`, the fallback error notice is suppressed, and the
+  durable work receipt is escalated to `review-required`.
+- **Pre-submission corrections only.** A recorded non-delivery (`failed`) leaves the retry available
+  on the SAME host-assigned slot; a completed or unresolved slot is absorbing in the accounting and
+  is never replaced by a changed payload or another slot. Same-slot resends are answered from the
+  journal, so no path can reach a second SMTP transaction for one logical operation.
+- **Crash recovery.** A re-issued prompt after an idle-timeout reconnect is suppressed when the
+  durable journal records a submission or leaves an outcome unresolved, exactly like a recorded
+  response.
+
+### Exported API (consumers: `email-reminder-threads`, `email-spontaneous-targets`, `email-private-observability`, `email-tool-guidance`, `email-activation`)
+
+```ts
+// src/core/email-response-accounting.ts
+export interface EmailResponseOperation {
+  operationId: string;
+  phase: EmailSubmissionPhase;
+  targetKind?: "user" | "third-party";
+  actionSlot?: string;
+  reused?: boolean;
+}
+export interface EmailResponseAccounting {
+  submittedToUser: boolean;
+  submittedToThirdParty: boolean;
+  unknown: boolean;
+  operations: readonly EmailResponseOperation[];
+}
+export const EMPTY_EMAIL_RESPONSE: EmailResponseAccounting;
+export const EMAIL_ORDINARY_ACTION_SLOTS: readonly string[]; // reply, files, compose
+export const EMAIL_HOST_SKILL_SLOTS: Readonly<Record<string, string>>; // send-reply → reply, send-file → files
+export function emailSessionOwner(session: { platform: string; userId: string }): string | undefined;
+export function emailResponseSlots(grants?: readonly { grantId: string }[]): string[];
+export function isThirdPartySlot(slot: string | undefined): boolean;
+export function recordEmailSubmission(
+  accounting: EmailResponseAccounting | undefined,
+  metadata: EmailSubmissionMetadata,
+  actionSlot?: string,
+): EmailResponseAccounting;
+export function recordEmailUncertainty(accounting?: EmailResponseAccounting): EmailResponseAccounting;
+export function hasEmailSubmitted(accounting?: EmailResponseAccounting): boolean;
+export function hasEmailResponseOrUncertainty(accounting?: EmailResponseAccounting): boolean;
+export function hasEmailUncertaintyEvidence(accounting?: EmailResponseAccounting): boolean;
+export function emailResponseFromEvidence(params: {
+  owner: string;
+  workId: string;
+  slots: readonly string[];
+  accounting?: EmailResponseAccounting;
+  lookup(owner: string, operationKey: EmailOperationKey): EmailSendOutcome | undefined;
+}): EmailResponseAccounting;
+
+// src/skill-api/session-registry.ts (on SessionRegistry)
+recordEmailSubmission(sessionId, metadata, actionSlot?): boolean;
+markEmailResponseUnknown(sessionId): boolean;
+emailResponseOf(sessionId): EmailResponseAccounting;
+hasEmailSubmitted(sessionId): boolean;
+hasEmailResponseOrUncertainty(sessionId): boolean;
+
+// src/core/session-orchestrator.ts
+setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void; // { lookup(owner, key) }
+// SessionResponse gains: emailSubmitted?: boolean; emailUnknown?: boolean; emailSend?: EmailSendContext
+
+// src/core/agent-core.ts
+setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void; // forwards to orchestrator + Skill API
+// src/skill-api/server.ts
+setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void;
+```
+
+### Acceptance Scenarios
+
+- **Third-party only**: `send-email` succeeds, the agent completes without `send-reply`; no
+  missing-response email is manufactured and every user anchor ID is unchanged.
+- **Unknown failed result**: `send-email`/`send-file` returns `success: false` with an unresolved
+  submission; no response or quota rollback authorizes a duplicate send, and the work is
+  review-required.
+- **API reply lost**: SMTP accepted but the skill HTTP response is lost and the pooled agent
+  reconnects; the recorded operation suppresses another SMTP transaction.
+- **Durable evidence after the drain**: an effect still in flight defers the evidence read; the
+  recorded submission is only observed after the in-flight counter reaches zero.
+- **Pre-submission failure**: a recorded non-delivery keeps the corrective turn, on the same logical
+  slot, with no replacement slot.
+
+### Slice Verification
+
+```sh
+deno fmt --check src/ tests/
+deno lint src/ tests/
+deno check src/main.ts
+deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys \
+  tests/core/email-response-accounting.test.ts tests/core/reply-dispatcher.test.ts \
+  tests/skill-api/server.test.ts tests/skill-api/session-registry.test.ts \
+  tests/core/session-orchestrator.test.ts tests/core/email-session-receipts.test.ts
+```
+
+`tests/core/email-response-accounting.test.ts` drives the REAL orchestrator, session registry,
+durable receipt journal and retry/summary prompt builders with a scripted connector, and replaces
+only the mail service's `lookup` with an in-memory source that scopes and logs every consulted key:
+the submitted/unresolved/non-delivery matrices, the third-party-anchor guarantee, the drain ordering,
+the review-required escalation, the summary skip and the Discord regression are asserted there. The
+SMTP transport itself is NOT exercised by this suite (row 13's own fixtures own wire-level DATA
+counts); no model and no production credential is involved.

@@ -21,8 +21,16 @@ export class ReplyDispatcher {
     response: SessionResponse,
     replyToMessageId?: string,
   ): Promise<boolean> {
-    // If successful or reply/reaction/file was already sent, nothing to do
-    if (response.success || response.replySent || response.reactionSent || response.fileSent) {
+    // If successful, or a reply/reaction/file was already sent, or email was
+    // submitted OR left unresolved, nothing to do. Row 22: a submitted
+    // third-party mail satisfies the response, and an unresolved submission must
+    // never be followed by a fallback mail that could duplicate it — the status
+    // is carried ON the response, so it still suppresses here after the
+    // session's registry entry is gone.
+    if (
+      response.success || response.replySent || response.reactionSent || response.fileSent ||
+      response.emailSubmitted || response.emailUnknown
+    ) {
       return false;
     }
 
@@ -44,10 +52,17 @@ export class ReplyDispatcher {
     const errorMessage = "I encountered an issue processing your message. Please try again.";
 
     try {
+      // Row 22: the notice is an outgoing mail on the work item's behalf, so an
+      // email session delivers it with the host-assigned operation context — the
+      // adapter refuses an email send without it, and the ordinary `reply` slot
+      // is reused (never a second error-message operation).
       const result = await platformAdapter.sendReply(
         channelId,
         errorMessage,
-        { replyToMessageId },
+        {
+          replyToMessageId,
+          ...(response.emailSend === undefined ? {} : { emailSend: response.emailSend }),
+        },
       );
 
       if (result.success) {

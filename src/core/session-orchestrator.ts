@@ -51,7 +51,20 @@ import type {
   EmailDestinationGrantPreflight,
   EmailDestinationGrantSelectionContext,
 } from "./email-intent-preflight.ts";
+import {
+  type EmailResponseAccounting,
+  emailResponseFromEvidence,
+  emailResponseSlots,
+  emailSessionOwner,
+  type EmailSubmissionEvidenceSource,
+  EMPTY_EMAIL_RESPONSE,
+  hasEmailResponseOrUncertainty,
+  hasEmailSubmitted,
+  hasEmailUncertaintyEvidence,
+  recordEmailUncertainty,
+} from "./email-response-accounting.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { EmailSendContext } from "../types/platform.ts";
 import type {
   AgentConnectorOptions,
   AgentType,
@@ -175,6 +188,14 @@ const EMAIL_DESTINATION_CLARIFICATION_DIRECTIVE =
   "to forward, then stop and wait for their reply.";
 
 /**
+ * Row 22: the one bounded, content-free failure text for a session whose email
+ * outcome is unresolved. It never claims delivery, never names a recipient and
+ * never names a message, so it is safe to log, audit and surface to the durable
+ * receipt as "review required".
+ */
+const EMAIL_OUTCOME_UNKNOWN_ERROR = "email_submission_outcome_unknown: review-required";
+
+/**
  * Response from a session
  */
 export interface SessionResponse {
@@ -184,6 +205,32 @@ export interface SessionResponse {
   /** Whether at least one file was delivered via send-file (message flows only) */
   fileSent?: boolean;
   error?: string;
+  /**
+   * Row 22: whether this session certainly submitted email to the initiating
+   * user or to a third party. A third-party submission satisfies the response
+   * requirement WITHOUT writing any reply anchor, so it is reported here and
+   * never as `replySent`/`fileSent`.
+   *
+   * Absent means "no email was submitted"; the field travels on the response
+   * value because per-spawn teardown removes the session entry before the reply
+   * dispatcher runs.
+   */
+  emailSubmitted?: boolean;
+  /**
+   * Row 22: whether this session's email outcome is unresolved (an interrupted
+   * turn, or a durable operation whose acceptance cannot be proven). An
+   * unresolved outcome forbids every automatic retry and every fallback notice,
+   * and is escalated to review-required instead of claiming success.
+   */
+  emailUnknown?: boolean;
+  /**
+   * Row 22: host-assigned email operation context for a fallback notice, present
+   * only for email sessions the host bound. The adapter refuses an email send
+   * without it; when it is supplied, the notice binds the ordinary `reply` slot
+   * (the same host-assigned logical operation), never an extra error-message
+   * slot.
+   */
+  emailSend?: EmailSendContext;
 }
 
 /**
@@ -242,6 +289,13 @@ export class SessionOrchestrator {
    * Discord/Misskey lifecycle behavior is untouched.
    */
   private emailDestinationGrantPreflight: EmailDestinationGrantPreflight | null = null;
+  /**
+   * Durable email submission evidence (rows 04/13 `lookup`), owned by row 22.
+   * Null until email ingress is wired; while null every retry/recovery decision
+   * still consults the in-memory accounting the Skill API recorded, and every
+   * non-email flow is untouched.
+   */
+  private emailSubmissionEvidence: EmailSubmissionEvidenceSource | null = null;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -331,6 +385,19 @@ export class SessionOrchestrator {
    */
   setEmailDestinationGrantPreflight(preflight: EmailDestinationGrantPreflight | null): void {
     this.emailDestinationGrantPreflight = preflight;
+  }
+
+  /**
+   * Install (or clear) the durable email submission evidence source (rows 04/13
+   * `lookup`).
+   *
+   * Email ingress wires this before its first poll. It is consulted ONLY for an
+   * email session when a retry or recovery decision is made, and only after that
+   * session's in-flight side effects have settled, so no other platform and no
+   * non-email session ever reaches it.
+   */
+  setEmailSubmissionEvidence(source: EmailSubmissionEvidenceSource | null): void {
+    this.emailSubmissionEvidence = source;
   }
 
   /**
@@ -1240,14 +1307,22 @@ export class SessionOrchestrator {
             // outcome can no longer be declared terminal even if a reply landed.
             if (response.stopReason !== "end_turn") emailWorkUncertain = true;
 
-            // Retry on missing response (reply / reaction / file).
+            // Retry on missing response (reply / reaction / file / submitted email).
+            // Row 22: the email verdict is read from durable evidence AFTER the
+            // session's in-flight side effects settle, never from a boolean — an
+            // accepted submission whose HTTP response was lost still counts as a
+            // response, and an unresolved one forbids the corrective turn.
+            const emailAccounting = await this.emailResponseFor(emailSession);
+            const emailSuppressed = hasEmailResponseOrUncertainty(emailAccounting);
+            if (emailSession) emailSession.recoveryFenced = false;
             let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
             let reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
             let fileSent = options.shellSessionId
               ? this.sessionRegistry.hasFileSent(options.shellSessionId)
               : false;
-            let hasResponded = replySent || reactionSent || fileSent;
-            if (!hasResponded && response.stopReason === "end_turn") {
+            let hasResponded = replySent || reactionSent || fileSent ||
+              hasEmailSubmitted(emailAccounting);
+            if (!hasResponded && !emailSuppressed && response.stopReason === "end_turn") {
               // Retry guidance is literal-first in both spawn shapes: name the
               // literal Skill API session id and the rendered staging dir
               // (`$TMPDIR/$SESSION_ID` shell tokens are stale/absent on a
@@ -1276,6 +1351,18 @@ export class SessionOrchestrator {
                   ? this.sessionRegistry.hasFileSent(options.shellSessionId)
                   : false;
                 hasResponded = replySent || reactionSent || fileSent;
+                // The corrective turn is itself effectful: re-read the email
+                // verdict (durable evidence included) before deciding again. An
+                // unresolved outcome stops the loop for good.
+                if (retryResponse.stopReason === "end_turn") {
+                  const afterRetry = await this.emailResponseFor(emailSession);
+                  if (emailSession) emailSession.recoveryFenced = false;
+                  if (afterRetry.unknown) {
+                    emailWorkUncertain = true;
+                    break;
+                  }
+                  hasResponded = hasResponded || hasEmailSubmitted(afterRetry);
+                }
                 if (hasResponded || retryResponse.stopReason !== "end_turn") break;
               }
             }
@@ -1357,7 +1444,35 @@ export class SessionOrchestrator {
         const reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
         const fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
 
-        if (replySent || reactionSent || fileSent) {
+        // Row 22: the terminal classification reads the email verdict once more
+        // (durable evidence included), because the summary turn that follows a
+        // reply is itself effectful.
+        const emailAccounting = await this.emailResponseFor(emailSession);
+        if (emailSession) emailSession.recoveryFenced = false;
+        if (emailAccounting.unknown) {
+          // An unresolved email outcome is never a success: the durable receipt
+          // (row 14) is escalated to review-required instead.
+          emailWorkUncertain = true;
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent,
+            reactionSent,
+            fileSent,
+            durationMs: Date.now() - sessionStartTime,
+            error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: false,
+            replySent,
+            reactionSent,
+            fileSent,
+            error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+          };
+          return result;
+        }
+
+        if (replySent || reactionSent || fileSent || hasEmailSubmitted(emailAccounting)) {
           await auditWriter?.write("session_end", {
             success: true,
             replySent,
@@ -1620,15 +1735,21 @@ export class SessionOrchestrator {
         // Check if reply, reaction, or file was sent. File-send response state
         // is per-session in the registry (marked by the Skill API server when
         // at least one file was delivered); a missing session yields false.
+        // Row 22: the email verdict is read from durable evidence AFTER the
+        // session's in-flight side effects settle, never from a boolean.
+        const emailAccounting = await this.emailResponseFor(emailSession);
+        const emailSuppressed = hasEmailResponseOrUncertainty(emailAccounting);
+        if (emailSession) emailSession.recoveryFenced = false;
         let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
         let reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
         let fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
 
-        // Agent has responded if it sent a reply, a reaction, OR a file
-        let hasResponded = replySent || reactionSent || fileSent;
+        // Agent has responded if it sent a reply, a reaction, a file, or email.
+        let hasResponded = replySent || reactionSent || fileSent ||
+          hasEmailSubmitted(emailAccounting);
 
         // If agent completed without any response, retry
-        if (!hasResponded && response.stopReason === "end_turn") {
+        if (!hasResponded && !emailSuppressed && response.stopReason === "end_turn") {
           sessionLogger.warn(
             "Agent completed without sending reply, reaction, or file, retrying with special prompt",
           );
@@ -1671,6 +1792,19 @@ export class SessionOrchestrator {
             fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
             hasResponded = replySent || reactionSent || fileSent;
 
+            // The corrective turn is itself effectful: re-read the email verdict
+            // (durable evidence included) before deciding again. An unresolved
+            // outcome stops the loop for good.
+            if (retryResponse.stopReason === "end_turn") {
+              const afterRetry = await this.emailResponseFor(emailSession);
+              if (emailSession) emailSession.recoveryFenced = false;
+              if (afterRetry.unknown) {
+                emailWorkUncertain = true;
+                break;
+              }
+              hasResponded = hasResponded || hasEmailSubmitted(afterRetry);
+            }
+
             if (hasResponded) {
               sessionLogger.info("Response sent after retry", {
                 sessionId,
@@ -1696,7 +1830,34 @@ export class SessionOrchestrator {
           replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
           reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
           fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
-          hasResponded = replySent || reactionSent || fileSent;
+          const finalEmail = await this.emailResponseFor(emailSession);
+          if (emailSession) emailSession.recoveryFenced = false;
+          hasResponded = replySent || reactionSent || fileSent ||
+            hasEmailSubmitted(finalEmail);
+        }
+
+        // Row 22: an unresolved email outcome is never a success — the durable
+        // receipt (row 14) is escalated to review-required instead.
+        const terminalEmail = emailSession?.emailResponse ?? EMPTY_EMAIL_RESPONSE;
+        if (terminalEmail.unknown || hasEmailUncertaintyEvidence(terminalEmail)) {
+          emailWorkUncertain = true;
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent,
+            reactionSent,
+            fileSent,
+            durationMs: Date.now() - sessionStartTime,
+            error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: false,
+            replySent,
+            reactionSent,
+            fileSent,
+            error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+          };
+          return result;
         }
 
         if (hasResponded) {
@@ -1837,6 +1998,15 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
+      // Row 22: the flow's email verdict is attached to the response at this
+      // single exit, so EVERY return path carries it (reconciling the durable
+      // journal one last time before the terminal classification). The retained
+      // session object stays readable even though teardown removed the registry
+      // entry, and a non-email session leaves the response untouched.
+      if (result!) {
+        await this.emailResponseFor(emailSession);
+        this.attachEmailResponseStatus(result!, emailSession, emailWorkUncertain);
+      }
       // Durable email work terminal receipt (row 14): exactly one per fenced
       // email work item, on EVERY exit path, after the lifecycle is final.
       // `receipts`/`emailReceipt` are undefined for every other platform.
@@ -1933,6 +2103,8 @@ export class SessionOrchestrator {
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
     let shellSessionId: string | null = null;
+    /** Row 22: retained session object of this run (assigned after setup). */
+    let emailSession: ActiveSession | null = null;
 
     try {
       // 1. Create workspace for the bot itself
@@ -1962,6 +2134,9 @@ export class SessionOrchestrator {
       shellSessionId = setup.shellSessionId;
       auditWriter = setup.auditWriter;
       sessionLogger = setup.sessionLogger;
+      // Row 22: retained session object of this run (the email verdict is read
+      // from it, and attached to the response, after teardown removes the entry).
+      emailSession = shellSessionId ? (this.sessionRegistry.get(shellSessionId) ?? null) : null;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -2290,8 +2465,18 @@ export class SessionOrchestrator {
 
         let replySent = replyHandler.hasReplySent(workspace.key, channelId);
 
+        // Row 22: a spontaneous email is accounted like any other response —
+        // submitted mail counts as delivered, an unresolved outcome forbids the
+        // corrective turn. Non-email flows read the empty accounting.
+        const emailAccounting = await this.emailResponseFor(emailSession);
+        const emailSuppressed = hasEmailResponseOrUncertainty(emailAccounting);
+        if (emailSession) emailSession.recoveryFenced = false;
+
         // Retry if no reply sent
-        if (!replySent && response.stopReason === "end_turn") {
+        if (
+          !replySent && !hasEmailSubmitted(emailAccounting) && !emailSuppressed &&
+          response.stopReason === "end_turn"
+        ) {
           sessionLogger.warn("Agent completed without reply, retrying");
 
           const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
@@ -2321,21 +2506,30 @@ export class SessionOrchestrator {
           replySent = replyHandler.hasReplySent(workspace.key, channelId);
         }
 
+        // Row 22: reconcile the email verdict before the terminal classification;
+        // an unresolved outcome is never reported as delivered.
+        const finalEmail = await this.emailResponseFor(emailSession);
+        const spontaneousDelivered = hasEmailSubmitted(finalEmail);
+        const spontaneousSuccess = !finalEmail.unknown && (replySent || spontaneousDelivered);
+        const spontaneousError = finalEmail.unknown
+          ? EMAIL_OUTCOME_UNKNOWN_ERROR
+          : (replySent ? undefined : "Agent did not send a reply");
+
         // Audit: session_end
         await auditWriter?.write("session_end", {
-          success: replySent,
+          success: spontaneousSuccess,
           replySent,
           fileSent: false,
           durationMs: Date.now() - sessionStartTime,
-          error: replySent ? undefined : "Agent did not send a reply",
+          error: spontaneousError,
           ...auditWriter?.getSummaryCounters(),
         });
 
         result = {
-          success: replySent,
+          success: spontaneousSuccess,
           replySent,
           fileSent: false,
-          error: replySent ? undefined : "Agent did not send a reply",
+          error: spontaneousError,
         };
         return result;
       } finally {
@@ -2375,6 +2569,13 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
+      // Row 22: attach this run's email verdict to the response at this single
+      // exit, so every return path carries it (the retained session object stays
+      // readable after the registry entry is removed below).
+      if (result!) {
+        await this.emailResponseFor(emailSession);
+        this.attachEmailResponseStatus(result!, emailSession, false);
+      }
       try {
         {
           if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
@@ -3910,6 +4111,8 @@ export class SessionOrchestrator {
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
     let shellSessionId: string | null = null;
+    /** Row 22: retained session object of this reminder run (see setup below). */
+    let emailSession: ActiveSession | null = null;
 
     try {
       // 1. Resolve DM channel
@@ -3968,6 +4171,10 @@ export class SessionOrchestrator {
       shellSessionId = setup.shellSessionId;
       auditWriter = setup.auditWriter;
       sessionLogger = setup.sessionLogger;
+      // Row 22: the retained session object of this reminder run. Teardown
+      // removes the registry entry before the reply dispatcher runs, so the
+      // email verdict is read from this object and attached to the response.
+      emailSession = shellSessionId ? (this.sessionRegistry.get(shellSessionId) ?? null) : null;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -4230,8 +4437,19 @@ export class SessionOrchestrator {
 
         let replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
 
+        // Row 22: a reminder delivered as email is accounted like any other
+        // session response — submitted mail counts as delivered, an unresolved
+        // outcome forbids the corrective turn. Non-email reminders (Discord,
+        // Misskey) read the empty accounting and keep their exact behavior.
+        const emailAccounting = await this.emailResponseFor(emailSession);
+        const emailSuppressed = hasEmailResponseOrUncertainty(emailAccounting);
+        if (emailSession) emailSession.recoveryFenced = false;
+
         // Retry if no reply sent
-        if (!replySent && response.stopReason === "end_turn") {
+        if (
+          !replySent && !hasEmailSubmitted(emailAccounting) && !emailSuppressed &&
+          response.stopReason === "end_turn"
+        ) {
           sessionLogger.warn("Agent completed without reply, retrying");
 
           const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
@@ -4261,8 +4479,13 @@ export class SessionOrchestrator {
           replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
         }
 
+        // Row 22: reconcile the email verdict once more before the terminal
+        // classification; an unresolved outcome is never treated as delivered.
+        const finalEmail = await this.emailResponseFor(emailSession);
+        const emailDelivered = hasEmailSubmitted(finalEmail);
+
         // 7. Disable reminder on success
-        if (replySent) {
+        if (replySent || emailDelivered) {
           await reminderStore.cancelReminder(workspace, reminder.id);
           remindersDeliveredTotal.labels(platform, "success").inc();
           sessionLogger.info("Reminder {reminderId} delivered and disabled", {
@@ -4272,21 +4495,28 @@ export class SessionOrchestrator {
           remindersDeliveredTotal.labels(platform, "failure").inc();
         }
 
+        // Row 22: an unresolved email outcome is never reported as delivered, and
+        // a submitted email satisfies this reminder without any reply anchor.
+        const reminderSuccess = !finalEmail.unknown && (replySent || emailDelivered);
+        const reminderError = finalEmail.unknown
+          ? EMAIL_OUTCOME_UNKNOWN_ERROR
+          : (replySent ? undefined : "Agent did not send a reply");
+
         // Audit: session_end (reminder)
         await auditWriter?.write("session_end", {
-          success: replySent,
+          success: reminderSuccess,
           replySent,
           fileSent: false,
           durationMs: Date.now() - sessionStartTime,
-          error: replySent ? undefined : "Agent did not send a reply",
+          error: reminderError,
           ...auditWriter?.getSummaryCounters(),
         });
 
         result = {
-          success: replySent,
+          success: reminderSuccess,
           replySent,
           fileSent: false,
-          error: replySent ? undefined : "Agent did not send a reply",
+          error: reminderError,
         };
         return result;
       } finally {
@@ -4325,6 +4555,13 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
+      // Row 22: attach this reminder run's email verdict to the response at this
+      // single exit, so every return path carries it (the retained session object
+      // stays readable after the registry entry is removed below).
+      if (result!) {
+        await this.emailResponseFor(emailSession);
+        this.attachEmailResponseStatus(result!, emailSession, false);
+      }
       try {
         {
           if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
@@ -4416,6 +4653,12 @@ export class SessionOrchestrator {
     if (!this.processPool) {
       throw new Error("runSharedPoolSession called without a process pool (per-spawn mode)");
     }
+    // Row 22: the run's retained session object. Teardown removes the registry
+    // entry before the caller's dispatcher runs, so the email verdict must be
+    // read from this object and attached to the returned response.
+    const emailSession = shellSessionId ? this.sessionRegistry.get(shellSessionId) ?? null : null;
+    /** True once this run can no longer prove that no email left the process. */
+    let runUncertain = false;
     // Shared-process mode: the pool-key data root (set by agent-factory into the
     // process env) drives the permission gate's tool-output boundary.
     if (connectorOptions.clientConfig) {
@@ -4529,6 +4772,8 @@ export class SessionOrchestrator {
           sl.warn("Session {sessionId} ended without agent response after reconnect", {
             sessionId: acpSessionId,
           });
+          // The turn was lost after it may have acted.
+          runUncertain = true;
           return acpSessionId;
         }
         sl.info("Agent session {sessionId} completed with stopReason {stopReason}", {
@@ -4538,12 +4783,19 @@ export class SessionOrchestrator {
 
         const replyHandler = this.skillRegistry.getReplyHandler();
         const reactionHandler = this.skillRegistry.getReactionHandler();
+        if (response.stopReason !== "end_turn") runUncertain = true;
+        // Row 22: the email verdict is read from durable evidence AFTER the
+        // session's in-flight side effects settle, never from a boolean.
+        const emailAccounting = await this.emailResponseFor(emailSession);
+        const emailSuppressed = hasEmailResponseOrUncertainty(emailAccounting);
+        if (emailSession) emailSession.recoveryFenced = false;
         let replySent = replyHandler.hasReplySent(workspace.key, channelId);
         let reactionSent = reactionHandler.hasReactionSent(workspace.key, channelId);
         let fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
-        let hasResponded = replySent || reactionSent || fileSent;
+        let hasResponded = replySent || reactionSent || fileSent ||
+          hasEmailSubmitted(emailAccounting);
 
-        if (!hasResponded && response.stopReason === "end_turn") {
+        if (!hasResponded && !emailSuppressed && response.stopReason === "end_turn") {
           // Shared-process retry guidance: literal session id + staging dir.
           const retryCtx = this.retryPromptContext(workspace, shellSessionId, true);
           const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
@@ -4570,6 +4822,19 @@ export class SessionOrchestrator {
             reactionSent = reactionHandler.hasReactionSent(workspace.key, channelId);
             fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
             hasResponded = replySent || reactionSent || fileSent;
+            if (retryResponse.stopReason !== "end_turn") runUncertain = true;
+            // The corrective turn is itself effectful: re-read the email verdict
+            // (durable evidence included) before deciding again. An unresolved
+            // outcome stops the loop for good.
+            if (retryResponse.stopReason === "end_turn") {
+              const afterRetry = await this.emailResponseFor(emailSession);
+              if (emailSession) emailSession.recoveryFenced = false;
+              if (afterRetry.unknown) {
+                runUncertain = true;
+                break;
+              }
+              hasResponded = hasResponded || hasEmailSubmitted(afterRetry);
+            }
             if (hasResponded || retryResponse.stopReason !== "end_turn") break;
           }
         }
@@ -4609,24 +4874,53 @@ export class SessionOrchestrator {
           : "Cancelled by queue deadline",
         ...auditWriter?.getSummaryCounters(),
       });
-      return {
-        success: false,
-        replySent: false,
-        fileSent: false,
-        error: recoveryAbort
-          ? `session_recovery_failed: ${recoveryAbort}`
-          : "Cancelled by queue deadline",
-      };
+      return this.attachEmailResponseStatus(
+        {
+          success: false,
+          replySent: false,
+          fileSent: false,
+          error: recoveryAbort
+            ? `session_recovery_failed: ${recoveryAbort}`
+            : "Cancelled by queue deadline",
+        },
+        emailSession,
+        true,
+      );
     }
 
-    // Post-lease: final response state.
+    // Post-lease: final response state. Row 22: the email verdict comes from the
+    // durable evidence as well, read after the same in-flight settle.
     const replyHandler = this.skillRegistry.getReplyHandler();
     const reactionHandler = this.skillRegistry.getReactionHandler();
     const replySent = replyHandler.hasReplySent(workspace.key, channelId);
     const reactionSent = reactionHandler.hasReactionSent(workspace.key, channelId);
     const fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+    const emailAccounting = await this.emailResponseFor(emailSession);
 
-    if (replySent || reactionSent || fileSent) {
+    if (emailAccounting.unknown) {
+      await auditWriter?.write("session_end", {
+        success: false,
+        replySent,
+        reactionSent,
+        fileSent,
+        durationMs: Date.now() - sessionStartTime,
+        error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+        ...auditWriter?.getSummaryCounters(),
+      });
+      return this.attachEmailResponseStatus(
+        {
+          success: false,
+          replySent,
+          reactionSent,
+          fileSent,
+          error: EMAIL_OUTCOME_UNKNOWN_ERROR,
+        },
+        emailSession,
+        true,
+      );
+    }
+
+    if (replySent || reactionSent || fileSent || hasEmailSubmitted(emailAccounting)) {
       await auditWriter?.write("session_end", {
         success: true,
         replySent,
@@ -4635,7 +4929,11 @@ export class SessionOrchestrator {
         durationMs: Date.now() - sessionStartTime,
         ...auditWriter?.getSummaryCounters(),
       });
-      return { success: true, replySent, reactionSent, fileSent };
+      return this.attachEmailResponseStatus(
+        { success: true, replySent, reactionSent, fileSent },
+        emailSession,
+        runUncertain,
+      );
     }
 
     await auditWriter?.write("session_end", {
@@ -4648,14 +4946,18 @@ export class SessionOrchestrator {
         : "Agent did not generate a reply",
       ...auditWriter?.getSummaryCounters(),
     });
-    return {
-      success: false,
-      replySent: false,
-      fileSent: false,
-      error: recoveryAbort
-        ? `session_recovery_failed: ${recoveryAbort}`
-        : "Agent did not generate a reply",
-    };
+    return this.attachEmailResponseStatus(
+      {
+        success: false,
+        replySent: false,
+        fileSent: false,
+        error: recoveryAbort
+          ? `session_recovery_failed: ${recoveryAbort}`
+          : "Agent did not generate a reply",
+      },
+      emailSession,
+      runUncertain,
+    );
   }
 
   /**
@@ -4787,9 +5089,16 @@ export class SessionOrchestrator {
       // may still be delivering; wait (bounded) for in-flight effects to settle
       // so their success OR rollback is visible in the responded read below.
       const settled = session ? await this.waitForInflightSideEffects(session, sessionId) : true;
+      // Row 22: the email verdict comes from durable evidence as well, read after
+      // the same settle. A submitted operation counts as a response, and an
+      // unresolved one forbids the re-issued prompt exactly like a delivered
+      // response: replaying a turn whose mail may already have been accepted
+      // would risk a duplicate delivery.
+      const emailAccounting = await this.emailResponseFor(session ?? null);
       const reactionHandler = this.skillRegistry.getReactionHandler();
       const responded = session
         ? session.replySent || session.fileSent ||
+          hasEmailSubmitted(emailAccounting) ||
           reactionHandler.hasReactionSent(session.workspace.key, session.channelId)
         : false;
 
@@ -4807,10 +5116,16 @@ export class SessionOrchestrator {
       // Fail closed: if side-effect calls never settled, a re-issued prompt
       // could run concurrently with a still-landing effect. Keep the fence
       // raised and abandon the session instead of risking duplicates.
-      if (!settled) {
+      if (!settled || emailAccounting.unknown) {
         logger.error(
-          "Session {sessionId} recovery aborted: side-effect calls still in flight after settle wait — not re-prompting",
-          { sessionId, shellSessionId },
+          "Session {sessionId} recovery aborted: {Reason} — not re-prompting",
+          {
+            sessionId,
+            shellSessionId,
+            Reason: settled
+              ? "an email submission outcome is unresolved"
+              : "side-effect calls still in flight after settle wait",
+          },
         );
         return null;
       }
@@ -4868,6 +5183,94 @@ export class SessionOrchestrator {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Read this session's email response accounting for one retry, corrective-turn
+   * or crash-recovery decision (row 22).
+   *
+   * Admission to side-effect skill calls is closed BEFORE the in-flight counter
+   * is read, so an orphaned tool child of an interrupted turn cannot land a
+   * submission after the evidence was read — the caller reopens admission when
+   * it deliberately permits further work. The read then drains in-flight effects
+   * (bounded) and merges the durable row-13 journal for the session's own
+   * logical slots, so an accepted submission whose HTTP response was lost still
+   * counts as a response.
+   *
+   * The reconciled verdict is written back onto the retained session object (not
+   * only returned), so the response value that reaches the reply dispatcher
+   * carries the same verdict — including after registry teardown. A drain that
+   * cannot settle, or an unreadable durable journal, is latched as UNRESOLVED
+   * (review-required) instead of assuming nothing was sent.
+   *
+   * Non-email sessions return the empty accounting without draining, fencing or
+   * writing anything, so Discord/Misskey decision paths are byte-for-byte
+   * unchanged.
+   */
+  private async emailResponseFor(session: ActiveSession | null): Promise<EmailResponseAccounting> {
+    if (session?.platform !== "email") return EMPTY_EMAIL_RESPONSE;
+    session.recoveryFenced = true;
+    if (!(await this.waitForInflightSideEffects(session, session.id))) {
+      session.emailResponse = recordEmailUncertainty(session.emailResponse);
+      return session.emailResponse;
+    }
+    const evidence = this.emailSubmissionEvidence;
+    const owner = emailSessionOwner(session);
+    const workId = session.emailWorkId;
+    if (!evidence || owner === undefined || workId === undefined || workId.trim() === "") {
+      return session.emailResponse ?? EMPTY_EMAIL_RESPONSE;
+    }
+    try {
+      session.emailResponse = emailResponseFromEvidence({
+        owner,
+        workId,
+        slots: emailResponseSlots(session.emailDestinationGrants),
+        accounting: session.emailResponse,
+        lookup: (lookupOwner, key) => evidence.lookup(lookupOwner, key),
+      });
+    } catch (error) {
+      // An unreadable journal cannot prove that nothing was submitted.
+      logger.error("Failed to read durable email evidence for session {sessionId}", {
+        sessionId: session.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      session.emailResponse = recordEmailUncertainty(session.emailResponse);
+    }
+    return session.emailResponse;
+  }
+
+  /**
+   * Attach this flow's email response status to a computed response (row 22).
+   *
+   * Called at the single exit of every flow that can carry email work, because
+   * teardown removes the session's registry entry before the reply dispatcher
+   * runs: the verdict must travel ON the value. `session` is the run's retained
+   * session object, which stays readable after the entry is removed.
+   *
+   * `runUncertain` is the flow's own uncertainty verdict (interrupted turn,
+   * cancellation, recovery abort): an interrupted email turn cannot prove that
+   * no mail left the process, so it suppresses fallback delivery exactly like an
+   * unresolved durable operation.
+   *
+   * A non-email session, or a flow that never registered one, keeps the response
+   * untouched.
+   */
+  private attachEmailResponseStatus(
+    response: SessionResponse,
+    session: ActiveSession | null | undefined,
+    runUncertain: boolean,
+  ): SessionResponse {
+    if (session?.platform !== "email") return response;
+    const accounting = session.emailResponse ?? EMPTY_EMAIL_RESPONSE;
+    response.emailSubmitted = hasEmailSubmitted(accounting);
+    response.emailUnknown = accounting.unknown || hasEmailUncertaintyEvidence(accounting) ||
+      runUncertain;
+    const owner = emailSessionOwner(session);
+    const workId = session.emailWorkId;
+    if (owner !== undefined && workId !== undefined && workId.trim() !== "") {
+      response.emailSend = { workId, owner };
+    }
+    return response;
   }
 
   /**
