@@ -17,6 +17,7 @@
     "html-to-text": "npm:html-to-text@^9.0.5",
     "mailparser": "npm:mailparser@^3.9.39",
     "misskey-js": "npm:misskey-js@2026.10.0",
+    "imapflow": "npm:imapflow@^1.7.8",
     "@agentclientprotocol/sdk": "npm:@agentclientprotocol/sdk@^0.14.1",
     "@node-rs/jieba": "npm:@node-rs/jieba@^2",
     "prom-client": "npm:prom-client@^15",
@@ -31,20 +32,20 @@
   },
   "tasks": {
     "dev": "deno run --watch --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts",
-    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts",
-    "start:config": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --config",
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts",
+    "start:config": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --config",
     // `--parallel` is deliberately NOT used: Deno runs parallel test modules in one process, so
     // `Deno.env` mutations leak between concurrently running files. The env-override tests set
     // and restore process-global variables, so a neighbour could observe a transient value and
     // fail on an unrelated assertion (observed on config-loader, scripts and agent-factory-omp).
-    "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi",
-    "test:watch": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --watch",
-    "test:coverage": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --coverage=coverage",
+    "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys",
+    "test:watch": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys --watch",
+    "test:coverage": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys --coverage=coverage",
     "coverage:report": "deno coverage coverage --exclude='tests/'",
-    "test:coverage:lcov": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --coverage=coverage && deno coverage coverage --lcov --output=coverage.lcov --exclude='tests/'",
-    "test:unit": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi tests/ --ignore=tests/integration",
-    "test:integration": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi tests/integration",
-    "ci": "deno task fmt:check && deno task lint && deno task check && deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi",
+    "test:coverage:lcov": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys --coverage=coverage && deno coverage coverage --lcov --output=coverage.lcov --exclude='tests/'",
+    "test:unit": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/ --ignore=tests/integration",
+    "test:integration": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys tests/integration",
+    "ci": "deno task fmt:check && deno task lint && deno task check && deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys",
     "fmt": "deno fmt src/ tests/",
     "fmt:check": "deno fmt --check src/ tests/",
     "lint": "deno lint src/ tests/",
