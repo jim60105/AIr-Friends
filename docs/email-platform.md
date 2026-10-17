@@ -136,6 +136,46 @@ Detailed acceptance requirements and scenarios are defined in `specs/email-mailb
   - `getEntry(key: MailboxKey): MailboxEntrySnapshot | undefined`
   - `close(): void`
 
+## Certificate-Validated IMAP Transport (Owned by `email-imap-transport`)
+
+The email platform communicates with remote IMAP mailboxes exclusively over certificate-validated TLS connections via `EmailImapClient` in `src/platforms/email/imap-client.ts`.
+
+### Invariants & Security
+
+- **Fail-Closed TLS Only**: Requires direct TLS (port 993) or mandatory STARTTLS (port 143) with certificate verification always enabled. Plaintext connections, opportunistic downgrade, and disabled certificate verification are strictly rejected.
+- **Zero Authentication Before TLS**: Password credentials and SASL authentication payloads are sent only after transport encryption and certificate validation succeed. In case of certificate failure or missing STARTTLS capability, zero authentication requests are transmitted.
+- **Credential Safety**: User credentials and secret passwords are NEVER logged or included in diagnostics, error messages, or telemetry.
+- **30-Second Operation Timeout**: All network operations, commands, and mailbox lock acquisitions are bounded by a 30-second watchdog timer (`DEFAULT_IMAP_TIMEOUT_MS = 30000`).
+- **Preflight & Hard Streaming Bounds**: Sources are checked against `maxBytes` (default 25 MiB) using `RFC822.SIZE` preflight before streaming. Oversized messages are rejected before reading body bytes. If the server understates message size, the streaming pipeline enforces an independent byte counter and cancels the download on overflow (`MESSAGE_TOO_LARGE`).
+- **Mailbox Lock Serialization**: Folder interactions (e.g. `INBOX`, `Sent`) serialize access using mailbox locks held across command operations and streaming download lifetimes.
+- **Read Flags Irrelevant**: `listAfter` queries messages strictly by UID (`uidSince + 1:*`) and ignores `\Seen` flags, allowing complete recovery of mail marked as read by other clients.
+- **Test-Only Trust Root Setup**: Custom CA certificates (`tlsCa`) can be injected exclusively into `EmailImapClientOptions` during tests against deterministic local in-process protocol fixtures (`tests/helpers/email-imap-service.ts`); no production configuration or CLI parameter exposes an option to disable verification.
+
+### Acceptance Scenarios
+
+Acceptance requirements and test scenarios defined in `specs/email-imap-transport/spec.md`:
+
+- **Downgrade or invalid certificate**: When the server omits STARTTLS or presents an untrusted/corrupt certificate, connection fails before credentials are sent.
+- **Read elsewhere**: When new mail has `\Seen` set by another client, the UID still appears in `listAfter` and its bounded source remains retrievable.
+- **Protocol smoke**: Real IMAP library (`imapflow`) connects to a controlled loopback test service using an in-process fixture CA; login, select, status, fetch, append, and disconnect exchanges complete deterministically without production network access.
+
+### Exported API
+
+- `ImapTransport`:
+  - `connect(): Promise<void>`
+  - `disconnect(): Promise<void>`
+  - `status(folder?: string): Promise<ImapMailboxPosition>`
+  - `position(folder?: string): Promise<ImapMailboxPosition>`
+  - `listAfter(uidSince: number, options?: ImapListOptions): Promise<number[]>`
+  - `fetchHeaders(uid: number, options?: ImapFetchHeadersOptions): Promise<string>`
+  - `fetchSource(uid: number, options?: ImapFetchSourceOptions): Promise<ImapMessage>`
+  - `appendSent(rawMime: Uint8Array | string, options?: ImapAppendOptions): Promise<void>`
+- `ImapMessage`:
+  - `uid: number`
+  - `size: number`
+  - `source: ReadableStream<Uint8Array>`
+  - `bytes(): Promise<Uint8Array>`
+
 ## Inbound Email Authentication & Allowlist Admission (Owned by `email-incoming-auth`)
 
 Inbound email authentication and allowlist admission are implemented in `src/platforms/email/incoming-auth.ts`.
