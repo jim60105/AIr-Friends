@@ -7,6 +7,7 @@
 Email attachment content SHALL be made available only as internally resolved copies within the current user session staging boundary.
 
 #### Scenario: Cross-user or symlink reference
+
 - **WHEN** a forged local reference names another owner or a staging symlink escapes
 - **THEN** no private bytes are read or staged
 
@@ -15,6 +16,7 @@ Email attachment content SHALL be made available only as internally resolved cop
 Adding local attachments SHALL preserve existing HTTP attachment SSRF checks and SHALL NOT admit file URLs as network fetch targets.
 
 #### Scenario: Mixed attachment types
+
 - **WHEN** a session includes a local email file and an unsafe network URL
 - **THEN** only the owner-validated local copy is accessible and unsafe URL remains unfetched
 
@@ -23,6 +25,7 @@ Adding local attachments SHALL preserve existing HTTP attachment SSRF checks and
 Session cleanup SHALL remove temporary attachment copies without removing permanent source history.
 
 #### Scenario: Session ends
+
 - **WHEN** the tmp lifecycle runs after attachment processing
 - **THEN** archive bytes remain intact and no sibling session copy is removed
 
@@ -45,14 +48,14 @@ Each network attachment SHALL conform to the `Attachment` interface with fields:
 - **THEN** `isImage` SHALL be `false`
 
 #### Scenario: Local email attachment variant
+
 - **WHEN** a stored email attachment is normalized
 - **THEN** it SHALL carry a local-email discriminator, opaque owner/message/attachment references and the same MIME/display/size metadata without a URL or arbitrary path
 - **AND** local materialization SHALL enforce current-session containment
 
-
 ### Requirement: Text Description Always Present
 
-Attachment URLs and metadata SHALL always be included as text descriptions in the assembled context, regardless of whether the agent supports image capability. This ensures the agent always has awareness of attachments.
+Network attachment URLs and metadata SHALL always be included as text descriptions in the assembled context, regardless of whether the agent supports image capability, so the agent has attachment information. Local email files SHALL use their owner-validated session paths and metadata.
 
 #### Scenario: Text description present with image capability
 
@@ -67,10 +70,10 @@ Attachment URLs and metadata SHALL always be included as text descriptions in th
 - **THEN** the context SHALL include text descriptions with URLs for all attachments
 
 #### Scenario: Local email attachment handling
+
 - **WHEN** this requirement is applied to an owner-validated local-email attachment
 - **THEN** network URL/download wording SHALL apply only to network attachments; local metadata SHALL use the session-contained file path, and only trigger images with negotiated capability and within the existing size limit SHALL become image content blocks
 - **AND** history files SHALL remain reference metadata unless materialized under the same current-session owner checks
-
 
 ### Requirement: Trigger-Only Image Download
 
@@ -89,10 +92,10 @@ Only trigger message images SHALL be downloaded for `ContentBlock` inclusion. Im
 - **THEN** the image SHALL be described by URL only; no download SHALL occur
 
 #### Scenario: Local email attachment handling
+
 - **WHEN** this requirement is applied to an owner-validated local-email attachment
 - **THEN** network URL/download wording SHALL apply only to network attachments; local metadata SHALL use the session-contained file path, and only trigger images with negotiated capability and within the existing size limit SHALL become image content blocks
 - **AND** history files SHALL remain reference metadata unless materialized under the same current-session owner checks
-
 
 ### Requirement: Size Limit and Download Timeout
 
@@ -138,10 +141,10 @@ Images exceeding 20 MB SHALL NOT be downloaded and SHALL be described by URL onl
 - **THEN** no error SHALL be thrown and the attachment SHALL be described by URL only
 
 #### Scenario: Local email attachment handling
+
 - **WHEN** this requirement is applied to an owner-validated local-email attachment
 - **THEN** network URL/download wording SHALL apply only to network attachments; local metadata SHALL use the session-contained file path, and only trigger images with negotiated capability and within the existing size limit SHALL become image content blocks
 - **AND** history files SHALL remain reference metadata unless materialized under the same current-session owner checks
-
 
 ### Requirement: Capability Negotiation
 
@@ -161,6 +164,7 @@ The system SHALL send image `ContentBlock` to the ACP Agent only when the agent 
 - **AND** no image download SHALL be attempted
 
 #### Scenario: Local email attachment handling
+
 - **WHEN** this requirement is applied to an owner-validated local-email attachment
 - **THEN** network URL/download wording SHALL apply only to network attachments; local metadata SHALL use the session-contained file path, and only trigger images with negotiated capability and within the existing size limit SHALL become image content blocks
 - **AND** history files SHALL remain reference metadata unless materialized under the same current-session owner checks
