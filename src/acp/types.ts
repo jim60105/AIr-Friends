@@ -124,8 +124,10 @@ export interface AgentConfig {
   /**
    * Additional runtime mounts for THIS agent launch, merged with the shared
    * confinement defaults by `SandboxManager.buildSpawnOptions()`. Only the OMP
-   * factory populates it, to expose the selected authored native assets
-   * read-only and the selected native mode data child read-write. OpenCode
+   * factory and the internal email-intent profile (`ExecutionProfile`) populate
+   * it: the OMP branch exposes the selected authored native assets read-only and
+   * the selected native mode data child read-write; the email-intent profile
+   * exposes its private launch HOME read-write. Every ORDINARY OpenCode launch
    * leaves it unset and keeps its existing mounts unchanged.
    */
   runtimeMounts?: AgentRuntimeMounts;
@@ -141,6 +143,14 @@ export interface AgentConfig {
    * fallback.
    */
   skillsRoot?: SkillsRootObservation;
+
+  /**
+   * INTERNAL launch-profile identity of THIS config, when the launch is not the
+   * ordinary shape (`ExecutionProfile`). Unset for every ordinary launch, so an
+   * existing consumer sees no change. The email-intent consumer verifies the
+   * active ACP session mode against it and fails closed on a mismatch.
+   */
+  executionProfile?: ExecutionProfile;
 }
 
 /**
@@ -184,6 +194,19 @@ export type OmpPermissionMode = "restricted" | "native-yolo";
  * Supported ACP Agent types
  */
 export type AgentType = "opencode" | "omp";
+
+/**
+ * INTERNAL launch profiles that select a non-ordinary ACP launch shape.
+ *
+ * A profile is a factory-side identity, never a dashboard- or
+ * configuration-selectable mode: no configuration field, request field or
+ * environment variable can name one. `email-intent` launches the authored
+ * deny-all OpenCode intent profile (fresh private HOME/cwd, provider-only
+ * configuration); its consumer is the email-intent runtime, which reads the
+ * identity back off `AgentConfig.executionProfile` and fails closed on any
+ * mismatch.
+ */
+export type ExecutionProfile = "email-intent";
 
 /**
  * Complete set of supported ACP Agent types recognized across configuration,
