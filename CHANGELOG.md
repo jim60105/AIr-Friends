@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-10-19
+
+### Fixed
+
+- Releases publish again. The release workflow's test job now installs the image-conversion tool its tests exercise, the same one the published container has always shipped, so a tagged release runs its tests to completion and reaches the release and image jobs instead of stopping short of them. The continuous-integration workflow already installed it; only the release path was missing it, which is why 0.36.0 published neither a release nor images.
+
 ## [0.36.0] - 2026-10-19
 
 ### Added
@@ -1256,7 +1262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.36.1...HEAD
+[0.36.1]: https://github.com/jim60105/AIr-Friends/compare/v0.36.0...v0.36.1
 [0.36.0]: https://github.com/jim60105/AIr-Friends/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/jim60105/AIr-Friends/compare/v0.34.1...v0.35.0
 [0.34.1]: https://github.com/jim60105/AIr-Friends/compare/v0.34.0...v0.34.1
