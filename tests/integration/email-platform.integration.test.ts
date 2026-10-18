@@ -28,8 +28,6 @@ import {
   composeEmailPlatform,
   type EmailPlatformRuntime,
 } from "../../src/platforms/email/activation.ts";
-import { EmailImapClient } from "../../src/platforms/email/imap-client.ts";
-import { EmailSmtpClient } from "../../src/platforms/email/smtp-client.ts";
 import { EmailImapTestService } from "../helpers/email-imap-service.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
 
@@ -71,6 +69,7 @@ function emailConfig(imap: EmailImapTestService, smtp: EmailSmtpTestService): Em
   return {
     enabled: true,
     address: BOT,
+    tlsCa: `${imap.caCert}\n${smtp.caCert}`,
     imap: {
       host: "127.0.0.1",
       port: imap.port,
@@ -115,25 +114,7 @@ async function composeRuntime(
   smtp: EmailSmtpTestService,
 ): Promise<{ runtime: EmailPlatformRuntime; config: Config }> {
   const config = deploymentConfig(base, emailConfig(imap, smtp));
-  const email = config.platforms.email!;
-  const runtime = await composeEmailPlatform({
-    config,
-    transports: {
-      imap: new EmailImapClient({
-        config: email.imap,
-        defaultFolder: email.incomingFolder,
-        defaultSentFolder: email.sentFolder,
-        tlsCa: imap.caCert,
-      }),
-      smtp: new EmailSmtpClient({ config: email.smtp, tlsCa: smtp.caCert }),
-      sentCopyImap: new EmailImapClient({
-        config: email.imap,
-        defaultFolder: email.incomingFolder,
-        defaultSentFolder: email.sentFolder,
-        tlsCa: imap.caCert,
-      }),
-    },
-  });
+  const runtime = await composeEmailPlatform({ config });
   return { runtime, config };
 }
 

@@ -100,6 +100,7 @@ channels:
 | --- | --- | --- |
 | `enabled` | `EMAIL_ENABLED` | `false`。設為 `true` 才會組合電子郵件平台 |
 | `address` | `EMAIL_ADDRESS` | 啟用時必填。機器人對外使用的信箱地址 |
+| `tlsCa` | `EMAIL_TLS_CA` | Optional literal PEM trust bundle for all email transports; replaces default roots. See the private CA section below. |
 | `imap.host` | `EMAIL_IMAP_HOST` | 啟用時必填 |
 | `imap.port` | `EMAIL_IMAP_PORT` | `tls` 預設 993；`starttls` 預設 143 |
 | `imap.tlsMode` | `EMAIL_IMAP_TLS_MODE` | `tls`。只接受 `tls` 或 `starttls`；明文與機會式 TLS 會被拒絕 |
@@ -511,3 +512,32 @@ jq -r 'select(.phase == "email_operation") | .data \
 - **舊信不重播**：首次啟用前的既有郵件不會被處理；UIDVALIDITY 變更也不會重播整個信箱。
 - **隱私殘留**：`MemoryStore` 的格式錯誤行片段可能出現在其日誌中，如上一節所述。
 - **備份即明文**：備份儲存庫包含私人通信；停用備份會失去唯一持久副本。
+
+## Private CA and Proton Mail Bridge
+
+`platforms.email.tlsCa` (environment variable `EMAIL_TLS_CA`) accepts a literal PEM
+certificate bundle for a private mail server such as Proton Mail Bridge. An empty
+or absent value retains the runtime's default certificate roots. A configured
+bundle **replaces** those roots for all email connections, including the separate
+sent-copy IMAP connection. Include every issuer needed by IMAP and SMTP.
+Certificate validation, hostname verification and the TLSv1.2 minimum remain enabled.
+
+Supply the public PEM directly, not a file path and never the TLS private key.
+For Helm, use the existing `extraEnv` option with a `secretKeyRef` to a TLS
+Secret's `tls.crt` key. The bot needs no extra volume mount. Secret-backed
+environment changes require a bot restart.
+
+Bridge requires a paid Proton Mail plan, a persistent credential store and an
+interactive account login. Use its generated mail-client credentials rather than
+the Proton account password. Across Pods, `127.0.0.1` addresses the client Pod,
+so connect to an internal Service whose hostname appears in Bridge's certificate
+SAN. A TCP proxy forwarding Bridge's loopback listeners must preserve STARTTLS
+end to end. Import the matching certificate/key into Bridge and restart it;
+certificate rotation requires re-importing them as well as restarting the bot.
+
+Neither Bridge nor this CA option attests Proton's receiving-header behavior.
+Inspect raw messages through Bridge's IMAP interface and perform the forged
+`Authentication-Results` stripping test documented above before selecting
+`EMAIL_AUTHSERV_ID` or setting `EMAIL_AUTH_HEADER_STRIPPING_ATTESTED=true`.
+Keep email disabled if Proton does not expose the required trusted, aligned
+DMARC result. Do not bypass admission or disable TLS validation.

@@ -156,7 +156,7 @@ export interface EmailImapClientOptions {
   defaultFolder?: string;
   defaultSentFolder?: string;
   defaultMaxBytes?: number;
-  /** Test-only: injected custom CA certificate or bundle for local fixture verification */
+  /** Custom CA certificate or bundle; replaces default roots without disabling verification. */
   tlsCa?: string | string[] | Buffer | Buffer[];
 }
 

@@ -53,6 +53,7 @@ export const ENV_MAPPINGS = {
   // Email platform settings
   EMAIL_ENABLED: "platforms.email.enabled",
   EMAIL_ADDRESS: "platforms.email.address",
+  EMAIL_TLS_CA: "platforms.email.tlsCa",
   EMAIL_IMAP_HOST: "platforms.email.imap.host",
   EMAIL_IMAP_PORT: "platforms.email.imap.port",
   EMAIL_IMAP_TLS_MODE: "platforms.email.imap.tlsMode",
@@ -258,6 +259,7 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       let parsedValue: unknown = value;
       if (
         envName === "EMAIL_SIGNATURE" ||
+        envName === "EMAIL_TLS_CA" ||
         envName === "EMAIL_ADDRESS" ||
         envName === "EMAIL_IMAP_HOST" ||
         envName === "EMAIL_IMAP_USERNAME" ||

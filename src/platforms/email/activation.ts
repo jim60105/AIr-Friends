@@ -287,17 +287,20 @@ export async function composeEmailPlatform(
 
   const imap = options.transports?.imap ?? new EmailImapClient({
     config: email.imap,
+    tlsCa: email.tlsCa || undefined,
     defaultFolder: email.incomingFolder,
     defaultSentFolder: email.sentFolder,
     defaultMaxBytes: email.maxMessageBytes,
   });
   const smtp = options.transports?.smtp ?? new EmailSmtpClient({
     config: email.smtp,
+    tlsCa: email.tlsCa || undefined,
     maxMessageBytes: email.maxMessageBytes,
   });
   // Receiving and sent-copy never share one mutable connection.
   const sentCopyImap = options.transports?.sentCopyImap ?? new EmailImapClient({
     config: email.imap,
+    tlsCa: email.tlsCa || undefined,
     defaultFolder: email.incomingFolder,
     defaultSentFolder: email.sentFolder,
     defaultMaxBytes: email.maxMessageBytes,

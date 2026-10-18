@@ -72,6 +72,8 @@ export interface EmailReceivingAuthConfig {
  */
 export interface EmailConfig extends BasePlatformConfig {
   address: string;
+  /** Optional PEM CA bundle replacing default trust roots for all email transports. */
+  tlsCa?: string;
   imap: EmailImapConfig;
   smtp: EmailSmtpConfig;
   incomingFolder: string;

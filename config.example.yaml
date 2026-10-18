@@ -57,6 +57,9 @@ platforms:
   email:
     enabled: false # true/false (default: false); override with env EMAIL_ENABLED
     address: "${EMAIL_ADDRESS}" # Primary mailbox address (e.g., bot@example.com)
+    # Optional PEM CA bundle for all email transports; replaces their default trust roots.
+    # Use EMAIL_TLS_CA (literal multiline PEM) or set tlsCa to a YAML block scalar.
+    tlsCa: ""
     imap:
       host: "${EMAIL_IMAP_HOST}" # IMAP server hostname
       port: 993 # 993 (tls) or 143 (starttls); override with env EMAIL_IMAP_PORT

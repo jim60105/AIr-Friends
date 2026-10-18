@@ -471,6 +471,14 @@ function expandEnvVars(value: string): string {
 function validateEmailConfig(email: Record<string, unknown>): void {
   if (email.enabled !== true) return;
 
+  if (email.tlsCa !== undefined && typeof email.tlsCa !== "string") {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "platforms.email.tlsCa must be a PEM certificate bundle string",
+      { field: "platforms.email.tlsCa" },
+    );
+  }
+
   // Address is required when enabled
   if (!email.address || typeof email.address !== "string" || email.address.trim() === "") {
     throw new ConfigError(

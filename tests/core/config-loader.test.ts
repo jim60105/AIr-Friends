@@ -127,6 +127,20 @@ workspace:
     assertEquals(result.platforms.email?.smtp.port, 465);
     assertEquals(result.platforms.email?.receivingAuth.attestedStripping, true);
   });
+
+  for (const invalidCa of ["true", "123", "[certificate]"]) {
+    const invalidConfig = validEmailConfig.replace(
+      'address: "bot@example.com"',
+      `address: "bot@example.com"\n    tlsCa: ${invalidCa}`,
+    );
+    await withTestConfig(invalidConfig, async (dir) => {
+      await assertRejects(
+        () => loadConfig(dir),
+        ConfigError,
+        "platforms.email.tlsCa must be a PEM certificate bundle string",
+      );
+    });
+  }
 });
 
 Deno.test("loadConfig - email enabled rejects plaintext or opportunistic TLS mode", async () => {

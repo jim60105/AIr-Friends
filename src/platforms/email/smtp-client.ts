@@ -140,7 +140,7 @@ export interface EmailSmtpClientOptions {
   maxMessageBytes?: number;
   /** Overall submission deadline; defaults to 30 seconds. */
   timeoutMs?: number;
-  /** Test-only: injected custom CA certificate or bundle for local fixture verification. */
+  /** Custom CA certificate or bundle; replaces default roots without disabling verification. */
   tlsCa?: string | string[] | Buffer | Buffer[];
 }
 
