@@ -70,6 +70,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-deno-
 
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
       - name: Run unit tests
         run: deno task test:unit
 
@@ -99,6 +102,9 @@ jobs:
           key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
           restore-keys: |
             ${{ runner.os }}-deno-
+
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
 
       - name: Run tests with coverage
         run: deno task test:coverage
