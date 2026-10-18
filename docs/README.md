@@ -19,7 +19,7 @@ AIr-Friends 是一套專為社群對話打造的多平台對話式 AI 機器人�
 │  AgentCore → SessionOrchestrator                            │
 │           ↓                                                 │
 │  AgentConnector → ACP ClientSideConnection                  │
-│           ↓ (產生子行程，stdio JSON-RPC 通訊)              │
+│           ↓ (產生子行程，stdio JSON-RPC 通訊)               │
 ├─────────────────────────────────────────────────────────────┤
 │                    外部 ACP 代理人                          │
 │  (OpenCode CLI / Oh-My-Pi OMP)                              │
