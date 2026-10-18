@@ -10,6 +10,7 @@
   * [對話脈絡與重設](guide/context-and-reset.md)
   * [記憶機制與體驗](guide/memory-experience.md)
   * [定時提醒功能](guide/reminders.md)
+  * [電子郵件對話](guide/email.md)
 
 * **角色與提示詞**
   * [角色設定概念](character/concepts.md)
@@ -21,6 +22,7 @@
   * [回覆政策控制](admin/reply-policy.md)
   * [頻率限制防護](admin/rate-limiting.md)
   * [部署模式指引](admin/deployment-modes.md)
+  * [電子郵件平台部署與維運](admin/email-platform.md)
 
 * **代理人與安全**
   * [ACP 引擎整合](agent/acp-engine.md)

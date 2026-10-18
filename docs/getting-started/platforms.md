@@ -1,6 +1,6 @@
 # 支援平台
 
-AIr-Friends 在設計上採用平台抽象層架構，型別定義於 `src/types/events.ts` 的 `Platform` 型別與 `VALID_PLATFORMS` 清單。目前原生支援 Discord 與 Misskey 兩個平台。
+AIr-Friends 在設計上採用平台抽象層架構，型別定義於 `src/types/events.ts` 的 `Platform` 型別與 `VALID_PLATFORMS` 清單。目前原生支援 Discord、Misskey 與電子郵件三個平台。
 
 ---
 
@@ -10,6 +10,7 @@ AIr-Friends 在設計上採用平台抽象層架構，型別定義於 `src/types
 | :--- | :--- | :--- | :--- |
 | Discord | `discord` | WebSocket Gateway (discord.js v14) | 伺服器文字頻道、討論串（Threads）、私訊（DM）、表情符號回應、打字中指示 |
 | Misskey | `misskey` | WebSocket Streaming API (misskey-js) | 公開貼文、首頁時間軸、提及通知、私密筆記（Direct）、聊天訊息、表情符號反應 |
+| 電子郵件 | `email` | IMAP（收信）與 SMTP（寄信） | 一對一私人通信、討論串、附件、檔案寄送、定時提醒、第三方寄信與轉寄 |
 
 ---
 
@@ -64,6 +65,40 @@ platforms:
 
 ---
 
+## 電子郵件平台設定
+
+電子郵件平台預設停用，且需要比社群平台更嚴格的身分驗證與隱私設定：IMAP 與 SMTP 都必須使用憑證有效的 TLS，收信 MTA 必須完成 `Authentication-Results` 標頭剝除驗證，且每位可對話的寄件者都要列在 `email/account/<地址>` 允許清單中。
+
+```yaml
+platforms:
+  email:
+    enabled: true
+    address: "${EMAIL_ADDRESS}"
+    imap:
+      host: "${EMAIL_IMAP_HOST}"
+      port: 993
+      tlsMode: "tls"
+      username: "${EMAIL_IMAP_USERNAME}"
+      password: "${EMAIL_IMAP_PASSWORD}"
+    smtp:
+      host: "${EMAIL_SMTP_HOST}"
+      port: 465
+      tlsMode: "tls"
+      username: "${EMAIL_SMTP_USERNAME}"
+      password: "${EMAIL_SMTP_PASSWORD}"
+    receivingAuth:
+      authservId: "mx.example.com"
+      attestedStripping: true
+
+channels:
+  - id: "email/account/alice@example.org"
+    enabled: true
+```
+
+完整的欄位、MTA 驗證程序、資料落地、備份隱私與複核流程，請參閱 [電子郵件平台部署與維運](../admin/email-platform.md)；使用者操作方式請參閱 [電子郵件對話](../guide/email.md)。
+
+---
+
 ## 平台連線與多重執行個體管理
 
-AIr-Friends 可以在同一份程序中同時啟用多個平台。兩種平台同時啟用時，訊息接收與發送分別由各平台的介面卡處理，每個使用者的工作區按 `{platform}/{userId}` 隔離，因此 Discord 使用者與 Misskey 使用者的對話記錄與記憶資料互不混淆。擴充新平台的說明請參閱 [平台介面介接](../extending/platform-adapters.md)。
+AIr-Friends 可以在同一份程序中同時啟用多個平台。多個平台同時啟用時，訊息接收與發送分別由各平台的介面卡處理，每個使用者的工作區按 `{platform}/{userId}` 隔離，因此 Discord、Misskey 與電子郵件使用者的對話記錄與記憶資料互不混淆。電子郵件平台另有單一信箱與單一行程的部署假設，詳見 [電子郵件平台部署與維運](../admin/email-platform.md)。擴充新平台的說明請參閱 [平台介面介接](../extending/platform-adapters.md)。

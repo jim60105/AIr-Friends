@@ -44,11 +44,11 @@ AIr-Friends 是一套專為社群對話打造的多平台對話式 AI 機器人�
 
 ### 一般終端使用者 (End-User)
 
-想了解如何與 AIr-Friends 互動、記憶功能如何運作，或想設定提醒時，先讀 [對話與互動](guide/chat-and-interactions.md) 認識標記（Mention）、私訊（DM）與討論串三種對話模式，再看 [對話脈絡與重設](guide/context-and-reset.md) 學會以 `/clear` 指令清除對話脈絡。[記憶機制與體驗](guide/memory-experience.md) 說明機器人自動記住互動內容與偏好的方式，[定時提醒功能](guide/reminders.md) 則示範如何用自然語言建立定時提醒。
+想了解如何與 AIr-Friends 互動、記憶功能如何運作，或想設定提醒時，先讀 [對話與互動](guide/chat-and-interactions.md) 認識標記（Mention）、私訊（DM）與討論串三種對話模式，再看 [對話脈絡與重設](guide/context-and-reset.md) 學會以 `/clear` 指令清除對話脈絡。[記憶機制與體驗](guide/memory-experience.md) 說明機器人自動記住互動內容與偏好的方式，[定時提醒功能](guide/reminders.md) 則示範如何用自然語言建立定時提醒。若你透過電子郵件與機器人往來，[電子郵件對話](guide/email.md) 說明討論串、附件、第三方寄信與轉寄的使用方式。
 
 ### 系統維運者與管理員 (Operator / Administrator)
 
-部署與維護從 [快速開始](getting-started/quickstart.md) 的 Podman Compose 啟動著手，並在 [支援平台](getting-started/platforms.md) 與 [模型與金鑰設定](getting-started/models-and-keys.md) 完成 Discord、Misskey 與 LLM 供應商的設定。[組態設定載入](admin/configuration.md)、[部署模式指引](admin/deployment-modes.md) 交代容器化、systemd 與環境變數的載入方式，[回覆政策控制](admin/reply-policy.md) 與 [頻率限制防護](admin/rate-limiting.md) 負責控制機器人的發言範圍與濫用防護。[ACP 引擎整合](agent/acp-engine.md) 與 [沙盒與安全界線](agent/security-and-sandbox.md) 說明兩種代理人引擎的組態與安全界限，[Web 儀表板](operations/dashboard.md)、[指標與健康檢查](operations/metrics-and-health.md) 與 [對話稽核日誌](operations/audit-logs.md) 則是日常監控工具。
+部署與維護從 [快速開始](getting-started/quickstart.md) 的 Podman Compose 啟動著手，並在 [支援平台](getting-started/platforms.md) 與 [模型與金鑰設定](getting-started/models-and-keys.md) 完成 Discord、Misskey、電子郵件與 LLM 供應商的設定。[組態設定載入](admin/configuration.md)、[部署模式指引](admin/deployment-modes.md) 交代容器化、systemd 與環境變數的載入方式，[回覆政策控制](admin/reply-policy.md) 與 [頻率限制防護](admin/rate-limiting.md) 負責控制機器人的發言範圍與濫用防護。電子郵件平台的允許清單、TLS、MTA 標頭剝除驗證、資料落地與複核程序見 [電子郵件平台部署與維運](admin/email-platform.md)。[ACP 引擎整合](agent/acp-engine.md) 與 [沙盒與安全界線](agent/security-and-sandbox.md) 說明兩種代理人引擎的組態與安全界限，[Web 儀表板](operations/dashboard.md)、[指標與健康檢查](operations/metrics-and-health.md) 與 [對話稽核日誌](operations/audit-logs.md) 則是日常監控工具。
 
 ### 開發者與擴充者 (Developer / Extender)
 

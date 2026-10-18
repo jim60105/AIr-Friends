@@ -55,4 +55,6 @@
 | `health.port` | `HEALTH_PORT` | `8080` | 健康檢查 HTTP 連接埠 |
 | `logging.level` | `LOG_LEVEL` | `"INFO"` | 系統日誌等級 (`DEBUG`、`INFO`、`WARN`、`ERROR`、`FATAL`) |
 
+電子郵件平台的完整欄位與環境變數對照（`platforms.email.*` 與 `EMAIL_*`）請參閱 [電子郵件平台部署與維運](../admin/email-platform.md)。
+
 其餘環境變數（沙盒、Shared Process、GELF、Send-file 等）請參閱 `src/utils/env.ts` 的 `ENV_MAPPINGS`，該表是環境變數對應的單一來源。
