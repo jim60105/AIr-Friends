@@ -36,6 +36,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-deno-
 
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
       - name: Run all tests
         run: deno task test
 
