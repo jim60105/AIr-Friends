@@ -100,7 +100,7 @@ channels:
 | --- | --- | --- |
 | `enabled` | `EMAIL_ENABLED` | `false`。設為 `true` 才會組合電子郵件平台 |
 | `address` | `EMAIL_ADDRESS` | 啟用時必填。機器人對外使用的信箱地址 |
-| `tlsCa` | `EMAIL_TLS_CA` | Optional literal PEM trust bundle for all email transports; replaces default roots. See the private CA section below. |
+| `tlsCa` | `EMAIL_TLS_CA` | 供所有電子郵件傳輸使用的 PEM 憑證信任組合字串；設定後會取代預設信任根。請參閱下方的私有 CA 與 Proton Mail Bridge 章節 |
 | `imap.host` | `EMAIL_IMAP_HOST` | 啟用時必填 |
 | `imap.port` | `EMAIL_IMAP_PORT` | `tls` 預設 993；`starttls` 預設 143 |
 | `imap.tlsMode` | `EMAIL_IMAP_TLS_MODE` | `tls`。只接受 `tls` 或 `starttls`；明文與機會式 TLS 會被拒絕 |
@@ -513,31 +513,12 @@ jq -r 'select(.phase == "email_operation") | .data \
 - **隱私殘留**：`MemoryStore` 的格式錯誤行片段可能出現在其日誌中，如上一節所述。
 - **備份即明文**：備份儲存庫包含私人通信；停用備份會失去唯一持久副本。
 
-## Private CA and Proton Mail Bridge
+## 私有憑證授權單位與 Proton Mail Bridge
 
-`platforms.email.tlsCa` (environment variable `EMAIL_TLS_CA`) accepts a literal PEM
-certificate bundle for a private mail server such as Proton Mail Bridge. An empty
-or absent value retains the runtime's default certificate roots. A configured
-bundle **replaces** those roots for all email connections, including the separate
-sent-copy IMAP connection. Include every issuer needed by IMAP and SMTP.
-Certificate validation, hostname verification and the TLSv1.2 minimum remain enabled.
+`platforms.email.tlsCa`（對應環境變數 `EMAIL_TLS_CA`）接受純文字的 PEM 憑證組合字串，供 Proton Mail Bridge 等私有郵件伺服器建立受信任連線。此欄位空白或未設定時，系統保留預設的執行環境根憑證；一旦設定，該組合將**取代**所有電子郵件連線的信任根，包含接收端 IMAP、寄信端 SMTP 與獨立的寄件備份 IMAP 連線。若 IMAP 與 SMTP 分別由不同授權單位簽發，該 PEM 內容必須包含雙方的簽發者憑證。憑證驗證、主機名稱核對與最低 TLSv1.2 門檻依然持續啟用，不會放寬安全限制。
 
-Supply the public PEM directly, not a file path and never the TLS private key.
-For Helm, use the existing `extraEnv` option with a `secretKeyRef` to a TLS
-Secret's `tls.crt` key. The bot needs no extra volume mount. Secret-backed
-environment changes require a bot restart.
+請直接提供公開的 PEM 憑證內容，不可填入檔案路徑，也絕不能包含 TLS 私密金鑰。在 Helm 環境中，可透過現有的 `extraEnv` 設定，以 `secretKeyRef` 參照 TLS 密鑰的 `tls.crt` 鍵值，不需要額外掛載磁區。密鑰內容變更後，必須重啟機器人容器以載入新的環境變數。
 
-Bridge requires a paid Proton Mail plan, a persistent credential store and an
-interactive account login. Use its generated mail-client credentials rather than
-the Proton account password. Across Pods, `127.0.0.1` addresses the client Pod,
-so connect to an internal Service whose hostname appears in Bridge's certificate
-SAN. A TCP proxy forwarding Bridge's loopback listeners must preserve STARTTLS
-end to end. Import the matching certificate/key into Bridge and restart it;
-certificate rotation requires re-importing them as well as restarting the bot.
+Proton Mail Bridge 必須搭配付費方案、持久化憑證存放區與互動式帳號登入。請一律使用 Bridge 產生的專用應用程式帳密，不要使用 Proton 帳號的登入密碼。跨 Pod 通信時，`127.0.0.1` 代表各 Pod 自身的本機介面，因此連線目標應指向內部 Service，且該 Service 主機名稱必須列於 Bridge 憑證的主題備用名稱（SAN）中。轉發 Bridge 內部連接埠的 TCP 代理也必須完整保留兩端的 STARTTLS 交握。將對應的憑證與私密金鑰匯入 Bridge 後需重啟 Bridge 服務；日後輪替憑證時，也必須重新匯入 Bridge，並重啟機器人以完成更新。
 
-Neither Bridge nor this CA option attests Proton's receiving-header behavior.
-Inspect raw messages through Bridge's IMAP interface and perform the forged
-`Authentication-Results` stripping test documented above before selecting
-`EMAIL_AUTHSERV_ID` or setting `EMAIL_AUTH_HEADER_STRIPPING_ATTESTED=true`.
-Keep email disabled if Proton does not expose the required trusted, aligned
-DMARC result. Do not bypass admission or disable TLS validation.
+Bridge 或本 CA 設定均無法證明 Proton 接收郵件伺服器的標頭處理行為。在決定 `EMAIL_AUTHSERV_ID` 或將 `EMAIL_AUTH_HEADER_STRIPPING_ATTESTED` 設為 `true` 之前，請務必透過 Bridge 的 IMAP 介面檢視收到的原始信件標頭，並完成前述的偽造 `Authentication-Results` 標頭剝除測試。若 Proton 伺服器未提供受信任且對齊的 DMARC 結果，請維持電子郵件停用狀態，切勿略過身分驗證或關閉 TLS 驗證。
