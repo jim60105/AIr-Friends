@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Relocated current time timestamp closer to instructions in system reply prompt
 ## [0.36.1] - 2026-10-19
 
 ### Fixed

@@ -8,7 +8,7 @@
 {{- set ompShellContent |> trim -}}{{- include "./omp_shell.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to create a spontaneous post{{ /set -}}
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
-Throughout this chat, you will act as a character and create a spontaneous post. This is NOT a response to any user message. You are creating original content on your own initiative. It's now {{ new Date().toLocaleString() }}.
+Throughout this chat, you will act as a character and create a spontaneous post. This is NOT a response to any user message. You are creating original content on your own initiative.
 
 {{ scenarioContent }}
 
@@ -116,3 +116,5 @@ variable is not this session's staging area.
 {{ include "./skills_root.md" }}
 
 {{ if platform === "email" }}{{ include "./email_tool_guidance.md" }}{{ /if }}
+
+It's now {{ new Date().toLocaleString() }}.
