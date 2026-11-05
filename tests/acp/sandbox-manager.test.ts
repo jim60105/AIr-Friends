@@ -925,25 +925,27 @@ Deno.test({
       // keeps the script free of any shell expansion.
       const script = [
         `cat '${modelsFile}'`,
-        `echo "model_read_status=$?"`,
+        // Every status lands on its OWN line: a probe's output (the payload fixture
+        // has no trailing newline) must never glue itself onto the next status token.
+        `printf '\\nmodel_read_status=%s\\n' "$?"`,
         `printf '%s' 'native-agent-marker' > '${ownMarker}'`,
-        `echo "native_write_status=$?"`,
+        `printf '\\nnative_write_status=%s\\n' "$?"`,
         `cat '${join(skillRoot, "SKILL.md")}'`,
-        `echo "skill_read_status=$?"`,
+        `printf '\\nskill_read_status=%s\\n' "$?"`,
         `cat '${siblingMarker}' 2>/dev/null`,
-        `echo "sibling_read_status=$?"`,
+        `printf '\\nsibling_read_status=%s\\n' "$?"`,
         `touch '${forbiddenInSkillRoot}' 2>/dev/null`,
-        `echo "skill_write_status=$?"`,
+        `printf '\\nskill_write_status=%s\\n' "$?"`,
         // The payload reads through the mode root's `natives` link, whose parent
         // path is re-bound after the mode-parent tmpfs shadow.
         `cat '${join(nativeDataDir, "natives", "18.6.1", "pi_natives.linux-x64-modern.node")}'`,
-        `echo "payload_read_status=$?"`,
+        `printf '\\npayload_read_status=%s\\n' "$?"`,
         `printf 'tampered' > '${
           join(nativeDataDir, "natives", "18.6.1", "pi_natives.linux-x64-modern.node")
         }' 2>/dev/null`,
-        `echo "payload_write_status=$?"`,
+        `printf '\\npayload_write_status=%s\\n' "$?"`,
         `cat '${cacheHomeMarker}' 2>/dev/null`,
-        `echo "cache_home_read_status=$?"`,
+        `printf '\\ncache_home_read_status=%s\\n' "$?"`,
       ].join("\n");
 
       const sandbox = new SandboxManager(
