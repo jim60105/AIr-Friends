@@ -4,7 +4,7 @@ import { machine } from "node:os";
 import { getgid, getuid } from "node:process";
 import { OWNED_DEBIAN_LIBC_PATHS } from "../../../../src/acp/filesystem-access-linux.ts";
 import { POC_PINS } from "../gate/pins.ts";
-import { observe } from "../gate/evidence.ts";
+import { normalizeArch, observe } from "../gate/evidence.ts";
 
 describe("poc runtime", () => {
   test("is the pinned Bun", () => {
@@ -15,7 +15,7 @@ describe("poc runtime", () => {
   });
 
   test("has the owned Debian libc path for the running architecture", () => {
-    const architecture = machine();
+    const architecture = normalizeArch(machine());
     const libcPath = OWNED_DEBIAN_LIBC_PATHS[architecture];
     observe("libcPath", libcPath ?? null);
     expect(libcPath).toBeDefined();

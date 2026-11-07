@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { collectTests, hashPocTree, hashProductSources } from "./evidence.ts";
+import { collectTests, hashPocTree, hashProductSources, normalizeArch } from "./evidence.ts";
 import { decideRun } from "./run-in-container.ts";
 import { PRODUCT_SOURCES } from "./pins.ts";
 
@@ -157,6 +157,20 @@ describe("run-in-container decisions", () => {
 
   test("writes nothing and exits 2 when no report was produced", () => {
     expect(decideRun(false)).toEqual({ write: false, exitCode: 2 });
+  });
+});
+
+describe("normalizeArch", () => {
+  test("maps every runtime spelling onto the catalog vocabulary", () => {
+    expect(normalizeArch("x86_64")).toBe("x86_64");
+    expect(normalizeArch("x64")).toBe("x86_64");
+    expect(normalizeArch("aarch64")).toBe("aarch64");
+    // Bun's `os.machine()` reports this on an arm64 host.
+    expect(normalizeArch("arm64")).toBe("aarch64");
+  });
+
+  test("fails loudly on an architecture the catalog cannot express", () => {
+    expect(() => normalizeArch("riscv64")).toThrow(/unsupported architecture/);
   });
 });
 

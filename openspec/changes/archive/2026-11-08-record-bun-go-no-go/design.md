@@ -15,6 +15,8 @@ See `proposal.md` for motivation. The gate (`define-bun-go-no-go-gate`) evaluate
 - No QEMU evidence for `aarch64`; the `ubuntu-24.04-arm` runner is native.
 - No master unfreeze and no planning of steps 3 to 8.
 
+Recorded deviation: the harness arch label is normalized here. `gate/run-in-container.ts` wrote `arch: machine()`, and Bun's `os.machine()` reports `arm64` on the arm64 runner while `gate/catalog.ts` and `evaluateCriterion` key on `aarch64`, so the gate silently dropped genuine arm64 evidence. `gate/evidence.ts` now exports `normalizeArch`, which the evidence writer and the `machine()`-keyed libc lookup in `suites/harness.spec.ts` both use; `x86_64` evidence keeps `arch: "x86_64"`. No criterion, threshold, suite behavior, catalog entry, `run-suite.sh` or `Containerfile` changes. The fix belongs to `build-bun-poc-harness`, which is already archived, so it ships here as this deviation and both architectures are re-captured from the new anchor.
+
 ## Decisions
 
 ### D1. Run order

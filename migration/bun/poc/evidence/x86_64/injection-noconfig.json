@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "suite": "injection-noconfig",
+  "arch": "x86_64",
+  "kernel": "7.2.15-200.fc44.x86_64",
+  "bunVersion": "1.4.2",
+  "bunRevision": "744846f844374847c902b5e7fd59b4342a51ef99",
+  "baseImageDigest": "sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73",
+  "opencodeVersion": "1.18.21",
+  "ompVersion": "18.6.1",
+  "pocTreeSha256": "336aae5681f148993e21f28b6e578a55b3da42acc628b10f49ea884dad9412f2",
+  "productSourcesSha256": "2126381089d7ba525e173d1d805fa8ec4fac39a2bb761f158be37d7c15355f8e",
+  "spawnBackend": "node",
+  "gitHead": "96fec54a7ab91b63b54170b2c2fff48c900b42c4",
+  "imageId": "e5fd0ecb06fa64bc651723b945ffdd6ffce1f8452c6329f89501529257a8bc6e",
+  "capturedAt": "2026-11-07T22:28:30.888Z",
+  "observations": {
+    "missingConfigExit": [
+      1,
+      1
+    ],
+    "missingConfigStderr": [
+      "ENOENT: /opt/air/skill-bunfig.toml: No such file or directory (open())",
+      "ENOENT: /opt/air/skill-bunfig.toml: No such file or directory (open())"
+    ],
+    "missingConfigBehavior": "fail-stop"
+  },
+  "tests": [
+    {
+      "name": "INJ-08: the trusted config file is absent from this run",
+      "status": "passed",
+      "assertions": 1
+    },
+    {
+      "name": "INJ-08: an absent trusted config stops the skill before any attacker code runs",
+      "status": "passed",
+      "assertions": 3
+    }
+  ]
+}

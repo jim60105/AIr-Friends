@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "suite": "process",
+  "arch": "x86_64",
+  "kernel": "7.2.15-200.fc44.x86_64",
+  "bunVersion": "1.4.2",
+  "bunRevision": "744846f844374847c902b5e7fd59b4342a51ef99",
+  "baseImageDigest": "sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73",
+  "opencodeVersion": "1.18.21",
+  "ompVersion": "18.6.1",
+  "pocTreeSha256": "336aae5681f148993e21f28b6e578a55b3da42acc628b10f49ea884dad9412f2",
+  "productSourcesSha256": "2126381089d7ba525e173d1d805fa8ec4fac39a2bb761f158be37d7c15355f8e",
+  "spawnBackend": "node",
+  "gitHead": "96fec54a7ab91b63b54170b2c2fff48c900b42c4",
+  "imageId": "419a662fbef8d423545623ba85e9858b49556fd6c3be85894be0fb7d288ce6e0",
+  "capturedAt": "2026-11-07T22:25:39.062Z",
+  "observations": {
+    "spawnBackend": "node",
+    "sigkillSurvivors": 2
+  },
+  "tests": [
+    {
+      "name": "PROC-01: a stalled consumer stops the producer and bounds parent RSS",
+      "status": "passed",
+      "assertions": 8
+    },
+    {
+      "name": "PROC-02: a write to a child that is not reading stays pending",
+      "status": "passed",
+      "assertions": 2
+    },
+    {
+      "name": "PROC-03: 64 MiB round trips through cat byte-identically",
+      "status": "passed",
+      "assertions": 3
+    },
+    {
+      "name": "PROC-04: stderr drains alongside stdout without stalling",
+      "status": "passed",
+      "assertions": 3
+    },
+    {
+      "name": "PROC-05: closing stdin delivers EOF and resolves exited",
+      "status": "passed",
+      "assertions": 2
+    },
+    {
+      "name": "PROC-06: the child environment holds exactly the passed variables",
+      "status": "passed",
+      "assertions": 5
+    },
+    {
+      "name": "PROC-07: SIGTERM through dumb-init ends the wrapper and its child",
+      "status": "passed",
+      "assertions": 4
+    },
+    {
+      "name": "PROC-08: SIGKILL follows the 2000 ms grace timer",
+      "status": "passed",
+      "assertions": 6
+    },
+    {
+      "name": "PROC-09: twenty spawn and teardown cycles leave no residue",
+      "status": "passed",
+      "assertions": 2
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "suite": "acp",
+  "arch": "x86_64",
+  "kernel": "7.2.15-200.fc44.x86_64",
+  "bunVersion": "1.4.2",
+  "bunRevision": "744846f844374847c902b5e7fd59b4342a51ef99",
+  "baseImageDigest": "sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73",
+  "opencodeVersion": "1.18.21",
+  "ompVersion": "18.6.1",
+  "pocTreeSha256": "336aae5681f148993e21f28b6e578a55b3da42acc628b10f49ea884dad9412f2",
+  "productSourcesSha256": "2126381089d7ba525e173d1d805fa8ec4fac39a2bb761f158be37d7c15355f8e",
+  "spawnBackend": "node",
+  "gitHead": "96fec54a7ab91b63b54170b2c2fff48c900b42c4",
+  "imageId": "462ddc1db46709a6fc4010323e8750015c6f020c42f0f96787677513aaf2d9ba",
+  "capturedAt": "2026-11-07T22:26:48.666Z",
+  "observations": {
+    "spawnBackend": "node"
+  },
+  "tests": [
+    {
+      "name": "ACP-01-OC: handshake, session and prompt end with end_turn and the scripted text",
+      "status": "passed",
+      "assertions": 2
+    },
+    {
+      "name": "ACP-01-OMP: handshake, session and prompt end with end_turn and the scripted text",
+      "status": "passed",
+      "assertions": 2
+    },
+    {
+      "name": "ACP-02-OC: 16 MiB of agent output arrives byte-identical by SHA-256",
+      "status": "passed",
+      "assertions": 3
+    },
+    {
+      "name": "ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256",
+      "status": "failed",
+      "assertions": 2
+    },
+    {
+      "name": "ACP-03-OC: a 1 MiB prompt reaches the provider intact",
+      "status": "passed",
+      "assertions": 2
+    },
+    {
+      "name": "ACP-03-OMP: a 1 MiB prompt reaches the provider intact",
+      "status": "passed",
+      "assertions": 2
+    },
+    {
+      "name": "ACP-09-OC: the agent tree holds PATH and HOME and no parent sentinel",
+      "status": "passed",
+      "assertions": 11
+    },
+    {
+      "name": "ACP-09-OMP: the agent tree holds PATH and HOME and no parent sentinel",
+      "status": "passed",
+      "assertions": 11
+    },
+    {
+      "name": "ACP-10-OC: SIGTERM teardown leaves no process of the agent tree alive",
+      "status": "passed",
+      "assertions": 3
+    },
+    {
+      "name": "ACP-10-OMP: SIGTERM teardown leaves no process of the agent tree alive",
+      "status": "passed",
+      "assertions": 3
+    }
+  ]
+}
