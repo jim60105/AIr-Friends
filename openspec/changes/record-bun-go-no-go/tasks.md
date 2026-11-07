@@ -18,7 +18,7 @@ Do not edit anything under `migration/bun/poc/` except what the commands below g
 
 - [x] 3.1 From `migration/bun/poc/`, run `bun install --frozen-lockfile`, then `bun run --no-env-file gate/record.ts`. Verify: `GO-NO-GO.json` and `GO-NO-GO.md` exist, and `GO-NO-GO.md` has one `Outcome:` line. Report the outcome, blockers and observations.
 - [x] 3.2 Commit `migration/bun/poc/evidence/`, `GO-NO-GO.md` and `GO-NO-GO.json`. Then run `bun run --no-env-file gate/verify-record.ts --live`. Verify: exit 0.
-- [ ] 3.3 Run the three commands in design D3. Verify: results as design D3 states.
+- [x] 3.3 Run the three commands in design D3. Verify: results as design D3 states.
 
 ## Workflow follow-up
 
