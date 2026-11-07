@@ -203,6 +203,13 @@ describe("Criterion Result From Test Report", () => {
     ]);
     expect(status).toBe("fail");
   });
+
+  test("fails on a passing test with a negative assertion count", () => {
+    const status = singleStatus(ffi, [
+      evidence("ffi", "x86_64", [{ name: "FFI-01: a", status: "passed", assertions: -1 }]),
+    ]);
+    expect(status).toBe("fail");
+  });
 });
 
 describe("Evidence Binding", () => {
@@ -359,6 +366,15 @@ describe("Product Isolation Condition", () => {
     expect(isolationViolations([".github/workflows/ci.yaml"])).toEqual([
       ".github/workflows/ci.yaml",
     ]);
+    const ffi = criterion("FFI-01", "P0-4", "ffi", ["x86_64"]);
+    const result = evaluate(
+      gateInput({
+        catalog: [ffi],
+        evidence: [evidence("ffi", "x86_64", [passed("FFI-01: a")])],
+        changedPaths: [".github/workflows/ci.yaml"],
+      }),
+    );
+    expect(result.outcome).toBe("No-Go");
   });
 
   test("accepts only the allowed paths", () => {
@@ -491,6 +507,16 @@ describe("Outcome Record Verification", () => {
       violations: ["src/main.ts"],
     });
     expect(problems.some((problem) => problem.includes("productSourcesSha256"))).toBe(true);
+    expect(problems.some((problem) => problem.includes("src/main.ts"))).toBe(true);
+  });
+
+  test("reports a recorded isolation violation that the checkout no longer has", () => {
+    const record = recordFrom(noEvidenceResult(), { changedPaths: ["src/main.ts"] });
+    const problems = compareLive(record, {
+      pocTreeSha256: record.pocTreeSha256,
+      productSourcesSha256: record.productSourcesSha256,
+      violations: [],
+    });
     expect(problems.some((problem) => problem.includes("src/main.ts"))).toBe(true);
   });
 

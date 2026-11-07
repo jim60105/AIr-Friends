@@ -58,8 +58,17 @@ export function compareLive(
       `productSourcesSha256: record ${record.productSourcesSha256}, checkout ${live.productSourcesSha256}`,
     );
   }
+  const recorded = isolationViolations(record.changedPaths);
+  const liveViolations = new Set(live.violations);
   for (const violation of live.violations) {
-    problems.push(`isolation: ${violation} changed since the merge base`);
+    if (!recorded.includes(violation)) {
+      problems.push(`isolation: ${violation} changed since the merge base`);
+    }
+  }
+  for (const violation of recorded) {
+    if (!liveViolations.has(violation)) {
+      problems.push(`isolation: ${violation} was recorded as changed and is no longer changed`);
+    }
   }
   return problems;
 }

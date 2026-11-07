@@ -173,7 +173,7 @@ function evaluateCriterion(
       detail: `${skipped.length} skipped test(s): ${skipped.map((test) => test.name).join(", ")}`,
     };
   }
-  const unasserted = prefixed.filter((test) => test.status === "passed" && test.assertions === 0);
+  const unasserted = prefixed.filter((test) => test.status === "passed" && !(test.assertions >= 1));
   if (unasserted.length > 0) {
     return {
       ...base,
