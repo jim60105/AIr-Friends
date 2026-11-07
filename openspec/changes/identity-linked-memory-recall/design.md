@@ -15,6 +15,10 @@ Observed code:
 - `src/skills/registry.ts`: constructor `(memoryStore, remindersConfig?, reminderStore?, sendFileConfig?, recallConfig?, emailCompose?)`; builds `MemoryHandler(memoryStore, this.memoryRetriever)` (line 64).
 - `src/core/agent-core.ts`: constructs `WorkspaceManager`, `MemoryStore`, `SkillRegistry` (5 args, line 85) and `ContextAssembler` (4 args, line 120); getters such as `getSkillRegistry()`.
 
+### Relation to existing specs
+
+`memory-recall` "Memory Eligibility / Conversation scopes" speaks of "the user's" public and private memories. For an account in an identity group, "the user" extends to every account in the group as specified by `identity-linked-recall`; for an unlinked account both specs say the same thing. No MODIFIED delta is written because no existing scenario's outcome changes; the archiver should keep both specs and not treat them as conflicting.
+
 ## Goals / Non-Goals
 
 **Goals:** linked sources in retrieval, fixed loading (both assembly paths), Fast Recall, `memory-search`; one registry wired by `AgentCore`.
@@ -77,7 +81,7 @@ private async loadUserFixedCandidates(
 ): Promise<{ userCore: ResolvedMemory[]; userWorking: ResolvedMemory[] }>
 ```
 
-It loads the current workspace exactly as today (errors propagate as today), then for each linked workspace in order loads `getCoreTierMemories(linked)` and `getRecentWorkingMemories(linked, workingMaxItems)` inside `try/catch`; a failure logs `logger.warn("Skipped unreadable linked memories", { workspaceKey: linked.key, error })` and contributes nothing. Linked memories whose id is already collected are dropped (same rule as D1). Returns concatenated arrays; `selectFixedMemories()` is called unchanged with the existing budgets.
+It loads the current workspace exactly as today (errors propagate as today), then for each linked workspace in order loads `getCoreTierMemories(linked)` and `getRecentWorkingMemories(linked, workingMaxItems)` inside `try/catch`; a failure logs `logger.warn("Skipped unreadable linked memories", { workspaceKey: linked.key, error })` and contributes nothing. Dedupe uses one `seen: Set<string>` shared by core and working, initialized with the ids of the current workspace's core and working lists; each linked memory (core or working) whose id is in `seen` is dropped, otherwise its id is added. The current lists themselves are never deduped (identical to today). Returns concatenated arrays; `selectFixedMemories()` is called unchanged with the existing budgets.
 
 - `assembleContext`: compute `const linkedWorkspaces = this.identityRegistry?.linkedWorkspaces(workspace) ?? [];` once; replace lines 243–247 with the helper; pass `linkedWorkspaces` as a new last parameter of `selectFastRecall`, which adds `...(linkedWorkspaces.length === 0 ? {} : { linkedWorkspaces })` to the `search()` request.
 - `assembleSpontaneousContext`: same helper for its `userCore`/`userWorking`; no Fast Recall is added.
@@ -91,12 +95,12 @@ It loads the current workspace exactly as today (errors propagate as today), the
 ### D4. Wiring
 
 - `SkillRegistry` constructor gains a seventh optional parameter `identityRegistry?: IdentityRegistry`, passed as `new MemoryHandler(memoryStore, this.memoryRetriever, identityRegistry)`.
-- `AgentCore`: after `this.memoryStore` is created, `this.identityRegistry = new IdentityRegistry(config.identities ?? [], this.workspaceManager);` and `logger.info("Identity groups loaded: {groupCount}", { groupCount: this.identityRegistry.groupCount });` (no account keys or group ids logged). Pass it as `new SkillRegistry(this.memoryStore, config.reminders, reminderStore, config.skills?.sendFile, config.memory.recall, undefined, this.identityRegistry)` and as the fifth `ContextAssembler` argument. Add `getIdentityRegistry(): IdentityRegistry` next to `getMemoryStore()`.
+- `AgentCore`: after `this.memoryStore` is created, `this.identityRegistry = new IdentityRegistry(config.identities ?? [], this.workspaceManager);` and `logger.info("Identity groups loaded: {groupCount}", { groupCount: this.identityRegistry.groupCount });` (no account keys or group ids logged). Pass it as `new SkillRegistry(this.memoryStore, config.reminders, reminderStore, config.skills?.sendFile, config.memory.recall, undefined, this.identityRegistry)` and as the fifth `ContextAssembler` argument. Declare the field `private readonly identityRegistry: IdentityRegistry;` with the other fields and add `getIdentityRegistry(): IdentityRegistry` next to `getMemoryStore()`.
 - `src/main.ts` / `src/bootstrap.ts`: no change.
 
-### D5. Test doubles
+### D5. Test fault injection
 
-Failure cases use a subclass in the test file: `class FailingStore extends MemoryStore { override async loadAllMemories(ws, v) { if (ws.key === FAILING_KEY) throw new Error("boom"); return await super.loadAllMemories(ws, v); } }`. Linked workspaces in unit tests come from a real `IdentityRegistry` over the test's `WorkspaceManager`, so paths match production.
+An unreadable linked source is produced by creating a **directory** at the linked account's `memory.public.jsonl` path (`Deno.mkdir(join(linked.path, "memory.public.jsonl"), { recursive: true })`). `Deno.readTextFile` then throws a non-NotFound error whose message does not contain "not found", so `MemoryStore.loadAllMemories` rethrows it; this exercises retrieval, fixed loading and (in `identity-linked-memory-patch`) patch resolution without a test subclass or helper injection point. Linked workspaces in unit tests come from a real `IdentityRegistry` over the test's `WorkspaceManager`, so paths match production.
 
 ### D6. Review document
 

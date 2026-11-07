@@ -35,7 +35,7 @@ Recall SHALL add the public memory file of every linked workspace, and their pri
 
 ### Requirement: Linked Source Robustness
 
-A linked source whose memory file is missing SHALL contribute nothing, and a linked source that fails to load SHALL be logged and skipped without failing recall. A linked memory whose id already appeared from an earlier source SHALL be dropped.
+A linked source whose memory file is missing SHALL contribute nothing, and a linked source that fails to load SHALL be skipped without failing recall. A linked memory whose id already appeared from an earlier source SHALL be dropped.
 
 #### Scenario: Missing linked workspace
 - **GIVEN** a linked account whose workspace directory does not exist
@@ -45,7 +45,7 @@ A linked source whose memory file is missing SHALL contribute nothing, and a lin
 #### Scenario: Unreadable linked source skipped
 - **GIVEN** loading one linked account's memory file throws
 - **WHEN** recall runs
-- **THEN** recall SHALL return results from the other sources and log a warning
+- **THEN** recall SHALL return results from the other sources
 
 #### Scenario: Duplicate id resolved by source order
 - **GIVEN** the current account and a linked account each hold a memory with the same id
@@ -73,7 +73,7 @@ Session-start fixed loading, for both triggered and spontaneous sessions, SHALL 
 #### Scenario: Linked failure does not fail assembly
 - **GIVEN** loading A's memories throws
 - **WHEN** context is assembled for B
-- **THEN** assembly SHALL succeed with B's own memories and log a warning
+- **THEN** assembly SHALL succeed with B's own memories
 
 #### Scenario: Fast Recall excludes injected linked memories
 - **GIVEN** A's memory was injected by fixed loading
