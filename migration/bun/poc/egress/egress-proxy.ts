@@ -431,6 +431,11 @@ export function startEgressProxy(port: number): Promise<EgressProxyHandle> {
   const { promise, resolve, reject } = Promise.withResolvers<EgressProxyHandle>();
   let settled = false;
   const server = net.createServer({ allowHalfOpen: true }, (conn) => {
+    // `node:net` reports peer resets as `error` events, and an unheard one ends the
+    // process. Deno's listener loop only ever saw them as a rejected read; keeping a
+    // baseline listener preserves that "one bad client cannot take the proxy down"
+    // behavior for the whole pre-tunnel lifetime (`readHead`, validation, connect).
+    conn.on("error", () => {});
     handleConnection(conn).catch(() => {
       conn.destroy();
     });
