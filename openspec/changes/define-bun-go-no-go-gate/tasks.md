@@ -6,9 +6,9 @@ Run `bun` commands with working directory `migration/bun/poc/` and with `--no-en
 
 ## 1. Catalog and evaluation
 
-- [ ] 1.1 Create `gate/catalog.ts` with `P0_BLOCKERS`, every criterion and every deferral verbatim from design D2. Expand two-ID rows to two entries and set `minTests` as stated there. Verify: covered by 1.3.
-- [ ] 1.2 Create `gate/evaluate.ts` with `validateCatalog`, `checkBinding` and `evaluate` per design D3, deciding statuses in the stated order. Verify: covered by 1.3.
-- [ ] 1.3 Create `gate/gate.spec.ts` covering every scenario of the requirements "Criterion Catalog Coverage", "Criterion Result From Test Report", "Evidence Binding", "Outcome Evaluation" and "Product Isolation Condition", using synthetic catalogs and evidence; also assert `validateCatalog` returns no problems for the real catalog. Verify: `bun test ./gate/gate.spec.ts` passes.
+- [x] 1.1 Create `gate/catalog.ts` with `P0_BLOCKERS`, every criterion and every deferral verbatim from design D2. Expand two-ID rows to two entries and set `minTests` as stated there. Verify: covered by 1.3.
+- [x] 1.2 Create `gate/evaluate.ts` with `validateCatalog`, `checkBinding` and `evaluate` per design D3, deciding statuses in the stated order. Verify: covered by 1.3.
+- [x] 1.3 Create `gate/gate.spec.ts` covering every scenario of the requirements "Criterion Catalog Coverage", "Criterion Result From Test Report", "Evidence Binding", "Outcome Evaluation" and "Product Isolation Condition", using synthetic catalogs and evidence; also assert `validateCatalog` returns no problems for the real catalog. Verify: `bun test ./gate/gate.spec.ts` passes.
 
 ## 2. Records
 
