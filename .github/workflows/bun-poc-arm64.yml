@@ -1,0 +1,40 @@
+name: Bun PoC arm64
+
+on:
+  push:
+    tags:
+      - "bun-poc-final-*"
+
+permissions:
+  contents: read
+
+jobs:
+  ffi:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Prepare rootless podman
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          command -v podman || { sudo apt-get update && sudo apt-get install -y podman; }
+
+      - name: Run ffi
+        continue-on-error: true
+        run: migration/bun/poc/run-suite.sh ffi --final
+
+      - name: Run ffi-enosys
+        continue-on-error: true
+        run: migration/bun/poc/run-suite.sh ffi-enosys --final
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bun-poc-aarch64-evidence
+          path: migration/bun/poc/evidence/aarch64/
+          if-no-files-found: error
