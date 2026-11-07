@@ -29,3 +29,8 @@ A user-scope `memory-patch` SHALL append its patch event to the workspace that o
 #### Scenario: Not found anywhere
 - **WHEN** the target id exists in no current or linked workspace
 - **THEN** `memory-patch` SHALL fail with the existing not-found error, including the hint to retry with scope `channel`
+
+#### Scenario: Unreadable linked account skipped during patch
+- **GIVEN** one linked account's memory file cannot be read and another linked account owns the target id
+- **WHEN** `memory-patch` runs
+- **THEN** the patch SHALL be appended to the readable owner's file
