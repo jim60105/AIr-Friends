@@ -142,6 +142,9 @@ env:
   # JSON string of channel configurations. Example:
   # [{"id":"discord/account/123","spontaneousPost":true},{"id":"discord/channel/456","channelLurk":true}]
   CHANNELS: ''
+  # JSON string of identity groups (accounts of the same person). Example:
+  # [{"id":"alice","accounts":["discord/123","misskey/account/456","alice@example.com"]}]
+  IDENTITIES: ''
 
   # Spontaneous post settings - Discord
   DISCORD_SPONTANEOUS_ENABLED: 'false'

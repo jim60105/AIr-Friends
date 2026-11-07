@@ -705,6 +705,16 @@ export interface ChannelConfig {
 }
 
 /**
+ * One operator-declared identity group (identity-linked memory).
+ */
+export interface IdentityGroupConfig {
+  /** Operator-facing label; used only in logs and error locations. */
+  id: string;
+  /** Canonical workspace keys `{platform}/{userId}`, produced by the config loader. */
+  accounts: string[];
+}
+
+/**
  * Get enabled channels for a specific platform matching filter criteria
  */
 export function getEnabledChannels(
@@ -943,6 +953,8 @@ export interface Config {
   replyPolicy: ReplyPolicy;
   /** Channel configurations */
   channels: ChannelConfig[];
+  /** Operator-declared identity groups (canonical workspace keys per group) */
+  identities?: IdentityGroupConfig[];
   selfResearch?: SelfResearchConfig;
   memoryMaintenance?: MemoryMaintenanceConfig;
   rateLimit?: RateLimitConfig;

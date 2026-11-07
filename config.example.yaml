@@ -367,6 +367,25 @@ channels:
   # - id: "misskey/timeline/self"
   #   spontaneousPost: true
 
+# Identity groups (identity-linked memory)
+# Each group lists platform accounts that belong to the same person, so the
+# memories of one account can be recalled from the others. Accepted entries:
+# a workspace key (discord/123456789012345678), a channel-style account id
+# (misskey/account/abcdef1234567890), an email address (alice@example.com),
+# email/<address>, or email/e_<64 hex>. Entries are normalized to
+# {platform}/{userId}; email accounts become email/e_<sha256 hex>.
+# Default: [] (no account is linked to another). Changes require a restart.
+# WARNING: Linking an account grants every other account in the group read
+# access to that account's memories. Only link accounts you are authorized to
+# treat as the same person.
+identities: []
+  # Example:
+  # - id: "alice"
+  #   accounts:
+  #     - "discord/123456789012345678"
+  #     - "misskey/account/abcdef1234567890"
+  #     - "alice@example.com"
+
 # Self-research: agent periodically reads RSS and researches topics
 selfResearch:
   enabled: false                    # Enable self-research (default: false); override with env SELF_RESEARCH_ENABLED

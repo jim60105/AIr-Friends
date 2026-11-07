@@ -1,10 +1,11 @@
 // tests/core/config-loader.test.ts
 
-import { assertEquals, assertRejects } from "@std/assert";
-import { loadConfig, loadSystemPrompt } from "@core/config-loader.ts";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { loadConfig, loadSystemPrompt, normalizeIdentities } from "@core/config-loader.ts";
 import { ConfigError } from "../../src/types/errors.ts";
 import { ErrorCode } from "../../src/types/errors.ts";
 import { getDefaultAgentType } from "../../src/acp/agent-factory.ts";
+import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import type { TemplateVariables } from "../../src/types/template.ts";
 import { join, resolve } from "@std/path";
 
@@ -3128,5 +3129,241 @@ Deno.test("Config - rejects a non-numeric memory.recall.secondNoteRecallScore", 
 
   await withTestConfig(recallConfig(memory), async (dir) => {
     await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+// --- identity groups configuration tests ---
+
+const identityConfig = (identitiesSnippet: string) => `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+${identitiesSnippet}
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+function identityError(raw: unknown): ConfigError {
+  return assertThrows(() => normalizeIdentities(raw), ConfigError);
+}
+
+Deno.test("identity groups - workspace key kept as-is", () => {
+  assertEquals(
+    normalizeIdentities([{ id: "alice", accounts: ["discord/123456789012345678"] }]),
+    [{ id: "alice", accounts: ["discord/123456789012345678"] }],
+  );
+});
+
+Deno.test("identity groups - channel-style account id collapsed", () => {
+  assertEquals(
+    normalizeIdentities([{ id: "alice", accounts: ["misskey/account/abcdef1234567890"] }])[0]
+      .accounts,
+    ["misskey/abcdef1234567890"],
+  );
+});
+
+Deno.test("identity groups - email address forms hashed", () => {
+  const expected = `email/${normalizeEmailMailbox("Alice@example.com").userId}`;
+  const entries = [
+    " Alice@Example.COM ",
+    "email/Alice@example.com",
+    "email/account/Alice@example.com",
+  ];
+
+  for (const entry of entries) {
+    assertEquals(
+      normalizeIdentities([{ id: "alice", accounts: [entry] }])[0].accounts,
+      [expected],
+    );
+  }
+});
+
+Deno.test("identity groups - email owner id kept as-is", () => {
+  const userId = `e_${"a".repeat(64)}`;
+  assertEquals(
+    normalizeIdentities([{ id: "alice", accounts: [`email/${userId}`] }])[0].accounts,
+    [`email/${userId}`],
+  );
+});
+
+Deno.test("identity groups - omitted identities load as []", async () => {
+  await withTestConfig(identityConfig(""), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.identities, []);
+  });
+});
+
+Deno.test("identity groups - empty YAML identities key loads as []", async () => {
+  await withTestConfig(identityConfig("identities:"), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.identities, []);
+  });
+});
+
+Deno.test("identity groups - YAML block is normalized end to end", async () => {
+  const yaml = `identities:
+  - id: " alice "
+    accounts:
+      - "discord/123456789012345678"
+      - "misskey/account/abcdef1234567890"
+      - "Alice@example.com"`;
+
+  await withTestConfig(identityConfig(yaml), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.identities, [{
+      id: "alice",
+      accounts: [
+        "discord/123456789012345678",
+        "misskey/abcdef1234567890",
+        `email/${normalizeEmailMailbox("Alice@example.com").userId}`,
+      ],
+    }]);
+  });
+});
+
+Deno.test("identity groups - shape errors name the field path", () => {
+  const cases: [unknown, string][] = [
+    [{}, "identities must be an array"],
+    ["not-an-array", "identities must be an array"],
+    [[null], "identities[0] must be a mapping"],
+    [[[]], "identities[0] must be a mapping"],
+    [[1], "identities[0] must be a mapping"],
+    [[{}], "identities[0].id must be a non-empty string"],
+    [[{ id: "  ", accounts: ["discord/1"] }], "identities[0].id must be a non-empty string"],
+    [[{ id: 1, accounts: ["discord/1"] }], "identities[0].id must be a non-empty string"],
+    [[{ id: "alice" }], "identities[0].accounts must be a non-empty array"],
+    [[{ id: "alice", accounts: [] }], "identities[0].accounts must be a non-empty array"],
+    [[{ id: "alice", accounts: "discord/1" }], "identities[0].accounts must be a non-empty array"],
+    [[{ id: "alice", accounts: [1] }], "identities[0].accounts[0] must be a string"],
+  ];
+
+  for (const [raw, message] of cases) {
+    const error = identityError(raw);
+    assertEquals(error.message, message);
+    assertEquals(error.code, ErrorCode.CONFIG_INVALID);
+  }
+});
+
+Deno.test("identity groups - duplicate group id rejected at the later group", () => {
+  const error = identityError([
+    { id: "alice", accounts: ["discord/1"] },
+    { id: " alice ", accounts: ["discord/2"] },
+  ]);
+
+  assertEquals(error.message, "identities[1].id duplicates an earlier group id");
+  assertEquals(error.context, { field: "identities[1].id" });
+});
+
+Deno.test("identity groups - unsupported account forms rejected", () => {
+  const entries = [
+    "slack/123",
+    "slack/account/123",
+    "discord",
+    "alice",
+    "discord/channel/123456789012345678",
+    "misskey/timeline/self",
+    "discord/alice@example.com",
+    "discord/",
+    "discord/a/b",
+    "discord/..",
+    "discord/.hidden",
+    "discord/ alice",
+    "discord/a\\b",
+    "not-an-address@@example.com",
+    "email/",
+  ];
+
+  for (const entry of entries) {
+    const error = identityError([{ id: "alice", accounts: [entry] }]);
+    assertEquals(error.message, "identities[0].accounts[0] is not a supported identity account");
+    assertEquals(error.context, { field: "identities[0].accounts[0]" });
+  }
+});
+
+Deno.test("identity groups - errors never echo the account value", () => {
+  const raw = "not-an-address@@example.com";
+  const error = identityError([{ id: "alice", accounts: [raw] }]);
+
+  assertEquals(error.message.includes("not-an-address"), false);
+  assertEquals(JSON.stringify(error.context).includes("not-an-address"), false);
+});
+
+Deno.test("identity groups - duplicate account within one group rejected", () => {
+  const error = identityError([
+    { id: "alice", accounts: ["alice@example.com", "email/alice@example.com"] },
+  ]);
+
+  assertEquals(error.message, "identities[0].accounts[1] duplicates identities[0].accounts[0]");
+});
+
+Deno.test("identity groups - duplicate account across groups rejected", () => {
+  const error = identityError([
+    { id: "alice", accounts: ["discord/123"] },
+    { id: "bob", accounts: ["discord/123"] },
+  ]);
+
+  assertEquals(error.message, "identities[1].accounts[0] duplicates identities[0].accounts[0]");
+});
+
+Deno.test("identity groups - IDENTITIES env override replaces the YAML value", async () => {
+  const yaml = `identities:
+  - id: "bob"
+    accounts:
+      - "discord/999"`;
+
+  await withTestConfig(identityConfig(yaml), async (dir) => {
+    const override = JSON.stringify([
+      { id: "alice", accounts: ["discord/123", "alice@example.com"] },
+    ]);
+    await withEnv("IDENTITIES", override, async () => {
+      const result = await loadConfig(dir);
+      assertEquals(result.identities, [{
+        id: "alice",
+        accounts: [
+          "discord/123",
+          `email/${normalizeEmailMailbox("alice@example.com").userId}`,
+        ],
+      }]);
+    });
+  });
+});
+
+Deno.test("identity groups - invalid IDENTITIES override is ignored", async () => {
+  const yaml = `identities:
+  - id: "bob"
+    accounts:
+      - "discord/999"`;
+
+  for (const invalid of ['{"id":"alice"}', "not json"]) {
+    await withTestConfig(identityConfig(""), async (dir) => {
+      await withEnv("IDENTITIES", invalid, async () => {
+        assertEquals((await loadConfig(dir)).identities, []);
+      });
+    });
+    await withTestConfig(identityConfig(yaml), async (dir) => {
+      await withEnv("IDENTITIES", invalid, async () => {
+        assertEquals(
+          (await loadConfig(dir)).identities,
+          [{ id: "bob", accounts: ["discord/999"] }],
+        );
+      });
+    });
+  }
+});
+
+Deno.test("identity groups - invalid group in IDENTITIES override rejected", async () => {
+  await withTestConfig(identityConfig(""), async (dir) => {
+    const override = JSON.stringify([{ id: "alice", accounts: ["discord/123", "discord/123"] }]);
+    await withEnv("IDENTITIES", override, async () => {
+      await assertRejects(() => loadConfig(dir), ConfigError);
+    });
   });
 });

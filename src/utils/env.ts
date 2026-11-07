@@ -28,6 +28,7 @@ export const ENV_MAPPINGS = {
   REPLY_POLICY: "replyPolicy",
   REPLY_TO: "replyPolicy",
   CHANNELS: "channels",
+  IDENTITIES: "identities",
 
   // Spontaneous post settings - Discord
   DISCORD_SPONTANEOUS_ENABLED: "platforms.discord.spontaneousPost.enabled",
@@ -296,8 +297,8 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       } // Handle REPLY_POLICY / REPLY_TO: map "whitelist" → "channels" for backward compat
       else if (envName === "REPLY_POLICY" || envName === "REPLY_TO") {
         parsedValue = value === "whitelist" ? "channels" : value;
-      } // Handle JSON string for CHANNELS
-      else if (envName === "CHANNELS") {
+      } // Handle JSON string for CHANNELS / IDENTITIES
+      else if (envName === "CHANNELS" || envName === "IDENTITIES") {
         try {
           parsedValue = JSON.parse(value);
           if (!Array.isArray(parsedValue)) {
