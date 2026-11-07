@@ -24,7 +24,8 @@ describe("poc runtime", () => {
 
   test("runs dumb-init", () => {
     const result = Bun.spawnSync(["dumb-init", "--version"], { stdout: "pipe", stderr: "pipe" });
-    const version = result.stdout.toString().trim();
+    // `dumb-init --version` writes its banner to stderr.
+    const version = `${result.stdout.toString()}${result.stderr.toString()}`.trim();
     observe("dumbInitVersion", version);
     expect(result.exitCode).toBe(0);
     expect(version).not.toBe("");

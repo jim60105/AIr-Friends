@@ -49,7 +49,14 @@ async function main(): Promise<void> {
       `--reporter-outfile=${JUNIT_FILE}`,
       `./suites/${suite}.spec.ts`,
     ],
-    { cwd: POC_DIR, stdout: "inherit", stderr: "inherit" },
+    {
+      cwd: POC_DIR,
+      stdout: "inherit",
+      stderr: "inherit",
+      // Bun.spawn does not forward later `process.env` mutations, so the
+      // observation file has to be handed to the suite explicitly.
+      env: { ...process.env, POC_OBSERVATIONS_FILE: OBSERVATIONS_FILE },
+    },
   );
   const testExitCode = await run.exited;
   const decision = decideRun(existsSync(JUNIT_FILE));
