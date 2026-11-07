@@ -12,6 +12,7 @@ import { startFakeDns, type FakeDns } from "../egress/fake-dns.ts";
 import {
   configureEgressAllowHosts,
   isEgressTargetAllowed,
+  isMetadataAddress,
   resolveAndValidateEgress,
   rewriteForwardHead,
   setEgressResolver,
@@ -277,13 +278,90 @@ test("EGR-01: both families are queried and public answers are allowed", async (
 });
 
 test("EGR-01: internal literals are denied and public literals are allowed", async () => {
-  const denied = ["127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.5.4", "0.0.0.0", "::1", "[::1]"];
+  const denied = [
+    "127.0.0.1",
+    "169.254.169.254",
+    "10.0.0.1",
+    "192.168.1.1",
+    "172.16.5.4",
+    "0.0.0.0",
+    "::1",
+    "[::1]",
+  ];
   for (const host of denied) expect(await isEgressTargetAllowed(host)).toBe(false);
   for (const host of ["8.8.8.8", "1.1.1.1"]) {
     expect(await isEgressTargetAllowed(host)).toBe(true);
   }
   const pinned = await resolveAndValidateEgress("8.8.8.8");
   expect(pinned.address).toBe("8.8.8.8");
+});
+
+// --- EGR-02: metadata addresses stay blocked, including for an allowlisted host ---
+
+test("EGR-02: an allowlisted metadata literal is still denied", async () => {
+  // A literal takes the fast path in resolveAddresses, so this proves the allowlist cannot
+  // exempt the metadata space even without a DNS answer.
+  configureEgressAllowHosts(["169.254.169.254", "169.254.170.2"]);
+  expect(await isEgressTargetAllowed("169.254.169.254")).toBe(false);
+  expect(await isEgressTargetAllowed("169.254.170.2")).toBe(false);
+  const verdict = await resolveAndValidateEgress("169.254.169.254");
+  expect(verdict.allowed).toBe(false);
+  expect(verdict.address).toBeUndefined();
+});
+
+test("EGR-02: an allowlisted host resolving to a metadata address is still denied", async () => {
+  const dns = await startFakeDns((_name, type) => (type === "A" ? ["169.254.169.254"] : []));
+  dnsServers.push(dns);
+  setEgressResolver(dns.resolver());
+  configureEgressAllowHosts(["metadata.test"]);
+  expect(await isEgressTargetAllowed("metadata.test")).toBe(false);
+  const verdict = await resolveAndValidateEgress("metadata.test");
+  expect(verdict.allowed).toBe(false);
+  expect(verdict.address).toBeUndefined();
+});
+
+test("EGR-02: every metadata spelling is identified", () => {
+  // Independent test data: the deny list the proxy must carry, in every spelling it accepts.
+  const metadata = [
+    "169.254.169.254",
+    "169.254.170.2",
+    "100.100.100.200",
+    "192.0.0.192",
+    "::ffff:169.254.169.254",
+    "::ffff:a9fe:a9fe",
+    "fd00:ec2::254",
+    "fd00:0ec2:0000:0000:0000:0000:0000:0254",
+  ];
+  for (const address of metadata) expect(isMetadataAddress(address)).toBe(true);
+  const neighbors = ["8.8.8.8", "169.254.169.253", "fd12:3456::10"];
+  for (const address of neighbors) expect(isMetadataAddress(address)).toBe(false);
+});
+
+test("EGR-02: a plain-HTTP request to the metadata endpoint is refused with 403", async () => {
+  // The metadata host is a literal, so the request never resolves; a proxy that skipped the
+  // check would instead answer 502 here, because the container has no route to reach it.
+  const proxy = await startProxy();
+  const response = await roundTrip(
+    proxy,
+    "GET http://169.254.169.254/latest/meta-data/ HTTP/1.1\r\nHost: 169.254.169.254\r\n\r\n",
+  );
+  expect(response).toContain("403");
+  expect(response).not.toContain("200");
+});
+
+test("EGR-02: an allowlisted name resolving to metadata is refused with 403", async () => {
+  const dns = await startFakeDns((_name, type) => (type === "A" ? ["169.254.169.254"] : []));
+  dnsServers.push(dns);
+  setEgressResolver(dns.resolver());
+  configureEgressAllowHosts(["metadata.test"]);
+  const proxy = await startProxy();
+  const response = await roundTrip(
+    proxy,
+    "GET http://metadata.test/latest/meta-data/ HTTP/1.1\r\nHost: metadata.test\r\n\r\n",
+  );
+  expect(response).toContain("403");
+  const answers = dns.queries().filter((query) => query.name === "metadata.test" && query.type === "A");
+  expect(answers.length).toBe(1);
 });
 
 // --- EGR-03: the connection uses the validated address with no second resolution ---

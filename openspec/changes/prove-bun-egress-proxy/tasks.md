@@ -11,6 +11,6 @@ Gate design D7 applies: a failing check is a result. Never weaken an assertion, 
 
 ## 2. Suite
 
-- [ ] 2.1 Create `suites/egress.spec.ts` with tests titled `EGR-01:` to `EGR-08:` following design D4, covering every scenario in this change's spec and the source intent column. Verify: covered by 2.2.
-- [ ] 2.2 Run `migration/bun/poc/run-suite.sh egress`. Verify: exit 0 and `.evidence-wip/x86_64/egress.json` holds at least one test per ID. Report any failed ID.
-- [ ] 2.3 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/egress/`, `migration/bun/poc/suites/` and this change directory.
+- [x] 2.1 Create `suites/egress.spec.ts` with tests titled `EGR-01:` to `EGR-08:` following design D4, covering every scenario in this change's spec and the source intent column. Verify: covered by 2.2.
+- [x] 2.2 Run `migration/bun/poc/run-suite.sh egress`. Verify: exit 0 and `.evidence-wip/x86_64/egress.json` holds at least one test per ID. Report any failed ID.
+- [x] 2.3 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/egress/`, `migration/bun/poc/suites/` and this change directory.
