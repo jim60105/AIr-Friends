@@ -33,10 +33,12 @@ None.
 ## Batch:
 
 depends-on: capture-deno-baseline
+depends-on: build-bun-poc-harness
 depends-on: define-bun-go-no-go-gate
 depends-on: prove-bun-ffi-confinement
 depends-on: prove-bun-agent-process-boundary
 depends-on: prove-bun-acp-real-agents
+depends-on: prove-bun-acp-failure-paths
 depends-on: prove-bun-egress-proxy
 depends-on: prove-bun-injection-defenses
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-See `proposal.md` for motivation. The gate (`define-bun-go-no-go-gate`) evaluates evidence bound to a tree hash, so all final runs must use one unchanged `migration/bun/poc/` tree. The hash excludes evidence and record files, so committing them does not invalidate them. Because `feat/migrate-to-bun` is not pushed by this batch, the owner decides how the commit reaches the arm64 host.
+See `proposal.md` for motivation. The gate (`define-bun-go-no-go-gate`) evaluates evidence bound to a tree hash, so all final runs must use one unchanged `migration/bun/poc/` tree. The hash excludes evidence and record files, so committing them does not invalidate them. The evidence also binds `src/acp/filesystem-access-linux.ts`, `src/acp/command-syntax.ts` and `src/utils/ssrf.ts`, so a `master` security fix merged after the runs makes them stale. Because `feat/migrate-to-bun` is not pushed by this batch, the owner decides how the commit reaches the arm64 host.
 
 ## Goals / Non-Goals
 
@@ -19,7 +19,7 @@ See `proposal.md` for motivation. The gate (`define-bun-go-no-go-gate`) evaluate
 
 ### D1. Run order
 
-All suites use the same `POC_SPAWN_BACKEND`. If `.evidence-wip/x86_64/process.json` shows `bun`, export `POC_SPAWN_BACKEND=bun` for task 1.2. On x86_64, run `process`, `acp`, `ffi`, `ffi-enosys`, `egress`, `injection` and `injection-noconfig`. On aarch64, run `ffi` and `ffi-enosys`. Each writes `evidence/<arch>/<suite>.json`.
+All suites use the same `POC_SPAWN_BACKEND`, and the gate rejects a mismatch. If `.evidence-wip/x86_64/process.json` shows `bun`, export `POC_SPAWN_BACKEND=bun` for task 1.2. On x86_64, run `process`, `acp`, `acp-failure`, `ffi`, `ffi-enosys`, `egress`, `injection` and `injection-noconfig`. On aarch64, run `ffi` and `ffi-enosys`. Each writes `evidence/<arch>/<suite>.json`.
 
 `run-suite.sh` needs `git`, `podman` and network access for the image build. It does not need Bun on the host. The script derives the output directory from `uname -m`, so the same command works on both architectures.
 
@@ -41,5 +41,5 @@ The first two must pass and the third must report "No test modules found". The i
 
 ## Risks / Trade-offs
 
-- [No native arm64 host is available] → The outcome stays blocked at task 2.1. An owner must supply a host or explicitly change the catalog through an OpenSpec change; the agent must not work around it.
+- [No native arm64 host is available] → The outcome stays blocked at task 2.1. A full-system arm64 VM also qualifies, because its own kernel handles the system calls; qemu-user does not. An owner must supply a host or explicitly change the catalog through an OpenSpec change; the agent must not work around it.
 - [Network is down while building] → `podman build` uses its cache when the tree is unchanged, and otherwise the run stops before writing evidence.

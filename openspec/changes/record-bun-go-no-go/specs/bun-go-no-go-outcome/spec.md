@@ -12,7 +12,7 @@ The committed outcome record SHALL state `Go` or `No-Go` and SHALL pass the gate
 
 #### Scenario: Verification on the final commit
 - **GIVEN** the commit containing `GO-NO-GO.json`, `GO-NO-GO.md` and the evidence
-- **WHEN** the gate's record verification runs
+- **WHEN** the gate's live record verification runs
 - **THEN** it SHALL exit 0
 
 #### Scenario: Outcome line
