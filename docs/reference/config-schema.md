@@ -27,6 +27,7 @@
 | `agent.sandbox.filesystemConfinement` | `AGENT_SANDBOX_FILESYSTEM_CONFINEMENT` | `false` | 是否以 bwrap 隔離檔案系統（需環境支援，失敗時嚴格中斷啟動） |
 | `replyPolicy` | `REPLY_POLICY` | `"channels"` | 全域回覆政策模式 (`all`、`public`、`channels`) |
 | `channels` | `CHANNELS` | `[]` | 頻道與帳號存取控制清單（JSON 陣列字串） |
+| `identities` | `IDENTITIES` | `[]` | 身分群組清單（JSON 陣列字串）：將同一人的多個平台帳號歸為一組，供記憶回想跨帳號連結；帳號會正規化為 `{platform}/{userId}` |
 | `rateLimit.enabled` | `RATE_LIMIT_ENABLED` | `false` | 是否啟用頻率限制 |
 | `rateLimit.maxRequestsPerWindow` | `RATE_LIMIT_MAX_REQUESTS_PER_WINDOW` | `10` | 單一視窗每使用者最大請求數 |
 | `rateLimit.windowMs` | `RATE_LIMIT_WINDOW_MS` | `600000` | 滑動視窗時間（毫秒，預設 10 分鐘） |
