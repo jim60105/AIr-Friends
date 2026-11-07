@@ -14,6 +14,7 @@ import type {
   DryRunConfig,
   GitBackupConfig,
   GitCredentialConfig,
+  IdentityGroupConfig,
   IdleTimeoutConfig,
   MemoryMaintenanceConfig,
   MemoryRecallConfig,
@@ -23,9 +24,11 @@ import type {
   SandboxConfig,
   UserMCPServerConfig,
 } from "../types/config.ts";
+import { parseChannelId } from "../types/config.ts";
 import { isSupportedAgentType, type MCPServerConfig } from "../acp/types.ts";
-import { VALID_PLATFORMS } from "../types/events.ts";
+import { isValidPlatform, VALID_PLATFORMS } from "../types/events.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
+import { sanitizePathComponent } from "@utils/path-validator.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { DISCORD_WHITELIST_PATTERN } from "../platforms/discord/discord-config.ts";
 import { MISSKEY_WHITELIST_PATTERN } from "../platforms/misskey/misskey-config.ts";
@@ -243,6 +246,170 @@ function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
   return channels;
 }
 
+/** Canonical email owner id form (`e_` + sha256 hex), accepted as-is. */
+const IDENTITY_EMAIL_USER_ID_PATTERN = /^e_[0-9a-f]{64}$/;
+
+/**
+ * Error for an unusable identity account entry. The message and context carry
+ * only the field path: the raw entry may be an email address and must never
+ * appear in a log line or error message.
+ */
+function identityAccountError(field: string): ConfigError {
+  return new ConfigError(
+    ErrorCode.CONFIG_INVALID,
+    `${field} is not a supported identity account`,
+    { field },
+  );
+}
+
+/**
+ * Normalize one configured account entry to the canonical workspace key
+ * `{platform}/{userId}` (identity-linked memory design, §3).
+ */
+function normalizeIdentityAccount(entry: string, field: string): string {
+  const value = entry.trim();
+  let platform: string;
+  let rest: string;
+
+  const parsed = parseChannelId(value);
+  if (parsed !== null) {
+    // Only `{platform}/account/{id}` may be linked; channels and timelines are not accounts.
+    if (parsed.type !== "account") throw identityAccountError(field);
+    platform = parsed.platform;
+    rest = parsed.value;
+  } else if (value.includes("@") && !value.includes("/")) {
+    platform = "email";
+    rest = value;
+  } else if (value.startsWith("email/")) {
+    platform = "email";
+    rest = value.slice("email/".length);
+  } else {
+    const slash = value.indexOf("/");
+    if (slash < 0) throw identityAccountError(field);
+    platform = value.slice(0, slash);
+    rest = value.slice(slash + 1);
+  }
+
+  if (!isValidPlatform(platform)) throw identityAccountError(field);
+
+  let userId: string;
+  if (platform === "email") {
+    if (IDENTITY_EMAIL_USER_ID_PATTERN.test(rest)) {
+      userId = rest;
+    } else {
+      try {
+        userId = normalizeEmailMailbox(rest).userId;
+      } catch {
+        // normalizeEmailMailbox embeds the raw address in its error; never propagate it.
+        throw identityAccountError(field);
+      }
+    }
+  } else {
+    // Sanitization equality keeps the key identical to WorkspaceManager.computeWorkspaceKey()
+    // output, so registry lookups cannot miss and two entries cannot collapse to one directory.
+    if (
+      rest === "" ||
+      rest.includes("/") ||
+      rest.includes("@") ||
+      sanitizePathComponent(rest) !== rest
+    ) {
+      throw identityAccountError(field);
+    }
+    userId = rest;
+  }
+
+  return `${platform}/${userId}`;
+}
+
+/**
+ * Validate and normalize the `identities` configuration value (identity-linked memory).
+ *
+ * Fails fast: a silently dropped account would silently change which memories are
+ * readable, so every malformed group or account rejects the whole configuration.
+ * Every error names only the field path (never the raw account value).
+ */
+export function normalizeIdentities(raw: unknown): IdentityGroupConfig[] {
+  if (!Array.isArray(raw)) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "identities must be an array",
+      { field: "identities" },
+    );
+  }
+
+  const groups: IdentityGroupConfig[] = [];
+  const seenIds = new Set<string>();
+  const seenAccounts = new Map<string, string>();
+
+  for (let i = 0; i < raw.length; i++) {
+    const groupPath = `identities[${i}]`;
+    const rawGroup: unknown = raw[i];
+    if (rawGroup === null || typeof rawGroup !== "object" || Array.isArray(rawGroup)) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `${groupPath} must be a mapping`,
+        { field: groupPath },
+      );
+    }
+
+    const group = rawGroup as Record<string, unknown>;
+    const id = typeof group.id === "string" ? group.id.trim() : "";
+    if (id === "") {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `${groupPath}.id must be a non-empty string`,
+        { field: `${groupPath}.id` },
+      );
+    }
+    if (seenIds.has(id)) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `${groupPath}.id duplicates an earlier group id`,
+        { field: `${groupPath}.id` },
+      );
+    }
+    seenIds.add(id);
+
+    const rawAccounts = group.accounts;
+    if (!Array.isArray(rawAccounts) || rawAccounts.length === 0) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `${groupPath}.accounts must be a non-empty array`,
+        { field: `${groupPath}.accounts` },
+      );
+    }
+
+    const accounts: string[] = [];
+    for (let j = 0; j < rawAccounts.length; j++) {
+      const field = `${groupPath}.accounts[${j}]`;
+      const entry: unknown = rawAccounts[j];
+      if (typeof entry !== "string") {
+        throw new ConfigError(
+          ErrorCode.CONFIG_INVALID,
+          `${field} must be a string`,
+          { field },
+        );
+      }
+
+      const key = normalizeIdentityAccount(entry, field);
+      const earlier = seenAccounts.get(key);
+      if (earlier !== undefined) {
+        throw new ConfigError(
+          ErrorCode.CONFIG_INVALID,
+          `${field} duplicates ${earlier}`,
+          { field, duplicateOf: earlier },
+        );
+      }
+      seenAccounts.set(key, field);
+      accounts.push(key);
+    }
+
+    groups.push({ id, accounts });
+  }
+
+  return groups;
+}
+
 /**
  * Default email platform configuration
  */
@@ -299,6 +466,7 @@ const DEFAULT_CONFIG: Partial<Config> = {
   },
   replyPolicy: "channels" as const,
   channels: [],
+  identities: [],
   platforms: {
     email: DEFAULT_EMAIL_CONFIG,
   } as unknown as PlatformsConfig,
@@ -748,6 +916,9 @@ function validateConfig(config: Record<string, unknown>): void {
   } else {
     config.channels = [];
   }
+
+  // Validate and normalize identity groups (a YAML `identities:` left empty merges as null)
+  config.identities = config.identities == null ? [] : normalizeIdentities(config.identities);
 
   // Validate spontaneous post config for each platform
   for (const platformName of VALID_PLATFORMS) {
