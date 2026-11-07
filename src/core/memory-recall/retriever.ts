@@ -14,10 +14,14 @@ import type { MemoryRecallConfig } from "../../types/config.ts";
 import type {
   MemoryCategory,
   MemoryScope,
+  MemoryVisibility,
   NoteRecallResult,
   ResolvedMemory,
 } from "../../types/memory.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../../types/workspace.ts";
+import { createLogger } from "@utils/logger.ts";
+
+const logger = createLogger("MemoryRetriever");
 
 /** Recall mode (Memory Recall v2 design, §7). */
 export type RecallMode = "fast" | "deep";
@@ -78,6 +82,9 @@ export interface MemoryRecallRequest {
 
   /** Restricts eligibility to one scope; omitted means every allowed scope. */
   scope?: MemoryScope;
+
+  /** Other workspaces of the same identity group; public, plus private in a DM. */
+  linkedWorkspaces?: readonly WorkspaceInfo[];
 }
 
 /** One recalled memory with everything needed to render or return it. */
@@ -391,6 +398,39 @@ export class MemoryRetriever {
     for (const source of sources) {
       documents.push(...await this.cache.getDocuments(source.path, source.load));
     }
+
+    // Linked accounts of the same identity group join the same population:
+    // their public file always, their private file only in a DM (the current
+    // session decides, never the linked workspace). A duplicate id keeps the
+    // earlier source, so the current account wins. An unreadable linked source
+    // is logged and skipped, because one bad linked account must not break the
+    // current account's recall.
+    const seen = new Set(documents.map((doc) => doc.memory.id));
+    for (const linked of request.linkedWorkspaces ?? []) {
+      const visibilities: MemoryVisibility[] = request.workspace.isDm
+        ? ["public", "private"]
+        : ["public"];
+      for (const visibility of visibilities) {
+        try {
+          const docs = await this.cache.getDocuments(
+            this.memoryStore.getMemoryFilePathFor(linked, visibility),
+            () => this.memoryStore.loadAllMemories(linked, visibility),
+          );
+          for (const doc of docs) {
+            if (seen.has(doc.memory.id)) continue;
+            seen.add(doc.memory.id);
+            documents.push(doc);
+          }
+        } catch (error) {
+          logger.warn("Skipped unreadable linked memory source", {
+            workspaceKey: linked.key,
+            visibility,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
     return documents;
   }
 }

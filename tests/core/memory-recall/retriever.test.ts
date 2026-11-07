@@ -1,6 +1,7 @@
 // tests/core/memory-recall/retriever.test.ts
 
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
+import { exists } from "@std/fs";
 import {
   estimateMemorySectionTokens,
   estimateNoteSectionTokens,
@@ -9,6 +10,7 @@ import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type { MemoryRecallRequest, RecallResponse } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
+import { IdentityRegistry } from "@core/identity-registry.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { MemoryRecallConfig } from "../../../src/types/config.ts";
 import type { Platform } from "../../../src/types/events.ts";
@@ -72,6 +74,7 @@ function scoreOf(response: RecallResponse, id: string): number {
 }
 
 interface Fixture {
+  manager: WorkspaceManager;
   store: MemoryStore;
   dmWorkspace: WorkspaceInfo;
   guildWorkspace: WorkspaceInfo;
@@ -110,6 +113,7 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
     await Deno.writeTextFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
 
     await fn({
+      manager,
       store,
       dmWorkspace,
       guildWorkspace,
@@ -1174,5 +1178,249 @@ Deno.test("search - Deep Recall caps the note count at the limit", async () => {
     });
 
     assertEquals(result.notes.length, 10);
+  });
+});
+
+// ============ Linked memory sources (identity-linked recall) ============
+
+/**
+ * The other workspaces of the current account's identity group, built over the
+ * fixture's real `WorkspaceManager` so the paths match production.
+ */
+function linkedWorkspacesOf(
+  fixture: Fixture,
+  current: WorkspaceInfo,
+): WorkspaceInfo[] {
+  const registry = new IdentityRegistry(
+    [{ id: "alice", accounts: ["discord/user456", "misskey/linked1"] }],
+    fixture.manager,
+  );
+  return registry.linkedWorkspaces(current);
+}
+
+/** Creates the linked workspace directory and writes its memory file. */
+async function writeLinkedMemory(
+  fixture: Fixture,
+  linked: WorkspaceInfo,
+  visibility: "public" | "private",
+  events: MemoryLogEvent[],
+): Promise<void> {
+  await Deno.mkdir(linked.path, { recursive: true });
+  await writeMemoryLog(fixture.store.getMemoryFilePathFor(linked, visibility), events);
+}
+
+Deno.test("search - a linked account's public memory is recalled outside a DM", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "own", content: "keyboard" }),
+    ]);
+    const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    await writeLinkedMemory(fixture, linked, "public", [
+      memoryEvent({ id: "linked-public", content: "keyboard" }),
+    ]);
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+    });
+
+    assertEquals(ids(result).sort(), ["linked-public", "own"]);
+  });
+});
+
+Deno.test("search - a linked account's private memory is recalled only in a DM", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "own", content: "keyboard" }),
+    ]);
+    const [guildLinked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    await writeLinkedMemory(fixture, guildLinked, "private", [
+      memoryEvent({ id: "linked-private", content: "keyboard" }),
+    ]);
+    const [dmLinked] = linkedWorkspacesOf(fixture, fixture.dmWorkspace);
+
+    const guildResult = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [guildLinked],
+    });
+    assertEquals(ids(guildResult), ["own"]);
+
+    const dmResult = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.dmWorkspace,
+      linkedWorkspaces: [dmLinked],
+    });
+    assert(ids(dmResult).includes("linked-private"));
+  });
+});
+
+Deno.test("search - a current memory supersedes a linked account's memory", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "b-superseder", content: "keyboard", supersedes: ["a-mem"] }),
+    ]);
+    const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    await writeLinkedMemory(fixture, linked, "public", [
+      memoryEvent({ id: "a-mem", content: "keyboard" }),
+    ]);
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+    });
+
+    assert(ids(result).includes("b-superseder"));
+    assert(!ids(result).includes("a-mem"), "a superseded linked memory must not be eligible");
+  });
+});
+
+Deno.test("search - a relatedTo reference from a current memory boosts a linked memory", async () => {
+  const search = async (relatedTo: string[]) => {
+    let childScore = 0;
+    await withFixture(async (fixture) => {
+      await writeMemoryLog(fixture.publicPath, [
+        memoryEvent({ id: "b-parent", content: "keyboard mouse", relatedTo }),
+      ]);
+      const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+      await writeLinkedMemory(fixture, linked, "public", [
+        memoryEvent({ id: "a-child", content: "keyboard" }),
+      ]);
+
+      const result = await permissiveRetriever(fixture.store).search({
+        mode: "fast",
+        query: "keyboard",
+        workspace: fixture.guildWorkspace,
+        linkedWorkspaces: [linked],
+      });
+      childScore = scoreOf(result, "a-child");
+    });
+    return childScore;
+  };
+
+  const withoutRelation = await search([]);
+  const withRelation = await search(["a-child"]);
+  assert(
+    withRelation > withoutRelation,
+    `related linked memory should be boosted (${withRelation} vs ${withoutRelation})`,
+  );
+});
+
+Deno.test("search - excludeIds applies to a linked memory", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "own", content: "mouse" }),
+    ]);
+    const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    await writeLinkedMemory(fixture, linked, "public", [
+      memoryEvent({ id: "a-excluded", content: "keyboard" }),
+    ]);
+
+    const seen = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+    });
+    assertEquals(ids(seen), ["a-excluded"]);
+
+    const excluded = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+      excludeIds: new Set(["a-excluded"]),
+    });
+    assertEquals(ids(excluded), []);
+  });
+});
+
+Deno.test("search - an empty linked-workspace list equals an omitted one", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "own", content: "keyboard" }),
+    ]);
+
+    const request = {
+      mode: "deep" as const,
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+    };
+    const omitted = await permissiveRetriever(fixture.store).search(request);
+    const empty = await permissiveRetriever(fixture.store).search({
+      ...request,
+      linkedWorkspaces: [],
+    });
+
+    assertEquals(empty, omitted);
+  });
+});
+
+Deno.test("search - a linked account that never interacted contributes nothing", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "own", content: "keyboard" }),
+    ]);
+    const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    assertEquals(await exists(linked.path), false);
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+    });
+
+    assertEquals(ids(result), ["own"]);
+    assertEquals(await exists(linked.path), false);
+  });
+});
+
+Deno.test("search - an unreadable linked source is skipped", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "own", content: "keyboard" }),
+    ]);
+    const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    // A directory where the memory file should be makes the load throw a
+    // non-NotFound error, which the retriever must log and skip.
+    await Deno.mkdir(`${linked.path}/memory.public.jsonl`, { recursive: true });
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+    });
+
+    assertEquals(ids(result), ["own"]);
+  });
+});
+
+Deno.test("search - a duplicate id keeps the current account's memory", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "dup", content: "current keyboard" }),
+    ]);
+    const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
+    await writeLinkedMemory(fixture, linked, "public", [
+      memoryEvent({ id: "dup", content: "linked keyboard" }),
+    ]);
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.guildWorkspace,
+      linkedWorkspaces: [linked],
+    });
+
+    assertEquals(ids(result), ["dup"]);
+    assertEquals(result.memories[0].memory.content, "current keyboard");
   });
 });
