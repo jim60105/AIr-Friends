@@ -5,6 +5,7 @@ import {
   collectTests,
   hashPocTree,
   hashProductSources,
+  normalizeArch,
   readObservations,
   type SuiteEvidence,
 } from "./evidence.ts";
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
   const evidence: SuiteEvidence = {
     schemaVersion: 1,
     suite,
-    arch: machine(),
+    arch: normalizeArch(machine()),
     kernel: release(),
     bunVersion: Bun.version,
     bunRevision: Bun.revision,

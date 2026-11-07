@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { XMLParser } from "fast-xml-parser";
+import type { Arch } from "./catalog.ts";
 import { PRODUCT_SOURCES } from "./pins.ts";
 
 export interface EvidenceTest {
@@ -13,7 +14,7 @@ export interface EvidenceTest {
 export interface SuiteEvidence {
   schemaVersion: 1;
   suite: string;
-  arch: string; // `uname -m` value
+  arch: Arch; // catalog architecture vocabulary
   kernel: string;
   bunVersion: string; // Bun.version
   bunRevision: string; // Bun.revision
@@ -28,6 +29,28 @@ export interface SuiteEvidence {
   capturedAt: string;
   observations: Record<string, unknown>;
   tests: EvidenceTest[];
+}
+
+/**
+ * Maps a runtime architecture name onto the catalog vocabulary. Bun's
+ * `os.machine()` reports `x86_64` on x86_64 but `arm64` on arm64, and
+ * `process.arch` reports `x64`/`arm64`, while `gate/catalog.ts` and the
+ * criteria key on `x86_64`/`aarch64`. An unknown value is a harness bug and
+ * fails loudly instead of writing evidence the gate would silently drop.
+ */
+export function normalizeArch(runtimeArch: string): Arch {
+  switch (runtimeArch) {
+    case "x86_64":
+    case "x64":
+      return "x86_64";
+    case "aarch64":
+    case "arm64":
+      return "aarch64";
+    default:
+      throw new Error(
+        `unsupported architecture "${runtimeArch}": expected x86_64, x64, aarch64 or arm64`,
+      );
+  }
 }
 
 const parser = new XMLParser({

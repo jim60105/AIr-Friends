@@ -2,7 +2,7 @@
 
 Prerequisite: every other change in the batch is applied, and `bun run --no-env-file validate.ts` in `migration/bun/baseline/` exits 0. Verify with `test -f migration/bun/poc/suites/injection-noconfig.spec.ts && test -f migration/bun/poc/suites/acp.spec.ts && test -f migration/bun/poc/suites/acp-failure.spec.ts && test -f migration/bun/poc/suites/process.spec.ts && test -f migration/bun/poc/suites/ffi.spec.ts && test -f migration/bun/poc/suites/egress.spec.ts`.
 
-Do not edit anything under `migration/bun/poc/` except what the commands below generate. Do not weaken, rerun selectively or hand-edit any evidence or record file.
+Do not edit anything under `migration/bun/poc/` except what the commands below generate and the arch-label normalization recorded as a deviation in `design.md`: without it Bun's `os.machine()` value (`arm64`) never matches the catalog's `aarch64`, so the gate drops the arm64 evidence. Do not weaken, rerun selectively or hand-edit any evidence or record file.
 
 ## 1. Final x86_64 runs
 
