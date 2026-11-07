@@ -3,6 +3,7 @@
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { AgentCore } from "@core/agent-core.ts";
+import type { SkillContext } from "@skills/types.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -368,6 +369,76 @@ Deno.test("AgentCore - a channel session's context carries the channel memories"
     assertStringIncludes(prompt, "[from user_42] The channel meets on Tuesdays");
 
     await agentCore.shutdown();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("AgentCore - identity groups reach the memory read paths", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_reply.md`,
+      "You are a helpful assistant.",
+    );
+
+    const config = createTestConfig(tempDir);
+    config.identities = [{ id: "alice", accounts: ["discord/1", "misskey/2"] }];
+    const agentCore = new AgentCore(config);
+    try {
+      assertEquals(agentCore.getIdentityRegistry().groupCount, 1);
+
+      const manager = agentCore.getWorkspaceManager();
+      const linkedWorkspace = await manager.getOrCreateWorkspace({
+        platform: "misskey",
+        channelId: "timeline",
+        userId: "2",
+        messageId: "linked-msg",
+        isDm: false,
+        guildId: "test_guild",
+        content: "",
+        timestamp: new Date(),
+      });
+      await agentCore.getMemoryStore().addMemory(
+        linkedWorkspace,
+        "misskey deployment note",
+        { visibility: "public" },
+      );
+
+      const workspace = await manager.getOrCreateWorkspace({
+        platform: "discord",
+        channelId: "test_channel",
+        userId: "1",
+        messageId: "own-msg",
+        isDm: false,
+        guildId: "test_guild",
+        content: "",
+        timestamp: new Date(),
+      });
+      const context: SkillContext = {
+        workspace,
+        platformAdapter: new MockPlatformAdapter() as unknown as PlatformAdapter,
+        channelId: "test_channel",
+        userId: "1",
+        workspaceManager: manager,
+      };
+
+      const result = await agentCore.getSkillRegistry().executeSkill(
+        "memory-search",
+        { query: "deployment" },
+        context,
+      );
+
+      assertEquals(result.success, true);
+      const data = result.data as { memories: Array<{ content: string }> };
+      assertEquals(
+        data.memories.map((memory) => memory.content),
+        ["misskey deployment note"],
+      );
+    } finally {
+      await agentCore.shutdown();
+    }
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
