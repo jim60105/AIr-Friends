@@ -164,10 +164,10 @@ async function acp06(kind: AgentKind): Promise<void> {
   const exit = await within(started.run.handle.exited, TEARDOWN_BOUND_MS, "wrapper exit");
   expect(typeof exit.code === "number" || typeof exit.signal === "string").toBe(true);
 
-  // Teardown must not leave the abandoned call hanging. Whether it rejects
-  // (OpenCode) or resolves with a stop reason (OMP) is the agent's own
-  // shutdown choice: the 3 s client timeout already rejected the wait.
-  expect(await firstSettled(tracked, TEARDOWN_BOUND_MS)).toBe("settled");
+  // The client-side timeout has to surface as a rejected call, and teardown
+  // must not leave it hanging: the abandoned prompt has to settle, rejecting.
+  const timedOut = await within(tracked, TEARDOWN_BOUND_MS, "abandoned prompt");
+  expect(timedOut.ok).toBe(false);
 }
 
 async function acp07(kind: AgentKind): Promise<void> {
