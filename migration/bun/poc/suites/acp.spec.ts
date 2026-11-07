@@ -13,6 +13,7 @@ import { type AcpRun, startRun } from "../acp/driver.ts";
 import {
   type LoopbackProvider,
   printableText,
+  type ProviderScript,
   startLoopbackProvider,
 } from "../acp/loopback-provider.ts";
 import { descendantsOf, isAlive, readEnviron, waitForChild } from "../process/proc-tree.ts";
@@ -57,9 +58,17 @@ afterEach(async () => {
   survivors.clear();
 });
 
-/** Starts the provider and one agent, then waits for `dumb-init`'s fork. */
-async function start(kind: AgentKind): Promise<{ provider: LoopbackProvider; run: AcpRun }> {
+/**
+ * Starts the provider with the test's script, then the agent, then waits for
+ * `dumb-init`'s fork. The script is installed before the spawn so a pin that
+ * asks the provider anything during the handshake cannot hang on the default.
+ */
+async function start(
+  kind: AgentKind,
+  script: ProviderScript,
+): Promise<{ provider: LoopbackProvider; run: AcpRun }> {
   const startedProvider = startLoopbackProvider(kind);
+  startedProvider.setScript(script);
   provider = startedProvider;
   const startedRun = await startRun(kind);
   run = startedRun;
@@ -96,8 +105,7 @@ async function waitForEnviron(pid: number): Promise<Record<string, string>> {
 
 async function acp01(kind: AgentKind): Promise<void> {
   const text = printableText(1024, 7);
-  const started = await start(kind);
-  started.provider.setScript({ kind: "text", text, chunkBytes: 64 });
+  const started = await start(kind, { kind: "text", text, chunkBytes: 64 });
   const response = await started.run.promptOrCrash("poc handshake");
   expect(response.stopReason).toBe("end_turn");
   expect(started.run.text()).toBe(text);
@@ -105,8 +113,7 @@ async function acp01(kind: AgentKind): Promise<void> {
 
 async function acp02(kind: AgentKind): Promise<void> {
   const text = printableText(LARGE_OUTPUT_BYTES, 0);
-  const started = await start(kind);
-  started.provider.setScript({
+  const started = await start(kind, {
     kind: "text",
     text,
     chunkBytes: LARGE_OUTPUT_CHUNK_BYTES,
@@ -120,21 +127,28 @@ async function acp02(kind: AgentKind): Promise<void> {
 
 async function acp03(kind: AgentKind): Promise<void> {
   const prompt = printableText(LARGE_PROMPT_BYTES, 23);
-  const started = await start(kind);
-  started.provider.setScript({
+  const started = await start(kind, {
     kind: "text",
     text: printableText(SMALL_REPLY_BYTES, 5),
     chunkBytes: SMALL_REPLY_BYTES,
   });
   const response = await started.run.promptOrCrash(prompt);
   expect(response.stopReason).toBe("end_turn");
-  const delivered = started.provider.requests().some((request) => request.body.includes(prompt));
+  const delivered = started.provider.requests().some((request) =>
+    request.path === "/v1/chat/completions" && request.body.includes(prompt)
+  );
   expect(delivered).toBe(true);
 }
 
 async function acp09(kind: AgentKind): Promise<void> {
   for (const [name, value] of Object.entries(SENTINELS)) process.env[name] = value;
-  const started = await start(kind);
+  // No prompt is sent here; a benign script only keeps an early handshake
+  // request from stalling.
+  const started = await start(kind, {
+    kind: "text",
+    text: printableText(SMALL_REPLY_BYTES, 0),
+    chunkBytes: SMALL_REPLY_BYTES,
+  });
 
   const tree = descendantsOf(started.run.handle.pid);
   expect(tree.length).toBeGreaterThan(0);
@@ -153,8 +167,7 @@ async function acp09(kind: AgentKind): Promise<void> {
 }
 
 async function acp10(kind: AgentKind): Promise<void> {
-  const started = await start(kind);
-  started.provider.setScript({
+  const started = await start(kind, {
     kind: "text",
     text: printableText(64, 3),
     chunkBytes: 64,

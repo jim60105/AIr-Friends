@@ -41,8 +41,8 @@ const OPENCODE_CONFIG = {
 
 /**
  * Design D2: OMP reads its provider registry from the inherited HOME. The
- * even larger limits than OpenCode's keep agent-side context accounting from
- * masking transport behavior.
+ * same oversized limits as OpenCode's config keep agent-side context
+ * accounting from masking transport behavior.
  */
 const OMP_MODELS_YAML = `providers:
   poc-fixture:
