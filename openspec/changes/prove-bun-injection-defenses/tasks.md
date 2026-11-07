@@ -2,7 +2,7 @@
 
 Prerequisite: `migration/bun/poc/run-suite.sh` and `migration/bun/poc/gate/evidence.ts` exist. Verify with `test -x migration/bun/poc/run-suite.sh && test -f migration/bun/poc/gate/evidence.ts`.
 
-Gate design D7 applies: a failing check is a result. Never weaken an assertion, threshold or size, and never edit the catalog. Do not edit product files, `Containerfile`, `run-suite.sh` or `gate/`. Do not commit `.evidence-wip/`.
+Gate design D7 applies: a failing check is a result. Never weaken an assertion, threshold or size, and never edit the catalog. Do not edit product files, `Containerfile`, `run-suite.sh` or `gate/`, except the `notmpcopyup` option recorded as a deviation in `design.md`: without it podman copies the image's `/opt/air` content into the tmpfs and the suite's precondition cannot hold. Do not commit `.evidence-wip/`.
 
 ## 1. Fixtures
 

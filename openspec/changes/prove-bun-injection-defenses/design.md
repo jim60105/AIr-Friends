@@ -65,8 +65,8 @@ export function runPlain(cwd: string, env: Record<string, string>, path?: string
 
 - `dotenv`: `.env` with `AIR_POC_ATTACKER_ENV=1`; `.env.local` with `AIR_POC_ATTACKER_LOCAL=1`.
 - `bunfig`: `bunfig.toml` with `preload = ["./evil-preload.ts"]`.
-- `project`: `tsconfig.json` with `compilerOptions.paths` mapping `poc-bare-probe` to `./evil-preload.ts`; `package.json` with a `scripts` entry named `report.ts` running `touch PWNED`; `node_modules/.bin/report.ts`, mode 0755, running `touch PWNED`; `node_modules/poc-bare-probe/index.js` writing `PWNED`. The bare import gives these files a lookup they could really hijack.
-- `symlink`: `report.ts` as a symbolic link to `SKILL_PATH`, and `helper.ts` writing `PWNED`. Tests run the spelling `./report.ts` in both forms.
+- `project`: `tsconfig.json` with `compilerOptions.paths` mapping `poc-bare-probe` to `./evil-preload.ts`; `package.json` with a `scripts` entry named `report.ts` running `touch PWNED`; `node_modules/.bin/report.ts`, mode 0755, writing `PWNED`; `node_modules/poc-bare-probe/index.js` writing `PWNED`. The bare import gives these files a lookup they could really hijack.
+- `symlink`: `report.ts` as a symbolic link to `SKILL_PATH`, and `helper.ts` writing `PWNED`. Tests run the spelling `./report.ts` in both forms, beside the `project` files so a loader that resolves relative to the spelling finds that `tsconfig.json` and `node_modules` rather than only a hijacked `helper.ts`.
 
 Runs use `spawnSync` with an explicit environment of `PATH` and `HOME`, the latter a fresh `mkdtemp` created by the run helper and removed afterwards unless the caller passes its own. `runDirect` executes the script path. `runLiteral` executes `bun` with `LITERAL_BUN_RUN.slice(1)` plus the path. `runPlain` executes plain `bun run <path>`, the unhardened form the positive controls need. All three pass the skill argument `--flag v`. Each test compares a control run from an empty `mkdtemp` against the attack run: equal `exitCode`, equal `stdout`, `pwned` false, and `"marker":"SKILL-RAN"` present, with the skill argument parsed and no attacker variable visible. Each test runs both forms, with the absolute path and with `relative(cwd, SKILL_PATH)` prefixed by `./` when needed, each spelling relative to its own run's directory.
 
@@ -102,7 +102,7 @@ Because the copy is verbatim, the prototype inherits `containsUnquotedShellExpan
 | --- | --- |
 | INJ-01 | `makeAttackerDir(["dotenv"])`. Positive control first: plain `bun run <SKILL_PATH>` from that directory must show the attacker variable. Then compare to control in both forms; assert `attackerEnv` is empty. |
 | INJ-02 | `makeAttackerDir(["bunfig"])`. Positive control first: plain `bun run <SKILL_PATH>` must create `PWNED`; delete it. Then compare to control in both forms. |
-| INJ-03 | `makeAttackerDir(["project"])` compared to control in both forms, with `bare` of `absent`. Then `makeAttackerDir(["symlink"])` with the spelling `./report.ts`, in both forms. |
+| INJ-03 | `makeAttackerDir(["project"])` compared to control in both forms, with `bare` of `absent`. Then `makeAttackerDir(["symlink", "project"])` with the spelling `./report.ts`, in both forms, `bare` again `absent`. |
 | INJ-04 | Grammar denies `BUN_OPTIONS=--preload=/tmp/e.ts <skill>`, `BUN_OPTIONS="--preload /tmp/e.ts" <literal form>` and `env BUN_OPTIONS=x <skill>`. Then run the literal form with `BUN_OPTIONS` set to preload an attacker file and call `observe("bunOptionsEffective", pwned(dir))`. This observation does not affect the test result. |
 | INJ-05 | Table of the accepted and denied scenarios, including a test per flag named in the spec, plus a removal and a reorder of each element of the literal prefix. |
 | INJ-06 | `statSync`: `size` 0, `uid` 0. `openSync(path, "a")` throws `EACCES`. |

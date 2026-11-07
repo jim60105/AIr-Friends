@@ -149,7 +149,10 @@ test("INJ-03: tsconfig.json, package.json and node_modules change nothing", () =
 });
 
 test("INJ-03: a symlinked spelling beside an attacker helper changes nothing", () => {
-  const dir = attackDir(["symlink"]);
+  // The symlinked spelling sits beside the project files, so a loader that
+  // resolves relative to the spelling would find the attacker's `tsconfig.json`
+  // and `node_modules` in the same directory.
+  const dir = attackDir(["symlink", "project"]);
   const baseline = runDirect(scratchDir("inj-control-"), envFor(), SKILL_PATH);
   expect(baseline.exitCode).toBe(0);
   expect(baseline.stdout).toContain('"marker":"SKILL-RAN"');
@@ -158,6 +161,7 @@ test("INJ-03: a symlinked spelling beside an attacker helper changes nothing", (
     expect(attack.exitCode).toBe(baseline.exitCode);
     expect(attack.stdout).toBe(baseline.stdout);
     expect(attack.stdout).toContain('"helper":"HELPER-OK"');
+    expect(attack.stdout).toContain('"bare":"absent"');
     expect(pwned(dir)).toBe(false);
   }
 });
@@ -188,6 +192,12 @@ const GRANTS = new Set([SKILL_PATH]);
 const GRAMMAR_CWD = "/repo";
 const SCRIPT_DIR = dirname(SKILL_PATH);
 const RELATIVE_SCRIPT = relative(GRAMMAR_CWD, SKILL_PATH);
+
+// A spelling that looks like a flag but resolves to the granted script, so a
+// missing dash guard would approve it instead of failing on a missing file.
+const DASH_ROOT = scratchDir("inj-dash-");
+mkdirSync(join(DASH_ROOT, "-p"), { recursive: true });
+symlinkSync(SKILL_PATH, join(DASH_ROOT, "-p", "report.ts"));
 
 interface Scenario {
   name: string;
@@ -269,6 +279,10 @@ const DENIED: readonly Scenario[] = [
   { name: "a script that is not granted", command: "/repo/src/acp/command-syntax.ts" },
   { name: "a slashless script in the literal form", command: [...LITERAL, "report.ts"].join(" "), cwd: SCRIPT_DIR },
   { name: "a slashless script executed directly", command: "report.ts", cwd: SCRIPT_DIR },
+  { name: "the literal prefix without a script", command: LITERAL.join(" ") },
+  { name: "a command holding only an fd redirect", command: "2>&1" },
+  { name: "a dash-prefixed script spelling", command: [...LITERAL, "-p/report.ts"].join(" "), cwd: DASH_ROOT },
+  { name: "a NUL byte in the spelling", command: `${SKILL_PATH}\u0000` },
   { name: "a shell operator", command: `${SKILL_PATH} --flag v; id` },
   { name: "a shell pipe", command: `${SKILL_PATH} | tee /tmp/out` },
 ];
