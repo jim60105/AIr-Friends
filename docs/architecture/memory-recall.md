@@ -117,6 +117,19 @@ interface SearchToken {
 
 ---
 
+## 身分連結（identity groups）
+
+維運者可在組態的 `identities` 宣告同一個人的多個平台帳號。讀取路徑（固定載入、Fast Recall、Deep Recall）因此把同一群組的記憶視為同一個母體；寫入路徑（`memory-save`）仍只寫當前帳號。群組由 `IdentityRegistry` 在啟動時建立一次，執行期間不會重新載入。
+
+檢索來源依固定順序加入：當前帳號的公開檔、當前帳號的私人檔（僅私訊）、當前頻道檔（非私訊）、每個連結帳號的公開檔、每個連結帳號的私人檔（僅私訊）。連結帳號的私人檔案是否加入只由當前工作階段是否為私訊決定，與該連結帳號自身的對話歷史無關。
+
+- 連結來源只做 id 去重：先出現者勝出，因此當前帳號優先於連結帳號，設定順序較前的帳號優先於較後者。
+- 結果刻意不帶來源標籤，代理人無法區分一筆記憶來自哪個帳號。
+- 連結來源無法讀取（權限、I/O 等）時只記錄警告並跳過該來源，當前帳號的檢索不受影響。
+- 一封閉迴路的記憶統計、匯出、維護與摘要仍只處理當前帳號；`memory-patch` 的跨帳號解析不在此路徑內。
+
+---
+
 ## 評分模型
 
 ```text
@@ -176,6 +189,8 @@ finalScore = lexicalScore + exactEntityBonus + exactPhraseBonus
 | Working | 使用者與頻道 Working 合併後取最新 `workingMaxItems` 筆 | `workingMaxItems` = 4、`workingMaxTokens` = 384 |
 
 **只有層級（tier）決定固定載入**。非 Core 記憶即使標記 `importance: high` 也不會被保證注入，而是轉為檢索排序的加分項；要保證注入，得把記憶升為 Core。`workingTierLimit` 管的是儲存層的降級門檻，`workingMaxItems` 管的是注入筆數，兩者互不影響，提示詞預算永遠不會改變儲存層級。
+
+設定 `identities` 時，Core 與 Working 候選改為來自當前帳號與所有連結帳號，但仍共用同一組 `coreMaxTokens`、`workingMaxItems`、`workingMaxTokens` 預算，不會依帳號各自放大。`selectFixedMemories()` 的核心由舊到新、Working 由新到舊的排序規則不變，因此合併後仍取全域最新的 `workingMaxItems` 筆；`injectedIds` 仍包含實際注入的所有記憶，Fast Recall 因此不會重複注入。具 trigger 與無 trigger 的 spontaneous 組裝都使用同一套合併規則，頻道記憶則不受影響。
 
 Fast Recall 區段緊接在固定記憶區段之後。`excludeIds` 只包含**實際注入**的記憶 id；被預算擠掉的記憶仍保有被 Fast Recall 取用的資格。Fast Recall 只在存在觸發訊息時執行，無觸發訊息的組裝路徑會跳過它。
 
@@ -274,6 +289,7 @@ Fast Recall 區段緊接在固定記憶區段之後。`excludeIds` 只包含**�
 | Deep Recall 例外 | 走既有技能錯誤回應路徑 |
 | JSONL 行損毀 | 跳過該行，其餘資料照常載入 |
 | 筆記檔案或目錄無法讀取 | 記錄警告，跳過該檔 |
+| 連結帳號的記憶來源無法讀取 | 記錄警告，跳過該來源，其餘來源照常 |
 | 無快速回想命中高信心結果 | 區段整段省略 |
 
 ---
