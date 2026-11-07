@@ -2477,6 +2477,10 @@ Deno.test("MemoryHandler - memory-patch appends to the linked public owner's fil
     );
 
     assertEquals(result.success, true);
+    assertEquals(
+      Object.keys(result.data as Record<string, unknown>).sort(),
+      ["changes", "patchId", "targetId", "timestamp"],
+    );
     const ownerEvents = (await Deno.readTextFile(ownerPath)).trim().split("\n");
     assertEquals(ownerEvents.length, 2);
     assertEquals(ownerEvents[1].includes('"enabled":false'), true);
