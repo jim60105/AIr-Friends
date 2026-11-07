@@ -108,14 +108,14 @@ The agent has no production access. It writes the runbook and the template and n
 ```bash
 # Kubernetes deployment. Replace <ns> and <pod>.
 kubectl -n <ns> get pod -l app.kubernetes.io/name=air-friends \
-  -o jsonpath='{.items[0].metadata.name}{"\n"}{.items[0].status.containerStatuses[0].imageID}{"\n"}'
+  -o jsonpath='{.items[0].metadata.name}{"\n"}{.items[0].status.containerStatuses[?(@.name=="air-friends")].imageID}{"\n"}'
 kubectl -n <ns> exec <pod> -- tar -C /app -czf - data > air-friends-data-baseline.tgz
 sha256sum air-friends-data-baseline.tgz
 stat -c %s air-friends-data-baseline.tgz
 tar -tzf air-friends-data-baseline.tgz | wc -l
 ```
 
-For a Compose deployment, the digest comes from `docker inspect --format '{{index .RepoDigests 0}}' <image>` and the archive from `docker compose exec -T <service> tar -C /app -czf - data`. The runbook states that the archive holds user data, must stay outside the repository, and that `tar` reporting "file changed as we read it" means the operator repeats the step during a quiet period.
+For a Compose deployment, the digest comes from `docker inspect --format '{{index .RepoDigests 0}}' <image>` and the archive from `docker compose exec -T <service> tar -C /app -czf - data`. The runbook states that the archive holds user data and must stay outside the repository, and that `tar` reporting "file changed as we read it" means the operator repeats the step during a quiet period. Because this backup is the rollback safety net, it also states: run `kubectl -n <ns> exec <pod> -- find /app/data -name '*.db'` first; if any database file exists, stop the bot before taking the archive, because a file copied mid-write can be corrupt.
 
 ## Risks / Trade-offs
 
