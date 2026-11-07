@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "freezeSha": "734c8b03c60a021a3982a07d18c3c3f75962c472",
+  "branchHead": "062541b6b8af79fbc7c9b5952f98782fe9ccfa9f",
+  "capturedAt": "2026-11-07T17:21:42.408Z",
+  "denoVersion": "deno 2.9.0 (stable, release, x86_64-unknown-linux-gnu)",
+  "appVersion": "0.36.1",
+  "command": [
+    "test",
+    "--allow-net",
+    "--allow-read",
+    "--allow-write",
+    "--allow-env",
+    "--allow-run",
+    "--allow-ffi",
+    "--allow-sys",
+    "--coverage=<tmp>/cov",
+    "--junit-path=<tmp>/junit.xml",
+    "tests/"
+  ],
+  "totals": {
+    "tests": 3836,
+    "passed": 3827,
+    "failed": 0,
+    "ignored": 9
+  },
+  "coverage": {
+    "branchPercent": 88.4,
+    "functionPercent": 94.4,
+    "linePercent": 83.3
+  }
+}
