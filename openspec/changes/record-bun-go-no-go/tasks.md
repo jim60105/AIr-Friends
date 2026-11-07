@@ -11,8 +11,8 @@ Do not edit anything under `migration/bun/poc/` except what the commands below g
 
 ## 2. Arm64 runs through CI
 
-- [ ] 2.1 Scan the commits since `master` for secrets and private details, and stop and report any finding. Then push `feat/migrate-to-bun`, tag the commit from task 1.1 as `bun-poc-final-<short sha>`, and push that tag. Do not delete or move a pushed tag. Verify: `gh run list --workflow=bun-poc-arm64.yml` shows a run whose `headSha` is that commit.
-- [ ] 2.2 Wait for the run with `gh run watch <run id>`, then run `gh run download <run id> -n bun-poc-aarch64-evidence -D migration/bun/poc/evidence/aarch64/`. Verify: `ffi.json` and `ffi-enosys.json` exist with `arch` of `aarch64`, the `pocTreeSha256` from task 1.2 and `gitHead` equal to the commit from task 1.1. If the workflow produced no evidence, this is a harness bug: fix it in `build-bun-poc-harness` and restart from task 1.1 with a new tag. A failed test is evidence and is not a reason to rerun.
+- [x] 2.1 Scan the commits since `master` for secrets and private details, and stop and report any finding. Then push `feat/migrate-to-bun`, tag the commit from task 1.1 as `bun-poc-final-<short sha>`, and push that tag. Do not delete or move a pushed tag. Verify: `gh run list --workflow=bun-poc-arm64.yml` shows a run whose `headSha` is that commit.
+- [x] 2.2 Wait for the run with `gh run watch <run id>`, then run `gh run download <run id> -n bun-poc-aarch64-evidence -D migration/bun/poc/evidence/aarch64/`. Verify: `ffi.json` and `ffi-enosys.json` exist with `arch` of `aarch64`, the `pocTreeSha256` from task 1.2 and `gitHead` equal to the commit from task 1.1. If the workflow produced no evidence, this is a harness bug: fix it in `build-bun-poc-harness` and restart from task 1.1 with a new tag. A failed test is evidence and is not a reason to rerun.
 
 ## 3. Decision
 
