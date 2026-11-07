@@ -6,6 +6,6 @@ Gate design D5 applies: a failing check is a result. Never weaken an assertion, 
 
 ## 1. Suite
 
-- [ ] 1.1 Create `suites/acp-failure.spec.ts` with tests titled `ACP-NN-OC:` and `ACP-NN-OMP:` for NN of 04 to 08, following design D1 and covering every scenario in this change's spec. Every test calls `expect`. Verify: covered by 1.2.
-- [ ] 1.2 Run `migration/bun/poc/run-suite.sh acp-failure`. Verify: exit 0 and `.evidence-wip/x86_64/acp-failure.json` holds at least one test per ID. Report any failed ID and whether the cause is transport, agent or harness.
-- [ ] 1.3 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/suites/` and this change directory.
+- [x] 1.1 Create `suites/acp-failure.spec.ts` with tests titled `ACP-NN-OC:` and `ACP-NN-OMP:` for NN of 04 to 08, following design D1 and covering every scenario in this change's spec. Every test calls `expect`. Verify: covered by 1.2.
+- [x] 1.2 Run `migration/bun/poc/run-suite.sh acp-failure`. Verify: exit 0 and `.evidence-wip/x86_64/acp-failure.json` holds at least one test per ID. Report any failed ID and whether the cause is transport, agent or harness.
+- [x] 1.3 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/suites/` and this change directory.
