@@ -30,6 +30,6 @@ None.
 
 depends-on: define-bun-go-no-go-gate
 
-Needs the image, `run-suite.sh`, the catalog and the failure policy (gate design D7). Conflict note: touches only its own new files, so it can be applied in any order relative to the other `prove-*` changes.
+Needs the image and `run-suite.sh` from `build-bun-poc-harness`, and the catalog and failure policy (gate design D5). Conflict note: touches only its own new files, so it can be applied in any order relative to the other `prove-*` changes.
 
 Deferred, not part of this batch: replacing the production backend is design section 8 step 5, planned only after a Go result.

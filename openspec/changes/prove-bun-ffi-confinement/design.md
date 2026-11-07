@@ -92,10 +92,11 @@ Each test title starts with its criterion ID and a colon. All fixtures live in a
 | FFI-06 | Three tests from the scenarios of "Secure Access Round Trip". Read content is 200 KiB of a repeated string containing `正體中文`. |
 | FFI-07 | `createBunLinuxNativeCalls({ libcPath: "/nonexistent/libc.so.6" })`, then with a `mkdtemp` text file. Both: `calls` undefined, reason `secure_access_unavailable`. |
 | FFI-08 | `suites/ffi-enosys.spec.ts`, run under the seccomp profile. `calls.openat2` returns `errno` 38; a read returns `secure_access_unavailable`. |
-| FFI-09 | Record `openFdCount()`, run 1,000 operations cycling a read, a write and a denied symlink read, compare. |
+| FFI-09 | Run 100 warm-up operations first so lazily opened runtime descriptors do not count. Record `openFdCount()`, run 1,000 operations cycling a read, a write and a denied symlink read, compare. |
 
 ## Risks / Trade-offs
 
-- [A garbage collector or JIT frame clobbers `errno` between the call and the read] → FFI-04 is designed to expose this. A failure is No-Go evidence, under gate design D7.
+- [A garbage collector or JIT frame clobbers `errno` between the call and the read] → FFI-04 is designed to expose this. A failure is No-Go evidence, under gate design D5.
 - [Overlay filesystem identity on `/tmp`] → `lstat` and `statx` both report the same layer; if FFI-05 fails only because of the overlay, move fixtures to a path on the same filesystem and note it.
+- [A test passes without asserting] → Every test calls `expect`; the gate fails a test with no assertions, and FFI-06 needs its three tests.
 - [arm64 behavior differs] → Identical suites run on a native arm64 host in `record-bun-go-no-go`.

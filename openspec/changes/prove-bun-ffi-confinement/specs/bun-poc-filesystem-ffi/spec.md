@@ -91,6 +91,6 @@ The backend SHALL fail with reason `secure_access_unavailable` when libc cannot 
 Mixed successful and failing operations through the backend SHALL leave the process's open descriptor count unchanged.
 
 #### Scenario: Mixed operations
-- **GIVEN** 1,000 operations mixing reads, writes and denied paths
+- **GIVEN** 1,000 operations mixing reads, writes and denied paths, after a warm-up
 - **WHEN** they finish
 - **THEN** the entry count of `/proc/self/fd` SHALL equal the count before them
