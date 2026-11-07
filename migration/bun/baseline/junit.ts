@@ -7,7 +7,10 @@ const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "",
   processEntities: true,
-  isArray: (name) => name === "testsuite" || name === "testcase",
+  // Attributes share the element namespace once their prefix is removed, so the
+  // element-only test keeps a `testsuite`/`testcase` attribute from becoming an array.
+  isArray: (name, _jpath, _isLeafNode, isAttribute) =>
+    !isAttribute && (name === "testsuite" || name === "testcase"),
 });
 
 function asArray(value: unknown): unknown[] {
