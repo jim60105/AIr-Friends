@@ -199,8 +199,11 @@ export class MemoryStore {
 
   /**
    * Find a memory by ID (searches both public and private if applicable)
+   *
+   * Public so `memory-patch` can resolve the owning workspace of a linked
+   * memory.
    */
-  private async findMemoryById(
+  async findMemoryById(
     workspace: WorkspaceInfo,
     memoryId: string,
   ): Promise<ResolvedMemory | null> {

@@ -27,7 +27,7 @@ import type {
   NoteRecallResult,
   ResolvedMemory,
 } from "../types/memory.ts";
-import type { ChannelWorkspaceInfo } from "../types/workspace.ts";
+import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
 
 import { memoryOperationsTotal } from "@utils/metrics.ts";
 import { estimateTokens } from "@utils/token-counter.ts";
@@ -706,10 +706,35 @@ export class MemoryHandler {
       }
 
       // User-scoped memory (default)
+      let owner: WorkspaceInfo = context.workspace;
+      if (await this.memoryStore.findMemoryById(context.workspace, params.memory_id) === null) {
+        const owners: WorkspaceInfo[] = [];
+        for (const linked of this.identityRegistry?.linkedWorkspaces(context.workspace) ?? []) {
+          try {
+            if (await this.memoryStore.findMemoryById(linked, params.memory_id) !== null) {
+              owners.push(linked);
+            }
+          } catch (error) {
+            logger.warn("Skipped unreadable linked memory source during patch", {
+              workspaceKey: linked.key,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        if (owners.length > 1) {
+          return {
+            success: false,
+            error:
+              `Memory ${params.memory_id} is ambiguous: it exists in more than one linked account`,
+          };
+        }
+        if (owners.length === 1) owner = owners[0];
+      }
+
       let patchEntry: MemoryPatch;
       try {
         patchEntry = await this.memoryStore.patchMemory(
-          context.workspace,
+          owner,
           params.memory_id,
           patch,
         );
@@ -725,7 +750,7 @@ export class MemoryHandler {
       }
 
       logger.info("Memory {memoryId} patched via skill", {
-        workspaceKey: context.workspace.key,
+        workspaceKey: owner.key,
         memoryId: params.memory_id,
         patch,
       });
