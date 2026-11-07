@@ -6,8 +6,8 @@ Gate design D7 applies: a failing check is a result. Never weaken an assertion, 
 
 ## 1. Port
 
-- [ ] 1.1 Copy `src/utils/egress-proxy.ts` to `migration/bun/poc/egress/egress-proxy.ts` and apply exactly the table in design D1 and the stream handling in design D2. Leave every comment that is still true. Verify: `grep -n 'Deno\.' migration/bun/poc/egress/egress-proxy.ts` prints no code use (comments may mention it), and `podman build -f migration/bun/poc/Containerfile -t air-friends-bun-poc:local .` exits 0.
-- [ ] 1.2 Create `egress/fake-dns.ts` per design D3. Verify: covered by 2.2.
+- [x] 1.1 Copy `src/utils/egress-proxy.ts` to `migration/bun/poc/egress/egress-proxy.ts` and apply exactly the table in design D1 and the stream handling in design D2. Leave every comment that is still true. Verify: `grep -n 'Deno\.' migration/bun/poc/egress/egress-proxy.ts` prints no code use (comments may mention it), and `podman build -f migration/bun/poc/Containerfile -t air-friends-bun-poc:local .` exits 0.
+- [x] 1.2 Create `egress/fake-dns.ts` per design D3. Verify: covered by 2.2.
 
 ## 2. Suite
 
