@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-11-07T17:16:40.000Z",
+  "reference": "ghcr.io/jim60105/air-friends@sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059",
+  "digest": "sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059",
+  "sourceRevision": "734c8b03c60a021a3982a07d18c3c3f75962c472",
+  "observedFrom": "kubectl imageID, namespace air-friends"
+}
