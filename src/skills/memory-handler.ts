@@ -5,6 +5,7 @@ import { MemoryStore } from "@core/memory-store.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type { MemoryRecallResult } from "@core/memory-recall/retriever.ts";
+import type { IdentityRegistry } from "@core/identity-registry.ts";
 import type {
   MemoryExportParams,
   MemoryPatchParams,
@@ -45,6 +46,7 @@ export class MemoryHandler {
   constructor(
     private readonly memoryStore: MemoryStore,
     retriever?: MemoryRetriever,
+    private readonly identityRegistry?: IdentityRegistry,
   ) {
     this.retriever = retriever ?? new MemoryRetriever(memoryStore, DEFAULT_RECALL_CONFIG);
   }
@@ -368,11 +370,13 @@ export class MemoryHandler {
 
       // Deep Recall ranks the whole query text. Its token budget is applied
       // below, because memories and notes share it.
+      const linkedWorkspaces = this.identityRegistry?.linkedWorkspaces(context.workspace) ?? [];
       const response = await this.retriever.search({
         mode: "deep",
         query: params.query,
         workspace: context.workspace,
         channelWorkspace,
+        ...(linkedWorkspaces.length === 0 ? {} : { linkedWorkspaces }),
         agentWorkspacePath: context.agentWorkspacePath,
         category,
         scope,

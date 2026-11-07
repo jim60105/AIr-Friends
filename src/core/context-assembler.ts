@@ -11,6 +11,7 @@ import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { renderFixedMemoryLine, selectFixedMemories } from "./memory-recall/fixed-selection.ts";
 import { renderFastRecallSection, renderNoteEntry } from "./memory-recall/fast-recall.ts";
 import { MemoryRetriever } from "./memory-recall/retriever.ts";
+import type { IdentityRegistry } from "./identity-registry.ts";
 import type { FixedMemoryBudgets } from "./memory-recall/fixed-selection.ts";
 import type { EmailPromptGrant, TemplateVariables } from "../types/template.ts";
 import type {
@@ -89,16 +90,19 @@ export class ContextAssembler {
   private readonly config: ContextAssemblyConfig;
   private readonly workspaceManager?: WorkspaceManager;
   private readonly retriever: MemoryRetriever;
+  private readonly identityRegistry?: IdentityRegistry;
 
   constructor(
     memoryStore: MemoryStore,
     config: ContextAssemblyConfig,
     workspaceManager?: WorkspaceManager,
     retriever?: MemoryRetriever,
+    identityRegistry?: IdentityRegistry,
   ) {
     this.memoryStore = memoryStore;
     this.config = config;
     this.workspaceManager = workspaceManager;
+    this.identityRegistry = identityRegistry;
     // One retriever per process: the application passes the instance its
     // MemoryHandler already uses, so both share one snapshot cache. A
     // hand-built assembler gets an equivalent default.
@@ -192,6 +196,60 @@ export class ContextAssembler {
   }
 
   /**
+   * Fixed-loading candidates of the current account plus every linked account
+   * of its identity group (identity-linked memory, design D2).
+   *
+   * The current account is loaded exactly as before, so its failures propagate
+   * as today. A linked account is isolated: an unreadable source is logged and
+   * contributes nothing, because one bad linked account must not fail the
+   * session. A shared `seen` set drops a linked memory whose id already
+   * appeared (the current account wins), and the merged lists are handed to
+   * `selectFixedMemories()` under its existing shared budgets.
+   */
+  private async loadUserFixedCandidates(
+    workspace: WorkspaceInfo,
+    linkedWorkspaces: readonly WorkspaceInfo[],
+    workingMaxItems: number,
+  ): Promise<{ userCore: ResolvedMemory[]; userWorking: ResolvedMemory[] }> {
+    const userCore = await this.memoryStore.getCoreTierMemories(workspace);
+    const userWorking = await this.memoryStore.getRecentWorkingMemories(
+      workspace,
+      workingMaxItems,
+    );
+    if (linkedWorkspaces.length === 0) return { userCore, userWorking };
+
+    const seen = new Set([...userCore, ...userWorking].map((memory) => memory.id));
+    const linkedCore: ResolvedMemory[] = [];
+    const linkedWorking: ResolvedMemory[] = [];
+    for (const linked of linkedWorkspaces) {
+      try {
+        const core = await this.memoryStore.getCoreTierMemories(linked);
+        const working = await this.memoryStore.getRecentWorkingMemories(linked, workingMaxItems);
+        for (const memory of core) {
+          if (seen.has(memory.id)) continue;
+          seen.add(memory.id);
+          linkedCore.push(memory);
+        }
+        for (const memory of working) {
+          if (seen.has(memory.id)) continue;
+          seen.add(memory.id);
+          linkedWorking.push(memory);
+        }
+      } catch (error) {
+        logger.warn("Skipped unreadable linked memories", {
+          workspaceKey: linked.key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      userCore: [...userCore, ...linkedCore],
+      userWorking: [...userWorking, ...linkedWorking],
+    };
+  }
+
+  /**
    * Assemble initial context for an Agent session
    */
   async assembleContext(
@@ -238,11 +296,14 @@ export class ContextAssembler {
     const systemPrompt = await this.getSystemPrompt(templateVars);
 
     // Load the fixed-memory candidates: every enabled core-tier memory and the
-    // newest working-tier ones. Selection then bounds what is injected.
+    // newest working-tier ones, across the current and linked accounts of the
+    // same identity group. Selection then bounds what is injected under the
+    // existing shared budgets.
     const budgets = this.fixedMemoryBudgets();
-    const userCore = await this.memoryStore.getCoreTierMemories(workspace);
-    const userWorking = await this.memoryStore.getRecentWorkingMemories(
+    const linkedWorkspaces = this.identityRegistry?.linkedWorkspaces(workspace) ?? [];
+    const { userCore, userWorking } = await this.loadUserFixedCandidates(
       workspace,
+      linkedWorkspaces,
       budgets.workingMaxItems,
     );
     logger.debug("Loaded {coreCount} core and {workingCount} working memories", {
@@ -318,6 +379,7 @@ export class ContextAssembler {
       recentMessages,
       injectedIds,
       agentWorkspacePath,
+      linkedWorkspaces,
     );
 
     // Fetch related messages if available and in guild context
@@ -456,6 +518,7 @@ export class ContextAssembler {
     recentMessages: readonly PlatformMessage[],
     injectedIds: readonly string[],
     agentWorkspacePath: string | undefined,
+    linkedWorkspaces: readonly WorkspaceInfo[],
   ): Promise<{ memories: ResolvedMemory[]; notes: NoteRecallResult[] } | undefined> {
     const recall = this.config.recall ?? DEFAULT_RECALL_CONFIG;
     if (!recall.fastRecallEnabled) return undefined;
@@ -468,6 +531,7 @@ export class ContextAssembler {
         ...(previousUserMessage === undefined ? {} : { previousUserMessage }),
         workspace,
         ...(channelWorkspace === undefined ? {} : { channelWorkspace }),
+        ...(linkedWorkspaces.length === 0 ? {} : { linkedWorkspaces }),
         ...(agentWorkspacePath === undefined ? {} : { agentWorkspacePath }),
         excludeIds: new Set(injectedIds),
       });
@@ -1133,16 +1197,20 @@ export class ContextAssembler {
 
     const systemPrompt = await this.getSystemPrompt(templateVars);
     // A spontaneous post has no trigger, so it has no channel context either;
-    // the same budgets bound the fixed memories it injects.
+    // the same budgets bound the fixed memories it injects, merged across the
+    // current and linked accounts of the same identity group.
     const budgets = this.fixedMemoryBudgets();
+    const linkedWorkspaces = this.identityRegistry?.linkedWorkspaces(workspace) ?? [];
+    const { userCore, userWorking } = await this.loadUserFixedCandidates(
+      workspace,
+      linkedWorkspaces,
+      budgets.workingMaxItems,
+    );
     const { userCore: coreMemories, userWorking: workingMemories } = selectFixedMemories(
       {
-        userCore: await this.memoryStore.getCoreTierMemories(workspace),
+        userCore,
         channelCore: [],
-        userWorking: await this.memoryStore.getRecentWorkingMemories(
-          workspace,
-          budgets.workingMaxItems,
-        ),
+        userWorking,
         channelWorking: [],
       },
       budgets,

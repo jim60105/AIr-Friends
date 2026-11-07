@@ -5,12 +5,13 @@ import { FakeTime } from "@std/testing/time";
 import { resolve } from "@std/path";
 import { ContextAssembler } from "../../src/core/context-assembler.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
+import { IdentityRegistry } from "../../src/core/identity-registry.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { DEFAULT_RECALL_CONFIG } from "../../src/core/memory-recall/recall-config.ts";
 import { RELEVANT_NOTE_HEADING } from "../../src/core/memory-recall/fast-recall.ts";
 import { combinedTokenCount, estimateTokens } from "../../src/utils/token-counter.ts";
 import type { MessageFetcher } from "../../src/types/context.ts";
-import type { MemoryRecallConfig } from "../../src/types/config.ts";
+import type { IdentityGroupConfig, MemoryRecallConfig } from "../../src/types/config.ts";
 import type {
   MemoryRecallRequest,
   MemoryRetriever,
@@ -88,6 +89,8 @@ async function withTestContextAssembler(
     recall?: MemoryRecallConfig;
     /** Replaces the assembler's default retriever, so a test can spy on it. */
     retriever?: MemoryRetriever;
+    /** Identity groups; omitted leaves the assembler unlinked. */
+    identities?: IdentityGroupConfig[];
   } = {},
 ): Promise<void> {
   const tempDir = await Deno.makeTempDir();
@@ -119,6 +122,9 @@ async function withTestContextAssembler(
       },
       manager,
       overrides.retriever,
+      overrides.identities === undefined
+        ? undefined
+        : new IdentityRegistry(overrides.identities, manager),
     );
 
     await fn(assembler, store, manager, tempDir);
@@ -2390,4 +2396,219 @@ Deno.test("ContextAssembler - a quoted /clear never clears the outer history", a
     assertStringIncludes(prompt, "kept message");
     assertStringIncludes(prompt, "/clear");
   });
+});
+
+// ============ Linked fixed loading (identity-linked recall) ============
+
+/** The identity group linking the fixture account to a second platform account. */
+const LINKED_IDENTITIES: IdentityGroupConfig[] = [
+  { id: "alice", accounts: ["discord/user456", "misskey/linked1"] },
+];
+
+/** The linked workspace of `workspace`, built by the production registry. */
+function linkedWorkspaceOf(
+  manager: WorkspaceManager,
+  workspace: WorkspaceInfo,
+): WorkspaceInfo {
+  const [linked] = new IdentityRegistry(LINKED_IDENTITIES, manager).linkedWorkspaces(workspace);
+  return linked;
+}
+
+/** A resolved memory event line, written directly to a memory file. */
+function memoryLine(id: string, content: string): string {
+  return JSON.stringify({
+    type: "memory",
+    id,
+    ts: "2026-09-25T00:00:00.000Z",
+    enabled: true,
+    visibility: "public",
+    importance: "high",
+    content,
+    tier: "core",
+    category: "fact",
+    scope: "user",
+    decay: 1,
+    relatedTo: [],
+    supersedes: [],
+  }) + "\n";
+}
+
+Deno.test("ContextAssembler - a linked account's core memory is injected", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      const event = createTestEvent();
+      const workspace = await manager.getOrCreateWorkspace(event);
+      const linked = linkedWorkspaceOf(manager, workspace);
+      await Deno.mkdir(linked.path, { recursive: true });
+      await store.addMemory(linked, "A core fact", { tier: "core", visibility: "public" });
+
+      const context = await assembler.assembleContext(
+        event,
+        workspace,
+        createMockMessageFetcher([]),
+      );
+
+      assertEquals(context.coreMemories.map((memory) => memory.content), ["A core fact"]);
+    },
+    { identities: LINKED_IDENTITIES },
+  );
+});
+
+Deno.test("ContextAssembler - linked accounts share workingMaxItems, newest first", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+      const event = createTestEvent();
+      const workspace = await manager.getOrCreateWorkspace(event);
+      const linked = linkedWorkspaceOf(manager, workspace);
+      await Deno.mkdir(linked.path, { recursive: true });
+      await addMemories(clock, store, linked, ["A1", "A2"], "working");
+      await addMemories(clock, store, workspace, ["B1", "B2", "B3"], "working");
+
+      const context = await assembler.assembleContext(
+        event,
+        workspace,
+        createMockMessageFetcher([]),
+      );
+
+      // The newest four across both accounts, rendered oldest first.
+      assertEquals(
+        context.workingMemories.map((memory) => memory.content),
+        ["A2", "B1", "B2", "B3"],
+      );
+    },
+    { identities: LINKED_IDENTITIES },
+  );
+});
+
+Deno.test("ContextAssembler - a linked private core memory is injected only in a DM", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      const dmEvent = createTestEvent({ isDm: true });
+      const dmWorkspace = await manager.getOrCreateWorkspace(dmEvent);
+      const dmLinked = linkedWorkspaceOf(manager, dmWorkspace);
+      await Deno.mkdir(dmLinked.path, { recursive: true });
+      await store.addMemory(dmLinked, "A private core", {
+        tier: "core",
+        visibility: "private",
+      });
+
+      const dmContext = await assembler.assembleContext(
+        dmEvent,
+        dmWorkspace,
+        createMockMessageFetcher([]),
+      );
+      assertEquals(dmContext.coreMemories.map((memory) => memory.content), ["A private core"]);
+
+      const guildEvent = createTestEvent();
+      const guildWorkspace = await manager.getOrCreateWorkspace(guildEvent);
+      const guildContext = await assembler.assembleContext(
+        guildEvent,
+        guildWorkspace,
+        createMockMessageFetcher([]),
+      );
+      assertEquals(guildContext.coreMemories, []);
+    },
+    { identities: LINKED_IDENTITIES },
+  );
+});
+
+Deno.test("ContextAssembler - spontaneous assembly merges linked memories", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+      const linked = linkedWorkspaceOf(manager, workspace);
+      await Deno.mkdir(linked.path, { recursive: true });
+      await store.addMemory(linked, "A core fact", { tier: "core", visibility: "public" });
+
+      const context = await assembler.assembleSpontaneousContext(
+        "discord",
+        "channel123",
+        workspace,
+        createMockMessageFetcher([]),
+        { fetchRecentMessages: false },
+      );
+
+      assertEquals(context.coreMemories.map((memory) => memory.content), ["A core fact"]);
+    },
+    { identities: LINKED_IDENTITIES },
+  );
+});
+
+Deno.test("ContextAssembler - an unreadable linked source does not fail assembly", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      const event = createTestEvent();
+      const workspace = await manager.getOrCreateWorkspace(event);
+      await store.addMemory(workspace, "B core fact", { tier: "core" });
+      const linked = linkedWorkspaceOf(manager, workspace);
+      await Deno.mkdir(`${linked.path}/memory.public.jsonl`, { recursive: true });
+
+      const context = await assembler.assembleContext(
+        event,
+        workspace,
+        createMockMessageFetcher([]),
+      );
+
+      assertEquals(context.coreMemories.map((memory) => memory.content), ["B core fact"]);
+    },
+    { identities: LINKED_IDENTITIES },
+  );
+});
+
+Deno.test("ContextAssembler - Fast Recall receives the linked workspaces and injected ids", async () => {
+  const { retriever, requests } = recordingRetriever();
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      const event = createTestEvent({ content: "keyboard" });
+      const workspace = await manager.getOrCreateWorkspace(event);
+      const linked = linkedWorkspaceOf(manager, workspace);
+      await Deno.mkdir(linked.path, { recursive: true });
+      const injected = await store.addMemory(linked, "A core fact", {
+        tier: "core",
+        visibility: "public",
+      });
+
+      await assembler.assembleContext(event, workspace, createMockMessageFetcher([]));
+
+      assertEquals(requests.length, 1);
+      assertEquals(
+        requests[0].linkedWorkspaces?.map((linkedWs) => linkedWs.key),
+        [linked.key],
+      );
+      assertEquals(requests[0].excludeIds?.has(injected.id), true);
+    },
+    { retriever, identities: LINKED_IDENTITIES },
+  );
+});
+
+Deno.test("ContextAssembler - a duplicate id is injected once, from the current account", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      const event = createTestEvent();
+      const workspace = await manager.getOrCreateWorkspace(event);
+      const linked = linkedWorkspaceOf(manager, workspace);
+      await Deno.mkdir(linked.path, { recursive: true });
+      await Deno.writeTextFile(
+        store.getMemoryFilePathFor(workspace, "public"),
+        memoryLine("dup", "B core"),
+        { append: true },
+      );
+      await Deno.writeTextFile(
+        store.getMemoryFilePathFor(linked, "public"),
+        memoryLine("dup", "A core"),
+        { append: true },
+      );
+
+      const context = await assembler.assembleContext(
+        event,
+        workspace,
+        createMockMessageFetcher([]),
+      );
+
+      assertEquals(context.coreMemories.filter((memory) => memory.id === "dup").length, 1);
+      assertEquals(context.coreMemories[0].content, "B core");
+    },
+    { identities: LINKED_IDENTITIES },
+  );
 });

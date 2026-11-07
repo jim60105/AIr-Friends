@@ -3,6 +3,7 @@
 import { assertEquals } from "@std/assert";
 import { MemoryHandler } from "@skills/memory-handler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
+import { IdentityRegistry } from "@core/identity-registry.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { MemorySearchEntry, SkillContext } from "@skills/types.ts";
 import type { NoteRecallResult } from "../../src/types/memory.ts";
@@ -2263,4 +2264,110 @@ Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all impor
   assertEquals((result.data as { count: number }).count, 2); // All importance
 
   await Deno.remove(tempDir, { recursive: true });
+});
+
+// ============ Identity-linked recall (read paths only) ============
+
+/**
+ * A handler wired to an identity registry, over a fresh non-DM workspace linked
+ * to a second platform account.
+ */
+async function withLinkedHandler(
+  fn: (fixture: {
+    handler: MemoryHandler;
+    store: MemoryStore;
+    workspace: WorkspaceInfo;
+    linked: WorkspaceInfo;
+    context: SkillContext;
+  }) => Promise<void>,
+): Promise<void> {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
+    const store = new MemoryStore(manager, {});
+    const registry = new IdentityRegistry(
+      [{ id: "alice", accounts: ["discord/123", "misskey/456"] }],
+      manager,
+    );
+    const handler = new MemoryHandler(store, undefined, registry);
+    const workspace: WorkspaceInfo = {
+      key: "discord/123",
+      components: { platform: "discord", userId: "123" },
+      path: `${tempDir}/workspaces/discord/123`,
+      tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
+      isDm: false,
+    };
+    await Deno.mkdir(workspace.path, { recursive: true });
+    await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+    await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+    const [linked] = registry.linkedWorkspaces(workspace);
+    await Deno.mkdir(linked.path, { recursive: true });
+
+    const context: SkillContext = {
+      workspace,
+      platformAdapter: createMockPlatformAdapter(),
+      channelId: "456",
+      userId: "123",
+      workspaceManager: manager,
+    };
+
+    await fn({ handler, store, workspace, linked, context });
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+}
+
+Deno.test("MemoryHandler - memory-search returns a linked account's memory", async () => {
+  await withLinkedHandler(async ({ handler, store, linked, context }) => {
+    await store.addMemory(linked, "misskey deployment note", { visibility: "public" });
+
+    const result = await handler.handleMemorySearch({ query: "deployment" }, context);
+
+    assertEquals(result.success, true);
+    assertEquals(
+      searchedMemories(result).map((memory) => memory.content),
+      ["misskey deployment note"],
+    );
+  });
+});
+
+Deno.test("MemoryHandler - save, stats and export stay on the current account", async () => {
+  await withLinkedHandler(async ({ handler, store, linked, context }) => {
+    await store.addMemory(linked, "misskey linked memory", { visibility: "public" });
+    const linkedPath = store.getMemoryFilePathFor(linked, "public");
+    const linkedSizeBefore = (await Deno.stat(linkedPath)).size;
+
+    const save = await handler.handleMemorySave(
+      { content: "my own preference", importance: "normal" },
+      context,
+    );
+    assertEquals(save.success, true);
+    assertEquals((await Deno.stat(linkedPath)).size, linkedSizeBefore);
+
+    const stats = await handler.handleMemoryStats({}, context);
+    assertEquals(stats.success, true);
+    assertEquals(
+      (stats.data as { summary: { totalMemories: number } }).summary.totalMemories,
+      1,
+    );
+
+    let exported = "";
+    const exportAdapter = {
+      ...createMockPlatformAdapter(),
+      getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+      sendFile: (_channelId: string, files: Array<{ content: Uint8Array }>) => {
+        exported = new TextDecoder().decode(files[0].content);
+        return Promise.resolve({ success: true, messageId: "file_msg_123" });
+      },
+    } as unknown as PlatformAdapter;
+    const exportResult = await handler.handleMemoryExport(
+      { format: "markdown" },
+      { ...context, platformAdapter: exportAdapter },
+    );
+
+    assertEquals(exportResult.success, true);
+    assertEquals((exportResult.data as { count: number }).count, 1);
+    assertEquals(exported.includes("my own preference"), true);
+    assertEquals(exported.includes("misskey linked memory"), false);
+  });
 });

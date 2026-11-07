@@ -9,6 +9,7 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { resolveTrustedSkillsRoot } from "./skills-root.ts";
 import { MemoryStore } from "./memory-store.ts";
+import { IdentityRegistry } from "./identity-registry.ts";
 import { ReminderStore } from "./reminder-store.ts";
 import { ReplyPolicyEvaluator } from "./reply-policy.ts";
 import { SkillRegistry } from "@skills/registry.ts";
@@ -41,6 +42,7 @@ export class AgentCore {
   private yolo: boolean;
   private workspaceManager: WorkspaceManager;
   private memoryStore: MemoryStore;
+  private readonly identityRegistry: IdentityRegistry;
   private reminderStore: ReminderStore | null = null;
   private skillRegistry: SkillRegistry;
   /**
@@ -76,6 +78,16 @@ export class AgentCore {
       workingTierLimit: config.memory.workingTierLimit ?? 20,
     });
 
+    // One identity registry for the process: it is never reloaded at runtime,
+    // so changing groups needs a restart (identity-linked memory, design D4).
+    this.identityRegistry = new IdentityRegistry(
+      config.identities ?? [],
+      this.workspaceManager,
+    );
+    logger.info("Identity groups loaded: {groupCount}", {
+      groupCount: this.identityRegistry.groupCount,
+    });
+
     // Initialize skill registry
     let reminderStore: ReminderStore | undefined;
     if (config.reminders?.enabled) {
@@ -88,6 +100,8 @@ export class AgentCore {
       reminderStore,
       config.skills?.sendFile,
       config.memory.recall,
+      undefined,
+      this.identityRegistry,
     );
     const skillRegistry = this.skillRegistry;
 
@@ -135,6 +149,7 @@ export class AgentCore {
       },
       this.workspaceManager,
       skillRegistry.getMemoryRetriever(),
+      this.identityRegistry,
     );
 
     // Initialize reply policy (needed by orchestrator and message handler)
@@ -437,6 +452,13 @@ export class AgentCore {
    */
   getMemoryStore(): MemoryStore {
     return this.memoryStore;
+  }
+
+  /**
+   * Get the identity registry (read-only view over `config.identities`).
+   */
+  getIdentityRegistry(): IdentityRegistry {
+    return this.identityRegistry;
   }
 
   /**

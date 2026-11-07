@@ -15,6 +15,7 @@ import {
   type EmailForwardSourceStore,
 } from "./email-handler.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
+import type { IdentityRegistry } from "@core/identity-registry.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
 import type { MemoryRecallConfig, RemindersConfig, SendFileSkillConfig } from "../types/config.ts";
@@ -58,10 +59,11 @@ export class SkillRegistry {
       mailService: EmailComposeMailService;
       forwardSourceStore?: EmailForwardSourceStore;
     },
+    identityRegistry?: IdentityRegistry,
   ) {
     // One retriever per process: every session shares its snapshot cache.
     this.memoryRetriever = new MemoryRetriever(memoryStore, recallConfig ?? DEFAULT_RECALL_CONFIG);
-    this.memoryHandler = new MemoryHandler(memoryStore, this.memoryRetriever);
+    this.memoryHandler = new MemoryHandler(memoryStore, this.memoryRetriever, identityRegistry);
     this.replyHandler = new ReplyHandler();
     this.reactionHandler = new ReactionHandler();
     this.contextHandler = new ContextHandler();
