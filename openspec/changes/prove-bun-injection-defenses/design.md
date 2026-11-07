@@ -31,13 +31,14 @@ See `proposal.md` for motivation. Observed facts:
 #!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 ```
 
-It imports `./helper.ts` and `parseArgs` from `node:util`, and prints one line of JSON:
+It imports `./helper.ts` and `parseArgs` from `node:util`, tries `const bare = await import("poc-bare-probe").then(() => "found", () => "absent")`, and prints one line of JSON:
 
 ```ts
 console.log(JSON.stringify({
   marker: "SKILL-RAN",
   args: parseArgs({ args: process.argv.slice(2), options: { flag: { type: "string" } } }).values,
   helper: helperValue,             // constant string from helper.ts
+  bare,                            // "absent" unless a lookup was hijacked
   attackerEnv: Object.keys(process.env).filter((k) => k.startsWith("AIR_POC_ATTACKER")),
 }));
 ```
@@ -49,7 +50,7 @@ console.log(JSON.stringify({
 ```ts
 export const SKILL_PATH = "/repo/migration/bun/poc/fixtures/skills/poc-skill/scripts/report.ts";
 export const LITERAL_BUN_RUN = ["bun", "run", "--no-env-file", "--no-install", "--config=/opt/air/skill-bunfig.toml"] as const;
-export type AttackFile = "dotenv" | "bunfig" | "project";
+export type AttackFile = "dotenv" | "bunfig" | "project" | "symlink";
 export function makeAttackerDir(files: readonly AttackFile[]): string; // mkdtemp under /tmp; contains evil-preload.ts
 export function pwned(dir: string): boolean;                           // <dir>/PWNED exists
 export interface SkillRun { exitCode: number; stdout: string; stderr: string }
@@ -61,7 +62,8 @@ export function runLiteral(cwd: string, env: Record<string, string>, path?: stri
 
 - `dotenv`: `.env` with `AIR_POC_ATTACKER_ENV=1`; `.env.local` with `AIR_POC_ATTACKER_LOCAL=1`.
 - `bunfig`: `bunfig.toml` with `preload = ["./evil-preload.ts"]`.
-- `project`: `tsconfig.json` with `compilerOptions.paths` mapping `./helper.ts` and `node:util` to `./evil-preload.ts`; `package.json` with a `scripts` entry named `report.ts` running `touch PWNED`; `node_modules/.bin/report.ts`, mode 0755, running `touch PWNED`; `node_modules/helper/index.js` writing `PWNED`.
+- `project`: `tsconfig.json` with `compilerOptions.paths` mapping `poc-bare-probe` to `./evil-preload.ts`; `package.json` with a `scripts` entry named `report.ts` running `touch PWNED`; `node_modules/.bin/report.ts`, mode 0755, running `touch PWNED`; `node_modules/poc-bare-probe/index.js` writing `PWNED`. The bare import gives these files a lookup they could really hijack.
+- `symlink`: `report.ts` as a symbolic link to `SKILL_PATH`, and `helper.ts` writing `PWNED`. Tests run the spelling `./report.ts` in both forms.
 
 Runs use `spawnSync` with an explicit environment of `PATH` and `HOME`, the latter a fresh `mkdtemp`. `runDirect` executes the script path. `runLiteral` executes `bun` with `LITERAL_BUN_RUN.slice(1)` plus the path. Both pass the skill argument `--flag v`. Each test compares a control run from an empty `mkdtemp` against the attack run: equal `exitCode`, equal `stdout`, `pwned` false, and `"marker":"SKILL-RAN"` present. Each test runs both forms, with the absolute path and with `relative(cwd, SKILL_PATH)` prefixed by `./` when needed.
 
@@ -81,11 +83,11 @@ Steps:
 
 1. Return `undefined` when `containsShellOperators(commandWithoutFdRedirects(segment))`.
 2. Tokenize with `tokenizeShellCommand`, drop empty tokens and tokens matching `FD_REDIRECT_TOKEN_PATTERN`, and decode each with `decodeLiteralToken`. Return `undefined` when any decoded token is `undefined`.
-3. If the first token equals `bun`: the first five tokens must equal `LITERAL_BUN_RUN` exactly, the sixth must exist and must not start with `-`, and it is the spelling.
+3. If the first token equals `bun`: the first five tokens must equal `LITERAL_BUN_RUN` exactly, the sixth must exist, must not start with `-` and must contain `/`, and it is the spelling. The slash rule is stricter than today's `deno run` grammar, because `bun run <name>` looks up `package.json` scripts before files.
 4. Otherwise the first token is the spelling and it must contain `/`.
-5. Return `undefined` when the spelling contains NUL. Join a relative spelling to `cwd`, `realpathSync` it inside a `try`, and return the result only if it is in `grants`. Tokens after the script are skill arguments and are not inspected, as today.
+5. Return `undefined` when the spelling contains NUL. Join a relative spelling to `cwd`, `realpathSync` it inside a `try`. If the spelling has a `..` component and `lexicallyNormalize(candidate)` differs from the real path, return `undefined`, as production's B1 guard does. Return the real path only if it is in `grants`. Tokens after the script are skill arguments and are not inspected, as today.
 
-`decodeLiteralToken` is copied verbatim from `src/acp/skill-inventory.ts`, with `containsUnquotedShellExpansion` imported from `command-syntax.ts`, because that file cannot be imported here.
+`decodeLiteralToken` and `lexicallyNormalize` are copied verbatim from `src/acp/skill-inventory.ts`, with `containsUnquotedShellExpansion` imported from `command-syntax.ts`, because that file cannot be imported here. A symlink spelling that resolves to a granted script is accepted here, as it is today; INJ-03 shows whether that is safe under Bun.
 
 ### D4. Suite method
 
@@ -93,15 +95,15 @@ Steps:
 
 | ID | Method |
 | --- | --- |
-| INJ-01 | `makeAttackerDir(["dotenv"])`; compare to control in both forms; assert `attackerEnv` is empty. |
-| INJ-02 | `makeAttackerDir(["bunfig"])`; compare to control in both forms. |
-| INJ-03 | `makeAttackerDir(["project"])`; compare to control in both forms. |
+| INJ-01 | `makeAttackerDir(["dotenv"])`. Positive control first: plain `bun run <SKILL_PATH>` from that directory must show the attacker variable. Then compare to control in both forms; assert `attackerEnv` is empty. |
+| INJ-02 | `makeAttackerDir(["bunfig"])`. Positive control first: plain `bun run <SKILL_PATH>` must create `PWNED`; delete it. Then compare to control in both forms. |
+| INJ-03 | `makeAttackerDir(["project"])` compared to control in both forms, with `bare` of `absent`. Then `makeAttackerDir(["symlink"])` with the spelling `./report.ts`, in both forms. |
 | INJ-04 | Grammar denies `BUN_OPTIONS=--preload=/tmp/e.ts <skill>`, `BUN_OPTIONS="--preload /tmp/e.ts" <literal form>` and `env BUN_OPTIONS=x <skill>`. Then run the literal form with `BUN_OPTIONS` set to preload an attacker file and call `observe("bunOptionsEffective", pwned(dir))`. This observation does not affect the test result. |
 | INJ-05 | Table of the accepted and denied scenarios, including a test per flag named in the spec, plus a removal and a reorder of each element of the literal prefix. |
 | INJ-06 | `statSync`: `size` 0, `uid` 0. `openSync(path, "a")` throws `EACCES`. |
 | INJ-07 | Fresh `HOME` with `.bunfig.toml` and `XDG_CONFIG_HOME` with `.bunfig.toml`, each preloading an absolute `evil-preload.ts`. Compare to control in both forms. |
 
-`suites/injection-noconfig.spec.ts`, title prefix `INJ-08:`, run with `/opt/air` empty. First assert the path is absent, so a broken run cannot pass. Use `makeAttackerDir(["bunfig"])` and run both forms. Call `observe("missingConfigExit", <codes>)` and `observe("missingConfigStderr", <first stderr line>)`. Classify `fail-stop` when every run has a non-zero exit, no `SKILL-RAN` and `pwned` false; otherwise `fallback`. Call `observe("missingConfigBehavior", <class>)`. A `fail-stop` run passes the test. For `fallback`, require `injection/skill-launcher.sh` to exist, run it as below and assert it exits 78 with `SKILL-RAN` absent and `pwned` false.
+`suites/injection-noconfig.spec.ts`, title prefix `INJ-08:`, run with `/opt/air` empty. First assert the path is absent, so a broken run cannot pass. Use `makeAttackerDir(["bunfig"])` and run both forms. Call `observe("missingConfigExit", <codes>)` and `observe("missingConfigStderr", <first stderr line>)`. Classify `fail-stop` when every run has a non-zero exit, no `SKILL-RAN` and `pwned` false; otherwise `fallback`. Call `observe("missingConfigBehavior", <class>)`. A `fail-stop` run passes the test. For `fallback`, require `injection/skill-launcher.sh` to exist, run it as below, assert it exits 78 with `SKILL-RAN` absent and `pwned` false, and call `observe("literalFormUnprotected", true)`: a launcher covers the shebang path only, and the literal form is typed by the agent.
 
 ### D5. Conditional launcher
 
@@ -113,7 +115,7 @@ Only when the observation is `fallback` (task 3.1), add `migration/bun/poc/injec
 exec bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml "$@"
 ```
 
-A `fallback` result changes the shebang and the approval grammar in the later plan, so report it prominently.
+A `fallback` result changes the shebang and the approval grammar in the later plan, so report it prominently. The record shows the unprotected literal form through its observation. Task 3.1 also reruns INJ-01 to INJ-03 through the launcher.
 
 ## Risks / Trade-offs
 

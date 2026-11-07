@@ -18,5 +18,5 @@ Gate design D7 applies: a failing check is a result. Never weaken an assertion, 
 
 ## 3. Conditional launcher
 
-- [ ] 3.1 Only if `missingConfigBehavior` is `fallback`: add `injection/skill-launcher.sh` verbatim from design D5 and rerun task 2.3. If it is `fail-stop`, make no change and mark this task done with the note `not required`. Verify: the note, or `INJ-08:` passed with the launcher present.
+- [ ] 3.1 Only if `missingConfigBehavior` is `fallback`: add `injection/skill-launcher.sh` verbatim from design D5, add a variant of the INJ-01 to INJ-03 tests that starts the skill through the launcher, and rerun tasks 2.2 and 2.3. If it is `fail-stop`, make no change and mark this task done with the note `not required`. Verify: the note, or `INJ-08:` passed with the launcher present.
 - [ ] 3.2 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/injection/`, `migration/bun/poc/fixtures/skills/`, `migration/bun/poc/suites/` and this change directory.

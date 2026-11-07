@@ -10,7 +10,7 @@ The agent can write to its workspace, and a plain swap from `deno run` to `bun r
 - Add a prototype of the exact approval grammar, using the production command tokenizer.
 - Add the `injection` and `injection-noconfig` suites, implementing criteria INJ-01 to INJ-08, in both invocation forms.
 - Verify the missing-config behavior against the real path, and record it. If Bun falls back to working-directory discovery, add the launcher check the design requires and verify it.
-- Add one vector beyond the design's list: `.bunfig.toml` in `$HOME` and `$XDG_CONFIG_HOME` (INJ-07), because the agent can write its home directory.
+- Add two vectors beyond the design's list: `.bunfig.toml` in `$HOME` and `$XDG_CONFIG_HOME` (INJ-07), because the agent can write its home directory, and a symlinked script spelling beside attacker files (INJ-03), because the grammar matches the canonical path while Bun may resolve imports from the spelling.
 - No product file changes. Built-in skills, `src/acp/skill-inventory.ts` and `agent-config/opencode.json` keep their Deno forms.
 
 ## Capabilities
@@ -33,6 +33,6 @@ None.
 
 depends-on: define-bun-go-no-go-gate
 
-Needs the image with `/opt/air/skill-bunfig.toml`, the `--tmpfs` variant in `run-suite.sh`, the `observe` helper and the failure policy (gate design D7). Conflict note: touches only its own new files, so it can be applied in any order relative to the other `prove-*` changes.
+Needs the image with `/opt/air/skill-bunfig.toml`, the `--tmpfs` variant in `run-suite.sh` and the `observe` helper from `build-bun-poc-harness`, and the failure policy (gate design D5). Conflict note: touches only its own new files, so it can be applied in any order relative to the other `prove-*` changes.
 
 Deferred, not part of this batch: converting the skills, the inventory and `opencode.json` is design section 8 step 6, planned only after a Go result.

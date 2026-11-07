@@ -10,6 +10,11 @@ Defines what the hardened skill invocation and exact approval grammar must prove
 
 A trusted skill started by direct execution or by the literal `bun run` form SHALL produce the same exit code and output from an attacker-controlled working directory as from an empty one, and SHALL execute no attacker file.
 
+#### Scenario: Unhardened control
+- **GIVEN** the attacker directories for environment files and for the config preload
+- **WHEN** the skill runs as plain `bun run <script>` from them
+- **THEN** the attacker variable SHALL be visible or the attacker script SHALL run, proving the fixture is effective
+
 #### Scenario: Environment files
 - **GIVEN** a working directory with `.env` and `.env.local` defining attacker variables
 - **WHEN** the skill runs in each invocation form
@@ -21,8 +26,13 @@ A trusted skill started by direct execution or by the literal `bun run` form SHA
 - **THEN** the attacker script SHALL not run and output SHALL equal the control run
 
 #### Scenario: Project files
-- **GIVEN** a working directory with `tsconfig.json` path overrides, a `package.json` script named after the skill and a `node_modules` tree
+- **GIVEN** a working directory with `tsconfig.json` path overrides for a bare module the skill looks up, a `package.json` script named after the skill and a `node_modules` tree providing that module
 - **WHEN** the skill runs in each invocation form
+- **THEN** no attacker file SHALL run and output SHALL equal the control run
+
+#### Scenario: Symlinked script spelling
+- **GIVEN** a symbolic link to the trusted script in the working directory, beside an attacker `helper.ts`
+- **WHEN** the link is run in each invocation form
 - **THEN** no attacker file SHALL run and output SHALL equal the control run
 
 ### Requirement: Home Directory Cannot Alter A Trusted Skill
@@ -45,7 +55,7 @@ The trusted config file SHALL be empty, owned by root and not writable by the sk
 
 ### Requirement: Missing Trusted Config Stops The Skill
 
-With the trusted config file absent, neither the skill nor a working-directory preload SHALL run in either invocation form, and the observed Bun behavior SHALL be recorded.
+With the trusted config file absent, neither the skill nor a working-directory preload SHALL run, and the observed Bun behavior SHALL be recorded for both invocation forms.
 
 #### Scenario: Bun stops by itself
 - **GIVEN** the config path is absent and the working directory holds a preloading `bunfig.toml`
@@ -55,7 +65,7 @@ With the trusted config file absent, neither the skill nor a working-directory p
 #### Scenario: Bun falls back
 - **GIVEN** the config path is absent and the working directory holds a preloading `bunfig.toml`
 - **WHEN** Bun runs the skill or the preload
-- **THEN** the suite SHALL record `missingConfigBehavior` as `fallback` and SHALL require the launcher to stop the skill before Bun starts
+- **THEN** the suite SHALL record `missingConfigBehavior` as `fallback`, SHALL require the launcher to stop the direct form before Bun starts, and SHALL record `literalFormUnprotected` as true
 
 ### Requirement: Exact Approval Grammar
 
@@ -77,6 +87,11 @@ The approval grammar SHALL accept a trusted script only by direct execution of i
 - **THEN** the grammar SHALL deny it
 
 #### Scenario: Other launchers and shell syntax
-- **GIVEN** `bunx`, `bun x`, `deno run`, a script not granted, or a command containing a shell operator or expansion
+- **GIVEN** `bunx`, `bun x`, `deno run`, a script not granted, a slashless script in the literal form, or a command containing a shell operator or expansion
+- **WHEN** it is evaluated
+- **THEN** the grammar SHALL deny it
+
+#### Scenario: Ambiguous parent spelling
+- **GIVEN** a spelling with a `..` component after a symbolic link, whose physical target is a granted script and whose lexical target is not
 - **WHEN** it is evaluated
 - **THEN** the grammar SHALL deny it
