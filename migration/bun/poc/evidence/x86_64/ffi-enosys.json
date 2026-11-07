@@ -8,12 +8,12 @@
   "baseImageDigest": "sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73",
   "opencodeVersion": "1.18.21",
   "ompVersion": "18.6.1",
-  "pocTreeSha256": "239da8a8c61a9b0ddd0d080d6f36c6da6bc551522713832abcb00a1d10790ad2",
+  "pocTreeSha256": "336aae5681f148993e21f28b6e578a55b3da42acc628b10f49ea884dad9412f2",
   "productSourcesSha256": "2126381089d7ba525e173d1d805fa8ec4fac39a2bb761f158be37d7c15355f8e",
   "spawnBackend": "node",
-  "gitHead": "5058ddfb127bbf20c22d14958f4dac419392c2a8",
-  "imageId": "e37ddb2340214a9f398ee761f55eee38b0ac3847fcddc269d485c7b7538992c2",
-  "capturedAt": "2026-11-07T22:18:05.867Z",
+  "gitHead": "96fec54a7ab91b63b54170b2c2fff48c900b42c4",
+  "imageId": "59db56afb47fa7a2ab05fa971cfff0783d56ed62cc22b8bb76f39ba0c0b039a8",
+  "capturedAt": "2026-11-07T22:28:13.855Z",
   "observations": {},
   "tests": [
     {
