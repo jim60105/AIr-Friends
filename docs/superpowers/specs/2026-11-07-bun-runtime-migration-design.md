@@ -270,6 +270,27 @@ passing.
 The first implementation plan covers steps 1 and 2 only. Steps 3 to 8 are planned after a Go result,
 so that plan can use the PoC findings.
 
+### OpenSpec proposals for steps 1 and 2
+
+These changes live under `openspec/changes/`. Apply them in table order. Changes in the same order
+group can swap places.
+
+| Order | Change                             | Step | Scope                                                                             | Depends on                                                     |
+| ----- | ---------------------------------- | ---- | --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 1     | `capture-deno-baseline`            | 1    | Freeze SHA, Deno test names and results, coverage, rollback reference             | None                                                           |
+| 2     | `build-bun-poc-harness`            | 2    | PoC workspace, pinned image, `run-suite.sh`, evidence collection, arm64 workflow  | `capture-deno-baseline`                                        |
+| 3     | `define-bun-go-no-go-gate`         | 2    | P0-bound criteria catalog, evaluation, isolation condition, outcome verification  | `capture-deno-baseline`, `build-bun-poc-harness`               |
+| 4     | `prove-bun-ffi-confinement`        | 2    | Real `openat2`, `statx` and errno path (FFI-01 to FFI-09)                         | `define-bun-go-no-go-gate`                                     |
+| 4     | `prove-bun-agent-process-boundary` | 2    | Spawn boundary, backpressure, environment, signals (PROC-01 to PROC-09)           | `define-bun-go-no-go-gate`                                     |
+| 4     | `prove-bun-egress-proxy`           | 2    | `node:net` proxy behavior (EGR-01 to EGR-08)                                      | `define-bun-go-no-go-gate`                                     |
+| 4     | `prove-bun-injection-defenses`     | 2    | Shebang, approval grammar, missing-config behavior (INJ-01 to INJ-08)             | `define-bun-go-no-go-gate`                                     |
+| 5     | `prove-bun-acp-real-agents`        | 2    | ACP success paths with real OpenCode and OMP (ACP-01 to 03, ACP-09, ACP-10)       | `define-bun-go-no-go-gate`, `prove-bun-agent-process-boundary` |
+| 6     | `prove-bun-acp-failure-paths`      | 2    | Stalled reader, cancellation, timeout, abrupt exit, EOF (ACP-04 to ACP-08)        | `prove-bun-acp-real-agents`                                    |
+| 7     | `record-bun-go-no-go`              | 2    | Final runs, arm64 CI evidence, recorded Go or No-Go outcome                       | All nine changes above                                         |
+
+`record-bun-go-no-go` must run last, because changing `migration/bun/poc/` after its task 1.1
+invalidates the evidence. A Go result does not check any box in section 9.
+
 ## 9. P0 release blockers
 
 - [ ] Unauthorized parent secrets are absent from real OpenCode and OMP child environments, and
