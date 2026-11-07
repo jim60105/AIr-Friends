@@ -294,6 +294,9 @@ Deno.test("email spontaneous - overdue restore keeps occurrence identity and due
     assertEquals(occurrences[0]?.dueAt.toISOString(), dueAt.toISOString());
     assertEquals(occurrences[0]?.status, "scheduled");
 
+    // `previous` is written only after the dispatched callback settles; `occurrences` is pushed
+    // before that, so wait for the durable finalization instead of assuming it already happened.
+    await waitFor(async () => (await readSnapshot(dir)).previous !== null);
     const snapshot = await readSnapshot(dir);
     assertEquals(snapshot.previous?.occurrenceId, seeded.occurrenceId);
     assertEquals(snapshot.previous?.dueAt, dueAt.toISOString());
@@ -657,7 +660,8 @@ Deno.test("email spontaneous - an unavailable dispatch is recorded as review-req
     scheduler.start();
     await scheduler.whenReady();
     await waitFor(() => occurrences.length > 0);
-    await observationWindow(50);
+    // Review-required evidence lands when the failed dispatch finalizes, not when it starts.
+    await waitFor(async () => (await readSnapshot(dir)).previous !== null);
 
     assertEquals(occurrences.length, 1);
     const snapshot = await readSnapshot(dir);
@@ -930,6 +934,9 @@ Deno.test("email spontaneous - a real dispatch binds the target durably before i
     await waitFor(() => occurrences.length > 0);
 
     assertEquals(occurrences[0]?.occurrenceId, occurrence.occurrenceId);
+    // The consumer's durable read completes after `occurrences` is pushed synchronously, so wait
+    // for its own positive signal before asserting on `observed`.
+    await waitFor(() => observed.length > 0);
     assertEquals(observed, ["started"]);
 
     // A bound-but-unresolved dispatch is recorded for review with a distinct successor.
