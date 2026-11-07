@@ -12,8 +12,8 @@ Run `bun` commands with working directory `migration/bun/poc/` and with `--no-en
 
 ## 2. Records
 
-- [ ] 2.1 Create `gate/record.ts` and `gate/verify-record.ts` per design D4, with the pure parts exported as `renderMarkdown(r: OutcomeRecord): string`, `compareRecord(r: OutcomeRecord, g: GateResult): string[]` and `compareLive(r: OutcomeRecord, live: { pocTreeSha256: string; productSourcesSha256: string; violations: string[] }): string[]`, guard both CLI bodies with `import.meta.main`, and add tests for every scenario of "Outcome Record" and "Outcome Record Verification". Verify: `bun test ./gate/gate.spec.ts` passes.
-- [ ] 2.2 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/gate/` and this change directory, and `deno test --no-run migration/` from the repository root reports "No test modules found". Do not commit `.evidence-wip/`, `GO-NO-GO.json` or `GO-NO-GO.md`.
+- [x] 2.1 Create `gate/record.ts` and `gate/verify-record.ts` per design D4, with the pure parts exported as `renderMarkdown(r: OutcomeRecord): string`, `compareRecord(r: OutcomeRecord, g: GateResult): string[]` and `compareLive(r: OutcomeRecord, live: { pocTreeSha256: string; productSourcesSha256: string; violations: string[] }): string[]`, guard both CLI bodies with `import.meta.main`, and add tests for every scenario of "Outcome Record" and "Outcome Record Verification". Verify: `bun test ./gate/gate.spec.ts` passes.
+- [x] 2.2 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/poc/gate/` and this change directory, and `deno test --no-run migration/` from the repository root reports "No test modules found". Do not commit `.evidence-wip/`, `GO-NO-GO.json` or `GO-NO-GO.md`.
 
 ## Workflow follow-up
 

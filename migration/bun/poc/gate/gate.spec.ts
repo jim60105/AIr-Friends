@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { CRITERIA, DEFERRALS, P0_BLOCKERS } from "./catalog.ts";
 import type { Arch, Criterion, Deferral, P0Id, SuiteName } from "./catalog.ts";
 import type { EvidenceTest, SuiteEvidence } from "./evidence.ts";
@@ -10,10 +13,24 @@ import {
   validateCatalog,
 } from "./evaluate.ts";
 import type { CriterionStatus, GateInput, GateResult } from "./evaluate.ts";
-import { POC_PINS } from "./pins.ts";
+import { POC_PINS, PRODUCT_SOURCES } from "./pins.ts";
+import { renderMarkdown, writeRecord } from "./record.ts";
+import type { OutcomeRecord } from "./record.ts";
+import { compareLive, compareRecord } from "./verify-record.ts";
 
 const TREE_HASH = "1".repeat(64);
 const SOURCES_HASH = "2".repeat(64);
+const createdRoots: string[] = [];
+
+afterEach(() => {
+  for (const root of createdRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function tempRoot(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  createdRoots.push(root);
+  return root;
+}
 
 function deferralAll(): Deferral[] {
   return (Object.keys(P0_BLOCKERS) as P0Id[]).map((p0) => ({
@@ -181,7 +198,9 @@ describe("Criterion Result From Test Report", () => {
   });
 
   test("fails on a passing test with no assertions", () => {
-    const status = singleStatus(ffi, [evidence("ffi", "x86_64", [passed("FFI-01: a")].map((entry) => ({ ...entry, assertions: 0 })))]);
+    const status = singleStatus(ffi, [
+      evidence("ffi", "x86_64", [{ name: "FFI-01: a", status: "passed", assertions: 0 }]),
+    ]);
     expect(status).toBe("fail");
   });
 });
@@ -344,7 +363,179 @@ describe("Product Isolation Condition", () => {
 
   test("accepts only the allowed paths", () => {
     const [workflow] = ALLOWED_CHANGED_FILES;
-    const changed = ["migration/bun/poc/gate/catalog.ts", "openspec/changes/x/tasks.md", "docs/superpowers/specs/x.md", workflow];
+    const changed = [
+      "migration/bun/poc/gate/catalog.ts",
+      "openspec/changes/x/tasks.md",
+      "docs/superpowers/specs/x.md",
+      workflow,
+    ];
     expect(isolationViolations(changed)).toEqual([]);
+  });
+});
+
+function recordFrom(result: GateResult, overrides: Partial<OutcomeRecord> = {}): OutcomeRecord {
+  return {
+    schemaVersion: 1,
+    outcome: result.outcome,
+    decidedAt: "2026-11-08T00:00:00.000Z",
+    freezeSha: "734c8b03c60a021a3982a07d18c3c3f75962c472",
+    head: "f3926fd938585fd9b919a813d3c51e57f0af91f5",
+    pins: POC_PINS,
+    pocTreeSha256: TREE_HASH,
+    productSourcesSha256: SOURCES_HASH,
+    changedPaths: [],
+    baselineState: "valid",
+    criteria: result.criteria,
+    blockers: result.blockers,
+    deferrals: [...DEFERRALS],
+    observations: {},
+    ...overrides,
+  };
+}
+
+/** A real-catalog evaluation with no evidence: every criterion is missing. */
+function noEvidenceResult(): GateResult {
+  return evaluate({
+    catalog: CRITERIA,
+    deferrals: DEFERRALS,
+    evidence: [],
+    pocTreeSha256: TREE_HASH,
+    productSourcesSha256: SOURCES_HASH,
+    changedPaths: [],
+    baselineState: "valid",
+  });
+}
+
+function outcomeLineCount(markdown: string, outcome: "Go" | "No-Go"): number {
+  return markdown.split("\n").filter((line) => line === `Outcome: ${outcome}`).length;
+}
+
+describe("Outcome Record", () => {
+  const ffi = criterion("FFI-01", "P0-4", "ffi", ["x86_64"]);
+
+  test("a Go record states the outcome and the still-open P0 scope", () => {
+    const result = evaluate(
+      gateInput({
+        catalog: [ffi],
+        evidence: [evidence("ffi", "x86_64", [passed("FFI-01: a")])],
+      }),
+    );
+    expect(result.outcome).toBe("Go");
+    const markdown = renderMarkdown(recordFrom(result));
+    expect(outcomeLineCount(markdown, "Go")).toBe(1);
+    expect(markdown).toContain("Open after this decision");
+    expect(markdown).toContain("Production variable set");
+    expect(markdown).toContain("None.");
+    expect(markdown).toContain("Plan design section 8 steps 3 to 8");
+    expect(markdown).toContain(POC_PINS.bunVersion);
+  });
+
+  test("a No-Go record states the outcome and every blocker", () => {
+    const result = noEvidenceResult();
+    expect(result.outcome).toBe("No-Go");
+    const markdown = renderMarkdown(recordFrom(result));
+    expect(outcomeLineCount(markdown, "No-Go")).toBe(1);
+    for (const blocker of result.blockers) expect(markdown).toContain(blocker);
+    expect(markdown).toContain("Stop the migration");
+  });
+
+  test("writes the machine-readable and Markdown records", () => {
+    const record = recordFrom(noEvidenceResult());
+    const dir = tempRoot("bun-gate-record-");
+    writeRecord(record, dir);
+    const written = JSON.parse(readFileSync(join(dir, "GO-NO-GO.json"), "utf8")) as OutcomeRecord;
+    expect(written).toEqual(record);
+    expect(readFileSync(join(dir, "GO-NO-GO.md"), "utf8")).toBe(renderMarkdown(record));
+  });
+});
+
+describe("Outcome Record Verification", () => {
+  test("reports no difference for a matching record", () => {
+    const result = noEvidenceResult();
+    expect(compareRecord(recordFrom(result), result)).toEqual([]);
+  });
+
+  test("reports an edited outcome", () => {
+    const result = noEvidenceResult();
+    const problems = compareRecord(recordFrom(result, { outcome: "Go" }), result);
+    expect(problems.some((problem) => problem.includes("outcome"))).toBe(true);
+  });
+
+  test("reports an edited criterion status and a duplicate entry", () => {
+    const result = noEvidenceResult();
+    const record = recordFrom(result);
+    const edited = { ...record, criteria: [{ ...record.criteria[0], status: "pass" as const }] };
+    expect(compareRecord(edited, result).some((problem) => problem.includes("criteria:"))).toBe(true);
+
+    const duplicated = { ...record, criteria: [record.criteria[0], record.criteria[0]] };
+    expect(compareRecord(duplicated, result).some((problem) => problem.includes("duplicate"))).toBe(
+      true,
+    );
+  });
+
+  test("reports a live tree hash mismatch", () => {
+    const record = recordFrom(noEvidenceResult());
+    const problems = compareLive(record, {
+      pocTreeSha256: "f".repeat(64),
+      productSourcesSha256: record.productSourcesSha256,
+      violations: [],
+    });
+    expect(problems.some((problem) => problem.includes("pocTreeSha256"))).toBe(true);
+  });
+
+  test("reports a live product source mismatch and an isolation violation", () => {
+    const record = recordFrom(noEvidenceResult());
+    const problems = compareLive(record, {
+      pocTreeSha256: record.pocTreeSha256,
+      productSourcesSha256: "f".repeat(64),
+      violations: ["src/main.ts"],
+    });
+    expect(problems.some((problem) => problem.includes("productSourcesSha256"))).toBe(true);
+    expect(problems.some((problem) => problem.includes("src/main.ts"))).toBe(true);
+  });
+
+  function runVerify(args: string[]): { exitCode: number; stderr: string } {
+    const result = Bun.spawnSync(
+      [process.execPath, join(import.meta.dir, "verify-record.ts"), ...args],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    return { exitCode: result.exitCode ?? 1, stderr: result.stderr.toString() };
+  }
+
+  function pocWithRecord(record: OutcomeRecord): string {
+    const dir = tempRoot("bun-gate-verify-");
+    writeFileSync(join(dir, "GO-NO-GO.json"), `${JSON.stringify(record, null, 2)}\n`);
+    return dir;
+  }
+
+  test("exits 0 for a record produced from the committed evidence", () => {
+    const dir = pocWithRecord(recordFrom(noEvidenceResult()));
+    expect(runVerify(["--poc", dir])).toEqual({ exitCode: 0, stderr: "" });
+  });
+
+  test("exits 1 and names the outcome for an edited record", () => {
+    const dir = pocWithRecord(recordFrom(noEvidenceResult(), { outcome: "Go" }));
+    const run = runVerify(["--poc", dir]);
+    expect(run.exitCode).toBe(1);
+    expect(run.stderr).toContain("outcome");
+  });
+
+  test("exits 1 and names the hash mismatch for live verification on a changed tree", () => {
+    const poc = pocWithRecord(recordFrom(noEvidenceResult()));
+    const repo = tempRoot("bun-gate-repo-");
+    for (const relativePath of PRODUCT_SOURCES) {
+      const path = join(repo, relativePath);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "// product source\n");
+    }
+    const run = runVerify(["--live", "--poc", poc, "--repo", repo]);
+    expect(run.exitCode).toBe(1);
+    expect(run.stderr).toContain("pocTreeSha256");
+  });
+
+  test("exits 0 without live verification on a later tree", () => {
+    const dir = pocWithRecord(recordFrom(noEvidenceResult()));
+    writeFileSync(join(dir, "later.txt"), "changed after the record\n");
+    expect(runVerify(["--poc", dir])).toEqual({ exitCode: 0, stderr: "" });
   });
 });
