@@ -62,3 +62,17 @@ A suite run SHALL write its evidence file and exit 0 when tests fail, and SHALL 
 - **GIVEN** a run that produces no JUnit report
 - **WHEN** the run finishes
 - **THEN** no evidence file SHALL be written and the run SHALL exit 2
+
+### Requirement: Arm64 Evidence Workflow
+
+The repository SHALL produce `aarch64` evidence from a workflow that runs the `ffi` and `ffi-enosys` suites with `--final` on a native arm64 GitHub Actions runner, triggered only by a pushed `bun-poc-final-*` tag, with read-only repository permission and no secret.
+
+#### Scenario: Failed suite still uploads evidence
+- **GIVEN** a suite step that exits non-zero after writing evidence
+- **WHEN** the workflow continues
+- **THEN** the evidence SHALL be uploaded as the `bun-poc-aarch64-evidence` artifact
+
+#### Scenario: Branch push
+- **GIVEN** a push of a branch with no matching tag
+- **WHEN** GitHub Actions evaluates triggers
+- **THEN** the workflow SHALL NOT run

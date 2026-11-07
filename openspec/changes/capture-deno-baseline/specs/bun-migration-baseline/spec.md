@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Captures and validates the Deno-era reference records (test names and results, coverage, freeze point, deployed image, data backup) that the Bun migration is measured against.
+Captures and validates the Deno-era reference records (test names and results, coverage, freeze point, deployed image) that the Bun migration is measured against.
 
 ## ADDED Requirements
 
@@ -69,29 +69,29 @@ The baseline tool SHALL record failing tests as results rather than treat them a
 
 ### Requirement: Baseline Record Validation
 
-The baseline tool SHALL report a state of `valid`, `pending` or `invalid` for the record set, where `pending` means only the operator record is absent.
+The baseline tool SHALL report a state of `valid` or `invalid` for the record set, and SHALL exit with status 0 only for `valid`.
 
 #### Scenario: Totals disagree with entries
 - **GIVEN** a summary whose totals differ from the counted entries of the test record
 - **WHEN** validation runs
 - **THEN** the state SHALL be `invalid` and the problem SHALL name the totals
 
-#### Scenario: Operator record absent
-- **GIVEN** valid captured records and no operator record
+#### Scenario: Rollback reference absent
+- **GIVEN** valid captured records and no rollback reference
 - **WHEN** validation runs
-- **THEN** the state SHALL be `pending` and the validator SHALL exit with status 3
+- **THEN** the state SHALL be `invalid` and the validator SHALL exit with status 1
 
 #### Scenario: Complete record set
-- **GIVEN** valid captured records and a valid operator record
+- **GIVEN** valid captured records and a valid rollback reference
 - **WHEN** validation runs
 - **THEN** the state SHALL be `valid` and the validator SHALL exit with status 0
 
-### Requirement: Operator Record Validation
+### Requirement: Rollback Reference Validation
 
-The baseline validator SHALL reject an operator record unless the image is identified by an immutable `sha256` digest and the data backup carries its checksum, size, entry count and storage label.
+The baseline validator SHALL reject a rollback reference unless the image is identified by an immutable `sha256` digest and its source revision equals the recorded freeze SHA.
 
 #### Scenario: Tag-only image reference
-- **GIVEN** an operator record whose image reference has a tag and no digest
+- **GIVEN** a rollback reference whose image reference has a tag and no digest
 - **WHEN** validation runs
 - **THEN** the state SHALL be `invalid` and the problem SHALL name the image reference
 
@@ -100,7 +100,7 @@ The baseline validator SHALL reject an operator record unless the image is ident
 - **WHEN** validation runs
 - **THEN** the state SHALL be `invalid`
 
-#### Scenario: Malformed backup checksum
-- **GIVEN** a backup checksum that is not 64 lowercase hexadecimal characters
+#### Scenario: Revision differs from the freeze point
+- **GIVEN** a source revision that differs from the recorded freeze SHA
 - **WHEN** validation runs
-- **THEN** the state SHALL be `invalid` and the problem SHALL name the checksum
+- **THEN** the state SHALL be `invalid` and the problem SHALL name the revision

@@ -2,7 +2,7 @@
 
 Prerequisite: `migration/bun/baseline/records-schema.ts` exists. Verify with `test -f migration/bun/baseline/records-schema.ts`.
 
-Run `bun` commands with working directory `migration/bun/poc/` and with `--no-env-file` where the subcommand is `run`. Create only the files in design D1. Do not edit product files.
+Run `bun` commands with working directory `migration/bun/poc/` and with `--no-env-file` where the subcommand is `run`. Create only the files in design D1. Do not edit product files or existing workflows.
 
 ## 1. Workspace and image
 
@@ -15,4 +15,5 @@ Run `bun` commands with working directory `migration/bun/poc/` and with `--no-en
 - [ ] 2.2 Create `gate/run-in-container.ts` per design D3, exporting `decideRun(junitExists: boolean): { write: boolean; exitCode: 0 | 2 }` and guarding the CLI body with `import.meta.main`. Verify: covered by 2.3.
 - [ ] 2.3 Create `gate/harness.spec.ts` covering every scenario in this change's spec with synthetic JUnit text and `mkdtemp` trees. Verify: `bun test ./gate/harness.spec.ts` passes.
 - [ ] 2.4 Create `suites/harness.spec.ts` with these tests: Bun version equals the pin; `/lib/<arch>-linux-gnu/libc.so.6` exists for the running architecture; `dumb-init` runs; UID is 1000 and GID is 0. Verify: `migration/bun/poc/run-suite.sh harness` exits 0 and `.evidence-wip/x86_64/harness.json` lists 4 passed tests with non-empty `pocTreeSha256` and `productSourcesSha256`.
-- [ ] 2.5 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/` and this change directory, and `deno test --no-run migration/` from the repository root reports "No test modules found". Do not commit `.evidence-wip/`.
+- [ ] 2.5 Create `.github/workflows/bun-poc-arm64.yml` verbatim from design D-ARM64. Do not push. Verify: `bun -e 'Bun.YAML.parse(await Bun.file("../../../.github/workflows/bun-poc-arm64.yml").text())'` exits 0.
+- [ ] 2.6 Confirm isolation. Verify: `git status --porcelain` lists only `migration/bun/`, `.github/workflows/bun-poc-arm64.yml` and this change directory, and `deno test --no-run migration/` from the repository root reports "No test modules found". Do not commit `.evidence-wip/`.

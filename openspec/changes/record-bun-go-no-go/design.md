@@ -12,7 +12,7 @@ See `proposal.md` for motivation. The gate (`define-bun-go-no-go-gate`) evaluate
 
 - No code, test or criterion change. If a run reveals a harness bug, stop and fix it in the owning `prove-*` change; final runs then restart from task 1.1.
 - No closing of any P0 blocker. Boxes in the source design stay unchecked.
-- No QEMU evidence for `aarch64`.
+- No QEMU evidence for `aarch64`; the `ubuntu-24.04-arm` runner is native.
 - No master unfreeze and no planning of steps 3 to 8.
 
 ## Decisions
@@ -25,7 +25,7 @@ All suites use the same `POC_SPAWN_BACKEND`, and the gate rejects a mismatch. If
 
 ### D2. Outcome handling
 
-`gate/record.ts` writes the record for either outcome and exits 0. A No-Go is a legitimate end state and is committed like a Go. The agent reports its blockers and stops; it neither fixes them nor reruns to change the result. A record listing only `missing` for `aarch64` means task 2.1 was not done, so task 3.1 must not run before it.
+`gate/record.ts` writes the record for either outcome and exits 0. A No-Go is a legitimate end state and is committed like a Go. The agent reports its blockers and stops; it neither fixes them nor reruns to change the result. A record listing only `missing` for `aarch64` means tasks 2.1 and 2.2 were not done, so task 3.1 must not run before them.
 
 ### D3. Deno check
 
@@ -41,5 +41,6 @@ The first two must pass and the third must report "No test modules found". The i
 
 ## Risks / Trade-offs
 
-- [No native arm64 host is available] → The outcome stays blocked at task 2.1. A full-system arm64 VM also qualifies, because its own kernel handles the system calls; qemu-user does not. An owner must supply a host or explicitly change the catalog through an OpenSpec change; the agent must not work around it.
+- [The arm64 runner cannot run the suites] → The run produces no evidence and the outcome stays blocked at task 2.2. Fix the workflow in `build-bun-poc-harness`. The agent must not substitute emulated evidence. Changing the catalog needs an owner decision through an OpenSpec change.
+- [Pushing publishes the branch] → The repository is public, so task 2.1 scans before the push.
 - [Network is down while building] → `podman build` uses its cache when the tree is unchanged, and otherwise the run stops before writing evidence.

@@ -8,10 +8,10 @@ The Bun migration needs an immutable reference point before anything changes: th
 
 - Add a small, self-contained record tool under `migration/bun/baseline/` that captures the freeze SHA, every Deno test name with its result, and the Deno coverage summary, and that validates the committed records.
 - Commit the captured records under `migration/bun/baseline/records/`.
-- Add an operator runbook and an operator record template for the two steps that need production access: the old image digest and the `/app/data` backup.
+- Record the deployed image as an immutable rollback reference, read by the agent with `kubectl` and `skopeo`.
 - No file outside `migration/bun/` changes. Deno stays the working runtime.
 
-Operator-run (human with production access; the agent cannot do these): recording the deployed image digest and backing up `/app/data`. These are tasks 3.1 to 3.3 and are marked `OPERATOR` in `tasks.md`.
+No step needs a human. Owner decision: step 1 takes no `/app/data` backup, because no step before cutover touches production data. Backup at cutover stays in section 10 of the source design.
 
 ## Capabilities
 
@@ -25,7 +25,7 @@ None.
 
 ## Impact
 
-- New: `migration/bun/README.md`, `migration/bun/baseline/` (tool, tests, runbook, records).
+- New: `migration/bun/README.md`, `migration/bun/baseline/` (tool, tests, records).
 - New development dependency, local to `migration/bun/baseline/package.json`: `fast-xml-parser`.
 - No change to `src/`, `tests/`, `deno.json`, `deno.lock`, the image, Helm or CI.
 - No human review document: every requirement is established by tests.
@@ -34,6 +34,6 @@ None.
 
 No `depends-on` lines: this change has no prerequisite and is first in the batch.
 
-Conflict note: no file overlap with any change in the batch. `define-bun-go-no-go-gate` and `record-bun-go-no-go` read `migration/bun/baseline/records-schema.ts` and the records. Operator tasks 3.1 to 3.3 block archive of this change until a human completes them.
+Conflict note: no file overlap with any change in the batch. `define-bun-go-no-go-gate` and `record-bun-go-no-go` read `migration/bun/baseline/records-schema.ts` and the records.
 
 Deferred, not part of this batch: design section 8 steps 3 to 8 are planned only after a Go result.

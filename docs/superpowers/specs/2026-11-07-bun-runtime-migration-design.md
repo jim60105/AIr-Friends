@@ -1,7 +1,7 @@
 # Bun Runtime Migration Design
 
 - **Date:** 2026-11-07
-- **Status:** Approved design, pending written-spec review
+- **Status:** Approved
 - **Baseline:** `master` at `734c8b0`, version `0.36.1`
 - **Branch:** `feat/migrate-to-bun`
 - **Input:** local handoff document (`tmp/AIr-Friends-handoff-attachment.md`, untracked), re-verified
@@ -150,7 +150,8 @@ bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml <script>
 
 - `src/acp/skill-inventory.ts` accepts exactly two invocation forms for a trusted script: direct
   execution of its path, which applies the shebang, and the literal `bun run` form above. The
-  safe-flag set is removed. Every other flag is denied, including `--preload`, `--require`,
+  `<script>` token must contain a slash, because `bun run <name>` checks `package.json` scripts first.
+  The safe-flag set is removed. Every other flag is denied, including `--preload`, `--require`,
   `--import`, `--inspect`, `--env-file`, `--cwd` and `--tsconfig-override`.
 - `/opt/air/skill-bunfig.toml` is an empty, root-owned, read-only file in the image. Development and
   CI create the same file at that path. A missing file must stop the skill instead of falling back to
@@ -214,12 +215,13 @@ the injection regression suite.
   counterpart, or the migration record lists why it was removed or skipped.
 - **Accepted loss:** 432 Deno sanitizer options have no Bun equivalent. P0 integration tests check
   file-descriptor and process counts instead.
-- **Coverage:** the 75% floor stays and is measured from Bun lcov. Deno's baseline number is
-  reference only, because the tools count differently.
+- **Coverage:** the CI check reads the Branch column, so the current 75% floor is branch coverage.
+  The baseline records all reported numbers. The floor stays on the equivalent Bun lcov measure;
+  Deno's number is reference only, because the tools count differently.
 - **Injection suite (new):** run trusted skills from an agent-writable directory containing `.env`,
   `.env.local`, `bunfig.toml`, `tsconfig.json`, `package.json` and `node_modules`. Also attempt
-  `BUN_OPTIONS` as a command prefix. Skill behavior must not change and the gate must deny the
-  prefixed form.
+  `BUN_OPTIONS` as a command prefix. Flags cannot neutralize this variable, so the gate denying the
+  prefixed form is the defense.
 
 Existing security tests must keep their intent, especially
 `tests/acp/agent-connector-env-isolation.test.ts`, `tests/acp/filesystem-confinement.test.ts`,
@@ -248,10 +250,12 @@ update `env.DENO_ENV` and any custom `AGENT_SKILLS_DIR` value, including the Arg
 
 All steps happen on `feat/migrate-to-bun`.
 
-1. **Baseline:** record the freeze SHA, Deno test names and results, coverage, and the old image
-   digest. Back up `/app/data`.
+1. **Baseline:** record the freeze SHA, Deno test names and results, coverage, and the deployed
+   image digest. No `/app/data` backup at this step, because nothing before cutover touches
+   production data.
 2. **Go/No-Go PoC:** prove the `openat2`/errno path through the real backend, ACP with real OpenCode
-   and OMP including backpressure, egress-proxy behavior, and injection defenses. An unsolvable
+   and OMP including backpressure, egress-proxy behavior, and injection defenses. `arm64` evidence
+   comes from the native `ubuntu-24.04-arm` GitHub Actions runner; the owner has no other arm64 host. An unsolvable
    blocker stops the migration, and `master` unfreezes.
 3. **Toolchain:** section 5.
 4. **Mechanical conversion:** convert `src/` and `tests/` together to `node:*` and `bun:test`.

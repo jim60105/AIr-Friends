@@ -127,10 +127,11 @@ export interface GateInput {
   pocTreeSha256: string;
   productSourcesSha256: string;
   changedPaths: readonly string[];
-  baselineState: "valid" | "pending" | "invalid";
+  baselineState: "valid" | "invalid";
 }
 export interface GateResult { outcome: "Go" | "No-Go"; criteria: CriterionResult[]; blockers: string[] }
 export const ALLOWED_CHANGED_PREFIXES = ["migration/bun/", "openspec/", "docs/superpowers/"] as const;
+export const ALLOWED_CHANGED_FILES = [".github/workflows/bun-poc-arm64.yml"] as const;
 export function validateCatalog(catalog: readonly Criterion[], deferrals: readonly Deferral[]): string[];
 export function checkBinding(e: SuiteEvidence, pocTreeSha256: string, productSourcesSha256: string): string[];
 export function evaluate(input: GateInput): GateResult;
@@ -164,7 +165,7 @@ export interface OutcomeRecord {
   pocTreeSha256: string;
   productSourcesSha256: string;
   changedPaths: string[];
-  baselineState: "valid" | "pending" | "invalid";
+  baselineState: "valid" | "invalid";
   criteria: CriterionResult[];
   blockers: string[];
   deferrals: Deferral[];
@@ -182,5 +183,5 @@ A failing check is a legitimate result, not a defect to hide. Workers must not w
 
 ## Risks / Trade-offs
 
-- [No native arm64 host] → The two FFI suites need a real arm64 kernel; `record-bun-go-no-go` makes this an operator step. QEMU user-mode emulation is not acceptable evidence because system calls pass through the emulator. The kernel-string check catches the common case; a full-system arm64 VM would pass it and is acceptable, because its kernel really handles the system calls.
+- [No local arm64 host] → The two FFI suites need a real arm64 kernel, which comes from the native `ubuntu-24.04-arm` GitHub Actions runner through `.github/workflows/bun-poc-arm64.yml`. QEMU user-mode emulation is not acceptable evidence because system calls pass through the emulator. The kernel-string check rejects it.
 - [Criteria are fixed before results] → A wrong threshold shows up as No-Go. Changing the catalog is an OpenSpec change, visible in review, and it invalidates evidence through the tree hash.

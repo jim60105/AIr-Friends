@@ -107,22 +107,27 @@ The gate SHALL return `Go` only when every criterion passes on every architectur
 - **WHEN** the outcome is evaluated
 - **THEN** the outcome SHALL be `No-Go` and the blockers SHALL name the spawn backend
 
-#### Scenario: Pending baseline
-- **GIVEN** all criteria `pass` and a baseline state of `pending`
+#### Scenario: Invalid baseline
+- **GIVEN** all criteria `pass` and a baseline state of `invalid`
 - **WHEN** the outcome is evaluated
 - **THEN** the outcome SHALL be `No-Go` and the blockers SHALL name the baseline
 
 ### Requirement: Product Isolation Condition
 
-The gate SHALL report an isolation violation for any path changed since the merge base with `master`, committed or uncommitted, that lies outside `migration/bun/`, `openspec/` and `docs/superpowers/`.
+The gate SHALL report an isolation violation for any path changed since the merge base with `master`, committed or uncommitted, that lies outside `migration/bun/`, `openspec/` and `docs/superpowers/`, except the single file `.github/workflows/bun-poc-arm64.yml`.
 
 #### Scenario: Product file changed
 - **GIVEN** a changed path `src/main.ts`
 - **WHEN** the isolation condition is evaluated
 - **THEN** it SHALL report `src/main.ts` as a violation and the outcome SHALL be `No-Go`
 
+#### Scenario: Other workflow file changed
+- **GIVEN** a changed path `.github/workflows/ci.yaml`
+- **WHEN** the isolation condition is evaluated
+- **THEN** it SHALL report `.github/workflows/ci.yaml` as a violation and the outcome SHALL be `No-Go`
+
 #### Scenario: Only allowed paths changed
-- **GIVEN** changed paths under `migration/bun/` and `openspec/`
+- **GIVEN** changed paths under `migration/bun/` and `openspec/`, and `.github/workflows/bun-poc-arm64.yml`
 - **WHEN** the isolation condition is evaluated
 - **THEN** it SHALL report no violation
 

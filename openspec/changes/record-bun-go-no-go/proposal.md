@@ -7,12 +7,12 @@ The migration may continue only on a recorded decision, and steps 3 to 8 are pla
 ## What Changes
 
 - Run every suite with `--final` on x86_64 from one commit.
-- Run the FFI suites on a native arm64 host from the same commit. This step is operator-run: it needs a real arm64 kernel and the agent has none.
+- Run the FFI suites from the same commit on the native arm64 GitHub Actions runner, and bring the evidence back to the branch.
 - Commit the evidence, generate `migration/bun/poc/GO-NO-GO.md` and `GO-NO-GO.json` with the gate, and verify them.
 - Confirm Deno still works on the branch.
 - No product file changes, whichever outcome results.
 
-Operator-run (human with a native arm64 Linux host; the agent cannot do this): task 2.1, marked `OPERATOR` in `tasks.md`.
+No step needs a human. The owner approved pushing `feat/migrate-to-bun` and one `bun-poc-final-*` tag for task 2.1. Scan the branch for secrets and private details before that push.
 
 ## Capabilities
 

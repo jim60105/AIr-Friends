@@ -9,6 +9,7 @@ Proof-of-concept results mean nothing unless they run on the target runtime with
 - Add the proof-of-concept workspace `migration/bun/poc/` with exact Bun and agent pins.
 - Add a container image that reproduces the target runtime, and `run-suite.sh`, which runs one suite under production-like restrictions.
 - Add evidence collection: `bun test` JUnit reports become evidence files bound to the tree and to the production sources in use.
+- Add `.github/workflows/bun-poc-arm64.yml`, which produces `aarch64` evidence on a native GitHub Actions runner. The owner has no other arm64 host.
 - No product file changes. Deno stays the working runtime.
 
 ## Capabilities
@@ -23,9 +24,9 @@ None.
 
 ## Impact
 
-- New: `migration/bun/poc/` (image, run script, evidence helpers, harness suite).
+- New: `migration/bun/poc/` (image, run script, evidence helpers, harness suite) and `.github/workflows/bun-poc-arm64.yml`.
 - New dependencies, local to `migration/bun/poc/package.json`: `@agentclientprotocol/sdk`, `zod`, `fast-xml-parser`.
-- No change to `src/`, `tests/`, `deno.json`, `deno.lock`, the root `Containerfile`, Helm or CI.
+- No change to `src/`, `tests/`, `deno.json`, `deno.lock`, the root `Containerfile`, Helm or the existing CI workflows.
 - No human review document: every requirement is established by tests.
 
 ## Batch:

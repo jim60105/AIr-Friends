@@ -14,7 +14,7 @@ See `proposal.md` for motivation. Observed facts:
 
 ## Goals / Non-Goals
 
-**Goals:** a reproducible runtime and a way to run any suite and collect bound evidence, with every file under `migration/bun/poc/`.
+**Goals:** a reproducible runtime and a way to run any suite and collect bound evidence, with every file under `migration/bun/poc/` except one arm64 workflow.
 
 **Non-Goals:**
 
@@ -39,6 +39,7 @@ migration/bun/poc/gate/evidence.ts      # collect from JUnit, hashes, observe
 migration/bun/poc/gate/run-in-container.ts # CLI inside the image
 migration/bun/poc/gate/harness.spec.ts
 migration/bun/poc/suites/harness.spec.ts
+.github/workflows/bun-poc-arm64.yml
 ```
 
 Tests use `.spec.ts` so Deno never discovers them.
@@ -181,7 +182,57 @@ Suites call `observe(key, value)` from `gate/evidence.ts`, which appends one JSO
 `hashProductSources(repoRoot)`: SHA-256 over `<relative path>\0<file bytes>\0` for each entry of `PRODUCT_SOURCES`, in array order. A failing hook in Bun removes the dependent tests from the report and leaves one failed `<testcase name="(unnamed)">`; `collectTests` keeps every test case, named or not, so the gate can see it. A missing `assertions` attribute reads as 0.
 
 
+### D-ARM64. Arm64 evidence workflow
+
+The workflow runs only on a pushed `bun-poc-final-*` tag. `workflow_dispatch` is not usable because it requires the file on the default branch, and `master` is frozen. It reads no secret and holds only `contents: read`. Suite steps continue on error because a failed test is evidence, and the upload always runs. Create it verbatim:
+
+```yaml
+name: Bun PoC arm64
+
+on:
+  push:
+    tags:
+      - "bun-poc-final-*"
+
+permissions:
+  contents: read
+
+jobs:
+  ffi:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Prepare rootless podman
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          command -v podman || { sudo apt-get update && sudo apt-get install -y podman; }
+
+      - name: Run ffi
+        continue-on-error: true
+        run: migration/bun/poc/run-suite.sh ffi --final
+
+      - name: Run ffi-enosys
+        continue-on-error: true
+        run: migration/bun/poc/run-suite.sh ffi-enosys --final
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bun-poc-aarch64-evidence
+          path: migration/bun/poc/evidence/aarch64/
+          if-no-files-found: error
+```
+
+Rootless `podman` on this runner is unverified until the first real run in `record-bun-go-no-go`.
+
 ## Risks / Trade-offs
 
 - [`podman` only] → Matches the host. Docker is not supported by `run-suite.sh`.
+- [Rootless `podman` fails on the arm64 runner] → The sysctl step lifts the Ubuntu 24.04 user-namespace restriction. If the first run still fails, fix the workflow in this change and restart the final runs.
 - [The whole repository is the build context] → Accepted. It keeps the three `COPY src/...` lines simple, and the layer cache keeps rebuilds short.

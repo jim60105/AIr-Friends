@@ -13,7 +13,7 @@ See `proposal.md` for motivation. Observed facts this design relies on:
 
 ## Goals / Non-Goals
 
-**Goals:** committed, validated records of the freeze SHA, Deno test names and results, and coverage; a runbook and a validated record for the two operator steps.
+**Goals:** committed, validated records of the freeze SHA, Deno test names and results, and coverage, plus a validated rollback reference for the deployed image.
 
 **Non-Goals:**
 
@@ -22,6 +22,7 @@ See `proposal.md` for motivation. Observed facts this design relies on:
 - No `master` branch-protection change. Freezing `master` is an owner decision outside the repository.
 - No edit to `src/`, `tests/`, `deno.json`, `deno.lock`, `.gitignore`, the image, Helm or CI.
 - No type-check, lint or format setup for `migration/`.
+- No `/app/data` backup. Step 1 does not touch production data; cutover owns the backup decision.
 
 ## Decisions
 
@@ -38,11 +39,9 @@ migration/bun/baseline/records-schema.ts   # validators; imports nothing outside
 migration/bun/baseline/capture.ts          # CLI
 migration/bun/baseline/validate.ts         # CLI
 migration/bun/baseline/baseline.spec.ts    # bun:test
-migration/bun/baseline/OPERATOR-RUNBOOK.md
 migration/bun/baseline/records/deno-tests.json
 migration/bun/baseline/records/baseline.json
-migration/bun/baseline/records/operator-record.template.json
-migration/bun/baseline/records/operator-record.json   # created by the operator
+migration/bun/baseline/records/rollback-reference.json
 ```
 
 Alternative rejected: `docs/migration/`. `docs/` is a published docsify site and the records are large JSON files.
@@ -67,20 +66,21 @@ export interface BaselineSummary {
   totals: { tests: number; passed: number; failed: number; ignored: number };
   coverage: CoverageSummary;
 }
-export interface OperatorRecord {
+export interface RollbackReference {
   schemaVersion: 1;
-  performedBy: string;
-  performedAt: string;      // ISO 8601
-  image: { reference: string; digest: string; observedFrom: string };
-  dataBackup: { archiveSha256: string; sizeBytes: number; entryCount: number; storageLabel: string };
+  capturedAt: string;       // ISO 8601
+  reference: string;        // <image>@sha256:<digest>
+  digest: string;           // sha256:<64 hex>
+  sourceRevision: string;   // 40 hex, org.opencontainers.image.revision label
+  observedFrom: string;     // e.g. "kubectl imageID, namespace air-friends"
 }
-export type BaselineState = "valid" | "pending" | "invalid";
+export type BaselineState = "valid" | "invalid";
 export function validateBaselineDir(recordsDir: string): { state: BaselineState; problems: string[] };
 ```
 
 `file` is the JUnit `classname` with a leading `./` removed. Sorting uses plain code-unit comparison on `file`, then `name`, and is stable, so repeated names keep their order. Durations are not recorded, so re-running capture yields a clean diff.
 
-Validation rules: `image.digest` matches `^sha256:[0-9a-f]{64}$`; `image.reference` ends with `@<digest>`; `archiveSha256` matches `^[0-9a-f]{64}$`; `sizeBytes` and `entryCount` are integers above 0; `performedBy`, `observedFrom` and `storageLabel` are non-empty; `performedAt` parses as a date.
+Validation rules: `digest` matches `^sha256:[0-9a-f]{64}$`; `reference` ends with `@<digest>`; `sourceRevision` equals `freezeSha` in `baseline.json`; `observedFrom` is non-empty; `capturedAt` parses as a date. A missing record file is `invalid`.
 
 ### D3. Capture flow
 
@@ -101,21 +101,16 @@ Validation rules: `image.digest` matches `^sha256:[0-9a-f]{64}$`; `image.referen
 
 `fast-xml-parser` is configured with `ignoreAttributes: false`, `attributeNamePrefix: ""`, `processEntities: true`, and `isArray` returning true for `testsuite` and `testcase`. Walk `testsuites.testsuite[].testcase[]` and any nested `testsuite`. Do not read the `<failure>` body.
 
-### D4. Operator boundary
+### D4. Rollback reference
 
-The agent has no production access. It writes the runbook and the template and never fabricates `operator-record.json`. `validate.ts` reports `pending` until the operator commits that file. Runbook content, verbatim steps:
+The agent reads the deployed image itself. Both commands are read-only:
 
 ```bash
-# Kubernetes deployment. Replace <ns> and <pod>.
-kubectl -n <ns> get pod -l app.kubernetes.io/name=air-friends \
-  -o jsonpath='{.items[0].metadata.name}{"\n"}{.items[0].status.containerStatuses[?(@.name=="air-friends")].imageID}{"\n"}'
-kubectl -n <ns> exec <pod> -- tar -C /app -czf - data > air-friends-data-baseline.tgz
-sha256sum air-friends-data-baseline.tgz
-stat -c %s air-friends-data-baseline.tgz
-tar -tzf air-friends-data-baseline.tgz | wc -l
+kubectl -n air-friends get pods -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="air-friends")]}{.imageID}{"\n"}{end}'
+skopeo inspect --format '{{index .Labels "org.opencontainers.image.revision"}}' docker://<reference>
 ```
 
-For a Compose deployment, the digest comes from `docker inspect --format '{{index .RepoDigests 0}}' <image>` and the archive from `docker compose exec -T <service> tar -C /app -czf - data`. The runbook states that the archive holds user data and must stay outside the repository, and that `tar` reporting "file changed as we read it" means the operator repeats the step during a quiet period. Because this backup is the rollback safety net, it also states: run `kubectl -n <ns> exec <pod> -- find /app/data -name '*.db'` first; if any database file exists, stop the bot before taking the archive, because a file copied mid-write can be corrupt.
+If the pod reports several digests, or the revision differs from `freezeSha`, stop and report it to the owner. Do not choose a digest and do not edit the record to pass. At proposal time the deployed image was `ghcr.io/jim60105/air-friends@sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059`, revision `734c8b03c60a021a3982a07d18c3c3f75962c472`; the record uses values read at capture time.
 
 ## Risks / Trade-offs
 
