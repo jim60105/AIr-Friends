@@ -6,7 +6,7 @@ See `proposal.md` for motivation. Observed facts:
 
 - `tests/integration/omp-native-runtime/native-runtime.integration.test.ts` already drives pinned `omp acp` against a loopback server speaking the OpenAI chat-completions SSE shape, with `tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml`.
 - A throwaway probe (feasibility only, using host versions newer than the pins) completed `initialize`, `session/new` and `session/prompt` on both agents through `node:child_process` under Bun:
-  - OpenCode, with no external network, using a custom `@ai-sdk/openai-compatible` provider, sent two requests per prompt. The title request has no `tools` field; the main request has a non-empty `tools` array.
+  - OpenCode, in a network namespace with only loopback and a fresh `HOME` and data directory, using a custom `@ai-sdk/openai-compatible` provider, sent two requests per prompt. So on 1.18.23 the provider package needed no download. The title request has no `tools` field; the main request has a non-empty `tools` array.
   - OMP, with no network configuration, sent one request and exposed the model as `<provider>/<id>` in the `model` config option.
 - `ChatbotClient` and `AgentConnector` import Deno APIs and alias paths, so they cannot load under Bun yet. The driver here is a new, minimal client.
 - The SDK's `ClientSideConnection` exposes `closed`, `signal`, `setSessionConfigOption`, `cancel`, `initialize`, `newSession` and `prompt`.
@@ -14,7 +14,7 @@ See `proposal.md` for motivation. Observed facts:
 
 ## Goals / Non-Goals
 
-**Goals:** prove criteria ACP-01 to ACP-10 for both agents.
+**Goals:** build the provider, launch fixtures and driver, and prove criteria ACP-01, 02, 03, 09 and 10 for both agents. `prove-bun-acp-failure-paths` reuses them for ACP-04 to ACP-08, so the `paced` and `stall` scripts and `stallAfter` are built here but exercised there.
 
 **Non-Goals:**
 
@@ -142,24 +142,21 @@ The `acp.Client` implementation: `sessionUpdate` appends `agent_message_chunk` t
 
 ### D4. Suite method
 
-`migration/bun/poc/suites/acp.spec.ts` starts a provider per test and loops over `[["opencode", "OC"], ["omp", "OMP"]]`. Test titles are `ACP-NN-OC: ...` and `ACP-NN-OMP: ...`. The text generator returns printable ASCII from a seeded counter, so JSON escaping does not change sizes.
+`migration/bun/poc/suites/acp.spec.ts` starts a provider per test, calls `run.stop()` and kills any recorded survivor in `afterEach`, and loops over `[["opencode", "OC"], ["omp", "OMP"]]`. Test titles are `ACP-NN-OC: ...` and `ACP-NN-OMP: ...`. Get a process with `waitForChild(handle.pid)` first, because `dumb-init` forks after `spawn` returns. The text generator returns printable ASCII from a seeded counter, so JSON escaping does not change sizes.
 
 | ID | Method |
 | --- | --- |
 | ACP-01 | `text` script of 1 KiB. Assert stop reason and `text()`. |
 | ACP-02 | `text` script of 16 MiB with `chunkBytes` 262144. Compare SHA-256. |
 | ACP-03 | Prompt of 1 MiB generated text, reply 16 bytes. Assert some recorded request body contains the whole prompt string. |
-| ACP-04 | `startRun(kind, { wrapStdout: stallAfter(1048576, 3000) })`, `text` script of 4 MiB. Compare SHA-256. |
-| ACP-05 | `paced` script (65536 bytes, 50 ms, 60 s). Await `firstText`, call `connection.cancel({ sessionId })`, race the prompt with 5 s. |
-| ACP-06 | `stall` script. Race the prompt with a 3 s timer that throws; expect rejection; `stop()` resolves and `exited` is settled. |
-| ACP-07 | `paced` script. Await `firstText`, `process.kill(descendantsOf(handle.pid)[0], "SIGKILL")`, expect `promptOrCrash` to reject within 3 s, await `exited`. |
-| ACP-08 | After a short prompt, `stop()`, then race `connection.closed` with 5 s. |
 | ACP-09 | Set the four sentinels in `process.env` before `startRun`, delete them in `afterEach`. After `session/new`, read `readEnviron` on every `descendantsOf(handle.pid)`. Assert the sentinels are absent and `PATH` and `HOME` hold the passed values. |
 | ACP-10 | After a short prompt, record `descendantsOf(handle.pid)`, `stop()`, then assert `isAlive` is false for every recorded PID. |
 
 ## Risks / Trade-offs
 
-- [An agent limits output or rewrites large text regardless of the fixture limits] → That shows as a failed ACP-02 or ACP-03. Under gate design D7, inspect it, and report it as an agent-side cause if so; do not lower the size.
+- [An agent limits output or rewrites large text regardless of the fixture limits] → That shows as a failed ACP-02 or ACP-03. Under gate design D5, inspect it, and report it as an agent-side cause if so; do not lower the size.
 - [The pinned OMP 18.6.1 differs from the probed 18.18.0] → `ACP-01-OMP` fails first and names the difference. The model option value and `omp acp` arguments are the likely points; the existing integration test is the reference.
 - [An agent's child processes briefly outlive teardown] → ACP-10 runs after `exited`. If this shows up as a failure, it is real P0-3 evidence.
+- [The pinned OpenCode downloads its provider package at run time] → `ACP-01-OC` hangs or errors under `--network=none`. Run it first (task 2.2). If that is the cause, report it; the image can pre-install the package only through an OpenSpec change to the harness.
+- [OMP extracts native addons in every fresh data home] → Each test costs extra seconds. The 120 s per-test timeout covers this; report if it does not.
 - [Port 43291 is busy] → The run uses `--network=none` in its own network namespace, so nothing else binds it.

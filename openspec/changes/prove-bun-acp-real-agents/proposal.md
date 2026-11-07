@@ -8,7 +8,7 @@ Deterministic children cannot show that real agents survive a Bun parent. OpenCo
 
 - Add a loopback scripted provider and per-agent launch fixtures that run the pinned `opencode` and `omp` executables with no external network and no credentials.
 - Add a minimal ACP driver over the proof-of-concept spawn boundary, using the same `@agentclientprotocol/sdk` version as production.
-- Add the `acp` suite, implementing criteria ACP-01 to ACP-10 for both agents: handshake, large traffic, slow consumer, cancellation, timeout, abrupt exit, end of stream, real child environment and teardown.
+- Add the `acp` suite, implementing criteria ACP-01, 02, 03, 09 and 10 for both agents: handshake, large traffic, real child environment and teardown.
 - No product file changes. `AgentConnector` and `ChatbotClient` stay on Deno.
 
 ## Capabilities
@@ -32,6 +32,6 @@ None.
 depends-on: define-bun-go-no-go-gate
 depends-on: prove-bun-agent-process-boundary
 
-Uses the image and catalog from the gate, and imports `process/agent-process.ts` and `process/proc-tree.ts`. Conflict note: touches only its own new files. If `prove-bun-agent-process-boundary` selected the `Bun.spawn` fallback, run this suite with the same `POC_SPAWN_BACKEND`.
+Uses the image and catalog from the gate, and imports `process/agent-process.ts` and `process/proc-tree.ts`. Conflict note: touches only its own new files. `prove-bun-acp-failure-paths` imports the provider, launch fixtures and driver. If `prove-bun-agent-process-boundary` selected the `Bun.spawn` fallback, run this suite with the same `POC_SPAWN_BACKEND`; the gate rejects a mismatch.
 
 Deferred, not part of this batch: moving the connector to Bun is design section 8 step 5, planned only after a Go result.
