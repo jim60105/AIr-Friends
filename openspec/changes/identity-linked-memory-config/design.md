@@ -53,19 +53,44 @@ Add to `src/core/config-loader.ts`:
 export function normalizeIdentities(raw: unknown): IdentityGroupConfig[]
 ```
 
-`validateConfig` calls it right after the `channels` block: `config.identities = config.identities === undefined ? [] : normalizeIdentities(config.identities);`. Because env overrides already ran, YAML and `IDENTITIES` share this path.
+`validateConfig` calls it right after the `channels` block: `config.identities = config.identities == null ? [] : normalizeIdentities(config.identities);` (`== null` also covers a YAML `identities:` key left empty, which `deepMerge` stores as `null`). Because env overrides already ran, YAML and `IDENTITIES` share this path.
 
-Per account entry (field path `identities[i].accounts[j]`), after `const value = entry.trim()`:
+Per account entry (field path `identities[i].accounts[j]`), exactly this algorithm:
 
-1. `parseChannelId(value)` matches:
-   - type `account` → `platform = match.platform`, `rest = match.value`; continue at step 4 (email) or step 5 (others).
-   - type `channel` / `timeline` → reject.
-2. Else, `value` contains `@` and no `/` → email address: `userId = normalizeEmailMailbox(value).userId`, platform `email`.
-3. Else, `value` starts with `email/` → `rest = value.slice(6)`, continue at step 4.
-4. Email remainder: if `/^e_[0-9a-f]{64}$/.test(rest)` → `userId = rest`; else `userId = normalizeEmailMailbox(rest).userId`.
-5. Else split on the first `/` → `platform`, `userId`. Require `isValidPlatform(platform)`, non-empty `userId`, no `/` in `userId`, and `sanitizePathComponent(userId) === userId` (rejects `\`, `..`, leading `.`, inner leading/trailing whitespace).
-6. Steps 1(account) for non-email platforms apply rule 5's `userId` checks to `rest`.
-7. Canonical key `${platform}/${userId}`.
+```ts
+const value = entry.trim();
+let platform: string;
+let rest: string;
+const parsed = parseChannelId(value);
+if (parsed !== null) {
+  if (parsed.type !== "account") reject();          // channel / timeline ids
+  platform = parsed.platform;
+  rest = parsed.value;
+} else if (value.includes("@") && !value.includes("/")) {
+  platform = "email";
+  rest = value;
+} else if (value.startsWith("email/")) {
+  platform = "email";
+  rest = value.slice("email/".length);
+} else {
+  const slash = value.indexOf("/");
+  if (slash < 0) reject();                           // e.g. "discord", "alice"
+  platform = value.slice(0, slash);
+  rest = value.slice(slash + 1);
+}
+if (!isValidPlatform(platform)) reject();            // also covers "slack/account/1"
+let userId: string;
+if (platform === "email") {
+  userId = /^e_[0-9a-f]{64}$/.test(rest) ? rest : normalizeEmailMailbox(rest).userId;
+} else {
+  if (rest === "" || rest.includes("/") || rest.includes("@") ||
+      sanitizePathComponent(rest) !== rest) reject();
+  userId = rest;
+}
+return `${platform}/${userId}`;
+```
+
+`reject()` throws the field-path `ConfigError` below. Non-email user ids also reject `@` so a misplaced address such as `discord/alice@example.com` cannot be accepted silently.
 
 Every rejection, including any exception from `normalizeEmailMailbox`, is caught and rethrown as `new ConfigError(ErrorCode.CONFIG_INVALID, "<path> is not a supported identity account", { field: "<path>" })`. The original error and the value are never placed in the message or context.
 
@@ -73,7 +98,7 @@ Group checks, in order: `raw` is an array (`identities must be an array`); each 
 
 Alternative considered: warn-and-skip like `loadChannels`. Rejected: a silently dropped account would silently change which memories are readable; the source design requires fail-fast.
 
-Rule 5's `sanitizePathComponent(userId) === userId` check is an addition to the source design: it guarantees the canonical key equals `WorkspaceManager.computeWorkspaceKey()` output, so registry lookups by `workspace.key` cannot miss and two entries cannot collapse to one directory after sanitization.
+The `sanitizePathComponent(rest) === rest` check is an addition to the source design: it guarantees the canonical key equals `WorkspaceManager.computeWorkspaceKey()` output, so registry lookups by `workspace.key` cannot miss and two entries cannot collapse to one directory after sanitization.
 
 ### D3. Environment override
 

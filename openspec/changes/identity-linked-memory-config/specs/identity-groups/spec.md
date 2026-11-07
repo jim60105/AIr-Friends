@@ -27,7 +27,7 @@ The configuration loader SHALL normalize every `identities[i].accounts[j]` entry
 - **THEN** the loaded group SHALL contain that exact value
 
 #### Scenario: Identities omitted
-- **WHEN** the configuration has no `identities` key and no `IDENTITIES` variable
+- **WHEN** the configuration has no `identities` key, or an empty `identities:` key (YAML null), and no `IDENTITIES` variable
 - **THEN** the loaded configuration SHALL have `identities` equal to `[]`
 
 ### Requirement: Identity Group Validation
@@ -43,7 +43,7 @@ The configuration loader SHALL reject an invalid `identities` value with a `Conf
 - **THEN** loading SHALL fail with `ConfigError` naming `identities[1].id`
 
 #### Scenario: Unsupported account forms rejected
-- **WHEN** an account entry has an unknown platform, is a `{platform}/channel/...` or `{platform}/timeline/...` id, has an empty user id, a user id containing `/` or `\`, `..`, a leading `.`, or surrounding whitespace inside the user id, or is an unparseable email address
+- **WHEN** an account entry has an unknown platform (`slack/123` or `slack/account/123`), has no `/` and no `@` (`discord`), is a `{platform}/channel/...` or `{platform}/timeline/...` id, has a non-email user id that is empty or contains `/`, `\`, `@`, `..`, a leading `.` or surrounding whitespace, or is an unparseable email address
 - **THEN** loading SHALL fail with `ConfigError` naming `identities[i].accounts[j]`
 
 #### Scenario: Duplicate account rejected
