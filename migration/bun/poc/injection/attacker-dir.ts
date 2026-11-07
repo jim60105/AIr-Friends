@@ -14,6 +14,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -130,19 +131,33 @@ export function pwned(dir: string): boolean {
 
 const DEFAULT_PATH = process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin";
 
-/** The explicit environment every run gets; `HOME` is always caller-supplied. */
-function baseEnv(env: Record<string, string>): Record<string, string> {
-  return { PATH: DEFAULT_PATH, ...env };
-}
-
+/**
+ * Runs one command with an explicit environment of `PATH` and `HOME` only. A
+ * caller that needs a specific (hostile) `HOME` passes one; otherwise a fresh
+ * `mkdtemp` is created for the run and removed afterwards, so nothing from the
+ * suite's own home directory can reach the skill.
+ */
 function run(
   command: string,
   args: readonly string[],
   cwd: string,
   env: Record<string, string>,
 ): SkillRun {
-  const result = spawnSync(command, args, { cwd, env: baseEnv(env), encoding: "utf8" });
-  return { exitCode: result.status ?? -1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  const ownHome = env.HOME === undefined ? mkdtempSync(join(tmpdir(), "inj-run-home-")) : undefined;
+  try {
+    const result = spawnSync(command, args, {
+      cwd,
+      env: { PATH: DEFAULT_PATH, ...env, HOME: env.HOME ?? ownHome },
+      encoding: "utf8",
+    });
+    return {
+      exitCode: result.status ?? -1,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
+  } finally {
+    if (ownHome !== undefined) rmSync(ownHome, { recursive: true, force: true });
+  }
 }
 
 /** Executes the script path itself, so the kernel honours its hardened shebang. */

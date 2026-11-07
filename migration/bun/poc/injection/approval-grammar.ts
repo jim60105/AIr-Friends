@@ -108,33 +108,36 @@ export function matchTrustedInvocation(
   // 1. Shell syntax at all means the executed file is not established here.
   if (containsShellOperators(commandWithoutFdRedirects(segment))) return undefined;
 
-  // 2. One literal token per argument; a tolerated fd redirect is not an argument.
+  // 2. One token per argument; a tolerated fd redirect is not an argument. Only
+  // the tokens up to and including the spelling are decoded: everything after
+  // it is a skill argument, which production does not inspect either.
   const tokens: string[] = [];
-  for (const raw of tokenizeShellCommand(segment)) {
-    if (raw.length === 0) continue;
-    if (FD_REDIRECT_TOKEN_PATTERN.test(raw)) continue;
-    const decoded = decodeLiteralToken(raw);
-    if (decoded === undefined) return undefined;
-    tokens.push(decoded);
+  for (const token of tokenizeShellCommand(segment)) {
+    if (token.length === 0) continue;
+    if (FD_REDIRECT_TOKEN_PATTERN.test(token)) continue;
+    tokens.push(token);
   }
   if (tokens.length === 0) return undefined;
+  const first = decodeLiteralToken(tokens[0]);
+  if (first === undefined) return undefined;
 
   // 3./4. Either the exact literal prefix followed by the spelling, or the
   // spelling directly. A slashless direct token goes through PATH, never the
   // working directory, and `bun run <name>` looks up a package script first,
   // so both forms require a slash in the spelling.
   let spelling: string;
-  if (tokens[0] === LITERAL_PREFIX[0]) {
+  if (first === LITERAL_PREFIX[0]) {
     if (tokens.length < LITERAL_PREFIX.length + 1) return undefined;
-    for (let i = 0; i < LITERAL_PREFIX.length; i++) {
-      if (tokens[i] !== LITERAL_PREFIX[i]) return undefined;
+    for (let i = 1; i < LITERAL_PREFIX.length; i++) {
+      if (decodeLiteralToken(tokens[i]) !== LITERAL_PREFIX[i]) return undefined;
     }
-    const script = tokens[LITERAL_PREFIX.length];
+    const script = decodeLiteralToken(tokens[LITERAL_PREFIX.length]);
+    if (script === undefined) return undefined;
     if (script.startsWith("-")) return undefined;
     if (!script.includes("/")) return undefined;
     spelling = script;
   } else {
-    spelling = tokens[0];
+    spelling = first;
     if (!spelling.includes("/")) return undefined;
   }
 

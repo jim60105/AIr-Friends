@@ -28,7 +28,7 @@ afterAll(() => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
 });
 
-/** The explicit run environment: `PATH` and a fresh `HOME`. */
+/** The run environment: `PATH` and a fresh `HOME`. */
 function env(): Record<string, string> {
   return { PATH: BASE_PATH, HOME: scratchDir("inj-noconfig-home-") };
 }
@@ -55,12 +55,14 @@ test("INJ-08: an absent trusted config stops the skill before any attacker code 
     { form: "literal", result: runLiteral(dir, env()) },
   ];
   observe("missingConfigExit", runs.map(({ result }) => result.exitCode));
-  observe(
-    "missingConfigStderr",
-    runs.map(({ result }) => firstStderrLine(result.stderr)),
-  );
+  observe("missingConfigStderr", runs.map(({ result }) => firstStderrLine(result.stderr)));
+  // A diagnostic failure (the binary could not be spawned, empty stderr) is not
+  // Bun stopping, so it cannot classify as `fail-stop`.
   const stopped = runs.every(({ result }) =>
-    result.exitCode !== 0 && !result.stdout.includes("SKILL-RAN") && !pwned(dir)
+    result.exitCode > 0 &&
+    firstStderrLine(result.stderr) !== "" &&
+    !result.stdout.includes("SKILL-RAN") &&
+    !pwned(dir)
   );
   const behavior = stopped ? "fail-stop" : "fallback";
   observe("missingConfigBehavior", behavior);
@@ -74,13 +76,15 @@ test("INJ-08: an absent trusted config stops the skill before any attacker code 
   // Bun fell back to discovery, so the direct form needs a launcher to stop
   // before Bun starts; the literal form is typed by the agent and stays open.
   expect(existsSync(LAUNCHER)).toBe(true);
+  const launcherDir = makeAttackerDir(["bunfig"]);
+  scratch.push(launcherDir);
   const viaLauncher = spawnSync(LAUNCHER, [SKILL_PATH, "--flag", "v"], {
-    cwd: dir,
+    cwd: launcherDir,
     env: env(),
     encoding: "utf8",
   });
   expect(viaLauncher.status).toBe(78);
   expect(viaLauncher.stdout).not.toContain("SKILL-RAN");
-  expect(pwned(dir)).toBe(false);
+  expect(pwned(launcherDir)).toBe(false);
   observe("literalFormUnprotected", true);
 });
