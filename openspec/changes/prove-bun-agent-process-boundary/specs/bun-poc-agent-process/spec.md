@@ -18,7 +18,7 @@ When the consumer stops reading a child's stdout, the boundary SHALL stop accept
 #### Scenario: Resumed consumer
 - **GIVEN** a stalled consumer
 - **WHEN** it resumes
-- **THEN** every byte the child wrote SHALL arrive
+- **THEN** the child SHALL exit 0 having written every byte, and every byte SHALL arrive
 
 ### Requirement: Stdin Backpressure
 
@@ -73,7 +73,7 @@ Teardown SHALL send SIGTERM through `dumb-init`, and SHALL send SIGKILL after 2 
 #### Scenario: Child ignoring SIGTERM
 - **GIVEN** a child that ignores SIGTERM
 - **WHEN** teardown runs
-- **THEN** SIGKILL SHALL be sent no earlier than 2000 ms and the wrapper's exit SHALL be observed by 2500 ms with signal `SIGKILL`
+- **THEN** SIGKILL SHALL follow the 2000 ms grace timer, measured at no less than 1990 ms from the SIGTERM call returning, and the wrapper's exit SHALL be observed by 2500 ms with signal `SIGKILL`
 
 ### Requirement: Repeated Spawn Leaves No Residue
 

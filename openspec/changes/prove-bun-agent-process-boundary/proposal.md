@@ -9,7 +9,7 @@ The design's main runtime risk is that Bun's `node:child_process` differs from D
 - Add a proof-of-concept `createAgentProcess` boundary matching the `AgentProcessHandle` contract in design section 4.3, on `node:child_process`, wrapped by `dumb-init`, with an explicit environment.
 - Add the teardown helper that mirrors the connector's SIGTERM then SIGKILL after 2 seconds.
 - Add the `process` suite, implementing criteria PROC-01 to PROC-09: backpressure in both directions, large round trip, stderr drain, stdin EOF, real child environment, signals and descriptor and process counts.
-- If and only if a criterion fails on `node:child_process`, add the `Bun.spawn` fallback behind the same boundary, as the design allows.
+- If a criterion still fails on `node:child_process`, add the `Bun.spawn` fallback behind the same boundary, as the design allows.
 - No product file changes. `AgentConnector` keeps `Deno.Command`.
 
 ## Capabilities
@@ -31,6 +31,6 @@ None.
 
 depends-on: define-bun-go-no-go-gate
 
-Needs the image, `run-suite.sh`, the `observe` helper and the failure policy (gate design D7). Conflict note: touches only its own new files. `prove-bun-acp-real-agents` imports `migration/bun/poc/process/agent-process.ts` and `process/proc-tree.ts`.
+Needs the image, `run-suite.sh` and the `observe` helper from `build-bun-poc-harness`, and the failure policy (gate design D5). Conflict note: touches only its own new files. `prove-bun-acp-real-agents` imports `migration/bun/poc/process/agent-process.ts` and `process/proc-tree.ts`.
 
 Deferred, not part of this batch: moving `AgentConnector` to this boundary is design section 8 step 5, planned only after a Go result.
