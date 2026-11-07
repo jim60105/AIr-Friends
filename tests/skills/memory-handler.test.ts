@@ -9,6 +9,7 @@ import type { MemorySearchEntry, SkillContext } from "@skills/types.ts";
 import type { NoteRecallResult } from "../../src/types/memory.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { NormalizedEvent, Platform } from "../../src/types/events.ts";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (): PlatformAdapter => {
@@ -2369,5 +2370,228 @@ Deno.test("MemoryHandler - save, stats and export stay on the current account", 
     assertEquals((exportResult.data as { count: number }).count, 1);
     assertEquals(exported.includes("my own preference"), true);
     assertEquals(exported.includes("misskey linked memory"), false);
+  });
+});
+
+// ============ Identity-linked memory patch ownership ============
+
+/**
+ * A handler wired to a three-account identity group, with the current account
+ * (discord/123) linked to misskey/456 and misskey/789.
+ */
+async function withLinkedPatchHandler(
+  isDm: boolean,
+  fn: (fixture: {
+    handler: MemoryHandler;
+    store: MemoryStore;
+    manager: WorkspaceManager;
+    workspace: WorkspaceInfo;
+    linked: WorkspaceInfo[];
+    context: SkillContext;
+  }) => Promise<void>,
+): Promise<void> {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
+    const store = new MemoryStore(manager, {});
+    const registry = new IdentityRegistry(
+      [{
+        id: "alice",
+        accounts: ["discord/123", "misskey/456", "misskey/789"],
+      }],
+      manager,
+    );
+    const handler = new MemoryHandler(store, undefined, registry);
+
+    const eventFor = (platform: Platform, userId: string): NormalizedEvent => ({
+      platform,
+      channelId: "456",
+      userId,
+      messageId: "msg_1",
+      isDm,
+      guildId: "",
+      content: "",
+      timestamp: new Date(0),
+    });
+
+    const workspace = await manager.getOrCreateWorkspace(eventFor("discord", "123"));
+    await manager.getOrCreateWorkspace(eventFor("misskey", "456"));
+    await manager.getOrCreateWorkspace(eventFor("misskey", "789"));
+    const linked = registry.linkedWorkspaces(workspace);
+
+    const context: SkillContext = {
+      workspace,
+      platformAdapter: createMockPlatformAdapter(),
+      channelId: "456",
+      userId: "123",
+      workspaceManager: manager,
+    };
+
+    await fn({ handler, store, manager, workspace, linked, context });
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+}
+
+Deno.test("MemoryHandler - memory-patch patches the current workspace when it owns the id", async () => {
+  await withLinkedPatchHandler(true, async ({ handler, store, workspace, linked, context }) => {
+    const own = await store.addMemory(workspace, "current account memory", {
+      visibility: "public",
+    });
+    await store.addMemory(linked[0], "linked account memory", { visibility: "public" });
+
+    const linkedPath = store.getMemoryFilePathFor(linked[0], "public");
+    const linkedSizeBefore = (await Deno.stat(linkedPath)).size;
+
+    const result = await handler.handleMemoryPatch(
+      { memory_id: own.id, enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, true);
+    assertEquals((await Deno.stat(linkedPath)).size, linkedSizeBefore);
+    const currentEvents = (await Deno.readTextFile(store.getMemoryFilePathFor(workspace, "public")))
+      .trim().split("\n");
+    assertEquals(currentEvents.length, 2);
+    assertEquals(currentEvents[1].includes('"enabled":false'), true);
+  });
+});
+
+Deno.test("MemoryHandler - memory-patch appends to the linked public owner's file", async () => {
+  await withLinkedPatchHandler(true, async ({ handler, store, workspace, linked, context }) => {
+    const target = await store.addMemory(linked[0], "linked deployment note", {
+      visibility: "public",
+    });
+    await store.addMemory(workspace, "current account memory", { visibility: "public" });
+    await store.addMemory(linked[1], "other linked memory", { visibility: "public" });
+
+    const ownerPath = store.getMemoryFilePathFor(linked[0], "public");
+    const currentPath = store.getMemoryFilePathFor(workspace, "public");
+    const otherPath = store.getMemoryFilePathFor(linked[1], "public");
+    const currentSizeBefore = (await Deno.stat(currentPath)).size;
+    const otherSizeBefore = (await Deno.stat(otherPath)).size;
+
+    const result = await handler.handleMemoryPatch(
+      { memory_id: target.id, enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, true);
+    assertEquals(
+      Object.keys(result.data as Record<string, unknown>).sort(),
+      ["changes", "patchId", "targetId", "timestamp"],
+    );
+    const ownerEvents = (await Deno.readTextFile(ownerPath)).trim().split("\n");
+    assertEquals(ownerEvents.length, 2);
+    assertEquals(ownerEvents[1].includes('"enabled":false'), true);
+    assertEquals((await Deno.stat(currentPath)).size, currentSizeBefore);
+    assertEquals((await Deno.stat(otherPath)).size, otherSizeBefore);
+
+    const search = await handler.handleMemorySearch({ query: "deployment note" }, context);
+    assertEquals(search.success, true);
+    assertEquals(
+      searchedMemories(search).some((memory) => memory.id === target.id),
+      false,
+    );
+  });
+});
+
+Deno.test("MemoryHandler - memory-patch cannot reach a linked private memory outside a DM", async () => {
+  await withLinkedPatchHandler(false, async ({ handler, store, linked, context }) => {
+    const target = await store.addMemory(linked[0], "linked private note", {
+      visibility: "private",
+    });
+    const privatePath = store.getMemoryFilePathFor(linked[0], "private");
+    const privateSizeBefore = (await Deno.stat(privatePath)).size;
+
+    const result = await handler.handleMemoryPatch(
+      { memory_id: target.id, enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, false);
+    assertEquals(result.error?.includes("Memory not found:"), true);
+    assertEquals(result.error?.includes("--scope channel"), true);
+    assertEquals((await Deno.stat(privatePath)).size, privateSizeBefore);
+  });
+});
+
+Deno.test("MemoryHandler - memory-patch reaches a linked private memory in a DM", async () => {
+  await withLinkedPatchHandler(true, async ({ handler, store, linked, context }) => {
+    const target = await store.addMemory(linked[0], "linked private note", {
+      visibility: "private",
+    });
+    const privatePath = store.getMemoryFilePathFor(linked[0], "private");
+
+    const result = await handler.handleMemoryPatch(
+      { memory_id: target.id, enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, true);
+    const events = (await Deno.readTextFile(privatePath)).trim().split("\n");
+    assertEquals(events.length, 2);
+    assertEquals(events[1].includes('"enabled":false'), true);
+  });
+});
+
+Deno.test("MemoryHandler - memory-patch rejects an id owned by two linked workspaces", async () => {
+  await withLinkedPatchHandler(true, async ({ handler, store, linked, context }) => {
+    const target = await store.addMemory(linked[0], "duplicated linked memory", {
+      visibility: "public",
+    });
+    await Deno.copyFile(
+      store.getMemoryFilePathFor(linked[0], "public"),
+      store.getMemoryFilePathFor(linked[1], "public"),
+    );
+
+    const firstPath = store.getMemoryFilePathFor(linked[0], "public");
+    const secondPath = store.getMemoryFilePathFor(linked[1], "public");
+    const firstSizeBefore = (await Deno.stat(firstPath)).size;
+    const secondSizeBefore = (await Deno.stat(secondPath)).size;
+
+    const result = await handler.handleMemoryPatch(
+      { memory_id: target.id, enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, false);
+    assertEquals(result.error?.includes(target.id), true);
+    assertEquals(result.error?.includes("ambiguous"), true);
+    assertEquals((await Deno.stat(firstPath)).size, firstSizeBefore);
+    assertEquals((await Deno.stat(secondPath)).size, secondSizeBefore);
+  });
+});
+
+Deno.test("MemoryHandler - memory-patch reports an unknown id as not found", async () => {
+  await withLinkedPatchHandler(true, async ({ handler, context }) => {
+    const result = await handler.handleMemoryPatch(
+      { memory_id: "mem_missing", enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, false);
+    assertEquals(result.error?.includes("Memory not found: mem_missing"), true);
+    assertEquals(result.error?.includes("--scope channel"), true);
+  });
+});
+
+Deno.test("MemoryHandler - memory-patch skips an unreadable linked account", async () => {
+  await withLinkedPatchHandler(true, async ({ handler, store, linked, context }) => {
+    await Deno.mkdir(store.getMemoryFilePathFor(linked[0], "public"));
+    const target = await store.addMemory(linked[1], "readable linked memory", {
+      visibility: "public",
+    });
+    const readablePath = store.getMemoryFilePathFor(linked[1], "public");
+
+    const result = await handler.handleMemoryPatch(
+      { memory_id: target.id, enabled: false },
+      context,
+    );
+
+    assertEquals(result.success, true);
+    const events = (await Deno.readTextFile(readablePath)).trim().split("\n");
+    assertEquals(events.length, 2);
+    assertEquals(events[1].includes('"enabled":false'), true);
   });
 });
