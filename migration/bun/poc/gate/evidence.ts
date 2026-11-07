@@ -80,6 +80,7 @@ function assertionCount(testCase: Record<string, unknown>): number {
  */
 export function collectTests(junitXml: string): EvidenceTest[] {
   const root = asObject(parser.parse(junitXml));
+  // Reports wrap suites in `testsuites`, but a bare root `testsuite` is also valid.
   const holder = asObject(root.testsuites ?? root);
   return collectCases(holder).map((testCase) => ({
     name: String(testCase.name ?? ""),
