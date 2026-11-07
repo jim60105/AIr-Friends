@@ -62,15 +62,20 @@ Bytes that arrive after the head in the same read stay in `head`, as they do tod
 ```ts
 function tunnelPipe(from: net.Socket, to: net.Socket): Promise<void> {
   return new Promise((resolve) => {
-    const fail = () => { from.destroy(); to.destroy(); resolve(); };
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    const fail = () => { from.destroy(); to.destroy(); done(); };
     from.on("data", (chunk) => {
       if (!to.write(chunk)) {
         from.pause();
         to.once("drain", () => from.resume());
       }
     });
-    from.once("end", () => { to.end(); resolve(); });
+    from.once("end", () => { to.end(); done(); });
     from.once("error", fail);
+    to.once("error", fail);
+    from.once("close", done);
+    to.once("close", done);
   });
 }
 ```
@@ -106,8 +111,8 @@ A `node:dgram` `udp4` socket bound to `127.0.0.1:0`. For each query: read the na
 | EGR-02 | Allowlisted host answering `169.254.169.254`; the `isMetadataAddress` literal table. | `egressAllowHosts - metadata addresses stay blocked...`, `isMetadataAddress - covers...`, `egress proxy - refuses plain-HTTP request to a metadata endpoint with 403` |
 | EGR-03 | `net.Server` on `127.0.0.1:P` and `127.0.0.2:P` with the same port. Allowlist `rebind.test`. Answer by `queryIndex`. | New: requires the seam |
 | EGR-04 | Allowlist `127.0.0.1`; upstream `net.Server` with `allowHalfOpen`; both sides write 32 MiB of seeded chunks and hash what they read; the client pauses 200 ms after the first chunk. | `tunnelConnections - relays a large payload...`, `egress proxy - CONNECT to an allowlisted loopback upstream...` |
-| EGR-05 | Two tests per the scenarios. | `tunnelConnections - upstream close propagates EOF...` |
-| EGR-06 | `node:http` upstream on loopback. Raw `net.connect` client. For pipelining, write two complete `GET` heads in one `write` and count `HTTP/1.1 ` status lines until the socket closes. | `rewriteForwardHead - ...` (both), `egress proxy - plain-HTTP forward...` |
+| EGR-05 | Three tests per the scenarios. For the peer failure, `destroy()` the upstream socket during a large transfer and assert that the client socket closes and `tunnelConnections` resolves within 2 s. | `tunnelConnections - upstream close propagates EOF...` |
+| EGR-06 | Raw `net.Server` upstream on loopback that records received bytes, replies with one canned `HTTP/1.1 200 OK` response with `Connection: close`, and ends. Raw `net.connect` client. For pipelining, write two complete `GET` heads in one `write`, count `HTTP/1.1 ` status lines until the socket closes, and assert the forwarded first head has `Connection: close`. A raw upstream keeps the test independent of any HTTP server's pipelining. | `rewriteForwardHead - ...` (both), `egress proxy - plain-HTTP forward...` |
 | EGR-07 | Per the scenarios, with an empty-allowlist case. | `egressAllowHosts - allowlisted private literal...`, `- IPv6 literal entry...`, `- malformed entries...`, `- empty allowlist...` |
 | EGR-08 | Raw client sending each request. For 502, allowlist `127.0.0.1` and use a port taken from a closed `net.Server`. | `egress proxy - refuses CONNECT to a loopback target with 403` |
 

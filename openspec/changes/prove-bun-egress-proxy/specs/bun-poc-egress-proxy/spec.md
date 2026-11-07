@@ -71,6 +71,11 @@ The proxy SHALL forward a half-close to the other side and keep the opposite dir
 - **WHEN** the upstream closes
 - **THEN** the client SHALL see end of stream within 1 second
 
+#### Scenario: Peer failure mid-transfer
+- **GIVEN** an established tunnel carrying a large transfer
+- **WHEN** one side is destroyed
+- **THEN** the other side SHALL close and the tunnel SHALL finish within 2 seconds
+
 ### Requirement: Plain HTTP Forwarding
 
 The proxy SHALL rewrite a plain HTTP request to origin form with `Connection: close`, dropping client `Connection` and `Proxy-Connection` headers, so one connection serves one validated request.
