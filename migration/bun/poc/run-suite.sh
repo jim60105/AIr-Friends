@@ -13,7 +13,10 @@ image="air-friends-bun-poc:local"
 extra=()
 case "${suite}" in
   ffi-enosys) extra+=(--security-opt "seccomp=${poc_dir}/fixtures/deny-openat2.json") ;;
-  injection-noconfig) extra+=(--tmpfs "/opt/air:rw,mode=0755") ;;
+  # `notmpcopyup`: podman copies the image's /opt/air content into a `--tmpfs`
+  # by default, which keeps skill-bunfig.toml present and defeats the
+  # missing-config precondition this suite asserts.
+  injection-noconfig) extra+=(--tmpfs "/opt/air:rw,mode=0755,notmpcopyup") ;;
   harness|process|acp|acp-failure|ffi|egress|injection) ;;
   *) echo "unknown suite: ${suite}" >&2; exit 2 ;;
 esac
