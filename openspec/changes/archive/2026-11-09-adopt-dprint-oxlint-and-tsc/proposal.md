@@ -19,7 +19,9 @@ None.
 
 ### Modified Capabilities
 
-None at the main-spec level. This change adds requirements to the `bun-toolchain` capability introduced by `add-bun-package-manifest` (delta file `specs/bun-toolchain/spec.md`).
+- `bun-toolchain`: this change adds requirements to the capability introduced by `add-bun-package-manifest` and
+  modifies `Path Aliases Resolve Under Bun` (delta file `specs/bun-toolchain/spec.md`), because TypeScript rejects
+  every module specifier beginning with `@types/` (TS6137), so the type checker cannot resolve that prefix.
 
 ## Impact
 

@@ -411,7 +411,7 @@ Deno.test({
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
           const key = `${workspaceManager.getWorkspaceKeyFromEvent(event)}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -634,7 +634,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
         };
       });
@@ -690,7 +690,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
         };
       });
@@ -744,7 +744,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
         };
       });
@@ -796,7 +796,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
         };
       });
@@ -838,7 +838,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(`${workspaceKey}:${event.channelId}`, true);
         };
       });
@@ -1490,7 +1490,7 @@ Deno.test("SessionOrchestrator - retry sends reply on first retry attempt", asyn
         if (callCount === 2) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -1539,7 +1539,7 @@ Deno.test("SessionOrchestrator - retry prompt includes recorded permission rejec
         if (callCount === 2) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -1583,7 +1583,7 @@ Deno.test("SessionOrchestrator - does not retry when reaction was sent", async (
         if (callCount === 1) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (reactionHandler as any).reactionSentMap.set(key, true);
         }
       };
@@ -1622,9 +1622,9 @@ Deno.test("SessionOrchestrator - does not retry when both reaction and reply wer
         if (callCount === 1) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (reactionHandler as any).reactionSentMap.set(key, true);
         }
       };
@@ -1692,7 +1692,7 @@ Deno.test("SessionOrchestrator - no retry when initial prompt has reply sent", a
         if (callCount === 1) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -1993,7 +1993,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost sends reply successfully
         if (callCount === 1) {
           const replyHandler = skillRegistry.getReplyHandler();
           const key = `discord/bot_id:99988877766655544`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -2065,7 +2065,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost retries on no reply", as
         if (callCount === 2) {
           const replyHandler = skillRegistry.getReplyHandler();
           const key = `discord/bot_id:99988877766655544`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -2152,7 +2152,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
     const config = createTestConfig(tempDir);
     config.agent.defaultAgentType = "opencode";
     // Ensure skillApi is not configured (disabled)
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     delete (config as any).skillApi;
 
     const workspaceManager = new WorkspaceManager({
@@ -2196,7 +2196,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
         if (callCount === 1) {
           const replyHandler = skillRegistry.getReplyHandler();
           const key = `discord/bot_id:99988877766655544`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -2240,7 +2240,7 @@ Deno.test("SessionOrchestrator - buildSpontaneousPrompt uses Vento template", as
       connector.onPrompt = () => {
         const replyHandler = skillRegistry.getReplyHandler();
         const key = `discord/bot_id:99988877766655544`;
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
         (replyHandler as any).replySentMap.set(key, true);
       };
     });
@@ -3764,7 +3764,7 @@ Deno.test({
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
             const key = `discord/u1:99988877766655544`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -3811,7 +3811,7 @@ Deno.test({
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
             const key = `discord/u1:99988877766655544`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -3856,7 +3856,7 @@ Deno.test({
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
             const key = `discord/bot_id:99988877766655544`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -3907,7 +3907,7 @@ Deno.test({
         connector.onPrompt = () => {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -3945,7 +3945,7 @@ Deno.test({
         connector.onPrompt = () => {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -3983,7 +3983,7 @@ Deno.test({
         connector.onPrompt = () => {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -4024,7 +4024,7 @@ Deno.test({
         connector.onPrompt = () => {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -4085,7 +4085,7 @@ Deno.test({
 
       // Switch to opencode agent with YOLO enabled
       config.agent.defaultAgentType = "opencode";
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       (orchestrator as any).yolo = true;
 
       const event = createTestEvent();
@@ -4098,7 +4098,7 @@ Deno.test({
           if (callCount === 1) {
             const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
             const key = `${workspace}:${event.channelId}`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -4139,7 +4139,7 @@ Deno.test({
           if (callCount === 1) {
             const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
             const key = `${workspace}:${event.channelId}`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -4191,7 +4191,7 @@ Deno.test({
           if (callCount === 1) {
             const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
             const key = `${workspace}:${event.channelId}`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -4258,7 +4258,7 @@ Deno.test({
         connector.onPrompt = () => {
           observedSessionIds.push(connector.options.agentConfig.env?.["SESSION_ID"] ?? "");
           const key = `${workspaceKey}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -4390,7 +4390,7 @@ Deno.test({
         connector.onPrompt = () => {
           observedSessionId = connector.options.agentConfig.env?.["SESSION_ID"] ?? "";
           const key = `${workspace.key}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         };
       });
@@ -4502,7 +4502,7 @@ Deno.test({
       const logger = createLogger("test");
 
       // No active sessions exist, so the disposable entry is removed
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
 
       // The disposable entry is gone; the tmp root and the reserved
@@ -4562,7 +4562,7 @@ Deno.test({
       const logger = createLogger("test");
 
       // Should skip cleanup because another session exists
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
 
       // Verify tmp directory still exists
@@ -4602,7 +4602,7 @@ Deno.test({
       const logger = createLogger("test");
 
       // Should not throw when tmp directory doesn't exist
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
 
       // If we get here without throwing, the test passes
@@ -4641,7 +4641,7 @@ Deno.test({
       // Stub Deno.removeSync to throw a non-NotFound error
       const originalRemoveSync = Deno.removeSync;
       let removeCalled = false;
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       (Deno as any).removeSync = (_path: string, _options?: Deno.RemoveOptions) => {
         removeCalled = true;
         throw new Error("Permission denied (mock)");
@@ -4649,12 +4649,12 @@ Deno.test({
 
       try {
         // Should not throw — error is caught and logged
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
         await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
         assertEquals(removeCalled, true);
       } finally {
         // Restore original Deno.removeSync
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
         (Deno as any).removeSync = originalRemoveSync;
       }
       // The failed entry is retained (and reported), and the tmp root survives.
@@ -4701,7 +4701,7 @@ Deno.test({
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
             const key = `discord/u1:99988877766655544`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -4742,7 +4742,7 @@ Deno.test({
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
             const key = `discord/u1:99988877766655544`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -4795,7 +4795,7 @@ Deno.test({
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
             const key = `discord/u1:99988877766655544`;
-            // deno-lint-ignore no-explicit-any
+            // oxlint-disable-next-line typescript/no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
         };
@@ -4892,7 +4892,7 @@ Deno.test("SessionOrchestrator - setupSession pre-creates session payload stagin
         if (callCount === 1) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -5111,7 +5111,7 @@ Deno.test({
         if (callCount === 1) {
           const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
           const key = `${workspace}:${event.channelId}`;
-          // deno-lint-ignore no-explicit-any
+          // oxlint-disable-next-line typescript/no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
       };
@@ -5383,11 +5383,11 @@ Deno.test({
 
       // Inject a dec() that throws: the finally's first try must swallow it,
       // then record metrics, and still return the computed response.
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       const originalDec = (activeSessionsGauge as any).dec;
       const gaugeBefore = (await activeSessionsGauge.get()).values[0]?.value ?? 0;
       try {
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
         (activeSessionsGauge as any).dec = () => {
           throw new Error("dec boom");
         };
@@ -5402,7 +5402,7 @@ Deno.test({
         assertEquals(response.success, false);
         assertEquals(response.error, "Agent did not generate a reply");
       } finally {
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
         (activeSessionsGauge as any).dec = originalDec;
         // The session's inc() ran but dec() failed during this test; rebalance
         // the shared gauge so later tests in this file see a clean baseline.

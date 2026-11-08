@@ -65,7 +65,7 @@ async function setup(timeoutMs?: number): Promise<TestRig> {
         tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
         isDm: false,
       },
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: { platform: "discord" } as any,
     });
 

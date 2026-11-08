@@ -208,7 +208,7 @@ class LedgerAdapter extends PlatformAdapter {
 
 async function probeEphemeralPort(): Promise<number> {
   const probe = Deno.serve({ port: 0, hostname: "127.0.0.1" }, () => new Response("probe"));
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const port = (probe as any).addr.port as number;
   await probe.shutdown();
   return port;

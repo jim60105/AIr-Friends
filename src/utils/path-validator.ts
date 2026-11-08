@@ -33,6 +33,7 @@ export function validatePathWithinBoundary(
 export function sanitizePathComponent(component: string): string {
   // Remove any path separators or traversal sequences
   return component
+    // oxlint-disable-next-line no-useless-escape
     .replace(/[\/\\]/g, "_")
     .replace(/\.\./g, "_")
     .replace(/^\.+/, "")

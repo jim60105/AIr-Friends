@@ -320,6 +320,7 @@ Deno.test("SpontaneousScheduler - persists next time via stateStore in scheduleN
   };
   scheduler.setStateStore(mockStore as never);
 
+  // oxlint-disable-next-line no-unused-vars
   let callCount = 0;
   scheduler.setCallback(() => {
     callCount++;

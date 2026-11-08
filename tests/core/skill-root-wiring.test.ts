@@ -136,7 +136,7 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
     },
     platformRegistry: { isAllConnected: () => true },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   server.setContext(mockContext as any);
   const readiness = await server.checkSkillReadiness();
   const scriptCheck = readiness.checks.find((c) => c.name === "scripts:memory-save");

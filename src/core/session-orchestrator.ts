@@ -5424,6 +5424,7 @@ export class SessionOrchestrator {
       if (session) session.recoveryFenced = false;
       try {
         return await connector.prompt(sessionId, finalContent);
+        // oxlint-disable-next-line no-unused-vars
       } catch (_resumeError) {
         logger.error(
           "Resumed session {sessionId} also timed out. Giving up.",

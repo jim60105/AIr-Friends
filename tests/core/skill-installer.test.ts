@@ -330,6 +330,7 @@ Deno.test("installExternalSkills - linked .agents ancestor is refused (B5)", asy
   );
   const executor: SkillInstallExecutor = {
     async run(_cmd, _args, options) {
+      // oxlint-disable-next-line typescript/no-non-null-asserted-optional-chain
       const home = options?.env?.HOME!;
       // Hostile staging: `.agents` is a LINK to a foreign tree carrying the
       // skill as regular files.

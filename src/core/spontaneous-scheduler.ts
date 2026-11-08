@@ -221,6 +221,7 @@ export class SpontaneousScheduler extends BaseScheduler {
   /**
    * Get the current status of all platform schedulers.
    */
+  // oxlint-disable-next-line typescript/ban-ts-comment
   // @ts-ignore: Return type intentionally differs from base — per-platform Record vs single object
   override getStatus(): Record<string, {
     isRunning: boolean;

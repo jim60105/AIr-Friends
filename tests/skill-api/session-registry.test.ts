@@ -34,7 +34,7 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
 
   const mockAdapter = {
     platform: "discord",
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 
   const mockEvent = {
@@ -46,7 +46,7 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
     guildId: "",
     content: "test",
     timestamp: new Date(),
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 
   const sessionId = registry.register({
@@ -91,9 +91,9 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -130,9 +130,9 @@ Deno.test("SessionRegistry - removes sessions", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -168,9 +168,9 @@ Deno.test("SessionRegistry - sessions do not expire by time (only removed explic
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -208,9 +208,9 @@ Deno.test("SessionRegistry - replyCount initializes to 0", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -235,9 +235,9 @@ Deno.test("SessionRegistry - incrementReplyCount increments correctly", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -277,9 +277,9 @@ Deno.test("SessionRegistry - tracks file sent status per session", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -314,9 +314,9 @@ Deno.test("SessionRegistry - fileSendCount increments, rolls back, and defaults"
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -364,7 +364,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
     userId: "b1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
     // triggerEvent is omitted
   });
@@ -394,9 +394,9 @@ Deno.test("SessionRegistry - setTerminateCallback stores callback", async () => 
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -441,9 +441,9 @@ Deno.test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () 
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -480,9 +480,9 @@ Deno.test("SessionRegistry - getLastSentMessageId returns undefined when not set
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -518,9 +518,9 @@ Deno.test("SessionRegistry - setLastFileMessageId and getLastFileMessageId", () 
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -566,9 +566,9 @@ Deno.test("SessionRegistry - setLastReplyAnchorMessageId and getLastReplyAnchorM
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -601,9 +601,9 @@ Deno.test("SessionRegistry - message ID roles are stored per session (isolation)
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
   const sessionB = registry.register({
@@ -612,9 +612,9 @@ Deno.test("SessionRegistry - message ID roles are stored per session (isolation)
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -645,9 +645,9 @@ Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback",
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -689,9 +689,9 @@ Deno.test("SessionRegistry - editCount initializes to 0", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -716,9 +716,9 @@ Deno.test("SessionRegistry - incrementEditCount increments correctly", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -758,9 +758,9 @@ Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -793,9 +793,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -805,9 +805,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -835,9 +835,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -865,9 +865,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after r
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -905,9 +905,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
     userId: "ua",
     isDm: false,
     workspace: workspaceA,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -917,9 +917,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
     userId: "ub",
     isDm: false,
     workspace: workspaceB,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -931,7 +931,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
   registry.stop();
 });
 
-// deno-lint-ignore no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 const registrationBase: any = {
   platform: "discord",
   channelId: "456",

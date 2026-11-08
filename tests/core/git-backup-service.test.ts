@@ -378,9 +378,9 @@ Deno.test("GitBackupService - runGit returns errorOutput on failure", async () =
       dataDir,
     );
     // Re-init with bad remote
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     (service2 as any).initialized = true;
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     (service2 as any).dataDir = dataDir;
 
     await Deno.writeTextFile(`${dataDir}/errortest.txt`, "trigger change");
@@ -774,7 +774,7 @@ Deno.test("getAuthenticatedUrl - authUser falls back to x-access-token when no a
     authPassword: "my-token",
   });
   // Set authorEmail to undefined to trigger x-access-token fallback
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (config as any).authorEmail = undefined;
   const service = new GitBackupService(config, "/tmp/data");
   const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();

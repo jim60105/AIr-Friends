@@ -328,7 +328,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
       userId: "123",
       isDm: false,
       workspace: mockWorkspace,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: {} as any,
       triggerEvent: {
         platform: "discord",
@@ -400,7 +400,7 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -481,7 +481,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -574,7 +574,7 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: false, error: "Platform error" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -663,7 +663,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -755,7 +755,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -861,7 +861,7 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -954,7 +954,7 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1049,7 +1049,7 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1136,7 +1136,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "original_msg" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_new" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1240,7 +1240,7 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
           timestamp: new Date("2024-07-01T10:00:00Z"),
           isBot: false,
         }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1335,7 +1335,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
           isBot: true,
         });
       },
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1429,7 +1429,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1536,7 +1536,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1663,7 +1663,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1778,7 +1778,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1890,7 +1890,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
         tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
         isDm: false,
       },
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: { platform: "discord" } as any,
       triggerEvent: {
         platform: "discord",
@@ -1901,7 +1901,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
         guildId: "",
         content: "test",
         timestamp: new Date(),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
 
@@ -1955,7 +1955,7 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "original_msg" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -2068,7 +2068,7 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
       userId: "123",
       isDm: false,
       workspace: mockWorkspace,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: {} as any,
       triggerEvent: {
         platform: "discord",
@@ -2164,7 +2164,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
       userId: "123",
       isDm: false,
       workspace: mockWorkspace,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: {} as any,
       triggerEvent: {
         platform: "discord",
@@ -2262,7 +2262,7 @@ function createSendFileRig(
         messageId: "file_msg_1",
         messageIds: ["file_msg_1"],
       }),
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 
   const sessionId = sessionRegistry.register({
@@ -2390,7 +2390,7 @@ Deno.test("SkillAPIServer - send-file quota not consumed on total failure (rollb
     const rig = createSendFileRig(tempDir, {
       adapter: {
         sendFile: () => Promise.resolve({ success: false, error: "Platform error" }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
     await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
@@ -2639,7 +2639,7 @@ Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no trig
             messageId: "m",
             messageIds: ["m"],
           }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
 
@@ -2692,7 +2692,7 @@ Deno.test("SkillAPIServer - partial delivery marks fileSent and keeps the quota 
             messageIds: ["chat_1"],
             error: "Mid-batch failure",
           }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
     await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
@@ -2858,7 +2858,7 @@ Deno.test("SkillAPIServer - send-file total failure records no message ID", asyn
     const rig = createSendFileRig(tempDir, {
       adapter: {
         sendFile: () => Promise.resolve({ success: false, error: "Platform error" }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
     await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
@@ -2894,7 +2894,7 @@ Deno.test("SkillAPIServer - send-file delivery without a usable message ID recor
     const rig = createSendFileRig(tempDir, {
       adapter: {
         sendFile: () => Promise.resolve({ success: true }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
     await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
@@ -2953,7 +2953,7 @@ Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", as
       },
       platformAdapter: {
         sendReply: () => Promise.resolve({ success: true, messageId: "reply_1" }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3053,7 +3053,7 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
           capturedEditAnchor = replyToMessageId;
           return Promise.resolve({ success: true, messageId: "reply_1_edited" });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3167,7 +3167,7 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
           reactedMessageId = messageId;
           return Promise.resolve({ success: true });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3269,7 +3269,7 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
           editAnchor = replyToMessageId;
           return Promise.resolve({ success: true, messageId: "reply_1_edited" });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3379,7 +3379,7 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
           capturedReplyAnchor = options?.replyToMessageId;
           return Promise.resolve({ success: true, messageId: "reply_1" });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "misskey",

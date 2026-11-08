@@ -1,6 +1,6 @@
 // tests/platforms/discord/discord-adapter.test.ts
 
-// deno-lint-ignore-file no-explicit-any
+/* oxlint-disable typescript/no-explicit-any */
 
 import { assertEquals } from "@std/assert";
 import type { Message } from "discord.js";

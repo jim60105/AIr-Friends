@@ -1,6 +1,6 @@
 // tests/platforms/discord/discord-emoji-filter.test.ts
 
-// deno-lint-ignore-file no-explicit-any
+/* oxlint-disable typescript/no-explicit-any */
 
 import { assertEquals } from "@std/assert";
 import { isPremiumEmoji } from "@platforms/discord/discord-adapter.ts";

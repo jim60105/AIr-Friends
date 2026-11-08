@@ -20,6 +20,7 @@ import type { Config } from "../../src/types/config.ts";
 const executor: SkillInstallExecutor = {
   async run(_cmd, args, options) {
     const skill = args[args.indexOf("-s") + 1];
+    // oxlint-disable-next-line typescript/no-non-null-asserted-optional-chain
     const home = options?.env?.HOME!;
     const dir = `${home}/.agents/skills/${skill}`;
     await Deno.mkdir(`${dir}/scripts`, { recursive: true });

@@ -548,6 +548,7 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
   }
 
   // Mock reader where target disappears between observations (path_changed)
+  // oxlint-disable-next-line no-unused-vars
   let callCount = 0;
   const disappearingReader: MetadataReader = {
     lstat: (path: string) => {

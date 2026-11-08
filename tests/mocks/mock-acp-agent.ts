@@ -766,6 +766,7 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
   const recordTarget = Deno.env.get("MOCK_SKILL_RECORD_FILE");
   const codes: number[] = [];
   for (const invocation of spawn) {
+    // oxlint-disable-next-line unicorn/no-useless-fallback-in-spread
     const env = { ...baseEnv, ...(invocation.env ?? {}) };
     const run = await new Deno.Command(Deno.execPath(), {
       args: [

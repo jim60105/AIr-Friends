@@ -206,7 +206,7 @@ export type ReasoningEffort =
   | "default"
   // Allow agent-specific passthrough tokens while preserving editor autocomplete
   // for the known values above.
-  // deno-lint-ignore ban-types
+  // oxlint-disable-next-line typescript/ban-types
   | (string & {});
 
 /**
