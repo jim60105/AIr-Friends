@@ -8,6 +8,7 @@
     "no-empty": "error",
     "no-control-regex": "error",
     "typescript/ban-ts-comment": ["error", { "ts-expect-error": "allow-with-description" }],
+    "typescript/ban-types": "error",
     "no-var": "error",
     "no-debugger": "error"
   },
