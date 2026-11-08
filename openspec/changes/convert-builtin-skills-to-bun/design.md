@@ -25,7 +25,7 @@ See `proposal.md`. Observed facts:
 
 ### D1. Shebang
 
-Exactly `#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml` as line 1 of each executable script and `skills/lib/client.ts`. File modes stay as they are.
+Exactly `#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml` as line 1 of each executable script and `skills/lib/client.ts`. File modes stay as they are; in particular `skills/lib/client.ts` and `skills/lib/payload.ts` are libraries and must not be made executable.
 
 ### D2. Arguments
 
