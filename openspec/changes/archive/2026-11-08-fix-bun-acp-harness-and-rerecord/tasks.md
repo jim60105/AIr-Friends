@@ -21,4 +21,4 @@ Do not weaken any size or time bound. Do not edit the catalog. Do not hand-edit 
 
 - [x] 4.1 Run `bun run --no-env-file gate/record.ts`. Verify: there is exactly one `Outcome:` line.
 - [x] 4.2 Commit the evidence and the record, then run `gate/verify-record.ts --live`. Verify: exit 0.
-- [ ] 4.3 Run the Deno check from `record-bun-go-no-go` design D3.
+- [x] 4.3 Run the Deno check from `record-bun-go-no-go` design D3.
