@@ -25,6 +25,11 @@ The parity check SHALL report every baseline test inside the requested scope tha
 - **WHEN** the check runs
 - **THEN** it SHALL report one missing occurrence
 
+#### Scenario: Report path is repository-relative
+- **GIVEN** a report at `<repo>/.parity/r.xml`
+- **WHEN** the check runs from `migration/bun/baseline` with `--junit .parity/r.xml`
+- **THEN** it SHALL read that report and SHALL exit 2 when the file is missing
+
 #### Scenario: Nested describe names
 - **GIVEN** a Bun test `step a` inside `describe("Parent")`
 - **WHEN** the report is read
