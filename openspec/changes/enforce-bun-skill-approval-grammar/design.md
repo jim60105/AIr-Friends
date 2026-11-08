@@ -49,7 +49,7 @@ The three Deno-named tests in `tests/acp/skill-inventory.test.ts` become `matche
 
 ### D5. Step 6 exit gate
 
-After all tasks: `grep -rnE 'Deno\.[A-Za-z]+' src tests skills scripts | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)'` prints nothing; `bun run check`, `bun run lint`, `bun run fmt:check` exit 0; `bun test --timeout=120000 tests/` passes; full parity without `--scope` and without `--allow-deferred` exits 0.
+After all tasks: `grep -rnE 'Deno\.[A-Za-z]+' src tests skills scripts | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)'` prints nothing; `bun run check`, `bun run lint`, `bun run fmt:check` exit 0; `bun test --timeout=120000 tests/` passes; full parity without `--scope` and without `--allow-deferred` exits 0. Skill-executing tests deferred in step 4 must pass here.
 
 ## Risks / Trade-offs
 

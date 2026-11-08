@@ -375,6 +375,10 @@ The approval gate SHALL approve a trusted script only when it is executed direct
 - **WHEN** the gate evaluates the literal prefix with `--preload ./evil.ts`, `--require`, `--import`, `--inspect`, `--env-file`, `--cwd` or `--tsconfig-override` added before the script
 - **THEN** it SHALL deny each command
 
+#### Scenario: Other bun commands denied by the gate itself
+- **WHEN** the gate evaluates `bun -e 'console.log(1)'`, `bun x cowsay`, `bun ./workspace/evil.ts`, or the literal prefix followed by a non-granted path such as `./workspace/evil.ts`
+- **THEN** it SHALL deny each command, independently of the OpenCode `bun *: ask` routing
+
 #### Scenario: Slashless script token denied
 - **WHEN** the gate evaluates the literal prefix followed by `memory-save.ts`
 - **THEN** it SHALL deny the command, because `bun run <name>` looks up `package.json` scripts first

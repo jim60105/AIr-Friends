@@ -22,5 +22,5 @@ Prerequisite: `convert-builtin-skills-to-bun` is applied and `/opt/air/skill-bun
 
 ## 5. Step 6 exit gate
 
-- [ ] 5.1 Run design D5. Verify: each command in design D5 exits 0 (or prints nothing for the grep); the parity command is `bun test --timeout=120000 --reporter=junit --reporter-outfile=.parity/full.xml tests/; (cd migration/bun/baseline && bun run --no-env-file parity.ts --junit .parity/full.xml)`.
+- [ ] 5.1 Run design D5. Verify: each command in design D5 exits 0 (or prints nothing for the grep); the parity command, which must not pass `--allow-deferred` (any deferred test fails the gate), is `bun test --timeout=120000 --reporter=junit --reporter-outfile=.parity/full.xml tests/; (cd migration/bun/baseline && bun run --no-env-file parity.ts --junit .parity/full.xml)`.
 - [ ] 5.2 Verify: `git status --porcelain` lists only the files in `proposal.md` Impact, any file changed for a type fix under 5.1 (listed in the task report), and this change directory.

@@ -8,6 +8,7 @@ The restricted-mode approval gate (`src/acp/skill-inventory.ts`) accepts a trust
 
 - Replace `resolveScriptEntrypoint`, `ALLOWED_SCRIPT_INTERPRETERS` and `DENO_RUN_SAFE_FLAGS` in `src/acp/skill-inventory.ts` with the PoC grammar: direct execution of a slash-containing path, or the exact literal `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml` prefix followed by a slash-containing path. Canonical membership checks stay as they are.
 - `agent-config/opencode.json`: replace `"deno run *": "ask"` with `"bun *": "ask"` and add `"bunx *": "deny"`. Update the matching comments in `src/utils/opencode-paths.ts`.
+- `bun *: ask` only forwards to the gate; the gate itself denies every `bun` form except the literal prefix followed by a granted script (`bun -e`, `bun x`, `bun <file>`, non-granted paths), covered by `tests/acp/skill-injection.test.ts`.
 - Add `tests/acp/skill-injection.test.ts`, the production injection suite ported from `migration/bun/poc/suites/injection.spec.ts` and `injection-noconfig.spec.ts`.
 - Rewrite the grammar cases in `tests/acp/skill-inventory.test.ts` and `tests/acp/opencode-skill-permission-routing.test.ts`; record the three renamed test names in `parity-exceptions.json`.
 - Convert `tests/integration/omp-skill-handoff/` and `tests/integration/email-intent/`.
