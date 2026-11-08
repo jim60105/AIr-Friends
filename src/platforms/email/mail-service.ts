@@ -385,6 +385,7 @@ export class EmailMailService {
    */
   async drain(): Promise<void> {
     while (this.inFlight.size > 0) {
+      // oxlint-disable-next-line unicorn/no-useless-spread
       await Promise.allSettled([...this.inFlight]);
     }
     const copyLane = COPY_LANES.get(this.imap);

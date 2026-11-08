@@ -148,7 +148,7 @@ Deno.test("HealthCheckServer - workspace write permission check with temp dir", 
       },
     };
 
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -195,7 +195,7 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
       },
     };
 
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -227,7 +227,7 @@ Deno.test("HealthCheckServer - the OMP default is no special case: readiness use
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -263,7 +263,7 @@ Deno.test("HealthCheckServer - an unresolvable configured root fails readiness e
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -309,7 +309,7 @@ Deno.test("HealthCheckServer - a registered script missing fails despite a copy 
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -341,7 +341,7 @@ Deno.test("HealthCheckServer - resolver error yields explicit skill-root failure
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -370,12 +370,12 @@ Deno.test("HealthCheckServer - readiness cache holds across context changes for 
       },
       platformRegistry: { isAllConnected: () => true },
     });
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mkContext(["memory-save"]) as any);
     const first = await server.checkSkillReadiness();
     // Replacement context registers a different skill list, but the 30-second
     // cache must keep serving the previous result unchanged.
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mkContext(["totally-new-skill"]) as any);
     const second = await server.checkSkillReadiness();
     assertEquals(second, first);
@@ -412,7 +412,7 @@ Deno.test("HealthCheckServer - skill API connectivity check", async () => {
       },
     };
 
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -446,7 +446,7 @@ Deno.test("HealthCheckServer - /readyz includes skillReadiness field", async () 
     },
   };
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   server.setContext(mockContext as any);
   server.start();
 

@@ -355,6 +355,7 @@ export class AgentProcessPool {
       if (ownershipHeartbeat !== undefined) clearInterval(ownershipHeartbeat);
       if (jwtRenewal !== undefined) clearInterval(jwtRenewal);
       if (pendingRenewals.size > 0) {
+        // oxlint-disable-next-line unicorn/no-useless-spread
         await Promise.allSettled([...pendingRenewals]);
       }
       // Single release path, spec order: (1) wait (bounded) for the agent's tool
@@ -509,6 +510,7 @@ export class AgentProcessPool {
     }
 
     if (entry) {
+      // oxlint-disable-next-line no-unused-expressions
       entry.reclaimTimer && clearTimeout(entry.reclaimTimer);
       entry.lastActivity = Date.now();
       return entry;

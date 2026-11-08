@@ -107,6 +107,7 @@ async function withTestContextAssembler(
       workspacesDir: "workspaces",
     });
     const store = new MemoryStore(manager, {
+      // oxlint-disable-next-line unicorn/no-useless-spread
       ...(overrides.workingTierLimit !== undefined
         ? { workingTierLimit: overrides.workingTierLimit }
         : {}),
@@ -1018,7 +1019,7 @@ Deno.test("F15 - channel memories render as attributed, untrusted notes (not Cha
     skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const channelMem: any = {
     id: "m1",
     enabled: true,

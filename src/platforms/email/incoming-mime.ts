@@ -116,7 +116,7 @@ export function sanitizeAttachmentDisplayName(
   }
 
   // Strip control chars (0x00-0x1F, 0x7F) and null bytes
-  // deno-lint-ignore no-control-regex
+  // oxlint-disable-next-line no-control-regex
   let cleaned = rawFilename.replace(/[\x00-\x1F\x7F]/g, "").trim();
 
   // Handle Windows and POSIX separators

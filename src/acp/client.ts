@@ -229,6 +229,7 @@ export const MAX_PERMISSION_REJECTION_FIELD_LENGTH = 200;
  * Applies to `toolName`, `kind`, and `commandOrPath` at record time.
  */
 const CONTROL_CHARS_PATTERN = new RegExp(
+  // oxlint-disable-next-line no-control-regex
   `[\\u0000-\\u001f\\u007f]`,
   "g",
 );

@@ -833,6 +833,7 @@ export async function appendDurable<T>(
     if (dataJson === undefined || dataJson === "undefined") {
       throw new Error("Cannot serialize undefined record");
     }
+    // oxlint-disable-next-line no-unused-vars
   } catch (_err) {
     throw new DurableFileError(
       DurableDiagnosticCode.WRITE_FAILED,
@@ -893,6 +894,7 @@ export async function appendDurable<T>(
     try {
       const stat = await Deno.lstat(filePath);
       currentSize = stat.size;
+      // oxlint-disable-next-line no-unused-vars
     } catch (_err) {
       // File does not exist yet
     }
@@ -962,6 +964,7 @@ export async function replaceSnapshot<T>(
       throw new Error("Cannot serialize undefined snapshot");
     }
     jsonString = rawJson + "\n";
+    // oxlint-disable-next-line no-unused-vars
   } catch (_err) {
     throw new DurableFileError(
       DurableDiagnosticCode.WRITE_FAILED,
@@ -1031,6 +1034,7 @@ export async function replaceSnapshot<T>(
     // Atomic rename
     try {
       await Deno.rename(tmpPath, filePath);
+      // oxlint-disable-next-line no-unused-vars
     } catch (_err) {
       await Deno.remove(tmpPath).catch(() => {});
       throw new DurableFileError(

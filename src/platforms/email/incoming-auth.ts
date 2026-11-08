@@ -370,6 +370,7 @@ export function parseAuthenticationResultsHeader(
       if (!clause) continue;
 
       // RFC 8601 §2.2: method/version=result, e.g. dmarc=pass or dmarc/1=pass
+      // oxlint-disable-next-line no-useless-escape
       const match = clause.match(/^dmarc(?:\/[0-9]+)?\s*=\s*([a-zA-Z0-9_\-]+)(.*)$/i);
       if (match) {
         const result = match[1].toLowerCase();
@@ -390,6 +391,7 @@ export function parseAuthenticationResultsHeader(
           // Validate domain syntax (RFC 5321/5322 hostname: letters, numbers, hyphens, dots)
           // Must not have invalid trailing chars like /evil
           if (
+            // oxlint-disable-next-line no-useless-escape
             /^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$/.test(unquoted)
           ) {
             headerFrom = unquoted;

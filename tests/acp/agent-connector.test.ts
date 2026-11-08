@@ -1054,13 +1054,13 @@ Deno.test("AgentConnector - createSession clears rejection records, prompt() doe
   try {
     // Real ChatbotClient so the buffer semantics are the production ones.
     const client = new ChatbotClient(
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { hasSkill: () => false } as any,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as any,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { workingDir: tempDir, platform: "test", userId: "u", channelId: "c", isDM: false } as any,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { scriptPaths: new Set(), commandPrefixes: new Set() } as any,
     );
     connector["client"] = client;

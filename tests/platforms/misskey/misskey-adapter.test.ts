@@ -403,7 +403,7 @@ Deno.test("chatMessageToPlatformMessage - should mark other bot messages", () =>
 
 Deno.test("chatMessageToPlatformMessage - should fallback to username if name is null", () => {
   const message = createMockChatMessage();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (message as any).fromUser = {
     id: "user456",
     name: null,
@@ -511,11 +511,11 @@ function createAdapterWithMockClient(
   });
 
   // Set botId so noteToPlatformMessage works
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
 
   // Replace the client.request method with our mock
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const client = (adapter as any).client;
   client.request = (
     endpoint: string,
@@ -1027,9 +1027,9 @@ function createAdapterWithFullMockClient(
     host: "misskey.test",
     token: "test-token",
   });
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const client = (adapter as any).client;
   client.request = (
     endpoint: string,
@@ -1510,7 +1510,7 @@ Deno.test("normalizeMisskeyNote - files produce attachments", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const ev = normalizeMisskeyNote(note, "bot123", false);
   assertEquals(ev.attachments?.length, 1);
@@ -1535,7 +1535,7 @@ Deno.test("noteToPlatformMessage - with files", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const pm = noteToPlatformMessage(note, "bot123");
   assertEquals(pm.attachments?.length, 1);
@@ -1560,7 +1560,7 @@ Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const chat = createMockChatMessage({ file: file as any });
   const ev = normalizeMisskeyChatMessage(chat, "bot123");
   assertEquals(ev.attachments?.length, 1);
@@ -1583,7 +1583,7 @@ Deno.test("chatMessageToPlatformMessage - with file", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const chat = createMockChatMessage({ file: file as any });
   const pm = chatMessageToPlatformMessage(chat, "bot123");
   assertEquals(pm.attachments?.length, 1);
@@ -1608,9 +1608,9 @@ function createMockMisskeyAdapter(): MisskeyAdapter {
   return adapter;
 }
 
-// deno-lint-ignore no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 function mockClientRequest(adapter: MisskeyAdapter, fn: (...args: any[]) => any): void {
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = { request: fn };
 }
 
@@ -1868,9 +1868,9 @@ Deno.test("MisskeyAdapter.sendFile - sends files via chat message (one per file,
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
   // Mock client with both request and uploadFile
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, params: any) => {
       calls.push({ endpoint, params });
       if (endpoint === "chat/messages/create-to-user") {
@@ -1909,9 +1909,9 @@ Deno.test("MisskeyAdapter.sendFile - sends files via note for non-chat channels 
   const adapter = createMockMisskeyAdapter();
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, params: any) => {
       calls.push({ endpoint, params });
       if (endpoint === "notes/create") {
@@ -1946,9 +1946,9 @@ Deno.test("MisskeyAdapter.sendFile - sends files via note with reply threading",
   const adapter = createMockMisskeyAdapter();
   const calls: string[] = [];
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, _params: any) => {
       calls.push(endpoint);
       if (endpoint === "notes/show") {
@@ -1985,7 +1985,7 @@ Deno.test("MisskeyAdapter.sendFile - handles upload failure before any message i
   const adapter = createMockMisskeyAdapter();
   const chatCalls: string[] = [];
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
     request: (endpoint: string) => {
       if (endpoint === "chat/messages/create-to-user") {
@@ -2014,7 +2014,7 @@ Deno.test("MisskeyAdapter.sendFile - handles upload failure before any message i
 Deno.test("MisskeyAdapter.sendFile - handles non-Error object in error", async () => {
   const adapter = createMockMisskeyAdapter();
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
     uploadFile: () => {
       throw { code: "RATE_LIMIT", message: "Too many requests" };
@@ -2036,9 +2036,9 @@ Deno.test("MisskeyAdapter.sendFile - mid-batch chat failure reports partial deli
   const deleteCalls: string[] = [];
   let uploadCounter = 0;
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, params: any) => {
       endpoints.push(endpoint);
       if (endpoint === "chat/messages/create-to-user") {
@@ -2119,7 +2119,7 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false when myReaction is null
 
 Deno.test("MisskeyAdapter.hasBotReaction - returns true when bot reacted to chat message", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "chat/messages/show") {
@@ -2135,7 +2135,7 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns true when bot reacted to chat
 
 Deno.test("MisskeyAdapter.hasBotReaction - returns false when bot has not reacted to chat message", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "chat/messages/show") {
@@ -2149,7 +2149,7 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false when bot has not reacte
 
 Deno.test("MisskeyAdapter.hasBotReaction - returns false on chat API error", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "chat/messages/show") {
@@ -2271,7 +2271,7 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async ()
 Deno.test("MisskeyAdapter.hasBotMention - returns true when mention matches", async () => {
   const adapter = createMockMisskeyAdapter();
   // Set botUsername
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botUsername = "testbot";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2285,7 +2285,7 @@ Deno.test("MisskeyAdapter.hasBotMention - returns true when mention matches", as
 
 Deno.test("MisskeyAdapter.hasBotMention - returns false when no mention", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botUsername = "testbot";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2305,7 +2305,7 @@ Deno.test("MisskeyAdapter.hasBotMention - returns false for chat messages", asyn
 
 Deno.test("MisskeyAdapter.hasBotMention - returns false on API error", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botUsername = "testbot";
   mockClientRequest(adapter, () => {
     return Promise.reject(new Error("API error"));
@@ -2320,7 +2320,7 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - returns timeline:self", a
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [{ id: "misskey/timeline/self", spontaneousPost: true }],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target?.channelId, "timeline:self");
@@ -2330,7 +2330,7 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - no spontaneousPost channe
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [{ id: "misskey/account/user123" }],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target, null);
@@ -2343,7 +2343,7 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - includes DM targets with 
       { id: "misskey/timeline/self", spontaneousPost: true },
       { id: "misskey/account/user123", spontaneousPost: true },
     ],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const results = new Set<string>();
   for (let i = 0; i < 100; i++) {
@@ -2358,7 +2358,7 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - only non-misskey entries 
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [{ id: "discord/account/123", spontaneousPost: true }],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target, null);
@@ -2373,7 +2373,7 @@ Deno.test("MisskeyAdapter - connect cleans up existing stream before reconnectin
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   const disposed: string[] = [];
@@ -2409,7 +2409,7 @@ Deno.test("MisskeyAdapter - heartbeat starts and stops correctly", () => {
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   assertEquals(adapterAny.heartbeatIntervalId, null);
@@ -2434,7 +2434,7 @@ Deno.test("MisskeyAdapter - stopHeartbeat is idempotent", () => {
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   adapterAny.client = {
@@ -2457,7 +2457,7 @@ Deno.test("MisskeyAdapter - disconnect stops heartbeat", async () => {
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   adapterAny.client = {
@@ -2479,7 +2479,7 @@ Deno.test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   adapterAny.client = {
@@ -2494,7 +2494,7 @@ Deno.test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
 
 Deno.test("MisskeyAdapter.fetchMessage - fetches note (non-chat channelId)", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
 
   let capturedEndpoint = "";
@@ -2518,7 +2518,7 @@ Deno.test("MisskeyAdapter.fetchMessage - fetches note (non-chat channelId)", asy
 
 Deno.test("MisskeyAdapter.fetchMessage - fetches chat message (channelId starts with chat:)", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
 
   let capturedEndpoint = "";
@@ -2542,7 +2542,7 @@ Deno.test("MisskeyAdapter.fetchMessage - fetches chat message (channelId starts 
 
 Deno.test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, () => {
     return Promise.reject(new Error("Not found"));

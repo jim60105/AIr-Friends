@@ -39,6 +39,7 @@ const LOG_LEVEL_TO_SYSLOG: Record<string, number> = {
  * to avoid disrupting the main application flow.
  */
 export class GelfTransport {
+  // oxlint-disable-next-line no-useless-escape
   private static readonly VALID_FIELD_NAME = /^[\w.\-]*$/;
   private readonly endpoint: string;
   private readonly hostname: string;

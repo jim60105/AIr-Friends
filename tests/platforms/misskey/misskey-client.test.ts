@@ -22,9 +22,9 @@ function createClient(
 
   if (overrides?.apiRequest) {
     // Replace internal api.request with mock
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     (client as any).api = {
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       ...(client as any).api,
       request: overrides.apiRequest,
     };

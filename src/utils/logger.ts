@@ -7,7 +7,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 // Default patterns for sensitive data detection
 const DEFAULT_SENSITIVE_PATTERNS: RegExp[] = [
+  // oxlint-disable-next-line no-useless-escape
   /(?:token|api[_-]?key|secret|password|auth)[\s]*[=:]\s*["']?[\w\-\.]+["']?/gi,
+  // oxlint-disable-next-line no-useless-escape
   /Bearer\s+[\w\-\.]+/gi,
   /[A-Za-z0-9+/]{40,}/g, // Long base64-like strings (potential tokens)
 ];
@@ -23,6 +25,7 @@ const DEFAULT_SENSITIVE_PATTERNS: RegExp[] = [
 export type LogPrivacy = "normal" | "private-email";
 
 /** Mail-address-shaped text, redacted from module names of private entries. */
+// oxlint-disable-next-line no-useless-escape
 const MAIL_ADDRESS_PATTERN = /[^\s:@{}\/]+@[^\s:@{}\/]+/g;
 
 /**
