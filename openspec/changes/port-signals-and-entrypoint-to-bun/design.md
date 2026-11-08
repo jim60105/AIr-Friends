@@ -36,7 +36,7 @@ process.on("uncaughtException", (error) => {
 });
 ```
 
-The `filename`, `lineno` and `colno` fields are dropped because Node's hook provides no event object; the stack carries them. Registering these listeners also keeps the process alive, matching what `preventDefault()` did.
+The `filename`, `lineno` and `colno` fields are dropped because Node's hook provides no event object; the stack carries them. The owner accepted this log-field change on 2026-11-09. Registering these listeners also keeps the process alive, matching what `preventDefault()` did.
 
 ### D3. Arguments
 

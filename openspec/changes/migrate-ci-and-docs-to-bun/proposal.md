@@ -8,7 +8,7 @@ CI, the release workflow and the Copilot setup still install Deno and run `deno 
 
 - `.github/workflows/ci.yaml`: Bun 1.4.2 via `oven-sh/setup-bun` and `bun install --frozen-lockfile`; `fmt:check`, `lint`, `check`; tests on `ubuntu-latest` and `ubuntu-24.04-arm`, the amd64 run twice (unprivileged user namespaces enabled and restricted) for P0-7; coverage with `scripts/coverage-floor.ts`; image build plus `scripts/image-smoke.sh` on both architectures, replacing the `deno compile` job.
 - `.github/workflows/release.yml` test job and `.github/workflows/copilot-setup-steps.yml` move to Bun. `docker-publish-latest.yml` and `docker-reused-setup-steps/action.yml` contain no Deno step and stay unchanged (checked).
-- Add `scripts/coverage-floor.ts` and its test. **Policy decision (owner-confirmable)**: Bun 1.4.2 LCOV has no branch records, so the 75% floor moves from branch coverage to line coverage over `src/`. The Deno baseline line figure was 83.3%; task 1.1 records the first Bun line figure in the task report so later drift is visible.
+- Add `scripts/coverage-floor.ts` and its test. **Policy decision (confirmed by the owner on 2026-11-09)**: Bun 1.4.2 LCOV has no branch records, so the 75% floor moves from branch coverage to line coverage over `src/`. The Deno baseline line figure was 83.3%; task 1.1 records the first Bun line figure in the task report so later drift is visible.
 - Delete `deno.json` and `deno.lock`.
 - Rewrite the Deno instructions in `AGENTS.md`, `README.md`, `tests/README.md` and `docs/`; update the `configuration-and-deployment` main spec Purpose sentence.
 

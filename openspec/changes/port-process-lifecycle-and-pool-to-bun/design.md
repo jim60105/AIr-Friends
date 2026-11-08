@@ -64,4 +64,4 @@ Assertions: before teardown, the descendant list is non-empty; after `disconnect
 ## Risks / Trade-offs
 
 - [PID reuse makes `processAlive` true for a new unrelated process] → The 1-second window and the low PID churn of a test host make this negligible; the assertion uses the PIDs collected before teardown.
-- [Awaiting disconnects slows shutdown] → Bounded by the connector's own 2-second grace plus escalation, in parallel.
+- [Awaiting disconnects slows shutdown] → Bounded by the connector's own 2-second grace plus escalation, in parallel. The owner accepted up to about 4 s of added shutdown time on 2026-11-09.

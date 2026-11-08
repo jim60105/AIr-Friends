@@ -215,9 +215,10 @@ the injection regression suite.
   counterpart, or the migration record lists why it was removed or skipped.
 - **Accepted loss:** 432 Deno sanitizer options have no Bun equivalent. P0 integration tests check
   file-descriptor and process counts instead.
-- **Coverage:** the CI check reads the Branch column, so the current 75% floor is branch coverage.
-  The baseline records all reported numbers. The floor stays on the equivalent Bun lcov measure;
-  Deno's number is reference only, because the tools count differently.
+- **Coverage:** the Deno CI check reads the Branch column, so the Deno-era 75% floor is branch
+  coverage. Bun 1.4.2 lcov has no branch records, so the Bun floor is 75% line coverage over `src/`
+  (owner decision, 2026-11-09; see section 8). The baseline records all reported numbers. Deno's
+  number is reference only, because the tools count differently.
 - **Injection suite (new):** run trusted skills from an agent-writable directory containing `.env`,
   `.env.local`, `bunfig.toml`, `tsconfig.json`, `package.json` and `node_modules`. Also attempt
   `BUN_OPTIONS` as a command prefix. Flags cannot neutralize this variable, so the gate denying the
@@ -350,11 +351,11 @@ Section 9 ownership:
 | P0-9 | `add-bun-package-manifest`, `package-bun-container-image`, `migrate-ci-and-docs-to-bun`                                                                                |
 | P0-10 | `package-bun-container-image`, `migrate-ci-and-docs-to-bun`, `drill-bun-cutover-and-rollback`, `cut-over-to-bun-release`                                              |
 
-These decisions are open for the owner. The changes name them, but they are not yet confirmed:
+The owner confirmed these decisions on 2026-11-09:
 
 - **Coverage floor:** Bun 1.4.2 LCOV has no branch records, so `migrate-ci-and-docs-to-bun` moves the
   75% floor to line coverage over `src/`. The Deno baseline line coverage is 83.3%. This supersedes the
-  Branch-column wording in section 6 once confirmed.
+  Branch-column wording in section 6.
 - **Drill thresholds:** `drill-bun-cutover-and-rollback` proposes these thresholds:
   - startup and idle memory: Deno median × 1.25
   - file descriptors: Deno maximum × 1.25

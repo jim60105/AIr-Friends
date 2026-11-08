@@ -56,4 +56,4 @@ Replace each `deno task <x>` with `bun run <x>`, `deno test` with `bun test` (or
 
 ## Open Questions
 
-- Coverage measure: Bun 1.4.2 LCOV has no branch data, so the 75% floor moves from branch coverage to line coverage. The owner may prefer a different floor value for lines (the Deno baseline line figure was 83.3%). The floor value is a single argument and does not change this design.
+- Coverage measure: Bun 1.4.2 LCOV has no branch data, so the 75% floor moves from branch coverage to line coverage. The owner confirmed the 75% line floor on 2026-11-09 (the Deno baseline line figure was 83.3%). The floor value is a single argument and does not change this design.

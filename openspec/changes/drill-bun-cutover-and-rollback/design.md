@@ -54,4 +54,4 @@ Sections: data copy provenance (date, `kubectl cp` command, size); drill results
 
 ## Open Questions
 
-- The 1.25 multipliers in D3 are this plan's proposal for "no material regression"; the owner may choose other numbers before `thresholds.json` is committed. The rule's shape and the order enforcement do not change.
+- The owner confirmed the D3 thresholds (the 1.25 multipliers, zero leftover processes, stop under 15 s) on 2026-11-09 as the meaning of "no material regression"; `thresholds.json` uses these values. The rule's shape and the order enforcement do not change.
