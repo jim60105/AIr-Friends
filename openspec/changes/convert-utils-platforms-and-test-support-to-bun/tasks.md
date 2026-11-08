@@ -1,0 +1,25 @@
+# Tasks
+
+Prerequisite: `add-bun-conversion-codemod` is applied. Verify with `test -f migration/bun/convert/README.md && test -f src/utils/fs-compat.ts && bun install --frozen-lockfile`.
+
+Follow `migration/bun/convert/README.md`. Do not edit files outside design D1 except `migration/bun/baseline/parity-exceptions.json`. Never weaken an assertion or rename a test.
+
+## 1. Mechanical rewrite
+
+- [ ] 1.1 Save the design D1 list to `.parity/convert-utils-platforms-and-test-support-to-bun.files`, one path per line. Verify: `wc -l < .parity/convert-utils-platforms-and-test-support-to-bun.files` prints `75` and `xargs -a .parity/convert-utils-platforms-and-test-support-to-bun.files ls >/dev/null` exits 0.
+- [ ] 1.2 Run the codemod. Verify: `bun run --no-env-file migration/bun/convert/codemod.ts $(cat .parity/convert-utils-platforms-and-test-support-to-bun.files) > .parity/convert-utils-platforms-and-test-support-to-bun.codemod.jsonl` exits 0 (rename any colliding local and rerun until it does).
+
+## 2. Manual conversion
+
+- [ ] 2.1 Convert `tests/mocks/*` and `tests/helpers/*` per design D2. Verify: `timeout 10 bun run --no-env-file tests/mocks/mock-acp-agent.ts < /dev/null 2>&1 | grep -c 'Deno is not defined'` prints `0`, and `grep -n 'Deno\.' tests/mocks tests/helpers -r` prints only comments.
+- [ ] 2.2 Convert the `t.step` blocks in `tests/utils/omp-native-cache.test.ts` to `describe`/`test` (README D5). Verify: `bun test tests/utils/omp-native-cache.test.ts` lists names of the form `<parent> > <step>`.
+- [ ] 2.3 Fix every Stats/Dirent property use listed in design Context and the codemod report. Verify: `grep -nE '\.(isFile|isDirectory|isSymlink)\b[^(]' $(cat .parity/convert-utils-platforms-and-test-support-to-bun.files)` prints nothing.
+- [ ] 2.4 Hand-convert `Deno.pid` in `src/utils/omp-native-cache.ts` and `Deno.open` in `src/utils/skill-secret.ts` (README D4 note). Verify: `bun test tests/utils/skill-secret.test.ts tests/utils/omp-native-cache.test.ts` passes.
+- [ ] 2.5 Convert `tests/utils/ssrf.test.ts` per design D3 and `tests/utils/omp-packaging.test.ts` per design D4. Verify: `bun test tests/utils/ssrf.test.ts tests/utils/omp-packaging.test.ts` passes.
+
+## 3. Verification
+
+- [ ] 3.1 Residual check. Verify: `grep -n 'Deno\.' $(grep -v '^src/\|^scripts/' .parity/convert-utils-platforms-and-test-support-to-bun.files) | grep -v '^[^:]*:[0-9]*: *\(//\|\*\)'` prints nothing, and `grep -noE 'Deno\.[A-Za-z]+' $(grep '^src/\|^scripts/' .parity/convert-utils-platforms-and-test-support-to-bun.files)` prints only symbols that `migration/bun/convert/README.md` D4 assigns to a later change.
+- [ ] 3.2 Parity. Verify: `mkdir -p .parity && bun test --timeout=120000 --reporter=junit --reporter-outfile=.parity/convert-utils-platforms-and-test-support-to-bun.xml tests/platforms/discord/discord-adapter-typing.test.ts tests/platforms/discord/discord-emoji-filter.test.ts tests/platforms/discord/discord-adapter.test.ts tests/platforms/misskey/misskey-adapter.test.ts tests/platforms/misskey/misskey-client.test.ts tests/platforms/platform-registry.test.ts tests/types/errors.test.ts tests/types/events.test.ts tests/types/audit.test.ts tests/utils/hash.test.ts tests/utils/logger.test.ts tests/utils/opencode-paths.test.ts tests/utils/rss-fetcher.test.ts tests/utils/skill-jwt.test.ts tests/utils/skill-secret.test.ts tests/utils/token-counter.test.ts tests/utils/ssrf.test.ts tests/utils/config-trio-sync.test.ts tests/utils/opencode-skill-discovery-declaration.test.ts tests/utils/omp-native-cache.test.ts tests/utils/env.test.ts tests/utils/metrics.test.ts; (cd migration/bun/baseline && bun run --no-env-file parity.ts --junit .parity/convert-utils-platforms-and-test-support-to-bun.xml --allow-deferred --scope tests/platforms/discord/discord-adapter-typing.test.ts --scope tests/platforms/discord/discord-emoji-filter.test.ts --scope tests/platforms/discord/discord-adapter.test.ts --scope tests/platforms/misskey/misskey-adapter.test.ts --scope tests/platforms/misskey/misskey-client.test.ts --scope tests/platforms/platform-registry.test.ts --scope tests/types/errors.test.ts --scope tests/types/events.test.ts --scope tests/types/audit.test.ts --scope tests/utils/hash.test.ts --scope tests/utils/logger.test.ts --scope tests/utils/opencode-paths.test.ts --scope tests/utils/rss-fetcher.test.ts --scope tests/utils/skill-jwt.test.ts --scope tests/utils/skill-secret.test.ts --scope tests/utils/token-counter.test.ts --scope tests/utils/ssrf.test.ts --scope tests/utils/config-trio-sync.test.ts --scope tests/utils/opencode-skill-discovery-declaration.test.ts --scope tests/utils/omp-native-cache.test.ts --scope tests/utils/env.test.ts --scope tests/utils/metrics.test.ts)` exits 0. Paste the `deferred` list into the task report.
+- [ ] 3.3 Format and lint. Verify: `bun run fmt:check` and `bun run lint` exit 0.
+- [ ] 3.4 Scope. Verify: `git status --porcelain` lists only files from design D1, `migration/bun/baseline/parity-exceptions.json` (only if an exception was needed) and this change directory.
