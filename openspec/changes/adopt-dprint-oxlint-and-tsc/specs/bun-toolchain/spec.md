@@ -4,7 +4,7 @@
 
 ### Requirement: Formatting Check
 
-`bun run fmt:check` SHALL report any file under `src/` or `tests/` that differs from the configured format and SHALL exit non-zero when one does.
+`bun run fmt:check` SHALL report any TypeScript, JavaScript, JSON or Markdown file under `src/` or `tests/`, excluding `src/dashboard/public/`, that differs from the configured format, and SHALL exit non-zero when one does. YAML, HTML and CSS files are not covered until `migrate-ci-and-docs-to-bun` adds them to the formatter.
 
 #### Scenario: Clean tree passes
 - **GIVEN** a checkout with no formatting drift
@@ -32,7 +32,7 @@
 
 ### Requirement: Type Check
 
-`bun run check` SHALL type-check the project with the TypeScript compiler, Bun types and the `tsconfig.json` path aliases, emitting no files.
+`bun run check` SHALL type-check the project with the TypeScript compiler, Bun types and the `tsconfig.json` path aliases the TypeScript compiler can resolve, emitting no files.
 
 #### Scenario: Type error fails
 - **GIVEN** a file under `src/` assigning a string to a `number` variable

@@ -57,7 +57,12 @@ the exact versions Deno 2.9.0 bundles (`dprint-plugin-typescript` 0.96.1, `-json
 
 If `dprint check` reports differences on the unchanged tree, run `dprint fmt` once and commit the result as this change's formatting commit. Before committing, confirm `deno fmt --check src/ tests/` still exits 0 on the reformatted tree; if it does not, the two formatters disagree, so adjust the dprint options (never the code by hand) until both pass, and record the options changed.
 
-`src/dashboard/public/**` is excluded because `deno fmt` was never run on it in practice (the CI step used the task scope, which `deno fmt` limits to supported files); formatting browser assets is not part of this migration.
+`src/dashboard/public/**` is excluded because formatting browser assets is not part of this migration. This narrows
+coverage: `deno fmt --check src/ tests/` also formatted YAML fixtures and the HTML/CSS assets under
+`src/dashboard/public/`, while dprint here covers only TypeScript, JavaScript, JSON and Markdown. Those files are clean
+today; `migrate-ci-and-docs-to-bun` must add YAML/HTML/CSS coverage or record its absence. CI still runs
+`deno fmt --check src/ tests/` against a floating `deno-version: v2.x`, so until that change lands a newer Deno could
+format differently from the pinned plugins.
 
 ### D2. `.oxlintrc.json`
 
@@ -72,12 +77,17 @@ If `dprint check` reports differences on the unchanged tree, run `dprint fmt` on
     "no-empty": "error",
     "no-control-regex": "error",
     "typescript/ban-ts-comment": ["error", { "ts-expect-error": "allow-with-description" }],
+    "typescript/ban-types": "error",
     "no-var": "error",
     "no-debugger": "error"
   },
   "ignorePatterns": ["src/dashboard/public/**"]
 }
 ```
+
+`typescript/ban-types` is enabled in addition to the nine rules above because the rewrite table's `ban-types` row needs
+the rule that actually reports that line; `typescript/no-empty-object-type` does not report `(string & {})`. It flags
+only the suppressed `src/types/config.ts` line.
 
 `lint` = `oxlint src tests`. Each listed rule matches a `deno lint` recommended rule of the same intent. If oxlint rejects a rule name, drop it and list it in the task report; do not substitute a stricter rule.
 
