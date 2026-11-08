@@ -1,0 +1,23 @@
+# Tasks
+
+Prerequisite: `add-bun-conversion-codemod` is applied. Verify with `test -f migration/bun/convert/README.md && test -f src/utils/fs-compat.ts && bun install --frozen-lockfile`.
+
+Follow `migration/bun/convert/README.md`. Do not edit files outside design D1 except `migration/bun/baseline/parity-exceptions.json`. Never weaken an assertion or rename a test.
+
+## 1. Mechanical rewrite
+
+- [ ] 1.1 Save the design D1 list to `.parity/convert-skills-dashboard-and-skill-api-support-to-bun.files`, one path per line. Verify: `wc -l < .parity/convert-skills-dashboard-and-skill-api-support-to-bun.files` prints `35` and `xargs -a .parity/convert-skills-dashboard-and-skill-api-support-to-bun.files ls >/dev/null` exits 0.
+- [ ] 1.2 Run the codemod. Verify: `bun run --no-env-file migration/bun/convert/codemod.ts $(cat .parity/convert-skills-dashboard-and-skill-api-support-to-bun.files) > .parity/convert-skills-dashboard-and-skill-api-support-to-bun.codemod.jsonl` exits 0 (rename any colliding local and rerun until it does).
+
+## 2. Manual conversion
+
+- [ ] 2.1 Hand-convert `Deno.open` in `src/skills/email-handler.ts` (README D4 note) and the Stats properties. Verify: `bun test tests/skills/email-handler.test.ts` passes or defers, and `grep -nE '\.(isFile|isDirectory|isSymlink)\b[^(]' $(cat .parity/convert-skills-dashboard-and-skill-api-support-to-bun.files)` prints nothing.
+- [ ] 2.2 Check design D2. Verify: `bun test tests/skills/file-handler.test.ts` passes with no deferred failure.
+- [ ] 2.3 Convert the dashboard and Skill API support tests. Verify: `bun test tests/dashboard/auth.test.ts tests/dashboard/audit-history-loader.test.ts tests/dashboard/completed-session-store.test.ts tests/skill-api/session-registry.test.ts tests/skill-api/caller-token.test.ts` passes or defers.
+
+## 3. Verification
+
+- [ ] 3.1 Residual check. Verify: `grep -n 'Deno\.' $(grep -v '^src/\|^scripts/' .parity/convert-skills-dashboard-and-skill-api-support-to-bun.files) | grep -v '^[^:]*:[0-9]*: *\(//\|\*\)'` prints nothing, and `grep -noE 'Deno\.[A-Za-z]+' $(grep '^src/\|^scripts/' .parity/convert-skills-dashboard-and-skill-api-support-to-bun.files)` prints only symbols that `migration/bun/convert/README.md` D4 assigns to a later change.
+- [ ] 3.2 Parity. Verify: `mkdir -p .parity && bun test --timeout=120000 --reporter=junit --reporter-outfile=.parity/convert-skills-dashboard-and-skill-api-support-to-bun.xml tests/skills/channel-memory-authz.test.ts tests/skills/memory-patch-channel-scope.test.ts tests/skills/registry.reminder.test.ts tests/skills/registry.test.ts tests/skills/reaction-handler.test.ts tests/skills/file-handler.test.ts tests/skills/email-compose-smoke.test.ts tests/skills/email-handler.test.ts tests/skills/skill-docs-token-gate.test.ts tests/skills/email-forward-smoke.test.ts tests/skills/email-forward.test.ts tests/skills/reminder-handler.test.ts tests/skills/context-handler.test.ts tests/skills/reply-handler.test.ts tests/skills/memory-handler.test.ts tests/skill-api/caller-token.test.ts tests/skill-api/session-registry.test.ts tests/dashboard/audit-history-loader.test.ts tests/dashboard/auth.test.ts tests/dashboard/completed-session-store.test.ts tests/dashboard/config.test.ts; (cd migration/bun/baseline && bun run --no-env-file parity.ts --junit .parity/convert-skills-dashboard-and-skill-api-support-to-bun.xml --allow-deferred --scope tests/skills/channel-memory-authz.test.ts --scope tests/skills/memory-patch-channel-scope.test.ts --scope tests/skills/registry.reminder.test.ts --scope tests/skills/registry.test.ts --scope tests/skills/reaction-handler.test.ts --scope tests/skills/file-handler.test.ts --scope tests/skills/email-compose-smoke.test.ts --scope tests/skills/email-handler.test.ts --scope tests/skills/skill-docs-token-gate.test.ts --scope tests/skills/email-forward-smoke.test.ts --scope tests/skills/email-forward.test.ts --scope tests/skills/reminder-handler.test.ts --scope tests/skills/context-handler.test.ts --scope tests/skills/reply-handler.test.ts --scope tests/skills/memory-handler.test.ts --scope tests/skill-api/caller-token.test.ts --scope tests/skill-api/session-registry.test.ts --scope tests/dashboard/audit-history-loader.test.ts --scope tests/dashboard/auth.test.ts --scope tests/dashboard/completed-session-store.test.ts --scope tests/dashboard/config.test.ts)` exits 0. Paste the `deferred` list into the task report.
+- [ ] 3.3 Format and lint. Verify: `bun run fmt:check` and `bun run lint` exit 0.
+- [ ] 3.4 Scope. Verify: `git status --porcelain` lists only files from design D1, `migration/bun/baseline/parity-exceptions.json` (only if an exception was needed) and this change directory.
