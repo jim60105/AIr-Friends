@@ -291,6 +291,81 @@ group can swap places.
 `record-bun-go-no-go` must run last, because changing `migration/bun/poc/` after its task 1.1
 invalidates the evidence. A Go result does not check any box in section 9.
 
+`record-bun-go-no-go` first recorded No-Go. `fix-bun-acp-harness-and-rerecord` corrected two harness
+defects that had nothing to do with Bun: periodic fixture text that tripped OMP's thinking-loop
+detector, and an ACP-06 test that never applied a client-side timeout. It then re-recorded the
+outcome as **Go**: all 63 criteria pass on `x86_64` and `aarch64`
+(`migration/bun/poc/GO-NO-GO.md`).
+
+### OpenSpec proposals for steps 3 to 8
+
+These changes live under `openspec/changes/` and were planned from the PoC findings. Apply them in
+table order. Changes in the same order group can swap places, but changes that share
+`package.json` or `bun.lock` (order 2) are applied one at a time. "Depends on" lists only direct
+prerequisites that no other listed prerequisite already implies. Each proposal's `## Batch:` section
+holds the full list and the conflict notes.
+
+| Order | Change                                                  | Step | Scope                                                                                                  | Depends on                                                                                                                          |
+| ----- | ------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `add-bun-package-manifest`                              | 3    | `package.json`, `bun.lock`, `bunfig.toml` and `tsconfig.json` with exact pins; `@node-rs/jieba` on x86_64 (P0-9) | Go outcome                                                                                                                          |
+| 2     | `adopt-dprint-oxlint-and-tsc`                           | 3    | dprint with the current style, oxlint, `tsc --noEmit` check script                                     | `add-bun-package-manifest`                                                                                                          |
+| 2     | `bundle-omp-extension-with-bun`                         | 3    | `bun build` OMP extension bundle, `bundle-audit.ts` kept, two-argument wrapper                         | `add-bun-package-manifest`                                                                                                          |
+| 2     | `add-bun-test-parity-check`                             | 3    | Parity tool against `deno-tests.json`, exceptions record, `--allow-deferred`                           | `add-bun-package-manifest`                                                                                                          |
+| 3     | `add-bun-conversion-codemod`                            | 4    | AST codemod, high-risk symbol owner table, runtime-platform (arm64 normalization) and fs-compat helpers | `adopt-dprint-oxlint-and-tsc`, `add-bun-test-parity-check`                                                                          |
+| 4     | `convert-utils-platforms-and-test-support-to-bun`       | 4    | Utils, types, Discord and Misskey, test helpers, mocks and fixtures                                     | `add-bun-conversion-codemod`, `bundle-omp-extension-with-bun`                                                                       |
+| 5     | `convert-core-state-and-schedulers-to-bun`              | 4    | Stores, schedulers, config, templates, memory recall, memory scripts                                    | `convert-utils-platforms-and-test-support-to-bun`                                                                                   |
+| 5     | `convert-core-sessions-and-workspaces-to-bun`           | 4    | Orchestrator, workspaces, skill install, git backup, bootstrap                                          | `convert-utils-platforms-and-test-support-to-bun`                                                                                   |
+| 5     | `convert-email-platform-to-bun`                         | 4    | Email platform and core email, `FileHandle` mapping                                                    | `convert-utils-platforms-and-test-support-to-bun`                                                                                   |
+| 5     | `convert-acp-policy-and-filesystem-to-bun`              | 4    | ACP policy, filesystem, sandbox manager, skill-inventory filesystem seam                                | `convert-utils-platforms-and-test-support-to-bun`                                                                                   |
+| 6     | `convert-acp-client-and-factory-to-bun`                 | 4    | ACP client and agent factory                                                                            | `convert-acp-policy-and-filesystem-to-bun`                                                                                          |
+| 6     | `convert-skills-dashboard-and-skill-api-support-to-bun` | 4    | Skill handlers, dashboard support, Skill API registry                                                   | `convert-core-state-and-schedulers-to-bun`, `convert-core-sessions-and-workspaces-to-bun`                                           |
+| 7     | `adopt-bun-agent-process-boundary`                      | 5    | `createAgentProcess` with callback stdin backpressure, real-child environment tests (P0-1, P0-2, P0-3) | `convert-acp-client-and-factory-to-bun`                                                                                             |
+| 7     | `port-command-call-sites-and-sandbox-probe-to-bun`      | 5    | Remaining `Deno.Command` sites, native cache preparation, real sandbox probe tests (P0-7)              | `convert-core-sessions-and-workspaces-to-bun`, `convert-acp-policy-and-filesystem-to-bun`                                           |
+| 7     | `port-egress-proxy-and-gelf-to-node-net`                | 5    | Proxy and GELF on `node:net`, `node:dns` and `node:dgram`; rebinding and half-close regressions (P0-5) | `convert-core-sessions-and-workspaces-to-bun`                                                                                       |
+| 7     | `port-filesystem-ffi-to-bun-ffi`                        | 5    | `openat2`/`statx` on `bun:ffi` with real errno tests (P0-4 amd64)                                      | `convert-acp-policy-and-filesystem-to-bun`                                                                                          |
+| 7     | `port-http-servers-to-bun-serve`                        | 5    | Dashboard, Skill API and health on `Bun.serve`; health probe checks `bun`                              | `convert-skills-dashboard-and-skill-api-support-to-bun`                                                                             |
+| 8     | `port-process-lifecycle-and-pool-to-bun`                | 5    | Lifecycle primitives, process-tree SIGKILL on escalation, awaited pool stop (P0-3)                     | `adopt-bun-agent-process-boundary`, `convert-core-sessions-and-workspaces-to-bun`, `convert-core-state-and-schedulers-to-bun`       |
+| 9     | `port-signals-and-entrypoint-to-bun`                    | 5    | `process.on` signal and error hooks, `parseArgs`, self-SIGTERM tests                                    | `port-http-servers-to-bun-serve`, `port-process-lifecycle-and-pool-to-bun`                                                          |
+| 10    | `convert-agent-integration-suites-to-bun`               | 5    | Step 5 exit gate: agent integration suites, file-descriptor and process leak checks                   | `port-signals-and-entrypoint-to-bun`, `port-command-call-sites-and-sandbox-probe-to-bun`, `port-egress-proxy-and-gelf-to-node-net`, `port-filesystem-ffi-to-bun-ffi` |
+| 11    | `convert-builtin-skills-to-bun`                         | 6    | Hardened shebang, `parseArgs` with argument tests, `skill-bunfig.toml` installer                       | `convert-agent-integration-suites-to-bun`                                                                                           |
+| 12    | `enforce-bun-skill-approval-grammar`                    | 6    | Exact two-form grammar, `bun *: ask` and `bunx *: deny`, injection suite (P0-6), step 6 exit gate      | `convert-builtin-skills-to-bun`                                                                                                     |
+| 13    | `rename-deno-runtime-identifiers`                       | 7    | `/home/air`, `ENV` only, `DENO_*` removed, confinement list                                            | `enforce-bun-skill-approval-grammar`                                                                                                |
+| 14    | `package-bun-container-image`                           | 7    | Pinned `oven/bun` digest, root-owned immutable `/opt/air/skill-bunfig.toml`, image smoke and in-image tests (P0-4 seccomp, P0-7, P0-9 amd64) | `rename-deno-runtime-identifiers`                                                                                                   |
+| 15    | `migrate-ci-and-docs-to-bun`                            | 7    | Bun CI on amd64 and arm64, open and restricted user-namespace runs, coverage floor, docs, `deno.json` and `deno.lock` removed | `package-bun-container-image`                                                                                                       |
+| 16    | `drill-bun-cutover-and-rollback`                        | 8    | Restart-persistence tests (P0-8), container drill with thresholds fixed in advance, rollback drill, human-reviewed `TRIAL.md` | `migrate-ci-and-docs-to-bun`                                                                                                        |
+| 17    | `cut-over-to-bun-release`                               | 8    | Final gates, section 9 evidence, `0.37.0` version and changelog, `migration/bun/` and migration-only specs removed | `drill-bun-cutover-and-rollback`                                                                                                    |
+
+Section 9 ownership:
+
+| P0   | Owning changes                                                                                                                                                         |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0-1 | `adopt-bun-agent-process-boundary`                                                                                                                                     |
+| P0-2 | `adopt-bun-agent-process-boundary`, `convert-agent-integration-suites-to-bun`                                                                                          |
+| P0-3 | `adopt-bun-agent-process-boundary`, `port-process-lifecycle-and-pool-to-bun`, `port-signals-and-entrypoint-to-bun`, `drill-bun-cutover-and-rollback`                   |
+| P0-4 | `port-filesystem-ffi-to-bun-ffi`, `package-bun-container-image`, `migrate-ci-and-docs-to-bun`                                                                          |
+| P0-5 | `port-egress-proxy-and-gelf-to-node-net`                                                                                                                               |
+| P0-6 | `convert-builtin-skills-to-bun`, `enforce-bun-skill-approval-grammar`                                                                                                  |
+| P0-7 | `port-command-call-sites-and-sandbox-probe-to-bun`, `package-bun-container-image`, `migrate-ci-and-docs-to-bun`                                                        |
+| P0-8 | `drill-bun-cutover-and-rollback`                                                                                                                                       |
+| P0-9 | `add-bun-package-manifest`, `package-bun-container-image`, `migrate-ci-and-docs-to-bun`                                                                                |
+| P0-10 | `package-bun-container-image`, `migrate-ci-and-docs-to-bun`, `drill-bun-cutover-and-rollback`, `cut-over-to-bun-release`                                              |
+
+These decisions are open for the owner. The changes name them, but they are not yet confirmed:
+
+- **Coverage floor:** Bun 1.4.2 LCOV has no branch records, so `migrate-ci-and-docs-to-bun` moves the
+  75% floor to line coverage over `src/`. The Deno baseline line coverage is 83.3%. This supersedes the
+  Branch-column wording in section 6 once confirmed.
+- **Drill thresholds:** `drill-bun-cutover-and-rollback` proposes these thresholds:
+  - startup and idle memory: Deno median × 1.25
+  - file descriptors: Deno maximum × 1.25
+  - leftover processes: zero
+  - stop time: under 15 s
+- **Shutdown time:** the pool stop awaits disconnects and kills the process tree. This adds up to
+  about 4 s to shutdown.
+- **Error-handler fields:** Bun 1.4.2 does not fire `globalThis` `unhandledrejection`. The handler
+  moves to `process.on`, and the uncaught-error log loses its separate filename, lineno and colno
+  fields. The stack keeps that information.
+
 ## 9. P0 release blockers
 
 - [ ] Unauthorized parent secrets are absent from real OpenCode and OMP child environments, and
