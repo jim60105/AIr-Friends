@@ -40,6 +40,24 @@
 - **THEN** it SHALL exit non-zero
 
 #### Scenario: Alias and Bun types resolve
-- **GIVEN** a file importing a type through `@types/` and using `Bun.version`
+- **GIVEN** a file importing a type through `@utils/` and using `Bun.version`
 - **WHEN** `bun run check` runs on it
 - **THEN** neither the import nor `Bun.version` SHALL produce an error
+
+## MODIFIED Requirements
+
+### Requirement: Path Aliases Resolve Under Bun
+
+The `@core/`, `@platforms/`, `@skills/`, `@types/`, `@utils/` and `@acp/` import prefixes SHALL resolve to the matching directory under `src/` for the Bun runtime, and the type checker SHALL resolve the `@core/`, `@platforms/`, `@skills/`, `@utils/` and `@acp/` prefixes. TypeScript rejects every module specifier beginning with `@types/` (TS6137), so source files SHALL NOT import through `@types/`; the prefix stays configured so Bun keeps resolving it and it cannot shadow the npm type packages.
+
+#### Scenario: Runtime resolution
+- **WHEN** Bun imports `@utils/hash.ts`
+- **THEN** it SHALL load `src/utils/hash.ts`
+
+#### Scenario: The types alias does not shadow npm type packages
+- **WHEN** Bun imports `@types/errors.ts`
+- **THEN** it SHALL load `src/types/errors.ts`, and the Bun type package SHALL still be found by the type checker
+
+#### Scenario: The type checker resolves the runtime aliases
+- **WHEN** `bun run check` type-checks a file importing through `@utils/`, `@core/`, `@platforms/`, `@skills/` or `@acp/`
+- **THEN** the import SHALL produce no error
