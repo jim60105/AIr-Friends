@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "outcome": "No-Go",
-  "decidedAt": "2026-11-07T22:30:45.966Z",
+  "outcome": "Go",
+  "decidedAt": "2026-11-08T07:59:16.641Z",
   "freezeSha": "734c8b03c60a021a3982a07d18c3c3f75962c472",
-  "head": "9bb84e21f8c3aee5123b8ba79db2f2b4d446d00a",
+  "head": "3f4037493227b0ab0b2ce8272dba4372cd00f73c",
   "pins": {
     "bunVersion": "1.4.2",
     "bunRevisionPrefix": "744846f84",
@@ -11,7 +11,7 @@
     "opencodeVersion": "1.18.21",
     "ompVersion": "18.6.1"
   },
-  "pocTreeSha256": "336aae5681f148993e21f28b6e578a55b3da42acc628b10f49ea884dad9412f2",
+  "pocTreeSha256": "3301d9b6a62b20a2c9554a879c0af40e1f9342a3cb37804bd6837640746ace62",
   "productSourcesSha256": "2126381089d7ba525e173d1d805fa8ec4fac39a2bb761f158be37d7c15355f8e",
   "changedPaths": [
     ".github/workflows/bun-poc-arm64.yml",
@@ -29,6 +29,8 @@
     "migration/bun/baseline/validate.ts",
     "migration/bun/poc/.gitignore",
     "migration/bun/poc/Containerfile",
+    "migration/bun/poc/GO-NO-GO.json",
+    "migration/bun/poc/GO-NO-GO.md",
     "migration/bun/poc/acp/agents.ts",
     "migration/bun/poc/acp/driver.ts",
     "migration/bun/poc/acp/loopback-provider.ts",
@@ -121,12 +123,19 @@
     "openspec/changes/archive/2026-11-08-prove-bun-injection-defenses/proposal.md",
     "openspec/changes/archive/2026-11-08-prove-bun-injection-defenses/specs/bun-poc-injection-defenses/spec.md",
     "openspec/changes/archive/2026-11-08-prove-bun-injection-defenses/tasks.md",
-    "openspec/changes/record-bun-go-no-go/.openspec.yaml",
-    "openspec/changes/record-bun-go-no-go/design.md",
-    "openspec/changes/record-bun-go-no-go/proposal.md",
-    "openspec/changes/record-bun-go-no-go/specs/bun-go-no-go-outcome/spec.md",
-    "openspec/changes/record-bun-go-no-go/tasks.md",
+    "openspec/changes/archive/2026-11-08-record-bun-go-no-go/.openspec.yaml",
+    "openspec/changes/archive/2026-11-08-record-bun-go-no-go/design.md",
+    "openspec/changes/archive/2026-11-08-record-bun-go-no-go/proposal.md",
+    "openspec/changes/archive/2026-11-08-record-bun-go-no-go/specs/bun-go-no-go-outcome/spec.md",
+    "openspec/changes/archive/2026-11-08-record-bun-go-no-go/tasks.md",
+    "openspec/changes/fix-bun-acp-harness-and-rerecord/.openspec.yaml",
+    "openspec/changes/fix-bun-acp-harness-and-rerecord/design.md",
+    "openspec/changes/fix-bun-acp-harness-and-rerecord/proposal.md",
+    "openspec/changes/fix-bun-acp-harness-and-rerecord/specs/bun-poc-acp-resilience/spec.md",
+    "openspec/changes/fix-bun-acp-harness-and-rerecord/specs/bun-poc-acp-transport/spec.md",
+    "openspec/changes/fix-bun-acp-harness-and-rerecord/tasks.md",
     "openspec/specs/bun-go-no-go-gate/spec.md",
+    "openspec/specs/bun-go-no-go-outcome/spec.md",
     "openspec/specs/bun-migration-baseline/spec.md",
     "openspec/specs/bun-poc-acp-resilience/spec.md",
     "openspec/specs/bun-poc-acp-transport/spec.md",
@@ -205,141 +214,141 @@
       "id": "ACP-01-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-01-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-02-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-02-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-03-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-03-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-04-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-04-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-05-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-05-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-06-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-06-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-07-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-07-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-08-OC",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-08-OMP",
       "p0": "P0-2",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-09-OC",
       "p0": "P0-1",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-09-OMP",
       "p0": "P0-1",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-10-OC",
       "p0": "P0-3",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "ACP-10-OMP",
       "p0": "P0-3",
       "arch": "x86_64",
-      "status": "fail",
-      "detail": "1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256"
+      "status": "pass",
+      "detail": "1 test(s) passed"
     },
     {
       "id": "FFI-01",
@@ -580,28 +589,7 @@
       "detail": "2 test(s) passed"
     }
   ],
-  "blockers": [
-    "ACP-01-OC x86_64: fail",
-    "ACP-01-OMP x86_64: fail",
-    "ACP-02-OC x86_64: fail",
-    "ACP-02-OMP x86_64: fail",
-    "ACP-03-OC x86_64: fail",
-    "ACP-03-OMP x86_64: fail",
-    "ACP-04-OC x86_64: fail",
-    "ACP-04-OMP x86_64: fail",
-    "ACP-05-OC x86_64: fail",
-    "ACP-05-OMP x86_64: fail",
-    "ACP-06-OC x86_64: fail",
-    "ACP-06-OMP x86_64: fail",
-    "ACP-07-OC x86_64: fail",
-    "ACP-07-OMP x86_64: fail",
-    "ACP-08-OC x86_64: fail",
-    "ACP-08-OMP x86_64: fail",
-    "ACP-09-OC x86_64: fail",
-    "ACP-09-OMP x86_64: fail",
-    "ACP-10-OC x86_64: fail",
-    "ACP-10-OMP x86_64: fail"
-  ],
+  "blockers": [],
   "deferrals": [
     {
       "p0": "P0-1",

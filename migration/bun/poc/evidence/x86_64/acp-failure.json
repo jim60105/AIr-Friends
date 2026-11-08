@@ -8,12 +8,12 @@
   "baseImageDigest": "sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73",
   "opencodeVersion": "1.18.21",
   "ompVersion": "18.6.1",
-  "pocTreeSha256": "336aae5681f148993e21f28b6e578a55b3da42acc628b10f49ea884dad9412f2",
+  "pocTreeSha256": "3301d9b6a62b20a2c9554a879c0af40e1f9342a3cb37804bd6837640746ace62",
   "productSourcesSha256": "2126381089d7ba525e173d1d805fa8ec4fac39a2bb761f158be37d7c15355f8e",
   "spawnBackend": "node",
-  "gitHead": "96fec54a7ab91b63b54170b2c2fff48c900b42c4",
-  "imageId": "817431f85c2a69d39aa8a2cbf711f1a8b81b63823bff924d68d206a9ee08e6e4",
-  "capturedAt": "2026-11-07T22:28:03.320Z",
+  "gitHead": "3f4037493227b0ab0b2ce8272dba4372cd00f73c",
+  "imageId": "9517f328866c427d28f3a1f2baf167de2b681f35b875e71d2cda39c937129e8b",
+  "capturedAt": "2026-11-08T07:58:16.535Z",
   "observations": {
     "spawnBackend": "node"
   },
@@ -25,8 +25,8 @@
     },
     {
       "name": "ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256",
-      "status": "failed",
-      "assertions": 2
+      "status": "passed",
+      "assertions": 3
     },
     {
       "name": "ACP-05-OC: session/cancel ends a paced stream with stop reason cancelled within 5 s",
@@ -41,12 +41,12 @@
     {
       "name": "ACP-06-OC: a 3 s client timeout leaves teardown to resolve with the wrapper exited",
       "status": "passed",
-      "assertions": 3
+      "assertions": 5
     },
     {
       "name": "ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited",
-      "status": "failed",
-      "assertions": 3
+      "status": "passed",
+      "assertions": 5
     },
     {
       "name": "ACP-07-OC: SIGKILL mid-stream rejects the pending prompt within 3 s and resolves exited",

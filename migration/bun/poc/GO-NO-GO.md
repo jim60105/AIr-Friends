@@ -1,10 +1,10 @@
 # Bun migration Go/No-Go
 
-Outcome: No-Go
+Outcome: Go
 
-Date: 2026-11-07T22:30:45.966Z
+Date: 2026-11-08T07:59:16.641Z
 Freeze SHA: 734c8b03c60a021a3982a07d18c3c3f75962c472
-Head: 9bb84e21f8c3aee5123b8ba79db2f2b4d446d00a
+Head: 3f4037493227b0ab0b2ce8272dba4372cd00f73c
 
 ## Pins
 
@@ -16,26 +16,7 @@ Head: 9bb84e21f8c3aee5123b8ba79db2f2b4d446d00a
 
 ## Blockers
 
-- ACP-01-OC x86_64: fail
-- ACP-01-OMP x86_64: fail
-- ACP-02-OC x86_64: fail
-- ACP-02-OMP x86_64: fail
-- ACP-03-OC x86_64: fail
-- ACP-03-OMP x86_64: fail
-- ACP-04-OC x86_64: fail
-- ACP-04-OMP x86_64: fail
-- ACP-05-OC x86_64: fail
-- ACP-05-OMP x86_64: fail
-- ACP-06-OC x86_64: fail
-- ACP-06-OMP x86_64: fail
-- ACP-07-OC x86_64: fail
-- ACP-07-OMP x86_64: fail
-- ACP-08-OC x86_64: fail
-- ACP-08-OMP x86_64: fail
-- ACP-09-OC x86_64: fail
-- ACP-09-OMP x86_64: fail
-- ACP-10-OC x86_64: fail
-- ACP-10-OMP x86_64: fail
+None.
 
 ## Criteria
 
@@ -50,26 +31,26 @@ Head: 9bb84e21f8c3aee5123b8ba79db2f2b4d446d00a
 | PROC-07 | P0-3 | x86_64 | pass | 1 test(s) passed |
 | PROC-08 | P0-3 | x86_64 | pass | 1 test(s) passed |
 | PROC-09 | P0-3 | x86_64 | pass | 1 test(s) passed |
-| ACP-01-OC | P0-2 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-01-OMP | P0-2 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-02-OC | P0-2 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-02-OMP | P0-2 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-03-OC | P0-2 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-03-OMP | P0-2 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-04-OC | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-04-OMP | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-05-OC | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-05-OMP | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-06-OC | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-06-OMP | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-07-OC | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-07-OMP | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-08-OC | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-08-OMP | P0-2 | x86_64 | fail | 2 failed test(s): ACP-04-OMP: a 3 s reader stall keeps 4 MiB of agent text byte-identical by SHA-256, ACP-06-OMP: a 3 s client timeout leaves teardown to resolve with the wrapper exited |
-| ACP-09-OC | P0-1 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-09-OMP | P0-1 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-10-OC | P0-3 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
-| ACP-10-OMP | P0-3 | x86_64 | fail | 1 failed test(s): ACP-02-OMP: 16 MiB of agent output arrives byte-identical by SHA-256 |
+| ACP-01-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-01-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-02-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-02-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-03-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-03-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-04-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-04-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-05-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-05-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-06-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-06-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-07-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-07-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-08-OC | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-08-OMP | P0-2 | x86_64 | pass | 1 test(s) passed |
+| ACP-09-OC | P0-1 | x86_64 | pass | 1 test(s) passed |
+| ACP-09-OMP | P0-1 | x86_64 | pass | 1 test(s) passed |
+| ACP-10-OC | P0-3 | x86_64 | pass | 1 test(s) passed |
+| ACP-10-OMP | P0-3 | x86_64 | pass | 1 test(s) passed |
 | FFI-01 | P0-4 | x86_64 | pass | 1 test(s) passed |
 | FFI-01 | P0-4 | aarch64 | pass | 1 test(s) passed |
 | FFI-02 | P0-4 | x86_64 | pass | 1 test(s) passed |
@@ -131,4 +112,4 @@ Head: 9bb84e21f8c3aee5123b8ba79db2f2b4d446d00a
 
 ## Next step
 
-Stop the migration. An owner decides whether a blocker is solvable; if not, master unfreezes.
+Plan design section 8 steps 3 to 8 using these findings. No P0 blocker is closed by this record.
