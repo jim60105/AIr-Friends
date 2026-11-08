@@ -36,11 +36,35 @@ const PRINTABLE = Array.from({ length: 94 }, (_, index) => 0x21 + index).filter(
   (byte) => byte !== 0x22 && byte !== 0x5c,
 );
 
-/** Deterministic text from the seeded printable alphabet above. */
+/**
+ * Mixes a position into a 32-bit value (the `lowbias32` integer hash), so each
+ * byte depends on its absolute position alone and no short cycle appears.
+ */
+function mixPosition(position: number): number {
+  let value = position >>> 0;
+  value ^= value >>> 16;
+  value = Math.imul(value, 0x7feb352d);
+  value ^= value >>> 15;
+  value = Math.imul(value, 0x846ca68b);
+  value ^= value >>> 16;
+  return value >>> 0;
+}
+
+/**
+ * Deterministic text from the seeded printable alphabet above. Byte `i` is a
+ * hash of `seed + i`, so any slice is regenerable from its offset alone.
+ *
+ * The text must not be periodic: OMP 18.6.1 runs a thinking-loop detector
+ * over model output and treats a short repeated cycle (the alphabet repeated
+ * 13 times) as a stream stall, then aborts and retries the request. A
+ * `(seed + i) % alphabet` sequence trips it after about 1.2 KB and the agent
+ * forwards only 12,990 bytes whatever the script length, under any parent
+ * runtime.
+ */
 export function printableText(length: number, seed = 0): string {
   const bytes = Buffer.allocUnsafe(length);
   for (let index = 0; index < length; index++) {
-    bytes[index] = PRINTABLE[(seed + index) % PRINTABLE.length];
+    bytes[index] = PRINTABLE[mixPosition(seed + index) % PRINTABLE.length];
   }
   return bytes.toString("latin1");
 }

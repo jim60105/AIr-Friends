@@ -149,14 +149,28 @@ async function acp05(kind: AgentKind): Promise<void> {
   expect(response.stopReason).toBe("cancelled");
 }
 
+class ClientTimeoutError extends Error {}
+
 async function acp06(kind: AgentKind): Promise<void> {
   const started = await start(kind, { kind: "stall" });
   const pending = started.run.promptOrCrash("poc stalled provider");
-  const tracked = settle(pending);
+  const raw = settle(pending);
 
-  // The client-side timeout: the stalled provider never gives the prompt a
-  // reason to finish, so the timer has to win.
-  expect(await firstSettled(tracked, CLIENT_TIMEOUT_MS)).toBe("timer");
+  // The client-side timeout, shaped like `AgentConnector.prompt()`: the ACP
+  // request is raced against a client timer arm that only ever rejects, so the
+  // call the client awaits rejects on the client's own clock whatever the
+  // agent does with the request afterwards.
+  const timer = Bun.sleep(CLIENT_TIMEOUT_MS).then((): never => {
+    throw new ClientTimeoutError(`prompt exceeded the ${CLIENT_TIMEOUT_MS} ms client timeout`);
+  });
+  const call = settle(Promise.race([pending, timer]));
+
+  // The stalled provider never gives the prompt a reason to finish, so the
+  // timer has to win and the call has to reject with the client timeout.
+  expect(await firstSettled(raw, CLIENT_TIMEOUT_MS)).toBe("timer");
+  const timedOut = await within(call, TEARDOWN_BOUND_MS, "timed-out call");
+  expect(timedOut.ok).toBe(false);
+  expect(timedOut.ok ? undefined : timedOut.error).toBeInstanceOf(ClientTimeoutError);
 
   // Teardown has to complete while that prompt is still outstanding, and the
   // wrapper's exit has to be observable afterwards.
@@ -164,10 +178,11 @@ async function acp06(kind: AgentKind): Promise<void> {
   const exit = await within(started.run.handle.exited, TEARDOWN_BOUND_MS, "wrapper exit");
   expect(typeof exit.code === "number" || typeof exit.signal === "string").toBe(true);
 
-  // The client-side timeout has to surface as a rejected call, and teardown
-  // must not leave it hanging: the abandoned prompt has to settle, rejecting.
-  const timedOut = await within(tracked, TEARDOWN_BOUND_MS, "abandoned prompt");
-  expect(timedOut.ok).toBe(false);
+  // Teardown must not leave the abandoned ACP request hanging. Whether it
+  // rejects (OpenCode dies without answering) or resolves (OMP answers
+  // `cancelled` on SIGTERM before exiting) is the agent's shutdown choice and
+  // does not depend on the parent runtime; the client already rejected above.
+  expect(await firstSettled(raw, TEARDOWN_BOUND_MS)).toBe("settled");
 }
 
 async function acp07(kind: AgentKind): Promise<void> {
