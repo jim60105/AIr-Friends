@@ -1,0 +1,38 @@
+{
+  "name": "air-friends",
+  "version": "0.36.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "engines": {
+    "bun": "1.4.2"
+  },
+  "scripts": {
+    "start": "bun run --no-env-file --config=./bunfig.toml src/main.ts",
+    "start:config": "bun run --no-env-file --config=./bunfig.toml src/main.ts --config",
+    "dev": "bun run --watch --no-env-file --config=./bunfig.toml src/main.ts",
+    "test": "bun test --timeout=120000 tests/",
+    "test:unit": "bun test --timeout=120000 tests/acp tests/core tests/dashboard tests/platforms tests/scripts tests/skill-api tests/skills tests/types tests/utils tests/main.test.ts tests/healthcheck.test.ts",
+    "test:integration": "bun test --timeout=120000 tests/integration",
+    "test:coverage": "bun test --timeout=120000 --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage tests/"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "0.14.1",
+    "@node-rs/jieba": "2.0.3",
+    "discord.js": "14.26.4",
+    "html-to-text": "9.0.5",
+    "imapflow": "1.7.8",
+    "mailparser": "3.9.39",
+    "misskey-js": "2026.10.0",
+    "nodemailer": "7.0.13",
+    "prom-client": "15.1.3",
+    "ventojs": "2.2.0",
+    "yaml": "2.9.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@std/assert": "npm:@jsr/std__assert@1.0.19",
+    "@std/testing": "npm:@jsr/std__testing@1.0.18",
+    "@types/bun": "1.4.2"
+  }
+}

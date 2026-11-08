@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "types": ["bun"],
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@platforms/*": ["./src/platforms/*"],
+      "@skills/*": ["./src/skills/*"],
+      "@types/*": ["./src/types/*"],
+      "@utils/*": ["./src/utils/*"],
+      "@acp/*": ["./src/acp/*"]
+    }
+  },
+  "include": ["src", "tests", "scripts", "skills"],
+  "exclude": ["src/dashboard/public", "node_modules", "migration"]
+}

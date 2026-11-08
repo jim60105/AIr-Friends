@@ -6,41 +6,6 @@ Defines the Deno 2.x runtime environment, YAML configuration system with environ
 
 ## Requirements
 
-### Requirement: Deno Runtime with Explicit Permissions
-
-The system SHALL use Deno 2.x as the runtime environment with explicit permission flags. The system SHALL NOT use `--allow-all`.
-
-#### Scenario: Required Permission Flags
-
-- **GIVEN** the application is started via `deno run` or `deno task start`
-- **WHEN** the process launches
-- **THEN** the following permission flags SHALL be declared: `--allow-net`, `--allow-read`, `--allow-write`, `--allow-env`, `--allow-run`, `--allow-ffi`, `--allow-sys`
-
-#### Scenario: Eagerly loaded dependency requires its OS permission
-
-- **GIVEN** a module reached by a static import from the application entry point calls an OS API that Deno gates behind system permission at module initialization, such as `os.hostname()`
-- **WHEN** the process launches
-- **THEN** `--allow-sys` SHALL be declared even when the platform that owns that dependency is disabled
-
-#### Scenario: Development Mode with Hot Reload
-
-- **GIVEN** a developer runs `deno task dev`
-- **WHEN** the task executes
-- **THEN** the process SHALL start with `--watch` flag and all required permissions
-
-#### Scenario: Tests run with native module permission
-
-- **GIVEN** a developer or CI runs any `deno task` that executes tests
-- **WHEN** the task executes
-- **THEN** the process SHALL include `--allow-ffi` so native modules used by the application can load
-
-#### Scenario: Container image can load the segmenter
-
-- **GIVEN** the container image is built from `Containerfile`
-- **WHEN** the container starts with its default command
-- **THEN** the command SHALL include `--allow-ffi`
-- **AND** the vendored `assets/` directory SHALL be present in the image
-
 ### Requirement: YAML Configuration Loading
 
 The system SHALL load configuration from YAML files with a defined merge order: defaults → base config → environment-specific config → environment variables. The email signature SHALL remain literal decoded text and SHALL be excluded from generic environment expansion.
@@ -293,43 +258,6 @@ The container image SHALL include OCI-compliant labels for metadata.
 - **GIVEN** the Containerfile is built with `VERSION` and `RELEASE` args
 - **WHEN** the image is produced
 - **THEN** it SHALL include labels: `name`, `vendor`, `maintainer`, `url`, `version`, `release`, `io.k8s.display-name`, `summary`, and `description`
-
-### Requirement: Deno Project Structure
-
-The project SHALL use `deno.json` as the central configuration file with import aliases and task definitions.
-
-#### Scenario: Import Aliases
-
-- **GIVEN** `deno.json` defines import aliases
-- **WHEN** source code imports modules
-- **THEN** the following aliases SHALL be available: `@core/` → `./src/core/`, `@platforms/` → `./src/platforms/`, `@skills/` → `./src/skills/`, `@types/` → `./src/types/`, `@utils/` → `./src/utils/`, `@acp/` → `./src/acp/`
-
-#### Scenario: Task Definitions
-
-- **GIVEN** `deno.json` defines tasks
-- **WHEN** a developer runs `deno task <name>`
-- **THEN** the following tasks SHALL be available: `dev` (watch mode), `start` (production), `test` (all tests, one module at a time), `fmt` (format), `lint` (lint), `check` (type check), `ci` (fmt check + lint + type check + test)
-- **AND** the `test` and `test:unit` tasks SHALL NOT pass `--parallel`: Deno runs parallel test modules in one process, so `Deno.env` mutations leak between concurrently running modules and the environment-override tests fail on unrelated assertions
-- **AND** the `ci` task's fmt-check and lint steps SHALL be scoped to `src/` and `tests/` — the same scopes as `fmt:check` and `lint`, matching the GitHub Actions workflow — so the task passes on a repository whose non-code assets (vendored data, docs, archives) are not format-managed and whose TypeScript outside `src/` and `tests/` (skill scripts, benchmark scripts) is not lint-managed
-
-#### Scenario: Formatting Rules
-
-- **GIVEN** `deno.json` defines `fmt` settings
-- **WHEN** `deno fmt` runs
-- **THEN** it SHALL enforce: `lineWidth: 100`, `indentWidth: 2`, `useTabs: false`, `singleQuote: false`, `proseWrap: "preserve"`
-
-#### Scenario: Compiler Options
-
-- **GIVEN** `deno.json` defines `compilerOptions`
-- **WHEN** `deno check` runs
-- **THEN** it SHALL enforce: `strict: true`, `noImplicitAny: true`, `noImplicitReturns: true`, `noFallthroughCasesInSwitch: true`
-
-#### Scenario: Lock File
-
-- **GIVEN** `deno.lock` exists in the repository
-- **WHEN** dependencies are resolved
-- **THEN** the lock file SHALL be committed to version control
-- **AND** CI/container builds SHALL use `--lock=deno.lock` for reproducibility
 
 ### Requirement: Dashboard Configuration Section
 
