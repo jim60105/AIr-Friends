@@ -1,10 +1,11 @@
 // src/dashboard/audit-history-loader.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { CompletedSession } from "./completed-session-store.ts";
 import type { SessionType } from "../types/config.ts";
 import type { SessionAuditEntry } from "../types/audit.ts";
+import fsp from "node:fs/promises";
 
 const logger = createLogger("AuditHistoryLoader");
 const MAX_RESULTS = 100;
@@ -41,7 +42,7 @@ async function parseAuditFile(
   sessionId: string,
 ): Promise<CompletedSession | null> {
   try {
-    const content = await Deno.readTextFile(filePath);
+    const content = await fsp.readFile(filePath, "utf8");
     const { first, last } = getFirstAndLastEntries(content);
     if (!first) return null;
 
@@ -89,7 +90,7 @@ export async function loadSessionsFromAuditLogs(
   const sessions: CompletedSession[] = [];
 
   try {
-    await Deno.stat(auditBasePath);
+    await fsp.stat(auditBasePath);
   } catch {
     logger.debug("Audit directory does not exist, skipping history load", {
       auditBasePath,
@@ -99,16 +100,16 @@ export async function loadSessionsFromAuditLogs(
 
   try {
     // Walk: {auditBasePath}/{platform}/{userId}/{sessionId}.jsonl
-    for await (const platformEntry of Deno.readDir(auditBasePath)) {
-      if (!platformEntry.isDirectory) continue;
+    for (const platformEntry of await fsp.readdir(auditBasePath, { withFileTypes: true })) {
+      if (!platformEntry.isDirectory()) continue;
       const platformPath = join(auditBasePath, platformEntry.name);
 
-      for await (const userEntry of Deno.readDir(platformPath)) {
-        if (!userEntry.isDirectory) continue;
+      for (const userEntry of await fsp.readdir(platformPath, { withFileTypes: true })) {
+        if (!userEntry.isDirectory()) continue;
         const userPath = join(platformPath, userEntry.name);
 
-        for await (const fileEntry of Deno.readDir(userPath)) {
-          if (!fileEntry.isFile || !fileEntry.name.endsWith(".jsonl")) continue;
+        for (const fileEntry of await fsp.readdir(userPath, { withFileTypes: true })) {
+          if (!fileEntry.isFile() || !fileEntry.name.endsWith(".jsonl")) continue;
 
           const sessionId = fileEntry.name.replace(/\.jsonl$/, "");
           const filePath = join(userPath, fileEntry.name);

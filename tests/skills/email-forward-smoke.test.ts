@@ -13,7 +13,7 @@
 // address is contacted: this is the "complete local SMTP forwarding" evidence of the change.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { EmailComposeHandler } from "../../src/skills/email-handler.ts";
 import type { SkillContext } from "../../src/skills/types.ts";
 import type { DestinationGrant } from "../../src/core/email-intent-preflight.ts";
@@ -43,6 +43,9 @@ import type {
 } from "../../src/platforms/email/imap-client.ts";
 import { decodePartBody, latin1Decode, parseMimeParts } from "../helpers/mime-parts.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const SELF_ADDRESS = "user@example.org";
 const OWNER = normalizeEmailMailbox(SELF_ADDRESS).userId;
@@ -255,9 +258,9 @@ async function buildSmokeHarness(
   };
 }
 
-Deno.test("smoke - a granted forward reaches a real local SMTP peer with the original bytes intact", async () => {
+test("smoke - a granted forward reaches a real local SMTP peer with the original bytes intact", async () => {
   await withSmtpService({}, async (smtpService) => {
-    const base = await Deno.makeTempDir();
+    const base = await makeTempDir();
     try {
       const harness = await buildSmokeHarness(base, smtpService);
       const result = await harness.handler.handleSendEmail(
@@ -305,14 +308,14 @@ Deno.test("smoke - a granted forward reaches a real local SMTP peer with the ori
       assertEquals(harness.imap.appended.length, 1);
       assertEquals(harness.imap.appended[0], transaction.decoded);
     } finally {
-      await Deno.remove(base, { recursive: true });
+      await fsp.rm(base, { recursive: true });
     }
   });
 });
 
-Deno.test("smoke - a rejected SMTP peer yields an explicit failure with no second transaction", async () => {
+test("smoke - a rejected SMTP peer yields an explicit failure with no second transaction", async () => {
   await withSmtpService({ rejectFinal: true }, async (smtpService) => {
-    const base = await Deno.makeTempDir();
+    const base = await makeTempDir();
     try {
       const harness = await buildSmokeHarness(base, smtpService);
       const result = await harness.handler.handleSendEmail(
@@ -338,11 +341,11 @@ Deno.test("smoke - a rejected SMTP peer yields an explicit failure with no secon
       assertEquals(smtpService.dataTransactions.length, 1);
       assertEquals(harness.imap.appended.length, 0);
       assert(
-        await Deno.stat(harness.emailRoot).then(() => true, () => false),
+        await fsp.stat(harness.emailRoot).then(() => true, () => false),
         "the submission journal is still durable evidence",
       );
     } finally {
-      await Deno.remove(base, { recursive: true });
+      await fsp.rm(base, { recursive: true });
     }
   });
 });

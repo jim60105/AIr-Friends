@@ -8,6 +8,9 @@ import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { SendFilePayload } from "../types/platform.ts";
 import type { SendFileSkillConfig } from "../types/config.ts";
 import { stripXmlTags, unescapeNewlines } from "./reply-handler.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 const logger = createLogger("FileHandler");
 
@@ -88,9 +91,9 @@ export class FileHandler {
       const fullPath = resolve(context.workspace.path, filePath);
       let size: number;
       try {
-        size = (await Deno.stat(fullPath)).size;
+        size = (await fsp.stat(fullPath)).size;
       } catch (error) {
-        if (error instanceof Deno.errors.NotFound) {
+        if (isNotFoundError(error)) {
           const guidance = await this.workspacePrefixGuidance(
             filePath,
             fullPath,
@@ -146,7 +149,7 @@ export class FileHandler {
     const files: SendFilePayload[] = [];
     for (const { filePath, fullPath } of validated) {
       try {
-        const fileContent = await Deno.readFile(fullPath);
+        const fileContent = await fsp.readFile(fullPath);
         files.push({
           content: fileContent,
           fileName: filePath.split("/").pop() ?? filePath,
@@ -300,7 +303,7 @@ export class FileHandler {
   private validateRealPath(fullPath: string, context: SkillContext): void {
     let realPath: string;
     try {
-      realPath = Deno.realPathSync(fullPath);
+      realPath = fs.realpathSync(fullPath);
     } catch {
       // File existence is validated by the earlier stat; a realPath failure here
       // (e.g. a broken symlink) is treated as an out-of-bounds/read failure.
@@ -313,7 +316,7 @@ export class FileHandler {
     const isWithin = (base: string): boolean => {
       let realBase: string;
       try {
-        realBase = Deno.realPathSync(base);
+        realBase = fs.realpathSync(base);
       } catch {
         return false;
       }
@@ -360,7 +363,7 @@ export class FileHandler {
  */
 async function pathExists(p: string): Promise<boolean> {
   try {
-    await Deno.stat(p);
+    await fsp.stat(p);
     return true;
   } catch {
     return false;

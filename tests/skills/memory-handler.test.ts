@@ -10,6 +10,9 @@ import type { NoteRecallResult } from "../../src/types/memory.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { NormalizedEvent, Platform } from "../../src/types/events.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (): PlatformAdapter => {
@@ -38,8 +41,8 @@ const createMockPlatformAdapter = (): PlatformAdapter => {
   } as unknown as PlatformAdapter;
 };
 
-Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave saves memory in DM as private", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -59,9 +62,9 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", asyn
   };
 
   // Create workspace directory with both memory files
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -84,11 +87,11 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", asyn
   assertEquals((result.data as { visibility: string }).visibility, "private");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave saves memory in guild as public", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -108,9 +111,9 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", as
   };
 
   // Create workspace directory
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -133,11 +136,11 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", as
   assertEquals((result.data as { visibility: string }).visibility, "public");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave validates parameters", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave validates parameters", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -169,11 +172,11 @@ Deno.test("MemoryHandler - handleMemorySave validates parameters", async () => {
   assertEquals(result1.error, "Missing or invalid 'content' parameter");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySearch searches memories in DM context", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -193,9 +196,9 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", 
   };
 
   // Create workspace directory with both memory files
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -231,7 +234,7 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", 
   assertEquals(data.memories[0].score > 0, true);
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
 /**
@@ -249,7 +252,7 @@ async function withSearchHandler(
     context: SkillContext;
   }) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -261,9 +264,9 @@ async function withSearchHandler(
       tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
       isDm,
     };
-    await Deno.mkdir(workspace.path, { recursive: true });
-    await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-    await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+    await fsp.mkdir(workspace.path, { recursive: true });
+    await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+    await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
     const context: SkillContext = {
       workspace,
@@ -275,7 +278,7 @@ async function withSearchHandler(
 
     await fn({ handler, store, manager, tempDir, workspace, context });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
@@ -285,7 +288,7 @@ function searchedMemories(result: { data?: unknown }): MemorySearchEntry[] {
   return data.memories;
 }
 
-Deno.test("MemoryHandler - handleMemorySearch ranks by relevance with score and matchedTerms", async () => {
+test("MemoryHandler - handleMemorySearch ranks by relevance with score and matchedTerms", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
     await store.addMemory(workspace, "鍵盤", { visibility: "public" });
     await store.addMemory(workspace, "Air75 V3 鍵盤", { visibility: "public" });
@@ -306,7 +309,7 @@ Deno.test("MemoryHandler - handleMemorySearch ranks by relevance with score and 
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch tokenizes the query as a whole", async () => {
+test("MemoryHandler - handleMemorySearch tokenizes the query as a whole", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
     await store.addMemory(workspace, "我喜歡喝無糖綠茶", { visibility: "public" });
 
@@ -320,7 +323,7 @@ Deno.test("MemoryHandler - handleMemorySearch tokenizes the query as a whole", a
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch searches both scopes by default", async () => {
+test("MemoryHandler - handleMemorySearch searches both scopes by default", async () => {
   await withSearchHandler(false, async ({ handler, store, manager, workspace, context }) => {
     await store.addMemory(workspace, "User deployment notes", { visibility: "public" });
     const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "456");
@@ -337,7 +340,7 @@ Deno.test("MemoryHandler - handleMemorySearch searches both scopes by default", 
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch with scope channel returns channel memories only", async () => {
+test("MemoryHandler - handleMemorySearch with scope channel returns channel memories only", async () => {
   await withSearchHandler(false, async ({ handler, store, manager, workspace, context }) => {
     await store.addMemory(workspace, "User deployment notes", { visibility: "public" });
     const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "456");
@@ -355,7 +358,7 @@ Deno.test("MemoryHandler - handleMemorySearch with scope channel returns channel
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch in a DM never returns channel memories", async () => {
+test("MemoryHandler - handleMemorySearch in a DM never returns channel memories", async () => {
   await withSearchHandler(true, async ({ handler, store, manager, workspace, context }) => {
     await store.addMemory(workspace, "Private deployment plan", { visibility: "private" });
     const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "456");
@@ -372,7 +375,7 @@ Deno.test("MemoryHandler - handleMemorySearch in a DM never returns channel memo
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch filters by category", async () => {
+test("MemoryHandler - handleMemorySearch filters by category", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
     await store.addMemory(workspace, "Prefers dark mode", {
       visibility: "public",
@@ -394,7 +397,7 @@ Deno.test("MemoryHandler - handleMemorySearch filters by category", async () => 
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch returns only memories that match the query", async () => {
+test("MemoryHandler - handleMemorySearch returns only memories that match the query", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
     await store.addMemory(workspace, "keyboard facts", { visibility: "public" });
     await store.addMemory(workspace, "mouse facts", { visibility: "public" });
@@ -408,7 +411,7 @@ Deno.test("MemoryHandler - handleMemorySearch returns only memories that match t
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch rejects an invalid category or scope", async () => {
+test("MemoryHandler - handleMemorySearch rejects an invalid category or scope", async () => {
   await withSearchHandler(false, async ({ handler, context }) => {
     const badCategory = await handler.handleMemorySearch(
       { query: "test", category: "hobby" },
@@ -426,7 +429,7 @@ Deno.test("MemoryHandler - handleMemorySearch rejects an invalid category or sco
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch caps the result count at 10", async () => {
+test("MemoryHandler - handleMemorySearch caps the result count at 10", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
     for (let i = 0; i < 12; i++) {
       await store.addMemory(workspace, `keyboard note ${i}`, { visibility: "public" });
@@ -443,7 +446,7 @@ Deno.test("MemoryHandler - handleMemorySearch caps the result count at 10", asyn
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch skips an item that does not fit the shared budget", async () => {
+test("MemoryHandler - handleMemorySearch skips an item that does not fit the shared budget", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
     // The long memory outranks the short one, but its serialized entry alone
     // exceeds `deepRecallMaxTokens`, so it is skipped and the short one fits.
@@ -461,7 +464,7 @@ Deno.test("MemoryHandler - handleMemorySearch skips an item that does not fit th
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch drops a lower-scoring memory for a higher-scoring note", async () => {
+test("MemoryHandler - handleMemorySearch drops a lower-scoring memory for a higher-scoring note", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context, tempDir }) => {
     // The memory matches one query word and is oversized; the note matches both
     // words, so the note is admitted first. The memory is then dropped because
@@ -470,10 +473,7 @@ Deno.test("MemoryHandler - handleMemorySearch drops a lower-scoring memory for a
       visibility: "public",
     });
     const agentWorkspacePath = await makeAgentWorkspace(tempDir);
-    await Deno.writeTextFile(
-      `${agentWorkspacePath}/notes/input.md`,
-      "# Input\n\nkeyboard mouse\n",
-    );
+    await fsp.writeFile(`${agentWorkspacePath}/notes/input.md`, "# Input\n\nkeyboard mouse\n");
 
     const result = await handler.handleMemorySearch(
       { query: "keyboard mouse" },
@@ -487,12 +487,12 @@ Deno.test("MemoryHandler - handleMemorySearch drops a lower-scoring memory for a
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch skips a note whose pointer exceeds the budget", async () => {
+test("MemoryHandler - handleMemorySearch skips a note whose pointer exceeds the budget", async () => {
   await withSearchHandler(false, async ({ handler, context, tempDir }) => {
     const agentWorkspacePath = await makeAgentWorkspace(tempDir);
     // Three long CJK chunks: the pointer alone is larger than the whole budget.
     const body = "鍵盤".repeat(400);
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       `${agentWorkspacePath}/notes/huge.md`,
       ["# 巨大", "", "## 一", body, "", "## 二", body, "", "## 三", body].join("\n") + "\n",
     );
@@ -508,8 +508,8 @@ Deno.test("MemoryHandler - handleMemorySearch skips a note whose pointer exceeds
   });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch patches memory", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -529,9 +529,9 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
   };
 
   // Create workspace directory with both memory files
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -564,11 +564,11 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
   assertEquals(typeof patchResult.data, "object");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in DM", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave ignores agent-provided visibility in DM", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -588,9 +588,9 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
   };
 
   // Create workspace directory with both memory files
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -609,11 +609,11 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
   assertEquals((result.data as { visibility: string }).visibility, "private");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave validates invalid importance", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave validates invalid importance", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -648,11 +648,11 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid importance", async
   assertEquals(result.error, "Invalid 'importance' parameter. Must be 'high' or 'normal'");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in non-DM", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave ignores agent-provided visibility in non-DM", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -672,9 +672,9 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
   };
 
   // Create workspace directory
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -693,11 +693,11 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
   assertEquals((result.data as { visibility: string }).visibility, "public");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch validates invalid limit", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySearch validates invalid limit", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -732,11 +732,11 @@ Deno.test("MemoryHandler - handleMemorySearch validates invalid limit", async ()
   assertEquals(result.error, "Invalid 'limit' parameter. Must be a positive number");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch validates missing memory_id", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch validates missing memory_id", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -768,11 +768,11 @@ Deno.test("MemoryHandler - handleMemoryPatch validates missing memory_id", async
   assertEquals(result.error, "Missing or invalid 'memory_id' parameter");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch validates invalid scope", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch validates invalid scope", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -807,11 +807,11 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid scope", async () 
   assertEquals(result.error, "Invalid 'scope' parameter. Must be 'user' or 'channel'");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch validates invalid enabled", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch validates invalid enabled", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -846,11 +846,11 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid enabled", async (
   assertEquals(result.error, "Invalid 'enabled' parameter. Must be a boolean");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch validates invalid visibility", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch validates invalid visibility", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -885,11 +885,11 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid visibility", asyn
   assertEquals(result.error, "Invalid 'visibility' parameter. Must be 'public' or 'private'");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch validates invalid importance", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch validates invalid importance", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -924,11 +924,11 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid importance", asyn
   assertEquals(result.error, "Invalid 'importance' parameter. Must be 'high' or 'normal'");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch requires at least one field", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -966,13 +966,13 @@ Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async
   );
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
 // ============ Relationship Fields Tests ============
 
-Deno.test("MemoryHandler - handleMemoryPatch accepts relatedTo parameter", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch accepts relatedTo parameter", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -988,9 +988,9 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts relatedTo parameter", async
     isDm: true,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1012,11 +1012,11 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts relatedTo parameter", async
 
   assertEquals(patchResult.success, true);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch rejects invalid relatedTo", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch rejects invalid relatedTo", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1047,11 +1047,11 @@ Deno.test("MemoryHandler - handleMemoryPatch rejects invalid relatedTo", async (
   assertEquals(result.success, false);
   assertEquals(result.error, "Invalid 'relatedTo' parameter. Must be an array of strings");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch accepts supersedes parameter", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch accepts supersedes parameter", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1067,9 +1067,9 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts supersedes parameter", asyn
     isDm: true,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1091,11 +1091,11 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts supersedes parameter", asyn
 
   assertEquals(patchResult.success, true);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1111,9 +1111,9 @@ Deno.test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", a
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1141,11 +1141,11 @@ Deno.test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", a
   assertEquals(data.relatedTo, ["mem_r1"]);
   assertEquals(data.supersedes, ["mem_s1", "mem_s2"]);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1161,9 +1161,9 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async ()
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1179,11 +1179,11 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async ()
   assertEquals(result.success, false);
   assertEquals(result.error, "Invalid 'relatedTo' parameter. Must be an array of strings");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave rejects invalid supersedes", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave rejects invalid supersedes", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1199,9 +1199,9 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid supersedes", async (
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1217,11 +1217,11 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid supersedes", async (
   assertEquals(result.success, false);
   assertEquals(result.error, "Invalid 'supersedes' parameter. Must be an array of strings");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryPatch rejects invalid supersedes", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryPatch rejects invalid supersedes", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1251,11 +1251,11 @@ Deno.test("MemoryHandler - handleMemoryPatch rejects invalid supersedes", async 
   assertEquals(result.success, false);
   assertEquals(result.error, "Invalid 'supersedes' parameter. Must be an array of strings");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits them from response", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits them from response", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1271,9 +1271,9 @@ Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits t
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1291,7 +1291,7 @@ Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits t
   assertEquals(data.relatedTo, undefined);
   assertEquals(data.supersedes, undefined);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
 // ============ Agent Workspace Search Tests ============
@@ -1299,16 +1299,16 @@ Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits t
 /** Creates the agent workspace of a search fixture and returns its path. */
 async function makeAgentWorkspace(tempDir: string): Promise<string> {
   const agentWorkspacePath = `${tempDir}/agent-workspace`;
-  await Deno.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
-  await Deno.writeTextFile(`${agentWorkspacePath}/README.md`, "# Agent Workspace\n");
-  await Deno.writeTextFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
+  await fsp.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
+  await fsp.writeFile(`${agentWorkspacePath}/README.md`, "# Agent Workspace\n");
+  await fsp.writeFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
   return agentWorkspacePath;
 }
 
-Deno.test("MemoryHandler - handleMemorySearch returns note pointers", async () => {
+test("MemoryHandler - handleMemorySearch returns note pointers", async () => {
   await withSearchHandler(false, async ({ handler, context, tempDir }) => {
     const agentWorkspacePath = await makeAgentWorkspace(tempDir);
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       `${agentWorkspacePath}/notes/cooking.md`,
       "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes\n",
     );
@@ -1340,8 +1340,8 @@ Deno.test("MemoryHandler - handleMemorySearch returns note pointers", async () =
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no workspace", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemorySearch returns empty agentNotes when no workspace", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1357,9 +1357,9 @@ Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no w
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1379,11 +1379,11 @@ Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no w
   // agentNotes should be undefined when no workspace path provided
   assertEquals(data.agentNotes, undefined);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - memory-stats - returns statistics", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - memory-stats - returns statistics", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1399,9 +1399,9 @@ Deno.test("MemoryHandler - memory-stats - returns statistics", async () => {
     isDm: true,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   // Add some memories
   await memoryStore.addMemory(workspace, "Test public", { visibility: "public" });
@@ -1427,11 +1427,11 @@ Deno.test("MemoryHandler - memory-stats - returns statistics", async () => {
   assertEquals(data2.private!.total, 1);
   assertEquals(data2.summary.totalMemories, 2);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - memory-stats - respects DM privacy", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1447,8 +1447,8 @@ Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -1467,13 +1467,13 @@ Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
   };
   assertEquals(data2.private, null);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
 // ============ Memory Export Tests ============
 
-Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memories", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport returns empty file when no memories", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1489,9 +1489,9 @@ Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memorie
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   let sentFileName = "";
   const mockAdapter = {
@@ -1519,11 +1519,11 @@ Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memorie
   assertEquals((result.data as { count: number }).count, 0);
   assertEquals(sentFileName, "memory-export.md");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown format", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport sends file via DM in markdown format", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1539,9 +1539,9 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown form
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   // Add a public memory
   await memoryStore.addMemory(workspace, "Public memory", {
@@ -1577,11 +1577,11 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown form
   assertEquals(sentChannelId, "dm_123");
   assertEquals(sentFileName, "memory-export.md");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport sends file via DM in json format", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1597,9 +1597,9 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format",
     isDm: true,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   let sentFileName = "";
   const mockAdapter = {
@@ -1626,11 +1626,11 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format",
   assertEquals(result.success, true);
   assertEquals(sentFileName, "memory-export.json");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport always includes both public and private memories", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport always includes both public and private memories", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1646,9 +1646,9 @@ Deno.test("MemoryHandler - handleMemoryExport always includes both public and pr
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   // Add both public and private memories
   await memoryStore.addMemory(workspace, "Public memory", {
@@ -1691,11 +1691,11 @@ Deno.test("MemoryHandler - handleMemoryExport always includes both public and pr
   assertEquals(fileText.includes("Public memory"), true);
   assertEquals(fileText.includes("Private memory"), true);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport filters by importance", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1711,9 +1711,9 @@ Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () =
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   await memoryStore.addMemory(workspace, "Normal memory", {
     visibility: "public",
@@ -1747,11 +1747,11 @@ Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () =
   assertEquals(result.success, true);
   assertEquals((result.data as { count: number }).count, 1);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport filters enabled_only", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1767,9 +1767,9 @@ Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () =>
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const saveResult = await memoryStore.addMemory(workspace, "Enabled memory", {
     visibility: "public",
@@ -1807,11 +1807,11 @@ Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () =>
   assertEquals(result.success, true);
   assertEquals((result.data as { count: number }).count, 1);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_only is false", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport includes disabled when enabled_only is false", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1827,9 +1827,9 @@ Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_onl
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const saveResult = await memoryStore.addMemory(workspace, "Memory one", {
     visibility: "public",
@@ -1867,11 +1867,11 @@ Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_onl
   assertEquals(result.success, true);
   assertEquals((result.data as { count: number }).count, 2);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport validates format parameter", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport validates format parameter", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1902,11 +1902,11 @@ Deno.test("MemoryHandler - handleMemoryExport validates format parameter", async
   assertEquals(result.success, false);
   assertEquals(result.error, "Invalid 'format' parameter. Must be 'markdown' or 'json'");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport validates importance parameter", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport validates importance parameter", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1937,11 +1937,11 @@ Deno.test("MemoryHandler - handleMemoryExport validates importance parameter", a
   assertEquals(result.success, false);
   assertEquals(result.error, "Invalid 'importance' parameter. Must be 'high', 'normal', or 'all'");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport returns error when getDmChannelId fails", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport returns error when getDmChannelId fails", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -1957,9 +1957,9 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when getDmChannelId 
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const mockAdapter = {
     ...createMockPlatformAdapter(),
@@ -1982,11 +1982,11 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when getDmChannelId 
   assertEquals(result.success, false);
   assertEquals(result.error, "Failed to create DM channel. Cannot send export file.");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport returns error when sendFile fails", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport returns error when sendFile fails", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -2002,9 +2002,9 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when sendFile fails"
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const mockAdapter = {
     ...createMockPlatformAdapter(),
@@ -2027,11 +2027,11 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when sendFile fails"
   assertEquals(result.success, false);
   assertEquals(result.error, "DM channel closed");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport json format contains correct fields", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport json format contains correct fields", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -2047,9 +2047,9 @@ Deno.test("MemoryHandler - handleMemoryExport json format contains correct field
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   await memoryStore.addMemory(workspace, "JSON test memory", {
     visibility: "public",
@@ -2094,11 +2094,11 @@ Deno.test("MemoryHandler - handleMemoryExport json format contains correct field
   assertEquals(typeof parsed[0].createdAt, "string");
   assertEquals(typeof parsed[0].lastModifiedAt, "string");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when different", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when different", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -2114,9 +2114,9 @@ Deno.test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const saveResult = await memoryStore.addMemory(workspace, "Modified memory", {
     visibility: "public",
@@ -2159,11 +2159,11 @@ Deno.test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when
   assertEquals(fileText.includes("**Last Modified**"), true);
   assertEquals(fileText.includes("Modified memory"), true);
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport handles unexpected error gracefully", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport handles unexpected error gracefully", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -2179,9 +2179,9 @@ Deno.test("MemoryHandler - handleMemoryExport handles unexpected error gracefull
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   // Mock adapter that throws on getDmChannelId
   const mockAdapter = {
@@ -2207,11 +2207,11 @@ Deno.test("MemoryHandler - handleMemoryExport handles unexpected error gracefull
   assertEquals(result.success, false);
   assertEquals(result.error, "Unexpected network error");
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all importance", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("MemoryHandler - handleMemoryExport defaults to markdown and all importance", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -2227,9 +2227,9 @@ Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all impor
     isDm: false,
   };
 
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
   await memoryStore.addMemory(workspace, "Normal mem", {
     visibility: "public",
@@ -2264,7 +2264,7 @@ Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all impor
   assertEquals(sentFileName, "memory-export.md"); // Default markdown
   assertEquals((result.data as { count: number }).count, 2); // All importance
 
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
 // ============ Identity-linked recall (read paths only) ============
@@ -2282,7 +2282,7 @@ async function withLinkedHandler(
     context: SkillContext;
   }) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -2298,11 +2298,11 @@ async function withLinkedHandler(
       tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
       isDm: false,
     };
-    await Deno.mkdir(workspace.path, { recursive: true });
-    await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-    await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+    await fsp.mkdir(workspace.path, { recursive: true });
+    await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+    await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
     const [linked] = registry.linkedWorkspaces(workspace);
-    await Deno.mkdir(linked.path, { recursive: true });
+    await fsp.mkdir(linked.path, { recursive: true });
 
     const context: SkillContext = {
       workspace,
@@ -2314,11 +2314,11 @@ async function withLinkedHandler(
 
     await fn({ handler, store, workspace, linked, context });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("MemoryHandler - memory-search returns a linked account's memory", async () => {
+test("MemoryHandler - memory-search returns a linked account's memory", async () => {
   await withLinkedHandler(async ({ handler, store, linked, context }) => {
     await store.addMemory(linked, "misskey deployment note", { visibility: "public" });
 
@@ -2332,18 +2332,18 @@ Deno.test("MemoryHandler - memory-search returns a linked account's memory", asy
   });
 });
 
-Deno.test("MemoryHandler - save, stats and export stay on the current account", async () => {
+test("MemoryHandler - save, stats and export stay on the current account", async () => {
   await withLinkedHandler(async ({ handler, store, linked, context }) => {
     await store.addMemory(linked, "misskey linked memory", { visibility: "public" });
     const linkedPath = store.getMemoryFilePathFor(linked, "public");
-    const linkedSizeBefore = (await Deno.stat(linkedPath)).size;
+    const linkedSizeBefore = (await fsp.stat(linkedPath)).size;
 
     const save = await handler.handleMemorySave(
       { content: "my own preference", importance: "normal" },
       context,
     );
     assertEquals(save.success, true);
-    assertEquals((await Deno.stat(linkedPath)).size, linkedSizeBefore);
+    assertEquals((await fsp.stat(linkedPath)).size, linkedSizeBefore);
 
     const stats = await handler.handleMemoryStats({}, context);
     assertEquals(stats.success, true);
@@ -2390,7 +2390,7 @@ async function withLinkedPatchHandler(
     context: SkillContext;
   }) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -2429,11 +2429,11 @@ async function withLinkedPatchHandler(
 
     await fn({ handler, store, manager, workspace, linked, context });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("MemoryHandler - memory-patch patches the current workspace when it owns the id", async () => {
+test("MemoryHandler - memory-patch patches the current workspace when it owns the id", async () => {
   await withLinkedPatchHandler(true, async ({ handler, store, workspace, linked, context }) => {
     const own = await store.addMemory(workspace, "current account memory", {
       visibility: "public",
@@ -2441,7 +2441,7 @@ Deno.test("MemoryHandler - memory-patch patches the current workspace when it ow
     await store.addMemory(linked[0], "linked account memory", { visibility: "public" });
 
     const linkedPath = store.getMemoryFilePathFor(linked[0], "public");
-    const linkedSizeBefore = (await Deno.stat(linkedPath)).size;
+    const linkedSizeBefore = (await fsp.stat(linkedPath)).size;
 
     const result = await handler.handleMemoryPatch(
       { memory_id: own.id, enabled: false },
@@ -2449,15 +2449,16 @@ Deno.test("MemoryHandler - memory-patch patches the current workspace when it ow
     );
 
     assertEquals(result.success, true);
-    assertEquals((await Deno.stat(linkedPath)).size, linkedSizeBefore);
-    const currentEvents = (await Deno.readTextFile(store.getMemoryFilePathFor(workspace, "public")))
-      .trim().split("\n");
+    assertEquals((await fsp.stat(linkedPath)).size, linkedSizeBefore);
+    const currentEvents =
+      (await fsp.readFile(store.getMemoryFilePathFor(workspace, "public"), "utf8"))
+        .trim().split("\n");
     assertEquals(currentEvents.length, 2);
     assertEquals(currentEvents[1].includes('"enabled":false'), true);
   });
 });
 
-Deno.test("MemoryHandler - memory-patch appends to the linked public owner's file", async () => {
+test("MemoryHandler - memory-patch appends to the linked public owner's file", async () => {
   await withLinkedPatchHandler(true, async ({ handler, store, workspace, linked, context }) => {
     const target = await store.addMemory(linked[0], "linked deployment note", {
       visibility: "public",
@@ -2468,8 +2469,8 @@ Deno.test("MemoryHandler - memory-patch appends to the linked public owner's fil
     const ownerPath = store.getMemoryFilePathFor(linked[0], "public");
     const currentPath = store.getMemoryFilePathFor(workspace, "public");
     const otherPath = store.getMemoryFilePathFor(linked[1], "public");
-    const currentSizeBefore = (await Deno.stat(currentPath)).size;
-    const otherSizeBefore = (await Deno.stat(otherPath)).size;
+    const currentSizeBefore = (await fsp.stat(currentPath)).size;
+    const otherSizeBefore = (await fsp.stat(otherPath)).size;
 
     const result = await handler.handleMemoryPatch(
       { memory_id: target.id, enabled: false },
@@ -2481,11 +2482,11 @@ Deno.test("MemoryHandler - memory-patch appends to the linked public owner's fil
       Object.keys(result.data as Record<string, unknown>).sort(),
       ["changes", "patchId", "targetId", "timestamp"],
     );
-    const ownerEvents = (await Deno.readTextFile(ownerPath)).trim().split("\n");
+    const ownerEvents = (await fsp.readFile(ownerPath, "utf8")).trim().split("\n");
     assertEquals(ownerEvents.length, 2);
     assertEquals(ownerEvents[1].includes('"enabled":false'), true);
-    assertEquals((await Deno.stat(currentPath)).size, currentSizeBefore);
-    assertEquals((await Deno.stat(otherPath)).size, otherSizeBefore);
+    assertEquals((await fsp.stat(currentPath)).size, currentSizeBefore);
+    assertEquals((await fsp.stat(otherPath)).size, otherSizeBefore);
 
     const search = await handler.handleMemorySearch({ query: "deployment note" }, context);
     assertEquals(search.success, true);
@@ -2496,13 +2497,13 @@ Deno.test("MemoryHandler - memory-patch appends to the linked public owner's fil
   });
 });
 
-Deno.test("MemoryHandler - memory-patch cannot reach a linked private memory outside a DM", async () => {
+test("MemoryHandler - memory-patch cannot reach a linked private memory outside a DM", async () => {
   await withLinkedPatchHandler(false, async ({ handler, store, linked, context }) => {
     const target = await store.addMemory(linked[0], "linked private note", {
       visibility: "private",
     });
     const privatePath = store.getMemoryFilePathFor(linked[0], "private");
-    const privateSizeBefore = (await Deno.stat(privatePath)).size;
+    const privateSizeBefore = (await fsp.stat(privatePath)).size;
 
     const result = await handler.handleMemoryPatch(
       { memory_id: target.id, enabled: false },
@@ -2512,11 +2513,11 @@ Deno.test("MemoryHandler - memory-patch cannot reach a linked private memory out
     assertEquals(result.success, false);
     assertEquals(result.error?.includes("Memory not found:"), true);
     assertEquals(result.error?.includes("--scope channel"), true);
-    assertEquals((await Deno.stat(privatePath)).size, privateSizeBefore);
+    assertEquals((await fsp.stat(privatePath)).size, privateSizeBefore);
   });
 });
 
-Deno.test("MemoryHandler - memory-patch reaches a linked private memory in a DM", async () => {
+test("MemoryHandler - memory-patch reaches a linked private memory in a DM", async () => {
   await withLinkedPatchHandler(true, async ({ handler, store, linked, context }) => {
     const target = await store.addMemory(linked[0], "linked private note", {
       visibility: "private",
@@ -2529,26 +2530,26 @@ Deno.test("MemoryHandler - memory-patch reaches a linked private memory in a DM"
     );
 
     assertEquals(result.success, true);
-    const events = (await Deno.readTextFile(privatePath)).trim().split("\n");
+    const events = (await fsp.readFile(privatePath, "utf8")).trim().split("\n");
     assertEquals(events.length, 2);
     assertEquals(events[1].includes('"enabled":false'), true);
   });
 });
 
-Deno.test("MemoryHandler - memory-patch rejects an id owned by two linked workspaces", async () => {
+test("MemoryHandler - memory-patch rejects an id owned by two linked workspaces", async () => {
   await withLinkedPatchHandler(true, async ({ handler, store, linked, context }) => {
     const target = await store.addMemory(linked[0], "duplicated linked memory", {
       visibility: "public",
     });
-    await Deno.copyFile(
+    await fsp.copyFile(
       store.getMemoryFilePathFor(linked[0], "public"),
       store.getMemoryFilePathFor(linked[1], "public"),
     );
 
     const firstPath = store.getMemoryFilePathFor(linked[0], "public");
     const secondPath = store.getMemoryFilePathFor(linked[1], "public");
-    const firstSizeBefore = (await Deno.stat(firstPath)).size;
-    const secondSizeBefore = (await Deno.stat(secondPath)).size;
+    const firstSizeBefore = (await fsp.stat(firstPath)).size;
+    const secondSizeBefore = (await fsp.stat(secondPath)).size;
 
     const result = await handler.handleMemoryPatch(
       { memory_id: target.id, enabled: false },
@@ -2558,12 +2559,12 @@ Deno.test("MemoryHandler - memory-patch rejects an id owned by two linked worksp
     assertEquals(result.success, false);
     assertEquals(result.error?.includes(target.id), true);
     assertEquals(result.error?.includes("ambiguous"), true);
-    assertEquals((await Deno.stat(firstPath)).size, firstSizeBefore);
-    assertEquals((await Deno.stat(secondPath)).size, secondSizeBefore);
+    assertEquals((await fsp.stat(firstPath)).size, firstSizeBefore);
+    assertEquals((await fsp.stat(secondPath)).size, secondSizeBefore);
   });
 });
 
-Deno.test("MemoryHandler - memory-patch reports an unknown id as not found", async () => {
+test("MemoryHandler - memory-patch reports an unknown id as not found", async () => {
   await withLinkedPatchHandler(true, async ({ handler, context }) => {
     const result = await handler.handleMemoryPatch(
       { memory_id: "mem_missing", enabled: false },
@@ -2576,9 +2577,9 @@ Deno.test("MemoryHandler - memory-patch reports an unknown id as not found", asy
   });
 });
 
-Deno.test("MemoryHandler - memory-patch skips an unreadable linked account", async () => {
+test("MemoryHandler - memory-patch skips an unreadable linked account", async () => {
   await withLinkedPatchHandler(true, async ({ handler, store, linked, context }) => {
-    await Deno.mkdir(store.getMemoryFilePathFor(linked[0], "public"));
+    await fsp.mkdir(store.getMemoryFilePathFor(linked[0], "public"));
     const target = await store.addMemory(linked[1], "readable linked memory", {
       visibility: "public",
     });
@@ -2590,7 +2591,7 @@ Deno.test("MemoryHandler - memory-patch skips an unreadable linked account", asy
     );
 
     assertEquals(result.success, true);
-    const events = (await Deno.readTextFile(readablePath)).trim().split("\n");
+    const events = (await fsp.readFile(readablePath, "utf8")).trim().split("\n");
     assertEquals(events.length, 2);
     assertEquals(events[1].includes('"enabled":false'), true);
   });

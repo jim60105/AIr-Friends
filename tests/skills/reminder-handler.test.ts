@@ -14,6 +14,9 @@ import type { SkillContext } from "../../src/skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { Platform } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const createMockPlatformAdapter = (): PlatformAdapter => {
   return {
@@ -54,8 +57,8 @@ const makeWorkspace = (
   };
 };
 
-Deno.test("handleSetReminder - success in DM context sets reminder and returns id", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - success in DM context sets reminder and returns id", async () => {
+  const tempDir = await makeTempDir();
   const config: RemindersConfig = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -78,7 +81,7 @@ Deno.test("handleSetReminder - success in DM context sets reminder and returns i
   const handler = new ReminderHandler(mockStore, config);
 
   const workspace = makeWorkspace(tempDir, true, "discord", "u1");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
 
   const context: SkillContext = {
     workspace,
@@ -96,8 +99,8 @@ Deno.test("handleSetReminder - success in DM context sets reminder and returns i
   assertEquals((added as unknown as Record<string, unknown>)?.message, "remind me");
 });
 
-Deno.test("handleSetReminder - non-DM context returns DM-only error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - non-DM context returns DM-only error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -114,7 +117,7 @@ Deno.test("handleSetReminder - non-DM context returns DM-only error", async () =
 
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, false, "discord", "u1");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -130,8 +133,8 @@ Deno.test("handleSetReminder - non-DM context returns DM-only error", async () =
   assertEquals(typeof res.error, "string");
 });
 
-Deno.test("handleSetReminder - second call same session returns only one per session error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - second call same session returns only one per session error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -148,7 +151,7 @@ Deno.test("handleSetReminder - second call same session returns only one per ses
 
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u2");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -167,8 +170,8 @@ Deno.test("handleSetReminder - second call same session returns only one per ses
   assertEquals(typeof r2.error, "string");
 });
 
-Deno.test("handleSetReminder - after clearSessionState new session can set again", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - after clearSessionState new session can set again", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -185,7 +188,7 @@ Deno.test("handleSetReminder - after clearSessionState new session can set again
 
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u3");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -204,8 +207,8 @@ Deno.test("handleSetReminder - after clearSessionState new session can set again
   assertEquals(r2.success, true);
 });
 
-Deno.test("handleSetReminder - missing scheduledAt returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - missing scheduledAt returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -221,7 +224,7 @@ Deno.test("handleSetReminder - missing scheduledAt returns error", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u4");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -234,8 +237,8 @@ Deno.test("handleSetReminder - missing scheduledAt returns error", async () => {
   assertEquals(res.error, "Missing required parameter: scheduledAt");
 });
 
-Deno.test("handleSetReminder - invalid ISO format returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - invalid ISO format returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -251,7 +254,7 @@ Deno.test("handleSetReminder - invalid ISO format returns error", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u5");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -264,8 +267,8 @@ Deno.test("handleSetReminder - invalid ISO format returns error", async () => {
   assertEquals(res.error, "Invalid scheduledAt format. Must be a valid ISO 8601 timestamp.");
 });
 
-Deno.test("handleSetReminder - past time (too close) returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - past time (too close) returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -281,7 +284,7 @@ Deno.test("handleSetReminder - past time (too close) returns error", async () =>
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u6");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -297,8 +300,8 @@ Deno.test("handleSetReminder - past time (too close) returns error", async () =>
   assertEquals(typeof res.error, "string");
 });
 
-Deno.test("handleSetReminder - empty message returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - empty message returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -314,7 +317,7 @@ Deno.test("handleSetReminder - empty message returns error", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u7");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -330,8 +333,8 @@ Deno.test("handleSetReminder - empty message returns error", async () => {
   assertEquals(res.error, "Missing or empty required parameter: message");
 });
 
-Deno.test("handleSetReminder - max reminders exceeded returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - max reminders exceeded returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 1,
@@ -347,7 +350,7 @@ Deno.test("handleSetReminder - max reminders exceeded returns error", async () =
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u8");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -364,8 +367,8 @@ Deno.test("handleSetReminder - max reminders exceeded returns error", async () =
 });
 
 // ========== handleCancelReminder tests ==========
-Deno.test("handleCancelReminder - success in DM context", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleCancelReminder - success in DM context", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -397,7 +400,7 @@ Deno.test("handleCancelReminder - success in DM context", async () => {
 
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u9");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -410,8 +413,8 @@ Deno.test("handleCancelReminder - success in DM context", async () => {
   assertEquals(cancelledId, "r1");
 });
 
-Deno.test("handleCancelReminder - non-DM context returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleCancelReminder - non-DM context returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -427,7 +430,7 @@ Deno.test("handleCancelReminder - non-DM context returns error", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, false, "discord", "u10");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -440,8 +443,8 @@ Deno.test("handleCancelReminder - non-DM context returns error", async () => {
   assertEquals(typeof res.error, "string");
 });
 
-Deno.test("handleCancelReminder - missing reminderId returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleCancelReminder - missing reminderId returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -457,7 +460,7 @@ Deno.test("handleCancelReminder - missing reminderId returns error", async () =>
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u11");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -470,8 +473,8 @@ Deno.test("handleCancelReminder - missing reminderId returns error", async () =>
   assertEquals(res.error, "Missing required parameter: reminderId");
 });
 
-Deno.test("handleCancelReminder - non-existent reminder ID returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleCancelReminder - non-existent reminder ID returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -487,7 +490,7 @@ Deno.test("handleCancelReminder - non-existent reminder ID returns error", async
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u12");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -500,8 +503,8 @@ Deno.test("handleCancelReminder - non-existent reminder ID returns error", async
   assertEquals(typeof res.error, "string");
 });
 
-Deno.test("handleCancelReminder - already disabled reminder returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleCancelReminder - already disabled reminder returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -528,7 +531,7 @@ Deno.test("handleCancelReminder - already disabled reminder returns error", asyn
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u13");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -542,8 +545,8 @@ Deno.test("handleCancelReminder - already disabled reminder returns error", asyn
 });
 
 // ========== handleListReminders tests ==========
-Deno.test("handleListReminders - lists active reminders in DM", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleListReminders - lists active reminders in DM", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -584,7 +587,7 @@ Deno.test("handleListReminders - lists active reminders in DM", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u14");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -599,8 +602,8 @@ Deno.test("handleListReminders - lists active reminders in DM", async () => {
   assertEquals((reminders[0] as Record<string, unknown>).id, "lr1");
 });
 
-Deno.test("handleListReminders - returns empty when no reminders", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleListReminders - returns empty when no reminders", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -616,7 +619,7 @@ Deno.test("handleListReminders - returns empty when no reminders", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, true, "discord", "u15");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -630,8 +633,8 @@ Deno.test("handleListReminders - returns empty when no reminders", async () => {
   assertEquals(Array.isArray((res.data as Record<string, unknown>)?.reminders), true);
 });
 
-Deno.test("handleListReminders - non-DM context returns error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleListReminders - non-DM context returns error", async () => {
+  const tempDir = await makeTempDir();
   const config = {
     enabled: true,
     maxRemindersPerUser: 3,
@@ -647,7 +650,7 @@ Deno.test("handleListReminders - non-DM context returns error", async () => {
   } as unknown as ReminderStore;
   const handler = new ReminderHandler(mockStore, config);
   const workspace = makeWorkspace(tempDir, false, "discord", "u16");
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -716,12 +719,12 @@ function makeEmailHandler(
   };
 }
 
-Deno.test("handleSetReminder - email platform without a host origin is refused", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - email platform without a host origin is refused", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { handler, added } = makeEmailHandler();
     const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
     const context = makeEmailContext(workspace, { emailReminderOrigin: undefined });
 
     const res = await handler.handleSetReminder({
@@ -733,16 +736,16 @@ Deno.test("handleSetReminder - email platform without a host origin is refused",
     assertEquals(res.error, EMAIL_REMINDER_ORIGIN_ERROR);
     assertEquals(added(), null);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("handleSetReminder - email origin of another owner is refused", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - email origin of another owner is refused", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { handler, added } = makeEmailHandler();
     const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
     const otherOwner = `e_${"cd".repeat(32)}`;
     const context = makeEmailContext(workspace, {
       emailReminderOrigin: {
@@ -760,16 +763,16 @@ Deno.test("handleSetReminder - email origin of another owner is refused", async 
     assertEquals(res.error, EMAIL_REMINDER_ORIGIN_ERROR);
     assertEquals(added(), null);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("handleSetReminder - malformed email origin channel is refused", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - malformed email origin channel is refused", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { handler, added } = makeEmailHandler();
     const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
     // Wrong thread shape and a missing anchor: both are refused.
     for (
       const origin of [
@@ -786,16 +789,16 @@ Deno.test("handleSetReminder - malformed email origin channel is refused", async
     }
     assertEquals(added(), null);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("handleSetReminder - email reminder persists its owner-validated origin", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - email reminder persists its owner-validated origin", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { handler, added } = makeEmailHandler();
     const workspace = makeWorkspace(tempDir, true, "email", EMAIL_OWNER);
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
     // Upper-case channel/anchor inputs are normalized to the stored form.
     const context = makeEmailContext(workspace, {
       emailReminderOrigin: {
@@ -815,16 +818,16 @@ Deno.test("handleSetReminder - email reminder persists its owner-validated origi
       replyAnchorRecordId: EMAIL_ANCHOR,
     });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("handleSetReminder - Discord reminder carries no origin field", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("handleSetReminder - Discord reminder carries no origin field", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { handler, added } = makeEmailHandler();
     const workspace = makeWorkspace(tempDir, true, "discord", "u20");
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
     const res = await handler.handleSetReminder({
       scheduledAt: new Date(Date.now() + 5000).toISOString(),
       message: "stand up",
@@ -838,11 +841,11 @@ Deno.test("handleSetReminder - Discord reminder carries no origin field", async 
     assertEquals(res.success, true);
     assertEquals("origin" in (added() as Record<string, unknown>), false);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("buildEmailReminderOrigin - normalizes valid input and rejects invalid input", () => {
+test("buildEmailReminderOrigin - normalizes valid input and rejects invalid input", () => {
   assertEquals(buildEmailReminderOrigin(EMAIL_CHANNEL, EMAIL_ANCHOR), {
     channelId: EMAIL_CHANNEL,
     replyAnchorRecordId: EMAIL_ANCHOR,
@@ -852,7 +855,7 @@ Deno.test("buildEmailReminderOrigin - normalizes valid input and rejects invalid
   assertEquals(buildEmailReminderOrigin(`mail:${EMAIL_OWNER}:bad`, EMAIL_ANCHOR), undefined);
 });
 
-Deno.test("validateEmailReminderOrigin - binds the origin owner to the reminder owner", () => {
+test("validateEmailReminderOrigin - binds the origin owner to the reminder owner", () => {
   const origin = { channelId: EMAIL_CHANNEL, replyAnchorRecordId: EMAIL_ANCHOR };
   assertEquals(validateEmailReminderOrigin(origin, EMAIL_OWNER.toUpperCase()), origin);
   assertEquals(validateEmailReminderOrigin(origin, "someone-else"), undefined);

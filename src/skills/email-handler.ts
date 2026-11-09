@@ -58,6 +58,9 @@ import type {
 import type { EmailSendOutcome } from "@platforms/email/mail-service.ts";
 import type { SendFileSkillConfig } from "../types/config.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import type { Stats } from "node:fs";
 
 const logger = createLogger("EmailComposeHandler");
 
@@ -890,9 +893,9 @@ export class EmailComposeHandler {
         };
       }
 
-      let info: Deno.FileInfo;
+      let info: Stats;
       try {
-        info = await Deno.stat(lexical);
+        info = await fsp.stat(lexical);
       } catch {
         return {
           ok: false,
@@ -900,7 +903,7 @@ export class EmailComposeHandler {
             "staging directory FIRST with your edit/write tool. Nothing was sent.",
         };
       }
-      if (!info.isFile) {
+      if (!info.isFile()) {
         return {
           ok: false,
           error: "An attachment path is not a regular file. Nothing was sent.",
@@ -909,7 +912,7 @@ export class EmailComposeHandler {
 
       let realPath: string | undefined;
       try {
-        realPath = Deno.realPathSync(lexical);
+        realPath = fs.realpathSync(lexical);
       } catch {
         realPath = undefined;
       }
@@ -982,7 +985,7 @@ export class EmailComposeHandler {
       // the read is refused instead of being attached.
       let realAfter: string | undefined;
       try {
-        realAfter = Deno.realPathSync(file.fullPath);
+        realAfter = fs.realpathSync(file.fullPath);
       } catch {
         realAfter = undefined;
       }
@@ -1301,17 +1304,22 @@ function isOpaqueIdentifierToken(value: string): boolean {
  * `size + 1`, so a file grown after preflight cannot pull an unbounded amount of memory either.
  */
 async function readPreflightedFile(path: string, size: number): Promise<Uint8Array | null> {
-  const handle = await Deno.open(path, { read: true });
+  const handle = await fsp.open(path, "r");
   try {
     const buffer = new Uint8Array(size + 1);
     let filled = 0;
     while (filled < buffer.length) {
-      const read = await handle.read(buffer.subarray(filled));
-      if (read === null || read === 0) break;
-      filled += read;
+      const { bytesRead } = await handle.read(
+        buffer,
+        filled,
+        buffer.length - filled,
+        null,
+      );
+      if (bytesRead === 0) break;
+      filled += bytesRead;
     }
     return filled === size ? buffer.subarray(0, filled) : null;
   } finally {
-    handle.close();
+    await handle.close();
   }
 }
