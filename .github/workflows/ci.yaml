@@ -16,7 +16,7 @@ permissions:
 jobs:
   check:
     name: Code Quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout code
@@ -54,11 +54,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-26.04
             userns: open
-          - runner: ubuntu-latest
+          - runner: ubuntu-26.04
             userns: restricted
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             userns: open
     runs-on: ${{ matrix.runner }}
 
@@ -166,7 +166,7 @@ jobs:
   coverage:
     name: Test Coverage
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout code
@@ -235,8 +235,8 @@ jobs:
       fail-fast: false
       matrix:
         runner:
-          - ubuntu-latest
-          - ubuntu-24.04-arm
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
 
     steps:
