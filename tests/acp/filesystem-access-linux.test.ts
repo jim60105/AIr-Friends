@@ -7,6 +7,7 @@ import {
   getRealLinuxNativeCalls,
   type LinuxNativeCalls,
   mapLinuxErrnoToFailure,
+  OWNED_DEBIAN_LIBC_PATHS,
   parseStatxBuffer,
   X86_64_CONSTANTS,
 } from "../../src/acp/filesystem-access-linux.ts";
@@ -21,8 +22,13 @@ import type {
   CanonicalTarget,
   SessionContext,
 } from "../../src/acp/filesystem-roots.ts";
+import fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "bun:test";
+import { runtimeArch, runtimeOs } from "../../src/utils/runtime-platform.ts";
 
-Deno.test("Linux architecture constants alignment: x86_64 vs aarch64", () => {
+test("Linux architecture constants alignment: x86_64 vs aarch64", () => {
   // Common constants
   assertEquals(X86_64_CONSTANTS.SYS_openat2, 437n);
   assertEquals(AARCH64_CONSTANTS.SYS_openat2, 437n);
@@ -45,7 +51,7 @@ Deno.test("Linux architecture constants alignment: x86_64 vs aarch64", () => {
   assertEquals(AARCH64_CONSTANTS.O_NOFOLLOW, 0o100000);
 });
 
-Deno.test("decodeLinuxDev handles standard and high-bit 64-bit device numbers", () => {
+test("decodeLinuxDev handles standard and high-bit 64-bit device numbers", () => {
   // Normal dev: major 8, minor 1 => (8 << 8) | 1 = 2049
   const standardDev = (8 << 8) | 1;
   const decoded = decodeLinuxDev(standardDev);
@@ -59,7 +65,7 @@ Deno.test("decodeLinuxDev handles standard and high-bit 64-bit device numbers", 
   assertEquals(decodedHigh.minor, 0n);
 });
 
-Deno.test("encodeOpenHow encodes 24-byte struct with little-endian uint64s", () => {
+test("encodeOpenHow encodes 24-byte struct with little-endian uint64s", () => {
   const flags = 0x123456789abcdef0n;
   const mode = 0o600n;
   const resolve = 0x0e00000000000000n;
@@ -72,7 +78,7 @@ Deno.test("encodeOpenHow encodes 24-byte struct with little-endian uint64s", () 
   assertEquals(view.getBigUint64(16, true), resolve);
 });
 
-Deno.test("parseStatxBuffer correctly parses 256-byte little-endian statx layout", () => {
+test("parseStatxBuffer correctly parses 256-byte little-endian statx layout", () => {
   const buf = new Uint8Array(256);
   const view = new DataView(buf.buffer);
   view.setUint32(0, 0x07ff, true); // stx_mask
@@ -89,7 +95,7 @@ Deno.test("parseStatxBuffer correctly parses 256-byte little-endian statx layout
   assertEquals(res.devMinor, 2n);
 });
 
-Deno.test("isValidSafeIdentity checks safe non-negative finite integer dev/ino", () => {
+test("isValidSafeIdentity checks safe non-negative finite integer dev/ino", () => {
   assertEquals(isValidSafeIdentity(undefined), false);
   assertEquals(isValidSafeIdentity({ dev: -1, ino: 1 }), false);
   assertEquals(isValidSafeIdentity({ dev: 1, ino: -1 }), false);
@@ -101,7 +107,7 @@ Deno.test("isValidSafeIdentity checks safe non-negative finite integer dev/ino",
   assertEquals(isValidSafeIdentity({ dev: 2049, ino: 12345 }), true);
 });
 
-Deno.test("isValidRelativeComponentPath rejects null bytes, empty parts, and parent traversal", () => {
+test("isValidRelativeComponentPath rejects null bytes, empty parts, and parent traversal", () => {
   assertEquals(isValidRelativeComponentPath(""), false);
   assertEquals(isValidRelativeComponentPath("foo/../bar"), false);
   assertEquals(isValidRelativeComponentPath("foo/./bar"), false);
@@ -111,7 +117,7 @@ Deno.test("isValidRelativeComponentPath rejects null bytes, empty parts, and par
   assertEquals(isValidRelativeComponentPath("baz.txt"), true);
 });
 
-Deno.test("mapLinuxErrnoToFailure maps phases and errnos accurately", () => {
+test("mapLinuxErrnoToFailure maps phases and errnos accurately", () => {
   assertEquals(
     mapLinuxErrnoToFailure(ERRNO.ENOSYS, "root_open", "test").reason,
     "secure_access_unavailable",
@@ -198,7 +204,7 @@ function createBaseFixture() {
   return { context, roots, target };
 }
 
-Deno.test("Mock native boundary: handles deterministic failure injection and cleanup", () => {
+test("Mock native boundary: handles deterministic failure injection and cleanup", () => {
   const { context, roots, target } = createBaseFixture();
   const closedFds: number[] = [];
   const mockCalls: LinuxNativeCalls = {
@@ -245,7 +251,7 @@ Deno.test("Mock native boundary: handles deterministic failure injection and cle
   assertEquals(closedFds.includes(11), true);
 });
 
-Deno.test("Mock native boundary: successful multi-chunk read with streaming UTF-8", () => {
+test("Mock native boundary: successful multi-chunk read with streaming UTF-8", () => {
   const { context, roots, target } = createBaseFixture();
   const closedFds: number[] = [];
   const fullBytes = new TextEncoder().encode(
@@ -326,7 +332,7 @@ Deno.test("Mock native boundary: successful multi-chunk read with streaming UTF-
   assertEquals(closedFds.includes(12), true);
 });
 
-Deno.test("Mock native boundary: existing file overwrite truncates and writes full content", () => {
+test("Mock native boundary: existing file overwrite truncates and writes full content", () => {
   const { context, roots, target } = createBaseFixture();
   let ftruncateCalledWith: bigint | null = null;
   const writtenChunks: Uint8Array[] = [];
@@ -391,7 +397,7 @@ Deno.test("Mock native boundary: existing file overwrite truncates and writes fu
   assertEquals(totalWritten, "New overwrite text content 🚀");
 });
 
-Deno.test("Mock native boundary: replacement file detected before ftruncate denies overwrite", () => {
+test("Mock native boundary: replacement file detected before ftruncate denies overwrite", () => {
   const { context, roots, target } = createBaseFixture();
   let ftruncateCalled = false;
 
@@ -452,7 +458,7 @@ Deno.test("Mock native boundary: replacement file detected before ftruncate deni
   assertEquals(ftruncateCalled, false);
 });
 
-Deno.test("Mock native boundary: exclusive create fails on EEXIST race without overwrite downgrade", () => {
+test("Mock native boundary: exclusive create fails on EEXIST race without overwrite downgrade", () => {
   const { context, roots } = createBaseFixture();
   const prospectiveTarget: CanonicalTarget = {
     acpSessionId: "sess-1",
@@ -506,7 +512,7 @@ Deno.test("Mock native boundary: exclusive create fails on EEXIST race without o
   }
 });
 
-Deno.test("Mock native boundary: cleanup failure returns io_failed", () => {
+test("Mock native boundary: cleanup failure returns io_failed", () => {
   const { context, roots, target } = createBaseFixture();
 
   const mockCalls: LinuxNativeCalls = {
@@ -565,7 +571,7 @@ Deno.test("Mock native boundary: cleanup failure returns io_failed", () => {
   }
 });
 
-Deno.test("Real native libc availability check / unsupported platform handling", () => {
+test("Real native libc availability check / unsupported platform handling", () => {
   const real = getRealLinuxNativeCalls();
   // On this test machine, if Debian libc is absent at /lib/x86_64-linux-gnu/libc.so.6,
   // it must cleanly return secure_access_unavailable or unsupported_platform without crash or exception.
@@ -579,3 +585,113 @@ Deno.test("Real native libc availability check / unsupported platform handling",
     assertEquals(typeof real.calls?.open, "function");
   }
 });
+
+// ---------------------------------------------------------------------------
+// Real backend errno (`port-filesystem-ffi-to-bun-ffi`): the kernel's own
+// errno must reach `LinuxNativeCalls` through `bun:ffi`, including across many
+// alternating successes and failures.
+// ---------------------------------------------------------------------------
+
+const ownedLibcPath = OWNED_DEBIAN_LIBC_PATHS[runtimeArch()];
+// Skip only when the supported-platform prerequisite named by the design is
+// absent (non-Linux, or no owned libc at the defined location on this host).
+// Any other backend initialization failure must fail these tests, never skip.
+const skipRealBackend = runtimeOs() !== "linux" || ownedLibcPath === undefined ||
+  !fs.existsSync(ownedLibcPath);
+
+test.skipIf(skipRealBackend)(
+  "Real backend - openat2 reports ELOOP for a symlink and EXDEV for an escape",
+  () => {
+    const calls = getRealLinuxNativeCalls().calls;
+    if (!calls) throw new Error("real Linux native backend unavailable");
+    const constants = calls.getArchitectureConstants();
+    const base = fs.mkdtempSync(join(tmpdir(), "ffi-real-errno-"));
+    try {
+      const root = join(base, "root");
+      fs.mkdirSync(root);
+      fs.writeFileSync(join(root, "real.txt"), "real content");
+      fs.symlinkSync("real.txt", join(root, "link.txt"));
+      fs.writeFileSync(join(base, "outside.txt"), "outside content");
+
+      const rootFd = calls.open(
+        root,
+        constants.O_PATH | constants.O_DIRECTORY | constants.O_CLOEXEC,
+        0,
+      );
+      assertEquals(rootFd.errno, 0);
+      assertEquals(rootFd.fd >= 0, true);
+      try {
+        const flags = BigInt(constants.O_RDONLY | constants.O_CLOEXEC);
+        const resolve = constants.RESOLVE_BENEATH | constants.RESOLVE_NO_SYMLINKS |
+          constants.RESOLVE_NO_MAGICLINKS;
+        const openat2Errno = (pathname: string): number => {
+          const opened = calls.openat2(rootFd.fd, pathname, flags, 0n, resolve);
+          if (opened.fd >= 0) calls.close(opened.fd);
+          return opened.errno;
+        };
+
+        assertEquals(openat2Errno("link.txt"), ERRNO.ELOOP);
+        assertEquals(openat2Errno("../outside.txt"), ERRNO.EXDEV);
+        assertEquals(openat2Errno("missing.txt"), ERRNO.ENOENT);
+      } finally {
+        calls.close(rootFd.fd);
+      }
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(skipRealBackend)(
+  "Real backend - 10,000 alternating ENOENT and success with event-loop yields",
+  async () => {
+    const calls = getRealLinuxNativeCalls().calls;
+    if (!calls) throw new Error("real Linux native backend unavailable");
+    const constants = calls.getArchitectureConstants();
+    const base = fs.mkdtempSync(join(tmpdir(), "ffi-real-alternating-"));
+    try {
+      const root = join(base, "root");
+      fs.mkdirSync(root);
+      fs.writeFileSync(join(root, "real.txt"), "real content");
+      const rootFd = calls.open(
+        root,
+        constants.O_PATH | constants.O_DIRECTORY | constants.O_CLOEXEC,
+        0,
+      );
+      assertEquals(rootFd.errno, 0);
+      assertEquals(rootFd.fd >= 0, true);
+      const flags = BigInt(constants.O_RDONLY | constants.O_CLOEXEC);
+      const resolve = constants.RESOLVE_BENEATH | constants.RESOLVE_NO_SYMLINKS |
+        constants.RESOLVE_NO_MAGICLINKS;
+      try {
+        for (let i = 0; i < 10_000; i++) {
+          const missing = i % 2 === 0;
+          const opened = calls.openat2(
+            rootFd.fd,
+            missing ? "missing.txt" : "real.txt",
+            flags,
+            0n,
+            resolve,
+          );
+          try {
+            if (missing) {
+              assertEquals(opened.fd < 0, true);
+              assertEquals(opened.errno, ERRNO.ENOENT);
+            } else {
+              assertEquals(opened.errno, 0);
+              assertEquals(opened.fd >= 0, true);
+            }
+          } finally {
+            if (opened.fd >= 0) calls.close(opened.fd);
+          }
+          if ((i + 1) % 100 === 0) await Bun.sleep(0);
+          if (i % 1024 === 0) Bun.gc(false);
+        }
+      } finally {
+        calls.close(rootFd.fd);
+      }
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
