@@ -85,6 +85,15 @@ jobs:
       - name: Build trusted extension bundle
         run: bun run bundle:omp-extension
 
+      - name: Prepare OMP native cache
+        run: |
+          read -r version platform sha < <(bun --no-env-file -e 'import { OMP_NATIVE_CACHE_EXECUTABLE_SHA256, OMP_NATIVE_CACHE_VERSION, ompNativeCachePlatform } from "./src/utils/omp-native-cache.ts"; const p = ompNativeCachePlatform(); console.log(OMP_NATIVE_CACHE_VERSION, p, OMP_NATIVE_CACHE_EXECUTABLE_SHA256[p]);')
+          arch="${platform#linux-}"
+          curl -fsSL "https://github.com/can1357/oh-my-pi/releases/download/v${version}/omp-linux-${arch}" -o "$RUNNER_TEMP/omp"
+          echo "${sha}  $RUNNER_TEMP/omp" | sha256sum -c -
+          chmod 755 "$RUNNER_TEMP/omp"
+          bun run prepare:omp-natives --executable "$RUNNER_TEMP/omp"
+
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap
 
@@ -145,10 +154,14 @@ jobs:
         run: sudo sh scripts/install-skill-bunfig.sh
 
       - name: Run unit tests
-        run: bun run test:unit
+        run: >-
+          bun --no-env-file test --timeout=120000 --isolate
+          tests/acp tests/core tests/dashboard tests/platforms tests/scripts
+          tests/skill-api tests/skills tests/types tests/utils
+          tests/main.test.ts tests/healthcheck.test.ts
 
       - name: Run integration tests
-        run: bun run test:integration
+        run: bun --no-env-file test --timeout=120000 --isolate tests/integration
 
   coverage:
     name: Test Coverage
@@ -177,6 +190,15 @@ jobs:
 
       - name: Build trusted extension bundle
         run: bun run bundle:omp-extension
+
+      - name: Prepare OMP native cache
+        run: |
+          read -r version platform sha < <(bun --no-env-file -e 'import { OMP_NATIVE_CACHE_EXECUTABLE_SHA256, OMP_NATIVE_CACHE_VERSION, ompNativeCachePlatform } from "./src/utils/omp-native-cache.ts"; const p = ompNativeCachePlatform(); console.log(OMP_NATIVE_CACHE_VERSION, p, OMP_NATIVE_CACHE_EXECUTABLE_SHA256[p]);')
+          arch="${platform#linux-}"
+          curl -fsSL "https://github.com/can1357/oh-my-pi/releases/download/v${version}/omp-linux-${arch}" -o "$RUNNER_TEMP/omp"
+          echo "${sha}  $RUNNER_TEMP/omp" | sha256sum -c -
+          chmod 755 "$RUNNER_TEMP/omp"
+          bun run prepare:omp-natives --executable "$RUNNER_TEMP/omp"
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap

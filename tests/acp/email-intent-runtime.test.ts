@@ -240,7 +240,11 @@ function provisionNativeCache(base: string): OmpNativeCache {
   const platform = ompNativeCachePlatform();
   const cache = ompNativeCacheDescriptor(base, platform, "development");
   fs.mkdirSync(cache.versionDir, { recursive: true, mode: 0o700 });
-  const names = ompNativeCacheExpectedAddons(platform).exact;
+  const expected = ompNativeCacheExpectedAddons(platform);
+  // The arm64 requirement is a pattern (`pi_natives.*linux-arm64*.node`);
+  // naming the fixture after the platform identity satisfies it without a
+  // binary. The extra x64 name is harmless.
+  const names = [...expected.exact, `pi_natives.fixture.${platform}.node`];
   const files = names.map((name) => {
     const bytes = `fixture addon ${name}`;
     fs.writeFileSync(join(cache.versionDir, name), bytes);
