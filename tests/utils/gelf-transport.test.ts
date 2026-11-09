@@ -1,18 +1,131 @@
 // tests/utils/gelf-transport.test.ts
 
 import { assertEquals } from "@std/assert";
+import { test } from "bun:test";
+import { createSocket, type Socket as UdpSocket } from "node:dgram";
+import * as net from "node:net";
 import { GelfTransport } from "../../src/utils/gelf-transport.ts";
 import type { LogEntry } from "../../src/types/logger.ts";
 
-Deno.test("GelfTransport - converts LogEntry to correct GELF format", async () => {
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
+/** Reads the first chunk of data the socket receives. */
+function readOnce(socket: net.Socket): Promise<Buffer> {
+  const { promise, resolve, reject } = Promise.withResolvers<Buffer>();
+  socket.once("data", resolve);
+  socket.once("error", reject);
+  return promise;
+}
+
+interface TcpSink {
+  server: net.Server;
+  port: number;
+  accept(): Promise<net.Socket>;
+  close(): Promise<void>;
+}
+
+/** Starts a loopback TCP listener whose connections can be awaited one at a time. */
+async function startTcpServer(port = 0): Promise<TcpSink> {
+  const waiting: net.Socket[] = [];
+  const pending: Array<(socket: net.Socket) => void> = [];
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+    socket.on("error", () => {});
+    const resolve = pending.shift();
+    if (resolve) resolve(socket);
+    else waiting.push(socket);
+  });
+  const listening = Promise.withResolvers<number>();
+  server.once("error", listening.reject);
+  server.listen(port, "127.0.0.1", () => {
+    server.off("error", listening.reject);
+    listening.resolve((server.address() as net.AddressInfo).port);
+  });
+  return {
+    server,
+    port: await listening.promise,
+    accept: () => {
+      const socket = waiting.shift();
+      if (socket) return Promise.resolve(socket);
+      const { promise, resolve } = Promise.withResolvers<net.Socket>();
+      pending.push(resolve);
+      return promise;
+    },
+    close: () => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      server.close(() => resolve());
+      return promise;
+    },
+  };
+}
+
+interface UdpSink {
+  port: number;
+  next(): Promise<Buffer>;
+  /** Collects datagrams until `idleMs` passes without a new one. */
+  collect(idleMs: number): Promise<Buffer[]>;
+  close(): void;
+}
+
+/** Starts a loopback UDP receiver that queues datagrams for the test. */
+async function startUdpServer(): Promise<UdpSink> {
+  const socket: UdpSocket = createSocket("udp4");
+  const received: Buffer[] = [];
+  const pending: Array<(data: Buffer) => void> = [];
+  socket.on("message", (message) => {
+    const resolve = pending.shift();
+    if (resolve) resolve(message);
+    else received.push(message);
+  });
+  socket.on("error", () => {});
+  const listening = Promise.withResolvers<number>();
+  socket.bind(0, "127.0.0.1", () => listening.resolve(socket.address().port));
+  const port = await listening.promise;
+  const next = (): Promise<Buffer> => {
+    const queued = received.shift();
+    if (queued) return Promise.resolve(queued);
+    const { promise, resolve } = Promise.withResolvers<Buffer>();
+    pending.push(resolve);
+    return promise;
+  };
+  return {
+    port,
+    next,
+    collect: async (idleMs: number) => {
+      const out: Buffer[] = [];
+      const deadline = delay(idleMs).then(() => null);
+      while (true) {
+        const item = await Promise.race([next(), deadline]);
+        if (item === null) return out;
+        out.push(item);
+      }
+    },
+    close: () => {
+      try {
+        socket.close();
+      } catch {
+        // already closed
+      }
+    },
+  };
+}
+
+test("GelfTransport - converts LogEntry to correct GELF format", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -28,7 +141,7 @@ Deno.test("GelfTransport - converts LogEntry to correct GELF format", async () =
   };
 
   transport.send(entry);
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf.version, "1.1");
@@ -40,19 +153,23 @@ Deno.test("GelfTransport - converts LogEntry to correct GELF format", async () =
   assertEquals(gelf._userId, "123");
   assertEquals(gelf._action, "login");
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - maps log levels to correct syslog levels", async () => {
+test("GelfTransport - maps log levels to correct syslog levels", async () => {
   const receivedMessages: Record<string, number> = {};
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    const body = JSON.parse(await req.text());
-    receivedMessages[body._log_level] = body.level;
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const body = JSON.parse(await req.text());
+      receivedMessages[body._log_level] = body.level;
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -67,7 +184,7 @@ Deno.test("GelfTransport - maps log levels to correct syslog levels", async () =
     });
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await delay(500);
 
   assertEquals(receivedMessages["DEBUG"], 7);
   assertEquals(receivedMessages["INFO"], 6);
@@ -75,10 +192,10 @@ Deno.test("GelfTransport - maps log levels to correct syslog levels", async () =
   assertEquals(receivedMessages["ERROR"], 3);
   assertEquals(receivedMessages["FATAL"], 2);
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - handles send failure gracefully", async () => {
+test("GelfTransport - handles send failure gracefully", async () => {
   const transport = new GelfTransport({
     enabled: true,
     endpoint: "http://127.0.0.1:1/gelf", // Unreachable endpoint
@@ -93,19 +210,23 @@ Deno.test("GelfTransport - handles send failure gracefully", async () => {
   });
 
   // Wait for fetch to fail
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await delay(500);
   // If we reach here, no exception was thrown ✓
 });
 
-Deno.test("GelfTransport - uses default hostname when not specified", async () => {
+test("GelfTransport - uses default hostname when not specified", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -118,23 +239,27 @@ Deno.test("GelfTransport - uses default hostname when not specified", async () =
     message: "Default hostname test",
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf.host, "air-friends");
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - stringifies object values in context", async () => {
+test("GelfTransport - stringifies object values in context", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -148,23 +273,27 @@ Deno.test("GelfTransport - stringifies object values in context", async () => {
     context: { nested: { a: 1, b: "two" } },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf._nested, JSON.stringify({ a: 1, b: "two" }));
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - includes messageTemplate as custom field", async () => {
+test("GelfTransport - includes messageTemplate as custom field", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -179,7 +308,7 @@ Deno.test("GelfTransport - includes messageTemplate as custom field", async () =
     context: { sessionId: "ses_abc", modelId: "gpt-4" },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf.short_message, "Session ses_abc model set to gpt-4");
@@ -187,18 +316,22 @@ Deno.test("GelfTransport - includes messageTemplate as custom field", async () =
   assertEquals(gelf._sessionId, "ses_abc");
   assertEquals(gelf._modelId, "gpt-4");
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - omits messageTemplate when not present", async () => {
+test("GelfTransport - omits messageTemplate when not present", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -211,26 +344,25 @@ Deno.test("GelfTransport - omits messageTemplate when not present", async () => 
     message: "Simple message without template",
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf.short_message, "Simple message without template");
   assertEquals(gelf._messageTemplate, undefined);
 
-  await server.shutdown();
+  await server.stop();
 });
 
 // =============================================================================
 // TCP Protocol Tests
 // =============================================================================
 
-Deno.test("GelfTransport TCP - sends correct GELF message over TCP", async () => {
-  const listener = Deno.listen({ port: 0, hostname: "127.0.0.1" });
-  const port = (listener.addr as Deno.NetAddr).port;
+test("GelfTransport TCP - sends correct GELF message over TCP", async () => {
+  const listener = await startTcpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `tcp://127.0.0.1:${port}`,
+    endpoint: `tcp://127.0.0.1:${listener.port}`,
     protocol: "tcp",
     hostname: "tcp-test-host",
   });
@@ -247,9 +379,7 @@ Deno.test("GelfTransport TCP - sends correct GELF message over TCP", async () =>
   transport.send(entry);
 
   const conn = await connPromise;
-  const buf = new Uint8Array(4096);
-  const n = await conn.read(buf);
-  const received = new TextDecoder().decode(buf.subarray(0, n!));
+  const received = (await readOnce(conn)).toString();
 
   // Must be null-byte terminated
   assertEquals(received.endsWith("\0"), true);
@@ -266,11 +396,11 @@ Deno.test("GelfTransport TCP - sends correct GELF message over TCP", async () =>
   assertEquals(gelf._action, "post");
 
   transport.close();
-  conn.close();
-  listener.close();
+  conn.destroy();
+  await listener.close();
 });
 
-Deno.test("GelfTransport TCP - handles TCP connection failure gracefully", async () => {
+test("GelfTransport TCP - handles TCP connection failure gracefully", async () => {
   const transport = new GelfTransport({
     enabled: true,
     endpoint: "tcp://127.0.0.1:1", // Unreachable endpoint
@@ -286,18 +416,17 @@ Deno.test("GelfTransport TCP - handles TCP connection failure gracefully", async
   });
 
   // Wait for async TCP connection attempts to settle
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await delay(500);
 
   transport.close();
 });
 
-Deno.test("GelfTransport TCP - reconnects after connection is closed", async () => {
-  const listener1 = Deno.listen({ port: 0, hostname: "127.0.0.1" });
-  const port = (listener1.addr as Deno.NetAddr).port;
+test("GelfTransport TCP - reconnects after connection is closed", async () => {
+  const listener1 = await startTcpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `tcp://127.0.0.1:${port}`,
+    endpoint: `tcp://127.0.0.1:${listener1.port}`,
     protocol: "tcp",
   });
 
@@ -311,19 +440,19 @@ Deno.test("GelfTransport TCP - reconnects after connection is closed", async () 
   });
 
   const conn1 = await connPromise1;
-  const buf1 = new Uint8Array(4096);
-  const n1 = await conn1.read(buf1);
-  const received1 = new TextDecoder().decode(buf1.subarray(0, n1!));
+  const received1 = (await readOnce(conn1)).toString();
   const gelf1 = JSON.parse(received1.slice(0, -1));
   assertEquals(gelf1.short_message, "First message");
 
-  // Simulate connection loss: close transport's internal connection and server
-  transport.close();
-  conn1.close();
-  listener1.close();
+  // Simulate connection loss from the server side; the transport's close handler must
+  // invalidate its cached socket, not an explicit `close()` call.
+  conn1.destroy();
+  await listener1.close();
+  // Let the client socket observe the remote close before the next send reuses it.
+  await delay(50);
 
   // Start a new server on the same port
-  const listener2 = Deno.listen({ port, hostname: "127.0.0.1" });
+  const listener2 = await startTcpServer(listener1.port);
 
   // Second message should create a new connection (reconnect)
   const connPromise2 = listener2.accept();
@@ -335,25 +464,22 @@ Deno.test("GelfTransport TCP - reconnects after connection is closed", async () 
   });
 
   const conn2 = await connPromise2;
-  const buf2 = new Uint8Array(4096);
-  const n2 = await conn2.read(buf2);
-  const received2 = new TextDecoder().decode(buf2.subarray(0, n2!));
+  const received2 = (await readOnce(conn2)).toString();
   const gelf2 = JSON.parse(received2.slice(0, -1));
   assertEquals(gelf2.short_message, "Second message after reconnect");
 
   transport.close();
-  conn2.close();
-  listener2.close();
+  conn2.destroy();
+  await listener2.close();
 });
 
-Deno.test("GelfTransport TCP - parses various endpoint formats", async () => {
+test("GelfTransport TCP - parses various endpoint formats", async () => {
   // Test with http:// format
-  const listener1 = Deno.listen({ port: 0, hostname: "127.0.0.1" });
-  const port1 = (listener1.addr as Deno.NetAddr).port;
+  const listener1 = await startTcpServer();
 
   const transport1 = new GelfTransport({
     enabled: true,
-    endpoint: `http://127.0.0.1:${port1}`,
+    endpoint: `http://127.0.0.1:${listener1.port}`,
     protocol: "tcp",
   });
 
@@ -366,23 +492,20 @@ Deno.test("GelfTransport TCP - parses various endpoint formats", async () => {
   });
 
   const conn1 = await connPromise1;
-  const buf1 = new Uint8Array(4096);
-  const n1 = await conn1.read(buf1);
-  const received1 = new TextDecoder().decode(buf1.subarray(0, n1!));
+  const received1 = (await readOnce(conn1)).toString();
   const gelf1 = JSON.parse(received1.slice(0, -1));
   assertEquals(gelf1.short_message, "HTTP format endpoint");
 
   transport1.close();
-  conn1.close();
-  listener1.close();
+  conn1.destroy();
+  await listener1.close();
 
   // Test with tcp:// format
-  const listener2 = Deno.listen({ port: 0, hostname: "127.0.0.1" });
-  const port2 = (listener2.addr as Deno.NetAddr).port;
+  const listener2 = await startTcpServer();
 
   const transport2 = new GelfTransport({
     enabled: true,
-    endpoint: `tcp://127.0.0.1:${port2}`,
+    endpoint: `tcp://127.0.0.1:${listener2.port}`,
     protocol: "tcp",
   });
 
@@ -395,18 +518,16 @@ Deno.test("GelfTransport TCP - parses various endpoint formats", async () => {
   });
 
   const conn2 = await connPromise2;
-  const buf2 = new Uint8Array(4096);
-  const n2 = await conn2.read(buf2);
-  const received2 = new TextDecoder().decode(buf2.subarray(0, n2!));
+  const received2 = (await readOnce(conn2)).toString();
   const gelf2 = JSON.parse(received2.slice(0, -1));
   assertEquals(gelf2.short_message, "TCP format endpoint");
 
   transport2.close();
-  conn2.close();
-  listener2.close();
+  conn2.destroy();
+  await listener2.close();
 });
 
-Deno.test("GelfTransport TCP - close() is idempotent", () => {
+test("GelfTransport TCP - close() is idempotent", () => {
   const transport = new GelfTransport({
     enabled: true,
     endpoint: "tcp://127.0.0.1:12201",
@@ -423,15 +544,19 @@ Deno.test("GelfTransport TCP - close() is idempotent", () => {
 // GELF Payload Specification Compliance Tests
 // =============================================================================
 
-Deno.test("GelfTransport - filters _id from additional fields", async () => {
+test("GelfTransport - filters _id from additional fields", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -446,24 +571,28 @@ Deno.test("GelfTransport - filters _id from additional fields", async () => {
     context: { id: "should-be-filtered", other: "kept" },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf._other, "kept");
   assertEquals(gelf._id, undefined);
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - validates additional field names", async () => {
+test("GelfTransport - validates additional field names", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -484,7 +613,7 @@ Deno.test("GelfTransport - validates additional field names", async () => {
     },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf._validKey, "v1");
@@ -494,18 +623,22 @@ Deno.test("GelfTransport - validates additional field names", async () => {
   assertEquals(gelf["_invalid key"], undefined);
   assertEquals(gelf["_invalid!char"], undefined);
 
-  await server.shutdown();
+  await server.stop();
 });
 
-Deno.test("GelfTransport - converts boolean values to strings", async () => {
+test("GelfTransport - converts boolean values to strings", async () => {
   let receivedBody: string | null = null;
 
-  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
-    receivedBody = await req.text();
-    return new Response("", { status: 202 });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      receivedBody = await req.text();
+      return new Response("", { status: 202 });
+    },
   });
 
-  const port = server.addr.port;
+  const port = server.port;
   const transport = new GelfTransport({
     enabled: true,
     endpoint: `http://127.0.0.1:${port}/gelf`,
@@ -519,13 +652,13 @@ Deno.test("GelfTransport - converts boolean values to strings", async () => {
     context: { active: true, deleted: false },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await delay(200);
 
   const gelf = JSON.parse(receivedBody!);
   assertEquals(gelf._active, "true");
   assertEquals(gelf._deleted, "false");
 
-  await server.shutdown();
+  await server.stop();
 });
 
 // =============================================================================
@@ -555,13 +688,12 @@ async function gzipDecompress(data: Uint8Array): Promise<Uint8Array> {
   return result;
 }
 
-Deno.test("GelfTransport UDP - sends correct GELF message via UDP", async () => {
-  const listener = Deno.listenDatagram({ transport: "udp", hostname: "127.0.0.1", port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
+test("GelfTransport UDP - sends correct GELF message via UDP", async () => {
+  const listener = await startUdpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `udp://127.0.0.1:${port}`,
+    endpoint: `udp://127.0.0.1:${listener.port}`,
     protocol: "udp",
     compress: false,
     hostname: "udp-test-host",
@@ -577,7 +709,7 @@ Deno.test("GelfTransport UDP - sends correct GELF message via UDP", async () => 
 
   transport.send(entry);
 
-  const [data, _addr] = await listener.receive();
+  const data = await listener.next();
   const gelf = JSON.parse(new TextDecoder().decode(data));
 
   assertEquals(gelf.version, "1.1");
@@ -592,13 +724,12 @@ Deno.test("GelfTransport UDP - sends correct GELF message via UDP", async () => 
   listener.close();
 });
 
-Deno.test("GelfTransport UDP - applies GZIP compression by default", async () => {
-  const listener = Deno.listenDatagram({ transport: "udp", hostname: "127.0.0.1", port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
+test("GelfTransport UDP - applies GZIP compression by default", async () => {
+  const listener = await startUdpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `udp://127.0.0.1:${port}`,
+    endpoint: `udp://127.0.0.1:${listener.port}`,
     protocol: "udp",
     // compress defaults to true for UDP
     hostname: "gzip-test",
@@ -611,7 +742,7 @@ Deno.test("GelfTransport UDP - applies GZIP compression by default", async () =>
     message: "GZIP default test",
   });
 
-  const [data, _addr] = await listener.receive();
+  const data = await listener.next();
 
   // Verify GZIP magic bytes
   assertEquals(data[0], 0x1f);
@@ -628,13 +759,12 @@ Deno.test("GelfTransport UDP - applies GZIP compression by default", async () =>
   listener.close();
 });
 
-Deno.test("GelfTransport UDP - sends uncompressed when compress is false", async () => {
-  const listener = Deno.listenDatagram({ transport: "udp", hostname: "127.0.0.1", port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
+test("GelfTransport UDP - sends uncompressed when compress is false", async () => {
+  const listener = await startUdpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `udp://127.0.0.1:${port}`,
+    endpoint: `udp://127.0.0.1:${listener.port}`,
     protocol: "udp",
     compress: false,
   });
@@ -646,7 +776,7 @@ Deno.test("GelfTransport UDP - sends uncompressed when compress is false", async
     message: "Uncompressed UDP test",
   });
 
-  const [data, _addr] = await listener.receive();
+  const data = await listener.next();
 
   // First byte should be '{' (0x7b) — raw JSON, not GZIP
   assertEquals(data[0], 0x7b);
@@ -658,13 +788,12 @@ Deno.test("GelfTransport UDP - sends uncompressed when compress is false", async
   listener.close();
 });
 
-Deno.test("GelfTransport UDP - chunks large messages", async () => {
-  const listener = Deno.listenDatagram({ transport: "udp", hostname: "127.0.0.1", port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
+test("GelfTransport UDP - chunks large messages", async () => {
+  const listener = await startUdpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `udp://127.0.0.1:${port}`,
+    endpoint: `udp://127.0.0.1:${listener.port}`,
     protocol: "udp",
     compress: false,
     hostname: "chunk-test",
@@ -679,24 +808,14 @@ Deno.test("GelfTransport UDP - chunks large messages", async () => {
     context: { bigdata: "x".repeat(10000) },
   });
 
-  // Collect multiple chunks with a timeout
-  const chunks: Uint8Array[] = [];
-  const collectChunks = async () => {
-    while (true) {
-      const [data] = await listener.receive();
-      chunks.push(new Uint8Array(data));
-    }
-  };
-  await Promise.race([
-    collectChunks(),
-    new Promise((resolve) => setTimeout(resolve, 1000)),
-  ]);
+  // Collect multiple chunks with an idle timeout
+  const chunks = await listener.collect(1000);
 
   // Must have received more than one chunk
   assertEquals(chunks.length > 1, true, `Expected >1 chunks, got ${chunks.length}`);
 
   // Verify chunk headers and extract message ID
-  const expectedMessageId = chunks[0].slice(2, 10);
+  const expectedMessageId = chunks[0].subarray(2, 10);
   const sequenceCount = chunks[0][11];
   assertEquals(sequenceCount, chunks.length);
 
@@ -706,14 +825,14 @@ Deno.test("GelfTransport UDP - chunks large messages", async () => {
     assertEquals(chunk[0], 0x1e);
     assertEquals(chunk[1], 0x0f);
     // Message ID is the same across all chunks
-    assertEquals(new Uint8Array(chunk.slice(2, 10)), expectedMessageId);
+    assertEquals(new Uint8Array(chunk.subarray(2, 10)), new Uint8Array(expectedMessageId));
     // Sequence count is the same across all chunks
     assertEquals(chunk[11], sequenceCount);
   }
 
   // Reassemble in sequence order
   const ordered = chunks.toSorted((a, b) => a[10] - b[10]);
-  const dataParts: Uint8Array[] = ordered.map((c) => c.slice(12));
+  const dataParts: Uint8Array[] = ordered.map((c) => c.subarray(12));
   let totalLen = 0;
   for (const p of dataParts) totalLen += p.length;
   const reassembled = new Uint8Array(totalLen);
@@ -734,10 +853,10 @@ Deno.test("GelfTransport UDP - chunks large messages", async () => {
   listener.close();
 });
 
-Deno.test("GelfTransport UDP - handles UDP send failure gracefully", async () => {
+test("GelfTransport UDP - handles UDP send failure gracefully", async () => {
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: "udp://192.0.2.1:1", // RFC 5737 TEST-NET: unreachable
+    endpoint: "udp://unresolvable.invalid:1", // Guaranteed to fail the name lookup
     protocol: "udp",
   });
 
@@ -749,23 +868,22 @@ Deno.test("GelfTransport UDP - handles UDP send failure gracefully", async () =>
     message: "This should not throw",
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await delay(500);
 
   transport.close();
 });
 
-Deno.test("GelfTransport UDP - close() cleans up UDP connection", async () => {
-  const listener = Deno.listenDatagram({ transport: "udp", hostname: "127.0.0.1", port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
+test("GelfTransport UDP - close() cleans up UDP connection", async () => {
+  const listener = await startUdpServer();
 
   const transport = new GelfTransport({
     enabled: true,
-    endpoint: `udp://127.0.0.1:${port}`,
+    endpoint: `udp://127.0.0.1:${listener.port}`,
     protocol: "udp",
     compress: false,
   });
 
-  // Send a message to establish the internal UDP connection
+  // Send a message to establish the internal UDP socket
   transport.send({
     timestamp: new Date().toISOString(),
     level: "INFO",
@@ -773,7 +891,7 @@ Deno.test("GelfTransport UDP - close() cleans up UDP connection", async () => {
     message: "Establish connection",
   });
 
-  await listener.receive();
+  await listener.next();
 
   // First close should not throw
   transport.close();

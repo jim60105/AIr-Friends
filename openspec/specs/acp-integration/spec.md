@@ -606,9 +606,9 @@ The `SandboxManager` SHALL mediate the agent subprocess's network egress so the 
 The validating egress proxy (`src/utils/egress-proxy.ts`) SHALL relay bytes between the agent and the upstream origin without altering or losing them, and SHALL propagate connection lifecycle events in both directions, so the mediation layer does not itself become a source of corrupted streams or zombie connections.
 
 #### Scenario: Short writes are fully flushed
-- **GIVEN** a tunneled transfer large enough that the socket `write` returns fewer bytes than requested (TCP backpressure)
+- **GIVEN** a tunneled transfer large enough that the peer socket's write buffer fills (TCP backpressure)
 - **WHEN** the proxy relays a chunk to the peer, or writes a control response / rewritten request head
-- **THEN** it SHALL loop until every byte has been written, and the payload SHALL arrive byte-exact (a dropped remainder would corrupt the tunneled TLS stream)
+- **THEN** it SHALL stop reading from the source until the peer drains, and the payload SHALL arrive byte-exact (a dropped remainder would corrupt the tunneled TLS stream)
 
 #### Scenario: Upstream close is propagated to the client
 - **GIVEN** an established CONNECT tunnel whose upstream closes an idle keep-alive connection
@@ -2468,3 +2468,17 @@ The spawn boundary SHALL report an exit as a code, a signal name and a success f
 - **GIVEN** an agent subprocess that ignores `SIGTERM`
 - **WHEN** the connector disconnects
 - **THEN** it SHALL send `SIGKILL` 2 seconds after `SIGTERM` and the exit report SHALL show `SIGKILL`
+
+### Requirement: Egress Resolution Happens Once Per Connection
+
+The egress proxy SHALL resolve a hostname once per client request, validate every A and AAAA answer, and connect to the validated address without resolving again.
+
+#### Scenario: Rebinding answer is not followed
+- **GIVEN** an allowlisted hostname whose DNS server answers `127.0.0.1` to the first A query and `127.0.0.2` afterward, with listeners on both addresses and the same port
+- **WHEN** a client issues `CONNECT` for that hostname
+- **THEN** the `127.0.0.1` listener SHALL receive the connection, the `127.0.0.2` listener SHALL receive none, and exactly one A query SHALL have been made
+
+#### Scenario: Disallowed AAAA behind a public A
+- **GIVEN** a hostname with a public A record and a loopback AAAA record
+- **WHEN** a client issues `CONNECT` for it
+- **THEN** the proxy SHALL reply 403

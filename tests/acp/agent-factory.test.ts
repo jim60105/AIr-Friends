@@ -935,12 +935,8 @@ const createSandbox = (overrides: Partial<SandboxConfig> = {}): SandboxConfig =>
   ...overrides,
 });
 
-// TEMPORARY (port-egress-proxy-and-gelf-to-node-net): `ensureEgressProxy` reaches
-// `Deno.listen` at `src/utils/egress-proxy.ts:375`, so these two cases cannot get
-// past the proxy start. That owner must restore the `test` registrations and delete
-// the matching `parity-exceptions.json` entries.
-test.skip("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
-  ensureEgressProxy(0);
+test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", async () => {
+  await ensureEgressProxy(0);
   try {
     const config = createTestConfig({
       agent: {
@@ -959,12 +955,12 @@ test.skip("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () =
     );
     assertEquals(agentConfig.env?.no_proxy, agentConfig.env?.NO_PROXY);
   } finally {
-    stopEgressProxy();
+    await stopEgressProxy();
   }
 });
 
-test.skip("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () => {
-  ensureEgressProxy(0);
+test("createAgentConfig - NO_PROXY unchanged with an empty allowlist", async () => {
+  await ensureEgressProxy(0);
   try {
     const config = createTestConfig({
       agent: {
@@ -978,7 +974,7 @@ test.skip("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () =
     assertEquals(agentConfig.env?.NO_PROXY, "localhost,127.0.0.1,::1");
     assertEquals(agentConfig.env?.no_proxy, "localhost,127.0.0.1,::1");
   } finally {
-    stopEgressProxy();
+    await stopEgressProxy();
   }
 });
 

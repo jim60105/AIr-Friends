@@ -164,7 +164,7 @@ export async function bootstrap(
     }
     if (sandbox.egressProxy && !sandbox.unrestrictedEgress) {
       configureEgressAllowHosts(sandbox.egressAllowHosts ?? []);
-      const proxy = ensureEgressProxy(sandbox.egressProxyPort ?? 0);
+      const proxy = await ensureEgressProxy(sandbox.egressProxyPort ?? 0);
       logger.info("Agent egress mediated by validating proxy on 127.0.0.1:{port}", {
         port: proxy.port,
       });
