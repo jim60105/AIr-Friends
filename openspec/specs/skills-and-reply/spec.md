@@ -766,8 +766,8 @@ The `send-file` skill SHALL validate every requested `filePaths` path before sen
 #### Scenario: Real-path containment blocks symlink escapes
 - **GIVEN** a symlink inside the workspace that resolves outside the workspace or agent-workspace boundary
 - **WHEN** a `send-file` request for that path is validated
-- **THEN** containment SHALL be checked against the file's REAL path (`Deno.realPath`, symlink-aware) and the path SHALL be rejected
-- **AND** `Deno.stat`/`Deno.readFile` follow symlinks, so without this check they would exfiltrate arbitrary host files
+- **THEN** containment SHALL be checked against the file's REAL path (resolved with `realpath`, symlink-aware) and the path SHALL be rejected
+- **AND** `stat` and `readFile` follow symlinks, so without this check they would exfiltrate arbitrary host files
 
 #### Scenario: Batch limits checked before any byte is read
 - **GIVEN** a multi-file `send-file` invocation
