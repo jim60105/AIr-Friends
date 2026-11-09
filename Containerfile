@@ -61,7 +61,8 @@ RUN case "${TARGETARCH}" in \
       arm64) NODE_ARCH="arm64"; NODE_SHA256="${NODE_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+    "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
     -o /tmp/node.tar.xz && \
     echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - && \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner && \
@@ -93,7 +94,8 @@ RUN case "${TARGETARCH}" in \
       arm64) OC_ARCH="arm64"; OC_SHA256="${OPENCODE_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+    "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
     -o /tmp/opencode.tar.gz && \
     echo "${OC_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /opencode && \
@@ -184,11 +186,11 @@ RUN case "${TARGETARCH}" in \
     license_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/LICENSE" && \
     notices_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/THIRD-PARTY-NOTICES.txt" && \
     echo "downloading pinned OMP executable: ${asset_url}" && \
-    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
       "${asset_url}" -o /tmp/omp.bin && \
-    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
       "${license_url}" -o /tmp/LICENSE && \
-    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
       "${notices_url}" -o /tmp/THIRD-PARTY-NOTICES.txt && \
     # Fail closed: every checksum verifies BEFORE any install/COPY consumption.
     echo "${OMP_SHA256}  /tmp/omp.bin" | sha256sum -c - && \
@@ -270,7 +272,8 @@ RUN case "${TARGETARCH}" in \
       arm64) DUMBINIT_ARCH="aarch64"; DUMBINIT_SHA256="${DUMBINIT_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/Yelp/dumb-init/releases/download/v${DUMBINIT_VERSION}/dumb-init_${DUMBINIT_VERSION}_${DUMBINIT_ARCH}" \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+    "https://github.com/Yelp/dumb-init/releases/download/v${DUMBINIT_VERSION}/dumb-init_${DUMBINIT_VERSION}_${DUMBINIT_ARCH}" \
     -o /usr/local/bin/dumb-init && \
     echo "${DUMBINIT_SHA256}  /usr/local/bin/dumb-init" | sha256sum -c - && \
     chmod 755 /usr/local/bin/dumb-init && \

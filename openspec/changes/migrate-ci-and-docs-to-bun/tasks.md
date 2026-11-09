@@ -23,8 +23,8 @@ Prerequisite: `package-bun-container-image` is applied. Verify with `test -f scr
 
 ## 4. CI evidence
 
-- [x] 4.1 Ask the owner to push `feat/migrate-to-bun` and run `gh workflow run ci.yaml --ref feat/migrate-to-bun`. Verify: `gh run list --workflow ci.yaml --branch feat/migrate-to-bun --limit 1 --json conclusion,url` shows `"conclusion":"success"`; paste the run URL and the `image` job's arm64 smoke output (P0-4, P0-9 arm64; P0-7 both environments; P0-10 CI).
-  - Verified: https://github.com/jim60105/AIr-Friends/actions/runs/42655960657 on headSha `8b63c4a17886c00c9331d5fb04c2607e73b1b82d`, conclusion `success`. Jobs all `success`: Code Quality; Test Coverage; Run Tests (ubuntu-26.04, userns open); Run Tests (ubuntu-26.04, userns restricted); Run Tests (ubuntu-26.04-arm, userns open); Image Smoke (ubuntu-26.04); Image Smoke (ubuntu-26.04-arm). Arm64 `Run image smoke test`: `ok help`, `ok tools`, `ok skill-config`, `ok skill-run`, `ok in-image-tests` (40 tests, 0 fail across 4 files), `ok seccomp-enosys`.
+- [ ] 4.1 Ask the owner to push `feat/migrate-to-bun` and run `gh workflow run ci.yaml --ref feat/migrate-to-bun`. Verify: `gh run list --workflow ci.yaml --branch feat/migrate-to-bun --limit 1 --json conclusion,url` shows `"conclusion":"success"`; paste the run URL and the `image` job's arm64 smoke output (P0-4, P0-9 arm64; P0-7 both environments; P0-10 CI).
+  - Pending: the previous green run https://github.com/jim60105/AIr-Friends/actions/runs/42655960657 was on `8b63c4a` (before the download-retry hardening); a new run on the hardened tip is required and becomes the final evidence. Its x64 image job hit a transient GitHub release 500 after four attempts, while arm64 passed the same build in that run.
 
 ## 5. Housekeeping
 
