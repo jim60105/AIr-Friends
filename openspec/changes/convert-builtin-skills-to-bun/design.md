@@ -51,7 +51,7 @@ Run the codemod with `--no-src-helpers` on `skills/lib/*.ts` and `skills/*/scrip
 
 ### D4. Trusted config on hosts
 
-`scripts/install-skill-bunfig.sh` (POSIX `sh`, `set -eu`): `sudo install -d -m 0755 -o root -g root /opt/air && sudo install -m 0444 -o root -g root /dev/null /opt/air/skill-bunfig.toml`, idempotent, and prints the resulting `ls -l` line. CI calls it (`migrate-ci-and-docs-to-bun`).
+`scripts/install-skill-bunfig.sh` (POSIX `sh`, `set -eu`) is sudo-free and idempotent. When it already runs as root (for example inside a rootless container) it runs `install -d -m 0755 -o root -g root /opt/air && install -m 0444 -o root -g root /dev/null /opt/air/skill-bunfig.toml` and prints the resulting `stat -c '%U:%G %a %s'` line. When it runs unprivileged it exits non-zero with the rootless-container invocation, because the execution host is strictly non-root and never asks for `sudo`. CI calls it (`migrate-ci-and-docs-to-bun`).
 
 ### D5. Tests
 
@@ -60,4 +60,4 @@ Convert the five test files with the codemod and README. Tests that executed a s
 ## Risks / Trade-offs
 
 - [A flag that a script reads is missed in `options`] → It parses as `true` and the argument tests or `scripts.test.ts` fail; D2's table per script is the guard.
-- [Developers without `sudo`] → Skill-executing tests fail with the `ENOENT` message, which names the missing file; the fix is D4.
+- [Unprivileged hosts] → Skill-executing tests fail with the `ENOENT` message, which names the missing file; the fix is D4 (run it in a rootless container).
