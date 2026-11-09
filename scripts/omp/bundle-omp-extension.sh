@@ -1,35 +1,33 @@
 #!/bin/sh
 # scripts/omp/bundle-omp-extension.sh — wrapper for the trusted-extension
 # bundler (OpenSpec `package-pinned-omp-runtime` D5; native-loadable bundle
-# retarget by `package-bun-compatible-omp-extension`). The bundler logic
-# lives in bundle-extension.ts beside this script; this wrapper invokes it
-# with the exact permission set it needs and normalizes the output modes.
+# retarget by `package-bun-compatible-omp-extension`; Bun bundling by
+# `bundle-omp-extension-with-bun`). The bundler logic lives in
+# bundle-extension.ts beside this script; this wrapper invokes it and
+# normalizes the output modes.
 #
 # Usage:
-#   bundle-omp-extension.sh <src-root> <extension-target> <repo-deno-lock>
+#   bundle-omp-extension.sh <src-root> <extension-target>
 #
 # The single generated artifact is <extension-target>/index.js. In the image
 # build: src-root=/build-src, extension-target=/opt/air/omp/extension, run as
 # ROOT before `USER $UID`. Development launch builds the SAME artifact
-# contract at build/omp-extension/index.js (deno task bundle:omp-extension
+# contract at build/omp-extension/index.js (bun run bundle:omp-extension
 # routes here; src-root/target are the repo checkout and its build dir).
 
 set -eu
 
-SRC="${1:?usage: bundle-omp-extension.sh <src-root> <extension-target> <repo-deno-lock>}"
-TARGET="${2:?usage: bundle-omp-extension.sh <src-root> <extension-target> <repo-deno-lock>}"
-DENO_LOCK="${3:?usage: bundle-omp-extension.sh <src-root> <extension-target> <repo-deno-lock>}"
+SRC="${1:?usage: bundle-omp-extension.sh <src-root> <extension-target>}"
+TARGET="${2:?usage: bundle-omp-extension.sh <src-root> <extension-target>}"
 
-if ! command -v deno >/dev/null 2>&1; then
-  echo "bundle-omp-extension.sh requires deno (present in the image build base)" >&2
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bundle-omp-extension.sh requires bun" >&2
   exit 1
 fi
 
 here="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
-install -d -m 755 "${TARGET}"
-
-deno run --allow-read --allow-write --allow-run "${here}/bundle-extension.ts" "${SRC}" "${TARGET}" "${DENO_LOCK}"
+bun run --no-env-file "${here}/bundle-extension.ts" "${SRC}" "${TARGET}"
 
 # Deterministic output modes (dirs 0755, files 0644) when run as root, so the
 # generated tree never depends on the invoking umask. The IMAGE does not keep
