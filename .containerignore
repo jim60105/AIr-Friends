@@ -46,7 +46,6 @@ data/
 
 # Temporary files
 .cache/
-.deno/
 tmp/
 
 # Build artifacts
