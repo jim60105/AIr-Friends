@@ -1,7 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { basename, resolve, SEPARATOR } from "@std/path";
+import { basename, resolve, sep as SEPARATOR } from "node:path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";

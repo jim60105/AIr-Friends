@@ -1,6 +1,8 @@
 // src/core/workspace-manager.ts
 
-import { isAbsolute, join, relative, resolve, SEPARATOR } from "@std/path";
+import { isAbsolute, join, relative, resolve, sep as SEPARATOR } from "node:path";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 import { createLogger } from "@utils/logger.ts";
 import type { Logger } from "@utils/logger.ts";
 import {
@@ -262,9 +264,9 @@ export class WorkspaceManager {
     this.validateFileAccess(absolutePath, workspace);
 
     try {
-      return await Deno.readTextFile(absolutePath);
+      return await fsp.readFile(absolutePath, "utf8");
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         throw new WorkspaceError(
           ErrorCode.WORKSPACE_NOT_FOUND,
           `File not found: ${relativePath}`,
@@ -304,7 +306,7 @@ export class WorkspaceManager {
     const absolutePath = resolve(join(workspace.path, relativePath));
     this.validateFileAccess(absolutePath, workspace);
 
-    await Deno.writeTextFile(absolutePath, content, { append: true });
+    await fsp.appendFile(absolutePath, content);
   }
 
   /**
@@ -458,7 +460,7 @@ This is your personal workspace for long-term knowledge and notes.
         }
       }
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
+      if (!isNotFoundError(error)) {
         throw error;
       }
     }

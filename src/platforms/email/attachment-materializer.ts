@@ -1,6 +1,6 @@
 // src/platforms/email/attachment-materializer.ts
 
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import type { LocalEmailAttachment } from "../../types/events.ts";
 import type { EmailMessageStore } from "./message-store.ts";
 import { assertSafePath, assertStagingRootBoundary, canonicalizeRoot } from "./durable-files.ts";

@@ -46,8 +46,8 @@ import {
   OMP_INTENT_PROFILE_FLAG_VALUE,
 } from "./omp/extension/native-registration.ts";
 import { OMP_TOOL_CAPABILITY_MAP } from "./omp/tool-inventory.ts";
-import { dirname, isAbsolute, join, resolve } from "@std/path";
-import { parse as parseYaml } from "@std/yaml";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 /**
  * Contracted authored native OMP settings documents (development-tree paths;

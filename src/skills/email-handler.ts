@@ -39,7 +39,7 @@
 // This module is intentionally NOT registered in production bootstrap; email activation
 // remains guarded until the final batch cutover.
 
-import { isAbsolute, resolve, SEPARATOR } from "@std/path";
+import { isAbsolute, resolve, sep as SEPARATOR } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
 import { sessionStagingDir } from "@core/session-staging.ts";

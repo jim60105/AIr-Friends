@@ -20,7 +20,7 @@
  * a legacy journal starts with the header directly.
  */
 
-import { basename, dirname, isAbsolute, join, normalize } from "@std/path";
+import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import type { LinuxNativeCalls } from "../filesystem-access-linux.ts";
 import { readOmpSessionHeaderPrefix } from "../filesystem-access.ts";
 import type {

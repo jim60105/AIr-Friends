@@ -38,7 +38,7 @@
 //   identity, or a replaced script identity all deny. Identity-tuple fields are
 //   denial-only: a changed field can never widen authority.
 
-import { SEPARATOR } from "@std/path";
+import { sep as SEPARATOR } from "node:path";
 import { isValidSkillNameComponent, RESERVED_SKILL_ENTRIES } from "@core/bundled-skills.ts";
 import type { SkillsRootObservation } from "@core/skills-root.ts";
 import {
