@@ -368,7 +368,7 @@ let globalLoggerConfig: Partial<LoggerConfig> = {};
 export function configureLogger(
   config: { level?: string; format?: string; gelfTransport?: GelfTransportLike },
 ): void {
-  const levelStr = config.level ?? Deno.env.get("LOG_LEVEL") ?? "INFO";
+  const levelStr = config.level ?? process.env["LOG_LEVEL"] ?? "INFO";
   const level = LogLevel[levelStr.toUpperCase() as keyof typeof LogLevel] ?? LogLevel.INFO;
   globalLoggerConfig = { level, gelfTransport: config.gelfTransport };
 }
@@ -376,7 +376,7 @@ export function configureLogger(
 // Factory function to create logger with environment-based level
 export function createLogger(module: string): Logger {
   if (Object.keys(globalLoggerConfig).length === 0) {
-    const levelStr = Deno.env.get("LOG_LEVEL") ?? "INFO";
+    const levelStr = process.env["LOG_LEVEL"] ?? "INFO";
     const level = LogLevel[levelStr as keyof typeof LogLevel] ?? LogLevel.INFO;
     globalLoggerConfig = { level };
   }

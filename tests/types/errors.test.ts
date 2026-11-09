@@ -2,8 +2,9 @@
 
 import { assertEquals, assertInstanceOf } from "@std/assert";
 import { BaseError, ConfigError, ErrorCode, PlatformError } from "../../src/types/errors.ts";
+import { test } from "bun:test";
 
-Deno.test("ConfigError - should have correct properties", () => {
+test("ConfigError - should have correct properties", () => {
   const error = new ConfigError(
     ErrorCode.CONFIG_NOT_FOUND,
     "Config file not found",
@@ -17,7 +18,7 @@ Deno.test("ConfigError - should have correct properties", () => {
   assertEquals(error.context?.path, "/path/to/config.yaml");
 });
 
-Deno.test("PlatformError - connection error should be retryable", () => {
+test("PlatformError - connection error should be retryable", () => {
   const error = new PlatformError(
     ErrorCode.PLATFORM_CONNECTION_FAILED,
     "Failed to connect to Discord",
@@ -26,7 +27,7 @@ Deno.test("PlatformError - connection error should be retryable", () => {
   assertEquals(error.isRetryable, true);
 });
 
-Deno.test("PlatformError - auth error should not be retryable", () => {
+test("PlatformError - auth error should not be retryable", () => {
   const error = new PlatformError(
     ErrorCode.PLATFORM_AUTH_FAILED,
     "Invalid token",
@@ -35,7 +36,7 @@ Deno.test("PlatformError - auth error should not be retryable", () => {
   assertEquals(error.isRetryable, false);
 });
 
-Deno.test("BaseError - toJSON should serialize properly", () => {
+test("BaseError - toJSON should serialize properly", () => {
   const error = new ConfigError(
     ErrorCode.CONFIG_INVALID,
     "Invalid YAML syntax",

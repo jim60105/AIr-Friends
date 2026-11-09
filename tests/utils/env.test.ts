@@ -2,8 +2,9 @@
 
 import { assertEquals } from "@std/assert";
 import { applyEnvOverrides, setNestedProperty } from "@utils/env.ts";
+import { test } from "bun:test";
 
-Deno.test("setNestedProperty - sets deeply nested value", () => {
+test("setNestedProperty - sets deeply nested value", () => {
   const obj: Record<string, unknown> = {};
   setNestedProperty(obj, "platforms.discord.enabled", true);
   assertEquals(
@@ -12,13 +13,13 @@ Deno.test("setNestedProperty - sets deeply nested value", () => {
   );
 });
 
-Deno.test("applyEnvOverrides - EMAIL settings typed overrides", () => {
-  Deno.env.set("EMAIL_ENABLED", "true");
-  Deno.env.set("EMAIL_IMAP_PORT", "143");
-  Deno.env.set("EMAIL_POLL_INTERVAL_MS", "60000");
-  Deno.env.set("EMAIL_AUTH_HEADER_STRIPPING_ATTESTED", "true");
-  Deno.env.set("EMAIL_SIGNATURE", "Best regards,\nBot\n${DISCORD_TOKEN}");
-  Deno.env.set("EMAIL_IMAP_PASSWORD", "001234");
+test("applyEnvOverrides - EMAIL settings typed overrides", () => {
+  process.env["EMAIL_ENABLED"] = "true";
+  process.env["EMAIL_IMAP_PORT"] = "143";
+  process.env["EMAIL_POLL_INTERVAL_MS"] = "60000";
+  process.env["EMAIL_AUTH_HEADER_STRIPPING_ATTESTED"] = "true";
+  process.env["EMAIL_SIGNATURE"] = "Best regards,\nBot\n${DISCORD_TOKEN}";
+  process.env["EMAIL_IMAP_PASSWORD"] = "001234";
 
   try {
     const config: Record<string, unknown> = {
@@ -39,17 +40,17 @@ Deno.test("applyEnvOverrides - EMAIL settings typed overrides", () => {
     assertEquals((email.receivingAuth as Record<string, unknown>).attestedStripping, true);
     assertEquals(email.signature, "Best regards,\nBot\n${DISCORD_TOKEN}");
   } finally {
-    Deno.env.delete("EMAIL_ENABLED");
-    Deno.env.delete("EMAIL_IMAP_PORT");
-    Deno.env.delete("EMAIL_POLL_INTERVAL_MS");
-    Deno.env.delete("EMAIL_AUTH_HEADER_STRIPPING_ATTESTED");
-    Deno.env.delete("EMAIL_SIGNATURE");
-    Deno.env.delete("EMAIL_IMAP_PASSWORD");
+    delete process.env["EMAIL_ENABLED"];
+    delete process.env["EMAIL_IMAP_PORT"];
+    delete process.env["EMAIL_POLL_INTERVAL_MS"];
+    delete process.env["EMAIL_AUTH_HEADER_STRIPPING_ATTESTED"];
+    delete process.env["EMAIL_SIGNATURE"];
+    delete process.env["EMAIL_IMAP_PASSWORD"];
   }
 });
 
-Deno.test("applyEnvOverrides - DISCORD_ENABLED=true sets platforms.discord.enabled to boolean true", () => {
-  Deno.env.set("DISCORD_ENABLED", "true");
+test("applyEnvOverrides - DISCORD_ENABLED=true sets platforms.discord.enabled to boolean true", () => {
+  process.env["DISCORD_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       platforms: { discord: { enabled: false, token: "tok" }, misskey: { enabled: false } },
@@ -58,12 +59,12 @@ Deno.test("applyEnvOverrides - DISCORD_ENABLED=true sets platforms.discord.enabl
     const platforms = config.platforms as { discord: { enabled: boolean } };
     assertEquals(platforms.discord.enabled, true);
   } finally {
-    Deno.env.delete("DISCORD_ENABLED");
+    delete process.env["DISCORD_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType to omp", () => {
-  Deno.env.set("AGENT_DEFAULT_TYPE", "omp");
+test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType to omp", () => {
+  process.env["AGENT_DEFAULT_TYPE"] = "omp";
   try {
     const config: Record<string, unknown> = {
       agent: { defaultAgentType: "unset" },
@@ -72,12 +73,12 @@ Deno.test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType to
     const agent = config.agent as { defaultAgentType: string };
     assertEquals(agent.defaultAgentType, "omp");
   } finally {
-    Deno.env.delete("AGENT_DEFAULT_TYPE");
+    delete process.env["AGENT_DEFAULT_TYPE"];
   }
 });
 
-Deno.test("applyEnvOverrides - empty AGENT_DEFAULT_TYPE does not override", () => {
-  Deno.env.set("AGENT_DEFAULT_TYPE", "");
+test("applyEnvOverrides - empty AGENT_DEFAULT_TYPE does not override", () => {
+  process.env["AGENT_DEFAULT_TYPE"] = "";
   try {
     const config: Record<string, unknown> = {
       agent: { defaultAgentType: "original" },
@@ -86,12 +87,12 @@ Deno.test("applyEnvOverrides - empty AGENT_DEFAULT_TYPE does not override", () =
     const agent = config.agent as { defaultAgentType: string };
     assertEquals(agent.defaultAgentType, "original");
   } finally {
-    Deno.env.delete("AGENT_DEFAULT_TYPE");
+    delete process.env["AGENT_DEFAULT_TYPE"];
   }
 });
 
-Deno.test("applyEnvOverrides - DISCORD_ENABLED=false sets platforms.discord.enabled to boolean false", () => {
-  Deno.env.set("DISCORD_ENABLED", "false");
+test("applyEnvOverrides - DISCORD_ENABLED=false sets platforms.discord.enabled to boolean false", () => {
+  process.env["DISCORD_ENABLED"] = "false";
   try {
     const config: Record<string, unknown> = {
       platforms: { discord: { enabled: true, token: "tok" }, misskey: { enabled: false } },
@@ -100,12 +101,12 @@ Deno.test("applyEnvOverrides - DISCORD_ENABLED=false sets platforms.discord.enab
     const platforms = config.platforms as { discord: { enabled: boolean } };
     assertEquals(platforms.discord.enabled, false);
   } finally {
-    Deno.env.delete("DISCORD_ENABLED");
+    delete process.env["DISCORD_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - MISSKEY_ENABLED=true sets platforms.misskey.enabled to boolean true", () => {
-  Deno.env.set("MISSKEY_ENABLED", "true");
+test("applyEnvOverrides - MISSKEY_ENABLED=true sets platforms.misskey.enabled to boolean true", () => {
+  process.env["MISSKEY_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       platforms: { discord: { enabled: false, token: "tok" }, misskey: { enabled: false } },
@@ -114,12 +115,12 @@ Deno.test("applyEnvOverrides - MISSKEY_ENABLED=true sets platforms.misskey.enabl
     const platforms = config.platforms as { misskey: { enabled: boolean } };
     assertEquals(platforms.misskey.enabled, true);
   } finally {
-    Deno.env.delete("MISSKEY_ENABLED");
+    delete process.env["MISSKEY_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType", () => {
-  Deno.env.set("AGENT_DEFAULT_TYPE", "opencode");
+test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType", () => {
+  process.env["AGENT_DEFAULT_TYPE"] = "opencode";
   try {
     const config: Record<string, unknown> = {
       agent: { defaultAgentType: "unset" },
@@ -128,12 +129,12 @@ Deno.test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType", 
     const agent = config.agent as { defaultAgentType: string };
     assertEquals(agent.defaultAgentType, "opencode");
   } finally {
-    Deno.env.delete("AGENT_DEFAULT_TYPE");
+    delete process.env["AGENT_DEFAULT_TYPE"];
   }
 });
 
-Deno.test("applyEnvOverrides - empty env var does not override", () => {
-  Deno.env.set("DISCORD_ENABLED", "");
+test("applyEnvOverrides - empty env var does not override", () => {
+  process.env["DISCORD_ENABLED"] = "";
   try {
     const config: Record<string, unknown> = {
       platforms: { discord: { enabled: true, token: "tok" }, misskey: { enabled: false } },
@@ -142,12 +143,12 @@ Deno.test("applyEnvOverrides - empty env var does not override", () => {
     const platforms = config.platforms as { discord: { enabled: boolean } };
     assertEquals(platforms.discord.enabled, true);
   } finally {
-    Deno.env.delete("DISCORD_ENABLED");
+    delete process.env["DISCORD_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION sets skills.sendFile.maxFilesPerInvocation as number", () => {
-  Deno.env.set("SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION", "5");
+test("applyEnvOverrides - SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION sets skills.sendFile.maxFilesPerInvocation as number", () => {
+  process.env["SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION"] = "5";
   try {
     const config: Record<string, unknown> = {
       skills: { sendFile: { enabled: true } },
@@ -156,12 +157,12 @@ Deno.test("applyEnvOverrides - SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION sets ski
     const sendFile = config.skills as { sendFile: { maxFilesPerInvocation: number } };
     assertEquals(sendFile.sendFile.maxFilesPerInvocation, 5);
   } finally {
-    Deno.env.delete("SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION");
+    delete process.env["SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION"];
   }
 });
 
-Deno.test("applyEnvOverrides - SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB sets skills.sendFile.maxTotalSizeMb as number", () => {
-  Deno.env.set("SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB", "100");
+test("applyEnvOverrides - SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB sets skills.sendFile.maxTotalSizeMb as number", () => {
+  process.env["SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB"] = "100";
   try {
     const config: Record<string, unknown> = {
       skills: { sendFile: { enabled: true } },
@@ -170,12 +171,12 @@ Deno.test("applyEnvOverrides - SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB sets skills.sen
     const sendFile = config.skills as { sendFile: { maxTotalSizeMb: number } };
     assertEquals(sendFile.sendFile.maxTotalSizeMb, 100);
   } finally {
-    Deno.env.delete("SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB");
+    delete process.env["SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB"];
   }
 });
 
-Deno.test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
-  Deno.env.set("REPLY_TO", "public");
+test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
+  process.env["REPLY_TO"] = "public";
   try {
     const config: Record<string, unknown> = {
       replyPolicy: "channels",
@@ -185,15 +186,13 @@ Deno.test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
     const replyPolicy = config.replyPolicy as string;
     assertEquals(replyPolicy, "public");
   } finally {
-    Deno.env.delete("REPLY_TO");
+    delete process.env["REPLY_TO"];
   }
 });
 
-Deno.test("applyEnvOverrides - CHANNELS parses JSON entries", () => {
-  Deno.env.set(
-    "CHANNELS",
-    '[{"id":"discord/account/12345678901234567"},{"id":"discord/channel/45678901234567890"},{"id":"misskey/account/abc"}]',
-  );
+test("applyEnvOverrides - CHANNELS parses JSON entries", () => {
+  process.env["CHANNELS"] =
+    '[{"id":"discord/account/12345678901234567"},{"id":"discord/channel/45678901234567890"},{"id":"misskey/account/abc"}]';
   try {
     const config: Record<string, unknown> = {
       replyPolicy: "channels",
@@ -207,12 +206,12 @@ Deno.test("applyEnvOverrides - CHANNELS parses JSON entries", () => {
       "misskey/account/abc",
     ]);
   } finally {
-    Deno.env.delete("CHANNELS");
+    delete process.env["CHANNELS"];
   }
 });
 
-Deno.test("applyEnvOverrides - CHANNELS with invalid JSON is skipped", () => {
-  Deno.env.set("CHANNELS", "not-json");
+test("applyEnvOverrides - CHANNELS with invalid JSON is skipped", () => {
+  process.env["CHANNELS"] = "not-json";
   try {
     const config: Record<string, unknown> = {
       channels: [{ id: "discord/account/11100000000000001" }],
@@ -221,12 +220,12 @@ Deno.test("applyEnvOverrides - CHANNELS with invalid JSON is skipped", () => {
     const channels = config.channels as { id: string }[];
     assertEquals(channels, [{ id: "discord/account/11100000000000001" }]);
   } finally {
-    Deno.env.delete("CHANNELS");
+    delete process.env["CHANNELS"];
   }
 });
 
-Deno.test("applyEnvOverrides - empty CHANNELS does not override", () => {
-  Deno.env.set("CHANNELS", "");
+test("applyEnvOverrides - empty CHANNELS does not override", () => {
+  process.env["CHANNELS"] = "";
   try {
     const config: Record<string, unknown> = {
       channels: [{ id: "discord/account/11100000000000001" }],
@@ -235,12 +234,12 @@ Deno.test("applyEnvOverrides - empty CHANNELS does not override", () => {
     const channels = config.channels as { id: string }[];
     assertEquals(channels, [{ id: "discord/account/11100000000000001" }]);
   } finally {
-    Deno.env.delete("CHANNELS");
+    delete process.env["CHANNELS"];
   }
 });
 
-Deno.test("applyEnvOverrides - converts float string to number", () => {
-  Deno.env.set("DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY", "0.7");
+test("applyEnvOverrides - converts float string to number", () => {
+  process.env["DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY"] = "0.7";
   try {
     const config: Record<string, unknown> = {
       platforms: { discord: { spontaneousPost: { contextFetchProbability: 0.5 } } },
@@ -252,12 +251,12 @@ Deno.test("applyEnvOverrides - converts float string to number", () => {
     assertEquals(platforms.discord.spontaneousPost.contextFetchProbability, 0.7);
     assertEquals(typeof platforms.discord.spontaneousPost.contextFetchProbability, "number");
   } finally {
-    Deno.env.delete("DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY");
+    delete process.env["DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY"];
   }
 });
 
-Deno.test("applyEnvOverrides - DISCORD_SPONTANEOUS_ENABLED sets nested boolean", () => {
-  Deno.env.set("DISCORD_SPONTANEOUS_ENABLED", "true");
+test("applyEnvOverrides - DISCORD_SPONTANEOUS_ENABLED sets nested boolean", () => {
+  process.env["DISCORD_SPONTANEOUS_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       platforms: { discord: { spontaneousPost: { enabled: false } } },
@@ -268,12 +267,12 @@ Deno.test("applyEnvOverrides - DISCORD_SPONTANEOUS_ENABLED sets nested boolean",
     };
     assertEquals(platforms.discord.spontaneousPost.enabled, true);
   } finally {
-    Deno.env.delete("DISCORD_SPONTANEOUS_ENABLED");
+    delete process.env["DISCORD_SPONTANEOUS_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_ENABLED sets selfResearch.enabled", () => {
-  Deno.env.set("SELF_RESEARCH_ENABLED", "true");
+test("applyEnvOverrides - SELF_RESEARCH_ENABLED sets selfResearch.enabled", () => {
+  process.env["SELF_RESEARCH_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       selfResearch: { enabled: false },
@@ -282,12 +281,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_ENABLED sets selfResearch.enabled",
     const sr = config.selfResearch as { enabled: boolean };
     assertEquals(sr.enabled, true);
   } finally {
-    Deno.env.delete("SELF_RESEARCH_ENABLED");
+    delete process.env["SELF_RESEARCH_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_MODEL sets selfResearch.model", () => {
-  Deno.env.set("SELF_RESEARCH_MODEL", "gpt-5-mini");
+test("applyEnvOverrides - SELF_RESEARCH_MODEL sets selfResearch.model", () => {
+  process.env["SELF_RESEARCH_MODEL"] = "gpt-5-mini";
   try {
     const config: Record<string, unknown> = {
       selfResearch: { model: "" },
@@ -296,15 +295,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_MODEL sets selfResearch.model", () 
     const sr = config.selfResearch as { model: string };
     assertEquals(sr.model, "gpt-5-mini");
   } finally {
-    Deno.env.delete("SELF_RESEARCH_MODEL");
+    delete process.env["SELF_RESEARCH_MODEL"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS parses JSON array", () => {
-  Deno.env.set(
-    "SELF_RESEARCH_RSS_FEEDS",
-    '[{"url":"https://example.com/feed.xml","name":"Test"}]',
-  );
+test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS parses JSON array", () => {
+  process.env["SELF_RESEARCH_RSS_FEEDS"] = '[{"url":"https://example.com/feed.xml","name":"Test"}]';
   try {
     const config: Record<string, unknown> = {
       selfResearch: { rssFeeds: [] },
@@ -315,12 +311,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS parses JSON array", () =>
     assertEquals(sr.rssFeeds[0].url, "https://example.com/feed.xml");
     assertEquals(sr.rssFeeds[0].name, "Test");
   } finally {
-    Deno.env.delete("SELF_RESEARCH_RSS_FEEDS");
+    delete process.env["SELF_RESEARCH_RSS_FEEDS"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS skips invalid JSON", () => {
-  Deno.env.set("SELF_RESEARCH_RSS_FEEDS", "not-json");
+test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS skips invalid JSON", () => {
+  process.env["SELF_RESEARCH_RSS_FEEDS"] = "not-json";
   try {
     const config: Record<string, unknown> = {
       selfResearch: { rssFeeds: [{ url: "original" }] },
@@ -330,12 +326,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS skips invalid JSON", () =
     assertEquals(sr.rssFeeds.length, 1);
     assertEquals(sr.rssFeeds[0].url, "original");
   } finally {
-    Deno.env.delete("SELF_RESEARCH_RSS_FEEDS");
+    delete process.env["SELF_RESEARCH_RSS_FEEDS"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_MIN_INTERVAL_MS sets number", () => {
-  Deno.env.set("SELF_RESEARCH_MIN_INTERVAL_MS", "7200000");
+test("applyEnvOverrides - SELF_RESEARCH_MIN_INTERVAL_MS sets number", () => {
+  process.env["SELF_RESEARCH_MIN_INTERVAL_MS"] = "7200000";
   try {
     const config: Record<string, unknown> = {
       selfResearch: { minIntervalMs: 43200000 },
@@ -345,12 +341,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_MIN_INTERVAL_MS sets number", () =>
     assertEquals(sr.minIntervalMs, 7200000);
     assertEquals(typeof sr.minIntervalMs, "number");
   } finally {
-    Deno.env.delete("SELF_RESEARCH_MIN_INTERVAL_MS");
+    delete process.env["SELF_RESEARCH_MIN_INTERVAL_MS"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION sets boolean", () => {
-  Deno.env.set("SELF_RESEARCH_VERIFY_COMPLETION", "false");
+test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION sets boolean", () => {
+  process.env["SELF_RESEARCH_VERIFY_COMPLETION"] = "false";
   try {
     const config: Record<string, unknown> = {
       selfResearch: { verifyCompletion: true },
@@ -359,12 +355,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION sets boolean", ()
     const sr = config.selfResearch as { verifyCompletion: boolean };
     assertEquals(sr.verifyCompletion, false);
   } finally {
-    Deno.env.delete("SELF_RESEARCH_VERIFY_COMPLETION");
+    delete process.env["SELF_RESEARCH_VERIFY_COMPLETION"];
   }
 });
 
-Deno.test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION invalid value falls back to default", () => {
-  Deno.env.set("SELF_RESEARCH_VERIFY_COMPLETION", "banana");
+test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION invalid value falls back to default", () => {
+  process.env["SELF_RESEARCH_VERIFY_COMPLETION"] = "banana";
   try {
     const config: Record<string, unknown> = {
       selfResearch: { verifyCompletion: true },
@@ -373,12 +369,12 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION invalid value fal
     const sr = config.selfResearch as { verifyCompletion: boolean };
     assertEquals(sr.verifyCompletion, true);
   } finally {
-    Deno.env.delete("SELF_RESEARCH_VERIFY_COMPLETION");
+    delete process.env["SELF_RESEARCH_VERIFY_COMPLETION"];
   }
 });
 
-Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_ENABLED sets memoryMaintenance.enabled", () => {
-  Deno.env.set("MEMORY_MAINTENANCE_ENABLED", "true");
+test("applyEnvOverrides - MEMORY_MAINTENANCE_ENABLED sets memoryMaintenance.enabled", () => {
+  process.env["MEMORY_MAINTENANCE_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       memoryMaintenance: { enabled: false },
@@ -387,12 +383,12 @@ Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_ENABLED sets memoryMaintenance
     const mm = config.memoryMaintenance as { enabled: boolean };
     assertEquals(mm.enabled, true);
   } finally {
-    Deno.env.delete("MEMORY_MAINTENANCE_ENABLED");
+    delete process.env["MEMORY_MAINTENANCE_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_INTERVAL_MS sets number", () => {
-  Deno.env.set("MEMORY_MAINTENANCE_INTERVAL_MS", "7200000");
+test("applyEnvOverrides - MEMORY_MAINTENANCE_INTERVAL_MS sets number", () => {
+  process.env["MEMORY_MAINTENANCE_INTERVAL_MS"] = "7200000";
   try {
     const config: Record<string, unknown> = {
       memoryMaintenance: { intervalMs: 604800000 },
@@ -401,12 +397,12 @@ Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_INTERVAL_MS sets number", () =
     const mm = config.memoryMaintenance as { intervalMs: number };
     assertEquals(mm.intervalMs, 7200000);
   } finally {
-    Deno.env.delete("MEMORY_MAINTENANCE_INTERVAL_MS");
+    delete process.env["MEMORY_MAINTENANCE_INTERVAL_MS"];
   }
 });
 
-Deno.test("applyEnvOverrides - GIT_BACKUP_ENABLED sets gitBackup.enabled", () => {
-  Deno.env.set("GIT_BACKUP_ENABLED", "true");
+test("applyEnvOverrides - GIT_BACKUP_ENABLED sets gitBackup.enabled", () => {
+  process.env["GIT_BACKUP_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       gitBackup: { enabled: false },
@@ -415,12 +411,12 @@ Deno.test("applyEnvOverrides - GIT_BACKUP_ENABLED sets gitBackup.enabled", () =>
     const gb = config.gitBackup as { enabled: boolean };
     assertEquals(gb.enabled, true);
   } finally {
-    Deno.env.delete("GIT_BACKUP_ENABLED");
+    delete process.env["GIT_BACKUP_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - GIT_BACKUP_REMOTE_URL sets gitBackup.remoteUrl", () => {
-  Deno.env.set("GIT_BACKUP_REMOTE_URL", "https://github.com/test/repo.git");
+test("applyEnvOverrides - GIT_BACKUP_REMOTE_URL sets gitBackup.remoteUrl", () => {
+  process.env["GIT_BACKUP_REMOTE_URL"] = "https://github.com/test/repo.git";
   try {
     const config: Record<string, unknown> = {
       gitBackup: { remoteUrl: "" },
@@ -429,12 +425,12 @@ Deno.test("applyEnvOverrides - GIT_BACKUP_REMOTE_URL sets gitBackup.remoteUrl", 
     const gb = config.gitBackup as { remoteUrl: string };
     assertEquals(gb.remoteUrl, "https://github.com/test/repo.git");
   } finally {
-    Deno.env.delete("GIT_BACKUP_REMOTE_URL");
+    delete process.env["GIT_BACKUP_REMOTE_URL"];
   }
 });
 
-Deno.test("applyEnvOverrides - GIT_BACKUP_INTERVAL_MS sets number", () => {
-  Deno.env.set("GIT_BACKUP_INTERVAL_MS", "7200000");
+test("applyEnvOverrides - GIT_BACKUP_INTERVAL_MS sets number", () => {
+  process.env["GIT_BACKUP_INTERVAL_MS"] = "7200000";
   try {
     const config: Record<string, unknown> = {
       gitBackup: { intervalMs: 3600000 },
@@ -444,12 +440,12 @@ Deno.test("applyEnvOverrides - GIT_BACKUP_INTERVAL_MS sets number", () => {
     assertEquals(gb.intervalMs, 7200000);
     assertEquals(typeof gb.intervalMs, "number");
   } finally {
-    Deno.env.delete("GIT_BACKUP_INTERVAL_MS");
+    delete process.env["GIT_BACKUP_INTERVAL_MS"];
   }
 });
 
-Deno.test("applyEnvOverrides - GIT_BACKUP_AUTHOR_NAME sets string", () => {
-  Deno.env.set("GIT_BACKUP_AUTHOR_NAME", "Custom Author");
+test("applyEnvOverrides - GIT_BACKUP_AUTHOR_NAME sets string", () => {
+  process.env["GIT_BACKUP_AUTHOR_NAME"] = "Custom Author";
   try {
     const config: Record<string, unknown> = {
       gitBackup: { authorName: "Default" },
@@ -458,14 +454,14 @@ Deno.test("applyEnvOverrides - GIT_BACKUP_AUTHOR_NAME sets string", () => {
     const gb = config.gitBackup as { authorName: string };
     assertEquals(gb.authorName, "Custom Author");
   } finally {
-    Deno.env.delete("GIT_BACKUP_AUTHOR_NAME");
+    delete process.env["GIT_BACKUP_AUTHOR_NAME"];
   }
 });
 
 // --- Model Routing env override tests ---
 
-Deno.test("applyEnvOverrides - MODEL_ROUTING_ENABLED sets boolean", () => {
-  Deno.env.set("MODEL_ROUTING_ENABLED", "true");
+test("applyEnvOverrides - MODEL_ROUTING_ENABLED sets boolean", () => {
+  process.env["MODEL_ROUTING_ENABLED"] = "true";
   try {
     const config: Record<string, unknown> = {
       agent: { modelRouting: { enabled: false } },
@@ -474,15 +470,15 @@ Deno.test("applyEnvOverrides - MODEL_ROUTING_ENABLED sets boolean", () => {
     const agent = config.agent as { modelRouting: { enabled: boolean } };
     assertEquals(agent.modelRouting.enabled, true);
   } finally {
-    Deno.env.delete("MODEL_ROUTING_ENABLED");
+    delete process.env["MODEL_ROUTING_ENABLED"];
   }
 });
 
-Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES applies JSON", () => {
+test("applyEnvOverrides - MODEL_ROUTING_RULES applies JSON", () => {
   const rules = JSON.stringify([
     { match: { whitelist: "discord/account/12345678901234567" }, model: "test-model" },
   ]);
-  Deno.env.set("MODEL_ROUTING_RULES", rules);
+  process.env["MODEL_ROUTING_RULES"] = rules;
   try {
     const config: Record<string, unknown> = {
       agent: { modelRouting: { enabled: true, rules: [] } },
@@ -491,12 +487,12 @@ Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES applies JSON", () => {
     const agent = config.agent as { modelRouting: { rules: unknown[] } };
     assertEquals(agent.modelRouting.rules.length, 1);
   } finally {
-    Deno.env.delete("MODEL_ROUTING_RULES");
+    delete process.env["MODEL_ROUTING_RULES"];
   }
 });
 
-Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES skips on invalid JSON", () => {
-  Deno.env.set("MODEL_ROUTING_RULES", "not-valid-json");
+test("applyEnvOverrides - MODEL_ROUTING_RULES skips on invalid JSON", () => {
+  process.env["MODEL_ROUTING_RULES"] = "not-valid-json";
   try {
     const config: Record<string, unknown> = {
       agent: { modelRouting: { enabled: true, rules: [] } },
@@ -505,15 +501,13 @@ Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES skips on invalid JSON", () =>
     const agent = config.agent as { modelRouting: { rules: unknown[] } };
     assertEquals(agent.modelRouting.rules.length, 0);
   } finally {
-    Deno.env.delete("MODEL_ROUTING_RULES");
+    delete process.env["MODEL_ROUTING_RULES"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_MCP_SERVERS parses valid JSON", () => {
-  Deno.env.set(
-    "AGENT_MCP_SERVERS",
-    '[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]',
-  );
+test("applyEnvOverrides - AGENT_MCP_SERVERS parses valid JSON", () => {
+  process.env["AGENT_MCP_SERVERS"] =
+    '[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]';
   try {
     const config: Record<string, unknown> = { agent: {} };
     applyEnvOverrides(config);
@@ -521,24 +515,24 @@ Deno.test("applyEnvOverrides - AGENT_MCP_SERVERS parses valid JSON", () => {
     assertEquals(agent.mcpServers.length, 1);
     assertEquals((agent.mcpServers[0] as { name: string }).name, "github");
   } finally {
-    Deno.env.delete("AGENT_MCP_SERVERS");
+    delete process.env["AGENT_MCP_SERVERS"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_MCP_SERVERS skips invalid JSON", () => {
-  Deno.env.set("AGENT_MCP_SERVERS", "not-valid-json");
+test("applyEnvOverrides - AGENT_MCP_SERVERS skips invalid JSON", () => {
+  process.env["AGENT_MCP_SERVERS"] = "not-valid-json";
   try {
     const config: Record<string, unknown> = { agent: { mcpServers: [] } };
     applyEnvOverrides(config);
     const agent = config.agent as { mcpServers: unknown[] };
     assertEquals(agent.mcpServers.length, 0);
   } finally {
-    Deno.env.delete("AGENT_MCP_SERVERS");
+    delete process.env["AGENT_MCP_SERVERS"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_AUTO_APPROVE_SKILLS parses comma-separated list", () => {
-  Deno.env.set("AGENT_AUTO_APPROVE_SKILLS", "memory-save,send-reply,agent-browser");
+test("applyEnvOverrides - AGENT_AUTO_APPROVE_SKILLS parses comma-separated list", () => {
+  process.env["AGENT_AUTO_APPROVE_SKILLS"] = "memory-save,send-reply,agent-browser";
   try {
     const config: Record<string, unknown> = { agent: {} };
     applyEnvOverrides(config);
@@ -548,12 +542,12 @@ Deno.test("applyEnvOverrides - AGENT_AUTO_APPROVE_SKILLS parses comma-separated 
     assertEquals(agent.autoApproveSkills[1], "send-reply");
     assertEquals(agent.autoApproveSkills[2], "agent-browser");
   } finally {
-    Deno.env.delete("AGENT_AUTO_APPROVE_SKILLS");
+    delete process.env["AGENT_AUTO_APPROVE_SKILLS"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS parses comma-separated list", () => {
-  Deno.env.set("AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS", ".md,.txt,.json");
+test("applyEnvOverrides - AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS parses comma-separated list", () => {
+  process.env["AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS"] = ".md,.txt,.json";
   try {
     const config: Record<string, unknown> = {
       agent: { sandbox: { allowedWriteExtensions: [] } },
@@ -565,12 +559,12 @@ Deno.test("applyEnvOverrides - AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS parses com
     assertEquals(agent.sandbox.allowedWriteExtensions[1], ".txt");
     assertEquals(agent.sandbox.allowedWriteExtensions[2], ".json");
   } finally {
-    Deno.env.delete("AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS");
+    delete process.env["AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS"];
   }
 });
 
-Deno.test("applyEnvOverrides - AGENT_SANDBOX_EGRESS_ALLOW_HOSTS parses comma-separated list", () => {
-  Deno.env.set("AGENT_SANDBOX_EGRESS_ALLOW_HOSTS", " 192.168.1.10 , internal-proxy ,, ");
+test("applyEnvOverrides - AGENT_SANDBOX_EGRESS_ALLOW_HOSTS parses comma-separated list", () => {
+  process.env["AGENT_SANDBOX_EGRESS_ALLOW_HOSTS"] = " 192.168.1.10 , internal-proxy ,, ";
   try {
     const config: Record<string, unknown> = {
       agent: { sandbox: { egressAllowHosts: [] } },
@@ -579,12 +573,12 @@ Deno.test("applyEnvOverrides - AGENT_SANDBOX_EGRESS_ALLOW_HOSTS parses comma-sep
     const agent = config.agent as { sandbox: { egressAllowHosts: string[] } };
     assertEquals(agent.sandbox.egressAllowHosts, ["192.168.1.10", "internal-proxy"]);
   } finally {
-    Deno.env.delete("AGENT_SANDBOX_EGRESS_ALLOW_HOSTS");
+    delete process.env["AGENT_SANDBOX_EGRESS_ALLOW_HOSTS"];
   }
 });
 
-Deno.test("applyEnvOverrides - unset AGENT_SANDBOX_EGRESS_ALLOW_HOSTS leaves the default", () => {
-  Deno.env.delete("AGENT_SANDBOX_EGRESS_ALLOW_HOSTS");
+test("applyEnvOverrides - unset AGENT_SANDBOX_EGRESS_ALLOW_HOSTS leaves the default", () => {
+  delete process.env["AGENT_SANDBOX_EGRESS_ALLOW_HOSTS"];
   const config: Record<string, unknown> = {
     agent: { sandbox: { egressAllowHosts: [] } },
   };

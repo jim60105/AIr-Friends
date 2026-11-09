@@ -39,7 +39,7 @@ function createMockMessage(overrides: Record<string, unknown> = {}): any {
   };
 }
 
-Deno.test("normalizeDiscordMessage - should normalize guild message", () => {
+test("normalizeDiscordMessage - should normalize guild message", () => {
   const message = createMockMessage();
   const event = normalizeDiscordMessage(message as Message, "bot123");
 
@@ -52,7 +52,7 @@ Deno.test("normalizeDiscordMessage - should normalize guild message", () => {
   assertEquals(event.content, "Hello bot!");
 });
 
-Deno.test("normalizeDiscordMessage - should normalize DM message", () => {
+test("normalizeDiscordMessage - should normalize DM message", () => {
   const message = createMockMessage({
     guildId: null,
     channel: { isDMBased: () => true },
@@ -63,7 +63,7 @@ Deno.test("normalizeDiscordMessage - should normalize DM message", () => {
   assertEquals(event.guildId, "");
 });
 
-Deno.test("shouldRespondToMessage - should not respond to bots", () => {
+test("shouldRespondToMessage - should not respond to bots", () => {
   const message = createMockMessage({
     author: { id: "otherbot", bot: true },
   });
@@ -77,7 +77,7 @@ Deno.test("shouldRespondToMessage - should not respond to bots", () => {
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToMessage - should not respond to self", () => {
+test("shouldRespondToMessage - should not respond to self", () => {
   const message = createMockMessage({
     author: { id: "bot123", bot: true },
   });
@@ -91,7 +91,7 @@ Deno.test("shouldRespondToMessage - should not respond to self", () => {
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToMessage - should respond to DM when allowed", () => {
+test("shouldRespondToMessage - should respond to DM when allowed", () => {
   const message = createMockMessage({
     channel: { isDMBased: () => true },
   });
@@ -105,7 +105,7 @@ Deno.test("shouldRespondToMessage - should respond to DM when allowed", () => {
   assertEquals(result, true);
 });
 
-Deno.test("shouldRespondToMessage - should not respond to DM when not allowed", () => {
+test("shouldRespondToMessage - should not respond to DM when not allowed", () => {
   const message = createMockMessage({
     channel: { isDMBased: () => true },
   });
@@ -119,7 +119,7 @@ Deno.test("shouldRespondToMessage - should not respond to DM when not allowed", 
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToMessage - should respond to mention", () => {
+test("shouldRespondToMessage - should respond to mention", () => {
   const mentions = new Map([["bot123", {}]]);
   const message = createMockMessage({
     mentions: { users: mentions },
@@ -134,38 +134,35 @@ Deno.test("shouldRespondToMessage - should respond to mention", () => {
   assertEquals(result, true);
 });
 
-Deno.test(
-  "shouldRespondToMessage - should not respond to prefix-prefixed guild message even with a legacy commandPrefix config",
-  () => {
-    const message = createMockMessage({
-      content: "!help me",
-    });
+test("shouldRespondToMessage - should not respond to prefix-prefixed guild message even with a legacy commandPrefix config", () => {
+  const message = createMockMessage({
+    content: "!help me",
+  });
 
-    const result = shouldRespondToMessage(
-      message as Message,
-      "bot123",
-      { allowDm: true, respondToMention: true, commandPrefix: "!" } as unknown as Parameters<
-        typeof shouldRespondToMessage
-      >[2],
-    );
+  const result = shouldRespondToMessage(
+    message as Message,
+    "bot123",
+    { allowDm: true, respondToMention: true, commandPrefix: "!" } as unknown as Parameters<
+      typeof shouldRespondToMessage
+    >[2],
+  );
 
-    assertEquals(result, false);
-  },
-);
+  assertEquals(result, false);
+});
 
-Deno.test("removeBotMention - should remove mention from content", () => {
+test("removeBotMention - should remove mention from content", () => {
   const content = "<@bot123> Hello there";
   const result = removeBotMention(content, "bot123");
   assertEquals(result, "Hello there");
 });
 
-Deno.test("removeBotMention - should remove nickname mention", () => {
+test("removeBotMention - should remove nickname mention", () => {
   const content = "<@!bot123> Hello there";
   const result = removeBotMention(content, "bot123");
   assertEquals(result, "Hello there");
 });
 
-Deno.test("isBotMentioned - should detect mention", () => {
+test("isBotMentioned - should detect mention", () => {
   const mentions = new Map([["bot123", {}]]);
   const message = createMockMessage({
     mentions: { users: mentions },
@@ -175,13 +172,13 @@ Deno.test("isBotMentioned - should detect mention", () => {
   assertEquals(result, true);
 });
 
-Deno.test("isBotMentioned - should not detect when not mentioned", () => {
+test("isBotMentioned - should not detect when not mentioned", () => {
   const message = createMockMessage();
 
   const result = isBotMentioned(message as Message, "bot123");
   assertEquals(result, false);
 });
-Deno.test("normalizeDiscordMessage - image attachments are detected", () => {
+test("normalizeDiscordMessage - image attachments are detected", () => {
   const attachment = {
     id: "att1",
     url: "https://cdn.example.com/image.png",
@@ -202,7 +199,7 @@ Deno.test("normalizeDiscordMessage - image attachments are detected", () => {
   assertEquals(event.attachments![0].size, 12345);
 });
 
-Deno.test("normalizeDiscordMessage - non-image attachments are detected", () => {
+test("normalizeDiscordMessage - non-image attachments are detected", () => {
   const attachment = {
     id: "att2",
     url: "https://cdn.example.com/file.zip",
@@ -219,7 +216,7 @@ Deno.test("normalizeDiscordMessage - non-image attachments are detected", () => 
   assertEquals(event.attachments![0].height, undefined);
 });
 
-Deno.test("normalizeDiscordMessage - null contentType defaults to octet-stream", () => {
+test("normalizeDiscordMessage - null contentType defaults to octet-stream", () => {
   const attachment = {
     id: "att3",
     url: "https://cdn.example.com/unknown",
@@ -237,7 +234,7 @@ Deno.test("normalizeDiscordMessage - null contentType defaults to octet-stream",
 });
 
 import { messageToPltatformMessage } from "@platforms/discord/discord-utils.ts";
-Deno.test("messageToPltatformMessage - with attachments", () => {
+test("messageToPltatformMessage - with attachments", () => {
   const attachment = {
     id: "att1",
     url: "https://cdn.example.com/image.png",
@@ -252,7 +249,7 @@ Deno.test("messageToPltatformMessage - with attachments", () => {
   assertEquals(pm.attachments?.length, 1);
 });
 
-Deno.test("messageToPltatformMessage - without attachments", () => {
+test("messageToPltatformMessage - without attachments", () => {
   const message = createMockMessage();
   const pm = messageToPltatformMessage(message as any, "bot123");
   assertEquals(pm.attachments, undefined);
@@ -260,7 +257,7 @@ Deno.test("messageToPltatformMessage - without attachments", () => {
 
 // ============ Sticker tests ============
 
-Deno.test("normalizeDiscordMessage - sticker only message", () => {
+test("normalizeDiscordMessage - sticker only message", () => {
   const sticker = { id: "s1", name: "wave_hello", tags: "hello, hi, wave" };
   const message = createMockMessage({
     content: "",
@@ -270,7 +267,7 @@ Deno.test("normalizeDiscordMessage - sticker only message", () => {
   assertEquals(event.content, "[Sticker: wave_hello (hello, hi, wave)]");
 });
 
-Deno.test("normalizeDiscordMessage - text with sticker", () => {
+test("normalizeDiscordMessage - text with sticker", () => {
   const sticker = { id: "s1", name: "laugh", tags: "lol, funny" };
   const message = createMockMessage({
     content: "看看這個",
@@ -280,7 +277,7 @@ Deno.test("normalizeDiscordMessage - text with sticker", () => {
   assertEquals(event.content, "看看這個 [Sticker: laugh (lol, funny)]");
 });
 
-Deno.test("normalizeDiscordMessage - sticker without tags", () => {
+test("normalizeDiscordMessage - sticker without tags", () => {
   const sticker = { id: "s1", name: "custom_sticker", tags: null };
   const message = createMockMessage({
     content: "",
@@ -290,7 +287,7 @@ Deno.test("normalizeDiscordMessage - sticker without tags", () => {
   assertEquals(event.content, "[Sticker: custom_sticker]");
 });
 
-Deno.test("normalizeDiscordMessage - multiple stickers", () => {
+test("normalizeDiscordMessage - multiple stickers", () => {
   const s1 = { id: "s1", name: "wave", tags: "hello" };
   const s2 = { id: "s2", name: "heart", tags: "love" };
   const message = createMockMessage({
@@ -301,7 +298,7 @@ Deno.test("normalizeDiscordMessage - multiple stickers", () => {
   assertEquals(event.content, "[Sticker: wave (hello)] [Sticker: heart (love)]");
 });
 
-Deno.test("messageToPltatformMessage - with sticker", () => {
+test("messageToPltatformMessage - with sticker", () => {
   const sticker = { id: "s1", name: "wave_hello", tags: "hello, hi" };
   const message = createMockMessage({
     content: "",
@@ -311,7 +308,7 @@ Deno.test("messageToPltatformMessage - with sticker", () => {
   assertEquals(pm.content, "[Sticker: wave_hello (hello, hi)]");
 });
 
-Deno.test("messageToPltatformMessage - text with sticker", () => {
+test("messageToPltatformMessage - text with sticker", () => {
   const sticker = { id: "s1", name: "laugh", tags: "lol" };
   const message = createMockMessage({
     content: "check this",
@@ -338,261 +335,212 @@ function mockDiscordClient(adapter: DiscordAdapter, channelMock: any): void {
   };
 }
 
-Deno.test({
-  name: "DiscordAdapter.editMessage - edits message successfully",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const mockChannel = {
-      type: 0,
-      messages: {
-        fetch: () => Promise.resolve({ edit: () => Promise.resolve() }),
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.editMessage - edits message successfully", async () => {
+  const adapter = createMockDiscordAdapter();
+  const mockChannel = {
+    type: 0,
+    messages: {
+      fetch: () => Promise.resolve({ edit: () => Promise.resolve() }),
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const result = await adapter.editMessage("ch123", "msg123", "Updated content");
-    assertEquals(result.success, true);
-    assertEquals(result.messageId, "msg123");
-  },
+  const result = await adapter.editMessage("ch123", "msg123", "Updated content");
+  assertEquals(result.success, true);
+  assertEquals(result.messageId, "msg123");
 });
 
-Deno.test({
-  name: "DiscordAdapter.editMessage - handles channel not found",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    mockDiscordClient(adapter, null);
+test("DiscordAdapter.editMessage - handles channel not found", async () => {
+  const adapter = createMockDiscordAdapter();
+  mockDiscordClient(adapter, null);
 
-    const result = await adapter.editMessage("ch123", "msg123", "Updated");
-    assertEquals(result.success, false);
-    assertEquals(result.error, "Channel not found or not text-based");
-  },
+  const result = await adapter.editMessage("ch123", "msg123", "Updated");
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Channel not found or not text-based");
 });
 
-Deno.test({
-  name: "DiscordAdapter.editMessage - handles edit error",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const mockChannel = {
-      type: 0,
-      messages: {
-        fetch: () =>
-          Promise.resolve({
-            edit: () => Promise.reject(new Error("Missing permissions")),
-          }),
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.editMessage - handles edit error", async () => {
+  const adapter = createMockDiscordAdapter();
+  const mockChannel = {
+    type: 0,
+    messages: {
+      fetch: () =>
+        Promise.resolve({
+          edit: () => Promise.reject(new Error("Missing permissions")),
+        }),
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const result = await adapter.editMessage("ch123", "msg123", "Updated");
-    assertEquals(result.success, false);
-    assertEquals(result.error, "Failed to edit message: Missing permissions");
-  },
+  const result = await adapter.editMessage("ch123", "msg123", "Updated");
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Failed to edit message: Missing permissions");
 });
 
-Deno.test({
-  name: "DiscordAdapter.editMessage - truncates long content",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    let capturedContent = "";
-    const mockChannel = {
-      type: 0,
-      messages: {
-        fetch: () =>
-          Promise.resolve({
-            edit: (opts: { content: string }) => {
-              capturedContent = opts.content;
-              return Promise.resolve();
-            },
-          }),
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.editMessage - truncates long content", async () => {
+  const adapter = createMockDiscordAdapter();
+  let capturedContent = "";
+  const mockChannel = {
+    type: 0,
+    messages: {
+      fetch: () =>
+        Promise.resolve({
+          edit: (opts: { content: string }) => {
+            capturedContent = opts.content;
+            return Promise.resolve();
+          },
+        }),
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const longContent = "a".repeat(3000);
-    await adapter.editMessage("ch123", "msg123", longContent);
-    assertEquals(capturedContent.length, 2000);
-    assertEquals(capturedContent.endsWith("..."), true);
-  },
+  const longContent = "a".repeat(3000);
+  await adapter.editMessage("ch123", "msg123", longContent);
+  assertEquals(capturedContent.length, 2000);
+  assertEquals(capturedContent.endsWith("..."), true);
 });
 
 // ============ DiscordAdapter.sendFile tests ============
 
-Deno.test({
-  name: "DiscordAdapter.sendFile - sends file successfully",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    let sentFiles: any[] = [];
-    const mockChannel = {
-      type: 0,
-      send: (opts: any) => {
-        sentFiles = opts.files;
-        return Promise.resolve({ id: "sent_msg_123" });
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.sendFile - sends file successfully", async () => {
+  const adapter = createMockDiscordAdapter();
+  let sentFiles: any[] = [];
+  const mockChannel = {
+    type: 0,
+    send: (opts: any) => {
+      sentFiles = opts.files;
+      return Promise.resolve({ id: "sent_msg_123" });
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile(
-      "ch123",
-      [{ content: fileContent, fileName: "test.md" }],
-    );
-    assertEquals(result.success, true);
-    assertEquals(result.messageId, "sent_msg_123");
-    assertEquals(result.messageIds, ["sent_msg_123"]);
-    assertEquals(sentFiles.length, 1);
-  },
+  const fileContent = new TextEncoder().encode("test content");
+  const result = await adapter.sendFile(
+    "ch123",
+    [{ content: fileContent, fileName: "test.md" }],
+  );
+  assertEquals(result.success, true);
+  assertEquals(result.messageId, "sent_msg_123");
+  assertEquals(result.messageIds, ["sent_msg_123"]);
+  assertEquals(sentFiles.length, 1);
 });
 
-Deno.test({
-  name: "DiscordAdapter.sendFile - sends multiple files in one message",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    let sentFiles: any[] = [];
-    const mockChannel = {
-      type: 0,
-      send: (opts: any) => {
-        sentFiles = opts.files;
-        return Promise.resolve({ id: "sent_msg_multi" });
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.sendFile - sends multiple files in one message", async () => {
+  const adapter = createMockDiscordAdapter();
+  let sentFiles: any[] = [];
+  const mockChannel = {
+    type: 0,
+    send: (opts: any) => {
+      sentFiles = opts.files;
+      return Promise.resolve({ id: "sent_msg_multi" });
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const result = await adapter.sendFile("ch123", [
-      { content: new TextEncoder().encode("a"), fileName: "a.png" },
-      { content: new TextEncoder().encode("b"), fileName: "b.png" },
-    ]);
-    assertEquals(result.success, true);
-    assertEquals(result.messageId, "sent_msg_multi");
-    assertEquals(result.messageIds, ["sent_msg_multi"]);
-    // All files in a single message (2 attachments, 1 message)
-    assertEquals(sentFiles.length, 2);
-    assertEquals((sentFiles[0] as any).name, "a.png");
-    assertEquals((sentFiles[1] as any).name, "b.png");
-  },
+  const result = await adapter.sendFile("ch123", [
+    { content: new TextEncoder().encode("a"), fileName: "a.png" },
+    { content: new TextEncoder().encode("b"), fileName: "b.png" },
+  ]);
+  assertEquals(result.success, true);
+  assertEquals(result.messageId, "sent_msg_multi");
+  assertEquals(result.messageIds, ["sent_msg_multi"]);
+  // All files in a single message (2 attachments, 1 message)
+  assertEquals(sentFiles.length, 2);
+  assertEquals((sentFiles[0] as any).name, "a.png");
+  assertEquals((sentFiles[1] as any).name, "b.png");
 });
 
-Deno.test({
-  name: "DiscordAdapter.sendFile - handles channel not found",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    mockDiscordClient(adapter, null);
+test("DiscordAdapter.sendFile - handles channel not found", async () => {
+  const adapter = createMockDiscordAdapter();
+  mockDiscordClient(adapter, null);
 
-    const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile(
-      "ch123",
-      [{ content: fileContent, fileName: "test.md" }],
-    );
-    assertEquals(result.success, false);
-    assertEquals(result.error, "Channel not found or not text-based");
-  },
+  const fileContent = new TextEncoder().encode("test content");
+  const result = await adapter.sendFile(
+    "ch123",
+    [{ content: fileContent, fileName: "test.md" }],
+  );
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Channel not found or not text-based");
 });
 
-Deno.test({
-  name: "DiscordAdapter.sendFile - includes comment when provided",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    let capturedContent: string | undefined;
-    const mockChannel = {
-      type: 0,
-      send: (opts: any) => {
-        capturedContent = opts.content;
-        return Promise.resolve({ id: "sent_msg_456" });
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.sendFile - includes comment when provided", async () => {
+  const adapter = createMockDiscordAdapter();
+  let capturedContent: string | undefined;
+  const mockChannel = {
+    type: 0,
+    send: (opts: any) => {
+      capturedContent = opts.content;
+      return Promise.resolve({ id: "sent_msg_456" });
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile(
-      "ch123",
-      [{ content: fileContent, fileName: "test.md" }],
-      {
-        comment: "Here is the file",
-      },
-    );
-    assertEquals(result.success, true);
-    assertEquals(capturedContent, "Here is the file");
-  },
+  const fileContent = new TextEncoder().encode("test content");
+  const result = await adapter.sendFile(
+    "ch123",
+    [{ content: fileContent, fileName: "test.md" }],
+    {
+      comment: "Here is the file",
+    },
+  );
+  assertEquals(result.success, true);
+  assertEquals(capturedContent, "Here is the file");
 });
 
-Deno.test({
-  name: "DiscordAdapter.sendFile - includes reply reference when provided",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    let capturedReply: any;
-    const mockChannel = {
-      type: 0,
-      send: (opts: any) => {
-        capturedReply = opts.reply;
-        return Promise.resolve({ id: "sent_msg_789" });
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.sendFile - includes reply reference when provided", async () => {
+  const adapter = createMockDiscordAdapter();
+  let capturedReply: any;
+  const mockChannel = {
+    type: 0,
+    send: (opts: any) => {
+      capturedReply = opts.reply;
+      return Promise.resolve({ id: "sent_msg_789" });
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile(
-      "ch123",
-      [{ content: fileContent, fileName: "test.md" }],
-      {
-        replyToMessageId: "original_msg_id",
-      },
-    );
-    assertEquals(result.success, true);
-    assertEquals(capturedReply.messageReference, "original_msg_id");
-  },
+  const fileContent = new TextEncoder().encode("test content");
+  const result = await adapter.sendFile(
+    "ch123",
+    [{ content: fileContent, fileName: "test.md" }],
+    {
+      replyToMessageId: "original_msg_id",
+    },
+  );
+  assertEquals(result.success, true);
+  assertEquals(capturedReply.messageReference, "original_msg_id");
 });
 
-Deno.test({
-  name: "DiscordAdapter.sendFile - handles send error",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const mockChannel = {
-      type: 0,
-      send: () => {
-        throw new Error("Permission denied");
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.sendFile - handles send error", async () => {
+  const adapter = createMockDiscordAdapter();
+  const mockChannel = {
+    type: 0,
+    send: () => {
+      throw new Error("Permission denied");
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile(
-      "ch123",
-      [{ content: fileContent, fileName: "test.md" }],
-    );
-    assertEquals(result.success, false);
-    assertEquals(result.error, "Permission denied");
-  },
+  const fileContent = new TextEncoder().encode("test content");
+  const result = await adapter.sendFile(
+    "ch123",
+    [{ content: fileContent, fileName: "test.md" }],
+  );
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Permission denied");
 });
 
 // ============ extractChannelLurkIds tests ============
 
 import type { ChannelConfig } from "../../../src/types/config.ts";
+import { test } from "bun:test";
 
 // Helper to create ChannelConfig from id string
 function ch(id: string, opts: Partial<ChannelConfig> = {}): ChannelConfig {
   return { id, enabled: true, ...opts };
 }
 
-Deno.test("extractChannelLurkIds - extracts channel IDs with channelLurk enabled", () => {
+test("extractChannelLurkIds - extracts channel IDs with channelLurk enabled", () => {
   const channels: ChannelConfig[] = [
     ch("discord/channel/111", { channelLurk: true }),
     ch("discord/account/222"),
@@ -602,17 +550,17 @@ Deno.test("extractChannelLurkIds - extracts channel IDs with channelLurk enabled
   assertEquals(extractChannelLurkIds(channels), ["111", "444"]);
 });
 
-Deno.test("extractChannelLurkIds - returns empty for no channelLurk entries", () => {
+test("extractChannelLurkIds - returns empty for no channelLurk entries", () => {
   assertEquals(extractChannelLurkIds([ch("discord/account/123"), ch("misskey/account/456")]), []);
 });
 
-Deno.test("extractChannelLurkIds - handles empty channels", () => {
+test("extractChannelLurkIds - handles empty channels", () => {
   assertEquals(extractChannelLurkIds([]), []);
 });
 
 // ============ selectDiscordSpontaneousTarget tests ============
 
-Deno.test("selectDiscordSpontaneousTarget - selects from discord entries with spontaneousPost", () => {
+test("selectDiscordSpontaneousTarget - selects from discord entries with spontaneousPost", () => {
   const entry = selectDiscordSpontaneousTarget([
     ch("discord/channel/123", { spontaneousPost: true }),
   ]);
@@ -620,18 +568,18 @@ Deno.test("selectDiscordSpontaneousTarget - selects from discord entries with sp
   assertEquals(entry?.id, "123");
 });
 
-Deno.test("selectDiscordSpontaneousTarget - returns null for empty channels", () => {
+test("selectDiscordSpontaneousTarget - returns null for empty channels", () => {
   assertEquals(selectDiscordSpontaneousTarget([]), null);
 });
 
-Deno.test("selectDiscordSpontaneousTarget - ignores non-discord entries", () => {
+test("selectDiscordSpontaneousTarget - ignores non-discord entries", () => {
   assertEquals(
     selectDiscordSpontaneousTarget([ch("misskey/account/abc", { spontaneousPost: true })]),
     null,
   );
 });
 
-Deno.test("selectDiscordSpontaneousTarget - parses account entries with spontaneousPost", () => {
+test("selectDiscordSpontaneousTarget - parses account entries with spontaneousPost", () => {
   const entry = selectDiscordSpontaneousTarget([
     ch("discord/account/456", { spontaneousPost: true }),
   ]);
@@ -639,7 +587,7 @@ Deno.test("selectDiscordSpontaneousTarget - parses account entries with spontane
   assertEquals(entry?.id, "456");
 });
 
-Deno.test("selectDiscordSpontaneousTarget - includes both account and channel with spontaneousPost", () => {
+test("selectDiscordSpontaneousTarget - includes both account and channel with spontaneousPost", () => {
   const channels: ChannelConfig[] = [
     ch("discord/account/123", { spontaneousPost: true }),
     ch("discord/channel/456", { spontaneousPost: true }),
@@ -653,7 +601,7 @@ Deno.test("selectDiscordSpontaneousTarget - includes both account and channel wi
   assertEquals(results.has("channel"), true);
 });
 
-Deno.test("selectDiscordSpontaneousTarget - excludes entries without spontaneousPost", () => {
+test("selectDiscordSpontaneousTarget - excludes entries without spontaneousPost", () => {
   const channels: ChannelConfig[] = [
     ch("discord/account/123"),
     ch("discord/channel/456", { spontaneousPost: true }),
@@ -664,7 +612,7 @@ Deno.test("selectDiscordSpontaneousTarget - excludes entries without spontaneous
   }
 });
 
-Deno.test("selectDiscordSpontaneousTarget - returns null with no spontaneousPost entries", () => {
+test("selectDiscordSpontaneousTarget - returns null with no spontaneousPost entries", () => {
   const channels: ChannelConfig[] = [ch("discord/account/123"), ch("discord/account/456")];
   const entry = selectDiscordSpontaneousTarget(channels);
   assertEquals(entry, null);
@@ -683,196 +631,131 @@ function createTestConfig(channels: ChannelConfig[]): any {
   };
 }
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - selects channel entry",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const config = createTestConfig([ch("discord/channel/123456789", { spontaneousPost: true })]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target?.channelId, "123456789");
-  },
+test("DiscordAdapter.determineSpontaneousTarget - selects channel entry", async () => {
+  const adapter = createMockDiscordAdapter();
+  const config = createTestConfig([ch("discord/channel/123456789", { spontaneousPost: true })]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target?.channelId, "123456789");
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - returns null for empty channels",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const config = createTestConfig([]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target, null);
-  },
+test("DiscordAdapter.determineSpontaneousTarget - returns null for empty channels", async () => {
+  const adapter = createMockDiscordAdapter();
+  const config = createTestConfig([]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target, null);
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - returns null for non-discord entries",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const config = createTestConfig([ch("misskey/account/abc", { spontaneousPost: true })]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target, null);
-  },
+test("DiscordAdapter.determineSpontaneousTarget - returns null for non-discord entries", async () => {
+  const adapter = createMockDiscordAdapter();
+  const config = createTestConfig([ch("misskey/account/abc", { spontaneousPost: true })]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target, null);
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - account entry with DM failure returns null",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    (adapter as any).getDmChannelId = () => Promise.resolve(null);
-    const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target, null);
-  },
+test("DiscordAdapter.determineSpontaneousTarget - account entry with DM failure returns null", async () => {
+  const adapter = createMockDiscordAdapter();
+  (adapter as any).getDmChannelId = () => Promise.resolve(null);
+  const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target, null);
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - account entry with DM exception returns null",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    (adapter as any).getDmChannelId = () => Promise.reject(new Error("API error"));
-    const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target, null);
-  },
+test("DiscordAdapter.determineSpontaneousTarget - account entry with DM exception returns null", async () => {
+  const adapter = createMockDiscordAdapter();
+  (adapter as any).getDmChannelId = () => Promise.reject(new Error("API error"));
+  const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target, null);
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - account entry with DM success",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    (adapter as any).getDmChannelId = () => Promise.resolve("dm-ch-123");
-    const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target?.channelId, "dm-ch-123");
-  },
+test("DiscordAdapter.determineSpontaneousTarget - account entry with DM success", async () => {
+  const adapter = createMockDiscordAdapter();
+  (adapter as any).getDmChannelId = () => Promise.resolve("dm-ch-123");
+  const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target?.channelId, "dm-ch-123");
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - excludes entries without spontaneousPost",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const config = createTestConfig([
-      ch("discord/account/999"),
-      ch("discord/channel/123", { spontaneousPost: true }),
-    ]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target?.channelId, "123");
-  },
+test("DiscordAdapter.determineSpontaneousTarget - excludes entries without spontaneousPost", async () => {
+  const adapter = createMockDiscordAdapter();
+  const config = createTestConfig([
+    ch("discord/account/999"),
+    ch("discord/channel/123", { spontaneousPost: true }),
+  ]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target?.channelId, "123");
 });
 
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - no spontaneousPost entries returns null",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const config = createTestConfig([ch("discord/account/999")]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target, null);
-  },
+test("DiscordAdapter.determineSpontaneousTarget - no spontaneousPost entries returns null", async () => {
+  const adapter = createMockDiscordAdapter();
+  const config = createTestConfig([ch("discord/account/999")]);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target, null);
 });
 
 // ============ DiscordAdapter.getSearchGuildId tests ============
 
-Deno.test({
-  name: "DiscordAdapter.getSearchGuildId - returns channelId for non-DM",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: () => {
-    const adapter = createMockDiscordAdapter();
-    assertEquals(adapter.getSearchGuildId("channel123", false), "channel123");
-  },
+test("DiscordAdapter.getSearchGuildId - returns channelId for non-DM", () => {
+  const adapter = createMockDiscordAdapter();
+  assertEquals(adapter.getSearchGuildId("channel123", false), "channel123");
 });
 
-Deno.test({
-  name: "DiscordAdapter.getSearchGuildId - returns empty for DM",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: () => {
-    const adapter = createMockDiscordAdapter();
-    assertEquals(adapter.getSearchGuildId("channel123", true), "");
-  },
+test("DiscordAdapter.getSearchGuildId - returns empty for DM", () => {
+  const adapter = createMockDiscordAdapter();
+  assertEquals(adapter.getSearchGuildId("channel123", true), "");
 });
 
 // ============ DiscordAdapter.fetchMessage tests ============
 
-Deno.test({
-  name: "DiscordAdapter.fetchMessage - returns PlatformMessage on success",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const mockMessage = {
-      id: "msg_fetch_1",
-      channelId: "ch123",
-      content: "Fetched content",
-      createdAt: new Date("2024-07-01T10:00:00Z"),
-      author: {
-        id: "user123",
-        username: "TestUser",
-        displayName: "Test User",
-        bot: false,
-      },
-      attachments: new Map(),
-      stickers: new Map(),
-    };
-    const mockChannel = {
-      type: 0,
-      messages: {
-        fetch: () => Promise.resolve(mockMessage),
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.fetchMessage - returns PlatformMessage on success", async () => {
+  const adapter = createMockDiscordAdapter();
+  const mockMessage = {
+    id: "msg_fetch_1",
+    channelId: "ch123",
+    content: "Fetched content",
+    createdAt: new Date("2024-07-01T10:00:00Z"),
+    author: {
+      id: "user123",
+      username: "TestUser",
+      displayName: "Test User",
+      bot: false,
+    },
+    attachments: new Map(),
+    stickers: new Map(),
+  };
+  const mockChannel = {
+    type: 0,
+    messages: {
+      fetch: () => Promise.resolve(mockMessage),
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const result = await adapter.fetchMessage("ch123", "msg_fetch_1");
-    assertEquals(result !== null, true);
-    assertEquals(result!.messageId, "msg_fetch_1");
-    assertEquals(result!.content, "Fetched content");
-    assertEquals(result!.isBot, false);
-  },
+  const result = await adapter.fetchMessage("ch123", "msg_fetch_1");
+  assertEquals(result !== null, true);
+  assertEquals(result!.messageId, "msg_fetch_1");
+  assertEquals(result!.content, "Fetched content");
+  assertEquals(result!.isBot, false);
 });
 
-Deno.test({
-  name: "DiscordAdapter.fetchMessage - returns null on channel not found",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    mockDiscordClient(adapter, null);
+test("DiscordAdapter.fetchMessage - returns null on channel not found", async () => {
+  const adapter = createMockDiscordAdapter();
+  mockDiscordClient(adapter, null);
 
-    const result = await adapter.fetchMessage("ch_bad", "msg123");
-    assertEquals(result, null);
-  },
+  const result = await adapter.fetchMessage("ch_bad", "msg123");
+  assertEquals(result, null);
 });
 
-Deno.test({
-  name: "DiscordAdapter.fetchMessage - returns null on fetch error",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const mockChannel = {
-      type: 0,
-      messages: {
-        fetch: () => Promise.reject(new Error("Unknown message")),
-      },
-    };
-    mockDiscordClient(adapter, mockChannel);
+test("DiscordAdapter.fetchMessage - returns null on fetch error", async () => {
+  const adapter = createMockDiscordAdapter();
+  const mockChannel = {
+    type: 0,
+    messages: {
+      fetch: () => Promise.reject(new Error("Unknown message")),
+    },
+  };
+  mockDiscordClient(adapter, mockChannel);
 
-    const result = await adapter.fetchMessage("ch123", "msg_nonexistent");
-    assertEquals(result, null);
-  },
+  const result = await adapter.fetchMessage("ch123", "msg_nonexistent");
+  assertEquals(result, null);
 });

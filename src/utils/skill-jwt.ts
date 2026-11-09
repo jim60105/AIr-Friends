@@ -12,7 +12,8 @@ import {
   isValidSkillSecret,
   MIN_SKILL_SECRET_BYTES,
 } from "@utils/skill-secret.ts";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
+import { isNotFoundError, removePath } from "./fs-compat.ts";
 
 const JWT_HEADER = { alg: "HS256" };
 
@@ -274,9 +275,9 @@ export async function issueSessionJwtFile(params: {
 /** Delete the session's JWT file (idempotent; missing file is fine). */
 export async function deleteSessionJwtFile(jwtDir: string, sessionId: string): Promise<void> {
   try {
-    await Deno.remove(`${jwtDir}/${sessionId}.jwt`);
+    await removePath(`${jwtDir}/${sessionId}.jwt`);
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
+    if (!(isNotFoundError(error))) {
       throw error;
     }
   }

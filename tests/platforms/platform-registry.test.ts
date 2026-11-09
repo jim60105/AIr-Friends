@@ -13,6 +13,7 @@ import {
   type SendFilePayload,
   type SendFileResult,
 } from "../../src/types/platform.ts";
+import { test } from "bun:test";
 
 // Mock adapter for testing
 class MockAdapter extends PlatformAdapter {
@@ -140,105 +141,90 @@ class MockAdapter extends PlatformAdapter {
   }
 }
 
-Deno.test({
-  name: "PlatformRegistry - should register adapter",
-  fn() {
-    resetPlatformRegistry();
-    const registry = new PlatformRegistry();
-    const adapter = new MockAdapter();
+test("PlatformRegistry - should register adapter", function () {
+  resetPlatformRegistry();
+  const registry = new PlatformRegistry();
+  const adapter = new MockAdapter();
 
-    registry.register(adapter);
+  registry.register(adapter);
 
-    const retrieved = registry.getAdapter("discord");
-    assertEquals(retrieved, adapter);
-  },
+  const retrieved = registry.getAdapter("discord");
+  assertEquals(retrieved, adapter);
 });
 
-Deno.test({
-  name: "PlatformRegistry - should throw on duplicate registration",
-  fn() {
-    resetPlatformRegistry();
-    const registry = new PlatformRegistry();
-    const adapter1 = new MockAdapter();
-    const adapter2 = new MockAdapter();
+test("PlatformRegistry - should throw on duplicate registration", function () {
+  resetPlatformRegistry();
+  const registry = new PlatformRegistry();
+  const adapter1 = new MockAdapter();
+  const adapter2 = new MockAdapter();
 
-    registry.register(adapter1);
+  registry.register(adapter1);
 
-    try {
-      registry.register(adapter2);
-      throw new Error("Should have thrown");
-    } catch (error) {
-      assertEquals(
-        (error as Error).message.includes("already registered"),
-        true,
-      );
-    }
-  },
+  try {
+    registry.register(adapter2);
+    throw new Error("Should have thrown");
+  } catch (error) {
+    assertEquals(
+      (error as Error).message.includes("already registered"),
+      true,
+    );
+  }
 });
 
-Deno.test({
-  name: "PlatformRegistry - should forward events to global handlers",
-  async fn() {
-    resetPlatformRegistry();
-    const registry = new PlatformRegistry();
-    const adapter = new MockAdapter();
+test("PlatformRegistry - should forward events to global handlers", async function () {
+  resetPlatformRegistry();
+  const registry = new PlatformRegistry();
+  const adapter = new MockAdapter();
 
-    registry.register(adapter);
+  registry.register(adapter);
 
-    const receivedEvents: NormalizedEvent[] = [];
-    registry.onEvent((event) => {
-      receivedEvents.push(event);
-      return Promise.resolve();
-    });
+  const receivedEvents: NormalizedEvent[] = [];
+  registry.onEvent((event) => {
+    receivedEvents.push(event);
+    return Promise.resolve();
+  });
 
-    const testEvent: NormalizedEvent = {
-      platform: "discord",
-      channelId: "ch1",
-      userId: "user1",
-      messageId: "msg1",
-      isDm: false,
-      guildId: "guild1",
-      content: "Hello",
-      timestamp: new Date(),
-    };
+  const testEvent: NormalizedEvent = {
+    platform: "discord",
+    channelId: "ch1",
+    userId: "user1",
+    messageId: "msg1",
+    isDm: false,
+    guildId: "guild1",
+    content: "Hello",
+    timestamp: new Date(),
+  };
 
-    await adapter.simulateEvent(testEvent);
+  await adapter.simulateEvent(testEvent);
 
-    assertEquals(receivedEvents.length, 1);
-    assertEquals(receivedEvents[0].messageId, "msg1");
-  },
+  assertEquals(receivedEvents.length, 1);
+  assertEquals(receivedEvents[0].messageId, "msg1");
 });
 
-Deno.test({
-  name: "PlatformRegistry - should get all adapters",
-  fn() {
-    resetPlatformRegistry();
-    const registry = new PlatformRegistry();
-    const adapter = new MockAdapter();
+test("PlatformRegistry - should get all adapters", function () {
+  resetPlatformRegistry();
+  const registry = new PlatformRegistry();
+  const adapter = new MockAdapter();
 
-    registry.register(adapter);
+  registry.register(adapter);
 
-    const adapters = registry.getAllAdapters();
-    assertEquals(adapters.length, 1);
-  },
+  const adapters = registry.getAllAdapters();
+  assertEquals(adapters.length, 1);
 });
 
-Deno.test({
-  name: "PlatformRegistry - should check connection status",
-  async fn() {
-    resetPlatformRegistry();
-    const registry = new PlatformRegistry();
-    const adapter = new MockAdapter();
+test("PlatformRegistry - should check connection status", async function () {
+  resetPlatformRegistry();
+  const registry = new PlatformRegistry();
+  const adapter = new MockAdapter();
 
-    registry.register(adapter);
+  registry.register(adapter);
 
-    // Not connected initially
-    assertEquals(registry.isAllConnected(), false);
+  // Not connected initially
+  assertEquals(registry.isAllConnected(), false);
 
-    // Connect
-    await adapter.connect();
+  // Connect
+  await adapter.connect();
 
-    // Now connected
-    assertEquals(registry.isAllConnected(), true);
-  },
+  // Now connected
+  assertEquals(registry.isAllConnected(), true);
 });

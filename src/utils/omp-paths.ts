@@ -7,9 +7,10 @@
 // data root is derived deterministically per approval mode so restricted and
 // native-yolo OMP processes never share a mutable native data directory.
 
-import { basename, join, resolve } from "@std/path";
+import { basename, join, resolve } from "node:path";
 import type { OmpPermissionMode } from "../acp/types.ts";
 import { OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME } from "./omp-native-cache.ts";
+import fs from "node:fs";
 
 /**
  * Canonical SOURCE origin of the deployment-owned trusted extension. Shared with
@@ -140,8 +141,8 @@ export function resolveOmpSystemPromptPath(options: {
 /** Real-filesystem existence probe used by the resolvers above. */
 function defaultExists(path: string): boolean {
   try {
-    const info = Deno.statSync(path);
-    return info.isFile;
+    const info = fs.statSync(path);
+    return info.isFile();
   } catch {
     return false;
   }

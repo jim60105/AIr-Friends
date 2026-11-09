@@ -3,8 +3,9 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import type { LogEntry } from "../../src/types/logger.ts";
+import { test } from "bun:test";
 
-Deno.test("Logger - should output JSON format", () => {
+test("Logger - should output JSON format", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -24,7 +25,7 @@ Deno.test("Logger - should output JSON format", () => {
   }
 });
 
-Deno.test("Logger - should respect log level", () => {
+test("Logger - should respect log level", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -42,7 +43,7 @@ Deno.test("Logger - should respect log level", () => {
   }
 });
 
-Deno.test("Logger - should sanitize sensitive data", () => {
+test("Logger - should sanitize sensitive data", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -62,7 +63,7 @@ Deno.test("Logger - should sanitize sensitive data", () => {
   }
 });
 
-Deno.test("Logger - should create child logger with module path", () => {
+test("Logger - should create child logger with module path", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -79,7 +80,7 @@ Deno.test("Logger - should create child logger with module path", () => {
   }
 });
 
-Deno.test("Logger - sends log entries to GELF transport when configured", () => {
+test("Logger - sends log entries to GELF transport when configured", () => {
   const sentEntries: LogEntry[] = [];
   const mockTransport = {
     send(entry: LogEntry) {
@@ -107,7 +108,7 @@ Deno.test("Logger - sends log entries to GELF transport when configured", () => 
   }
 });
 
-Deno.test("Logger - child logger inherits GELF transport", () => {
+test("Logger - child logger inherits GELF transport", () => {
   const sentEntries: LogEntry[] = [];
   const mockTransport = {
     send(entry: LogEntry) {
@@ -134,7 +135,7 @@ Deno.test("Logger - child logger inherits GELF transport", () => {
   }
 });
 
-Deno.test("Logger - does not send to GELF when level is below threshold", () => {
+test("Logger - does not send to GELF when level is below threshold", () => {
   const sentEntries: LogEntry[] = [];
   const mockTransport = {
     send(entry: LogEntry) {
@@ -162,7 +163,7 @@ Deno.test("Logger - does not send to GELF when level is below threshold", () => 
   }
 });
 
-Deno.test("Logger - renders message template with context values", () => {
+test("Logger - renders message template with context values", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -179,7 +180,7 @@ Deno.test("Logger - renders message template with context values", () => {
   }
 });
 
-Deno.test("Logger - preserves unmatched placeholders", () => {
+test("Logger - preserves unmatched placeholders", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -196,7 +197,7 @@ Deno.test("Logger - preserves unmatched placeholders", () => {
   }
 });
 
-Deno.test("Logger - handles escaped braces", () => {
+test("Logger - handles escaped braces", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -213,7 +214,7 @@ Deno.test("Logger - handles escaped braces", () => {
   }
 });
 
-Deno.test("Logger - no messageTemplate when no placeholders", () => {
+test("Logger - no messageTemplate when no placeholders", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -230,7 +231,7 @@ Deno.test("Logger - no messageTemplate when no placeholders", () => {
   }
 });
 
-Deno.test("Logger - handles object values in template", () => {
+test("Logger - handles object values in template", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -247,7 +248,7 @@ Deno.test("Logger - handles object values in template", () => {
   }
 });
 
-Deno.test("Logger - handles null/undefined values in template", () => {
+test("Logger - handles null/undefined values in template", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -264,7 +265,7 @@ Deno.test("Logger - handles null/undefined values in template", () => {
   }
 });
 
-Deno.test("Logger - sends messageTemplate to GELF transport", () => {
+test("Logger - sends messageTemplate to GELF transport", () => {
   const sentEntries: LogEntry[] = [];
   const mockTransport = {
     send(entry: LogEntry) {
@@ -299,7 +300,7 @@ Deno.test("Logger - sends messageTemplate to GELF transport", () => {
 
 // withContext() tests
 
-Deno.test("Logger - withContext() adds default context to all log calls", () => {
+test("Logger - withContext() adds default context to all log calls", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -316,7 +317,7 @@ Deno.test("Logger - withContext() adds default context to all log calls", () => 
   }
 });
 
-Deno.test("Logger - withContext() merges with call-site context", () => {
+test("Logger - withContext() merges with call-site context", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -334,7 +335,7 @@ Deno.test("Logger - withContext() merges with call-site context", () => {
   }
 });
 
-Deno.test("Logger - withContext() call-site context takes precedence", () => {
+test("Logger - withContext() call-site context takes precedence", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -351,7 +352,7 @@ Deno.test("Logger - withContext() call-site context takes precedence", () => {
   }
 });
 
-Deno.test("Logger - withContext() chained calls merge all fields", () => {
+test("Logger - withContext() chained calls merge all fields", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -370,7 +371,7 @@ Deno.test("Logger - withContext() chained calls merge all fields", () => {
   }
 });
 
-Deno.test("Logger - child() inherits defaultContext", () => {
+test("Logger - child() inherits defaultContext", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -389,7 +390,7 @@ Deno.test("Logger - child() inherits defaultContext", () => {
   }
 });
 
-Deno.test("Logger - withContext() works with message templates", () => {
+test("Logger - withContext() works with message templates", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
@@ -407,7 +408,7 @@ Deno.test("Logger - withContext() works with message templates", () => {
   }
 });
 
-Deno.test("Logger - empty defaultContext does not affect existing behavior", () => {
+test("Logger - empty defaultContext does not affect existing behavior", () => {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg: string) => logs.push(msg);
