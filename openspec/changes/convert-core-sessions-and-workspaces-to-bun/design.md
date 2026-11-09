@@ -74,3 +74,31 @@ Replace `Deno.serve` with `Bun.serve({ hostname: "127.0.0.1", port: 0, fetch })`
 
 - [A converted test now fails for a reason other than a deferred symbol] → Fix the conversion, not the assertion. If the failure is a real Bun behavior difference, stop and report it with the failing test name; do not add an exception for a failing test.
 - [`tests/core/session-orchestrator.test.ts` is too large to convert in one pass] → Convert it last; its deferred failures are expected from the ImageMagick `convert` call and agent spawning.
+
+## Scope deviations (supervisor-authorized at apply time)
+
+Import specifier only, identical imported names, one line per file. Without these the D1 test files
+abort at module load with `Cannot find module`, which parity cannot treat as a deferred
+`ReferenceError`; each owner still converts the file's remaining `Deno.*` calls.
+
+- `src/skills/file-handler.ts`: `@std/path` → `node:path`. Owner:
+  `convert-skills-dashboard-and-skill-api-support-to-bun`.
+- `src/core/agent-process-pool.ts`: `@std/path` → `node:path`. Owner:
+  `port-process-lifecycle-and-pool-to-bun`.
+
+Mechanical `Deno.*` → `node:*` sites in sibling-owned files whose unconverted call is swallowed by
+a `try`/`catch` and therefore turns into a non-deferrable assertion instead of a deferred
+`ReferenceError`. No README D4 high-risk symbol (`Deno.Command`, `Deno.serve`, FFI, signals, exit)
+is touched.
+
+- `src/acp/agent-factory.ts` (owner `convert-acp-client-and-factory-to-bun`): `Deno.env.get`
+  (`buildBaseAgentConfig` both branches, `detectPlaywrightBinarySync`), `Deno.statSync`
+  (trusted-extension check, Playwright cache walk, `profileFileExists`), `Deno.readTextFileSync`
+  (retry `SKILL.md` reader), `Deno.readDirSync` + Stats/Dirent properties
+  (`findBinaryInDirSync`, `findFileRecursiveSync`), `Deno.build.os` → `runtimeOs()`.
+- `src/platforms/email/durable-files.ts` and `src/platforms/email/message-store.ts` (owner
+  `convert-email-platform-to-bun`): `Deno.lstat`/`realPath`/`readFile`/`readTextFile`/`rename`/
+  `chmod`/`mkdir`/`remove`/`open`/`FsFile` and `Deno.errors.NotFound` in the canonicalization,
+  journal, snapshot and exclusive-write paths.
+- `src/platforms/email/attachment-materializer.ts` (same owner): `Deno.mkdir`/`writeFile`/
+  `rename`/`remove` in the attachment publish path.
