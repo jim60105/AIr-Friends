@@ -55,3 +55,7 @@ Sections: data copy provenance (date, `kubectl cp` command, size); drill results
 ## Open Questions
 
 - The owner confirmed the D3 thresholds (the 1.25 multipliers, zero leftover processes, stop under 15 s) on 2026-11-09 as the meaning of "no material regression"; `thresholds.json` uses these values. The rule's shape and the order enforcement do not change.
+
+## Owner decisions (deviations)
+
+- 2026-11-10 — **Live trial deferred.** The owner knowingly deferred the live-trial checks D4 describes. Discord permits only one live bot instance and production holds it, and no test accounts or credentials exist for Discord, Misskey or Email, so no live check could run from this environment. This supersedes D4's expectation of passing live rows: `TRIAL.md` records every live row as `DEFERRED` with its reason and a post-release verification condition, and task 4.1 closes on the owner's signed deferral on that date. No platform check is claimed to have passed.

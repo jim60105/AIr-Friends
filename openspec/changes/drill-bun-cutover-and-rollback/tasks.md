@@ -21,7 +21,9 @@ Prerequisite: `migrate-ci-and-docs-to-bun` is applied and its CI run succeeded. 
 
 ## 4. Live trial (human-reviewed)
 
-- [ ] 4.1 Write `migration/bun/cutover/TRIAL.md` per design D4 with the drill results filled in, and hand it to the owner for the live checks and sign-off. Verify: the owner's sign-off line is filled in; record the date.
+- [x] 4.1 Write `migration/bun/cutover/TRIAL.md` per design D4 with the drill results filled in, and hand it to the owner for the live checks and sign-off. Verify: the owner's sign-off line is filled in; record the date.
+
+  Owner decision (2026-11-10): the live trial is knowingly **DEFERRED** (Discord permits only one live bot instance and production holds it; no test accounts or credentials exist for Discord, Misskey or Email; no live check could run from this environment). Task 4.1 is closed on the owner's signed deferral in `TRIAL.md`, not on passing live rows; no platform check is claimed.
 
 ## 5. Housekeeping
 

@@ -1,7 +1,7 @@
 # Cutover drill and live trial (human-reviewed)
 
-Status: container drill on the development-data substitute complete; live
-platform checks and owner sign-off **PENDING**.
+Status: container drill on the development-data substitute complete; the live
+trial and its sign-off are **DEFERRED by the owner on 2026-11-10**.
 
 This document is the human-reviewed record for the pre-cutover drill. It does
 not replace the automated evidence: the process-level restart guarantee is
@@ -172,23 +172,32 @@ run also passed the zero-platform log guard.
   status). Design D2's minimal schema omitted these fields, but D3 and the
   P0-3 evidence need them; all other fields follow D2.
 
-## 3. Live trial with test accounts
+## 3. Live trial with test accounts — DEFERRED
 
-The live trial has not run. This host must not connect the service to a live
-platform: Discord permits exactly one running bot per application and an
-accidental login would conflict with production; no test accounts and no
-credentials are available here. No result below is fabricated.
+The live trial is knowingly deferred by the owner (2026-11-10). No live check
+was run and **no platform check has passed**. Discord permits exactly one live
+bot instance per application and production holds it; no test accounts or
+credentials exist for Discord, Misskey or Email; and this environment cannot
+start the service against a live platform. No result below is fabricated.
 
 | Check | Result | Date |
 | --- | --- | --- |
-| Discord reply from a test account | PENDING — owner-only (single live bot, no test account/credential here) | — |
-| Misskey reply from a test account | PENDING — owner-only (single live bot, no test account/credential here) | — |
-| Email receive and reply | PENDING — owner-only (no mailbox credential here) | — |
-| Reminder fires | PENDING — owner-only live check (persistence is covered by the automated restart test) | — |
-| Memory save and recall | PENDING — owner-only live check (persistence is covered by the automated restart test) | — |
-| Skill API calls from a skill | PENDING — owner-only live check | — |
-| OpenCode session | PENDING — owner-only (agent credentials) | — |
-| OMP session | PENDING — owner-only (agent credentials) | — |
+| Discord reply from a test account | DEFERRED — one live bot instance is permitted and production holds it; no test account or credential here | 2026-11-10 |
+| Misskey reply from a test account | DEFERRED — one live bot instance policy; no test account or credential here | 2026-11-10 |
+| Email receive and reply | DEFERRED — no mailbox account or credential available here | 2026-11-10 |
+| Reminder fires | DEFERRED — needs a live session to schedule and observe delivery; persistence is covered by the automated restart test | 2026-11-10 |
+| Memory save and recall | DEFERRED — needs a live session for recall; persistence is covered by the automated restart test | 2026-11-10 |
+| Skill API calls from a skill | DEFERRED — needs a live agent session to invoke a skill against the Skill API | 2026-11-10 |
+| OpenCode session | DEFERRED — no live agent credential available here | 2026-11-10 |
+| OMP session | DEFERRED — no live agent credential available here | 2026-11-10 |
+
+**Risk of deferral:** at release, live Discord/Misskey/Email connectivity and
+reply delivery, reminder firing, live memory recall, Skill API calls from a
+skill, and OpenCode/OMP sessions remain unverified. The drill proves container
+startup, resources, stop/restart, rollback and process-level persistence only.
+Verify every row above in a post-release maintenance window with test accounts
+and credentials; a failure there is handled as a release incident, including
+rollback to the old digest.
 
 ## 4. Deployment parameters at cutover
 
@@ -205,7 +214,11 @@ Change in ArgoCD together with the image digest:
 
 ## 5. Owner sign-off
 
-- [ ] Owner reviewed this document, completed the live checks and approves the
-  cutover.
+- [x] Owner acknowledgement: the live trial in section 3 is knowingly
+  **DEFERRED** (2026-11-10). The owner accepts that no platform check has
+  passed and that those checks will be verified post-release with test
+  accounts.
 
-Owner: ____________________  Date: __________
+Owner: the owner (acknowledgement recorded through the supervisor)
+Date: 2026-11-10
+Live trial: knowingly deferred — accepted 2026-11-10
