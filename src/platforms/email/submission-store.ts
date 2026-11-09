@@ -1020,7 +1020,7 @@ export class SubmissionStore {
 
     let bytes: Uint8Array;
     try {
-      bytes = await fsp.readFile(safeEmlPath);
+      bytes = new Uint8Array(await fsp.readFile(safeEmlPath));
     } catch (err) {
       if (isNotFoundError(err)) {
         throw new SubmissionStoreError(

@@ -17,6 +17,7 @@ import {
   SubmissionStoreError,
 } from "../../../src/platforms/email/submission-store.ts";
 import fsp from "node:fs/promises";
+import { Buffer } from "node:buffer";
 import { test } from "bun:test";
 import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
@@ -40,6 +41,31 @@ const DEFAULT_OWNER = "e_user1234567890abcdef";
 function makeKey(workId: string, actionSlot = "reply"): EmailOperationKey {
   return { workId, actionSlot };
 }
+
+test("SubmissionStore - evidence verification hands the callback plain bytes, not a Buffer", async () => {
+  await withTempDir(async (root) => {
+    const store = new SubmissionStore(root);
+    const key = makeKey("work-verify-bytes", "reply");
+    const bytes = new TextEncoder().encode("plain evidence bytes");
+    const emlRef = "sent/verify-bytes.eml";
+    await store.prepare(DEFAULT_OWNER, key, computeSha256Hex(bytes), emlRef, {
+      targetKind: "user",
+      recipientRef: "user@example.com",
+    });
+    await fsp.mkdir(join(root, "sent"), { recursive: true });
+    await fsp.writeFile(join(root, emlRef), bytes);
+
+    let received: Uint8Array | undefined;
+    await store.verifySubmissionEvidence(DEFAULT_OWNER, key, (value) => {
+      received = value;
+      return computeSha256Hex(value);
+    });
+
+    assertEquals(received === undefined, false);
+    assertEquals(Buffer.isBuffer(received), false);
+    assertEquals(received, bytes);
+  });
+});
 
 test("SubmissionStore - 1.1 Reservation keys, digest conflict detection, and idempotent repetition", async () => {
   await withTempDir(async (root) => {
