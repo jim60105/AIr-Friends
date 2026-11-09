@@ -41,10 +41,12 @@ test("opencode restricted profile: no native skill-script execution allow surviv
 test("opencode restricted profile: script invocations route to the ACP gate via ask", async () => {
   const config = await loadConfig();
   const bash = config.agent?.["build"]?.permission?.["bash"] as Record<string, string>;
-  // The two routing entries carry interpreter-launched (`deno run …`) and
-  // direct-script (`/custom/root/…` or relative `skills/…`) invocations into
-  // the ACP permission request regardless of the configured root.
-  assertEquals(bash["deno run *"], "ask", "interpreter-launched scripts must route to ask");
+  // The routing entries carry every `bun` spelling (`bun *`) into the ACP
+  // permission request regardless of the configured root, and deny the
+  // package runner outright (`bunx *`). Direct-script invocations
+  // (`/custom/root/…` or relative `skills/…`) match `*.ts*`.
+  assertEquals(bash["bun *"], "ask", "bun-launched scripts must route to ask");
+  assertEquals(bash["bunx *"], "deny", "the package runner must be denied without a gate request");
   assertEquals(bash["*.ts*"], "ask", "direct TypeScript invocations must route to ask");
   assertEquals(bash["*"], "deny", "the wildcard default stays deny");
 });

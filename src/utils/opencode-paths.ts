@@ -76,7 +76,7 @@ export function opencodeToolOutputDir(xdgDataHome: string): string {
 // other consumer) is written into the deployed OpenCode global configuration:
 // the skill discovery path list, and one `external_directory` allowance under
 // that root alone. Nothing else in that document changes — every other
-// setting, including the `deno run *` / `*.ts*` routing that sends script
+// setting, including the `bun *` / `*.ts*` routing that sends script
 // executions to the ACP approval gate, keeps its bytes exactly.
 //
 // The section below is the PURE document half plus the one filesystem step.
@@ -651,7 +651,7 @@ function withExternalDirectoryAllowance(
  * Splice the declaration into an existing document: the discovery path list
  * becomes exactly the resolved root, and the allowance under that root is
  * ensured. Both steps are source-preserving text splices, so every other byte
- * of the document — the `deno run *` / `*.ts*` routing to the approval gate,
+ * of the document — the `bun *` / `*.ts*` routing to the approval gate,
  * the remaining allowances and every unrelated setting — is copied verbatim.
  */
 export function applyOpencodeSkillDiscoveryDeclaration(

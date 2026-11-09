@@ -12,7 +12,7 @@ import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import type { ResolvedReminder } from "../../src/types/reminder.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import { makeTempDir, pathExists as exists } from "../../src/utils/fs-compat.ts";

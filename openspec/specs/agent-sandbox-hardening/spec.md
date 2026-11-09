@@ -34,14 +34,14 @@ In restricted mode, the command whitelist matcher SHALL approve a skill-script e
 
 #### Scenario: Legitimate skill invocation approved
 
-- **GIVEN** a command `deno run <flags> skills/memory-save/scripts/memory-save.ts <args>` where the script path is the entrypoint positional
+- **GIVEN** a command `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml skills/memory-save/scripts/memory-save.ts <args>` where the script path is the entrypoint positional
 - **WHEN** the matcher evaluates the command
 - **THEN** it SHALL approve the command
 
 #### Scenario: Skill invocation with trailing fd-to-fd redirect approved
 
 - **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
-- **WHEN** the matcher evaluates `deno run skills/memory-save/scripts/memory-save.ts --content-file $TMPDIR/$SESSION_ID/x.md 2>&1`
+- **WHEN** the matcher evaluates `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml skills/memory-save/scripts/memory-save.ts --content-file $TMPDIR/$SESSION_ID/x.md 2>&1`
 - **THEN** it SHALL approve the command because the entrypoint is the whitelisted script and the trailing `2>&1` token only duplicates file descriptor 1
 
 #### Scenario: Multi-command chain of skill commands approved
@@ -70,7 +70,7 @@ In restricted mode, the command whitelist matcher SHALL approve a skill-script e
 
 #### Scenario: Arbitrary command with whitelisted script as trailing argument rejected
 
-- **GIVEN** a command whose first token is an arbitrary binary (e.g. `tar`, `cat`) and whose trailing argument is a whitelisted script path (e.g. `cat /home/deno/.git-credentials skills/memory-save/scripts/memory-save.ts`)
+- **GIVEN** a command whose first token is an arbitrary binary (e.g. `tar`, `cat`) and whose trailing argument is a whitelisted script path (e.g. `cat /home/air/.git-credentials skills/memory-save/scripts/memory-save.ts`)
 - **WHEN** the matcher evaluates the command
 - **THEN** it SHALL NOT approve the command
 
@@ -83,14 +83,14 @@ In restricted mode, the command whitelist matcher SHALL approve a skill-script e
 #### Scenario: Tolerated fd-to-fd redirect skipped when locating the entrypoint
 
 - **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
-- **WHEN** the matcher evaluates `deno run 2>&1 skills/memory-save/scripts/memory-save.ts --session-id x`
+- **WHEN** the matcher evaluates `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml 2>&1 skills/memory-save/scripts/memory-save.ts --session-id x`
 - **THEN** it SHALL approve the command because the tolerated `2>&1` token is skipped when locating the invocation entrypoint (it is not a real argument and MUST NOT be mistaken for the script)
 - **AND** the first-token allow-list check SHALL still operate on the original tokens so a redirect can never masquerade as the entrypoint
 
 #### Scenario: Newline next to a tolerated redirect token remains rejected
 
 - **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
-- **WHEN** the matcher evaluates `deno run skills/memory-save/scripts/memory-save.ts --session-id x 2>&1\nrm victim`
+- **WHEN** the matcher evaluates `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml skills/memory-save/scripts/memory-save.ts --session-id x 2>&1\nrm victim`
 - **THEN** it SHALL NOT approve the command because only space/tab are token separators: a newline next to a tolerated token is a command separator, not a token boundary, so the command remains rejected
 
 #### Scenario: Non-tolerated operators and redirections remain rejected
@@ -195,15 +195,20 @@ The agent permission map (`agent-config/opencode.json`) SHALL NOT set any filesy
 
 #### Scenario: Entrypoint-matched skill patterns may remain allow
 - **GIVEN** either a legitimate installed script or a same-suffix planted workspace copy
-- **WHEN** the restricted agent evaluates a direct script invocation or `deno run` invocation
+- **WHEN** the restricted agent evaluates a direct script invocation or a `bun` invocation
 - **THEN** the previous skill-pattern allow exception SHALL no longer apply and it SHALL forward the execution permission request to ACP
 - **AND** ACP SHALL approve the legitimate enumerated entrypoint and reject the planted copy
 
 #### Scenario: Custom root does not require a skills-named directory
 - **GIVEN** an explicitly configured OpenCode root `/srv/agent-tooling`
-- **WHEN** its enumerated TypeScript script is invoked directly or through `deno run`
+- **WHEN** its enumerated TypeScript script is invoked directly or through the literal `bun run` form
 - **THEN** the restricted permission map SHALL forward the request to ACP
 - **AND** a foreign TypeScript entrypoint SHALL gain no grant from that routing pattern
+
+#### Scenario: Package runner is denied by the permission map
+- **GIVEN** the restricted OpenCode permission map
+- **WHEN** the agent requests any `bunx` command
+- **THEN** the map SHALL deny it without forwarding it to ACP
 
 ### Requirement: Generic-Command Workspace Confinement
 
@@ -278,7 +283,7 @@ The restricted-mode ACP permission gate SHALL approve a generic bash command (fi
 #### Scenario: fd-to-fd redirect before the script does not affect entrypoint resolution
 
 - **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
-- **WHEN** the matcher evaluates `deno run 2>&1 skills/memory-save/scripts/memory-save.ts --session-id x`
+- **WHEN** the matcher evaluates `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml 2>&1 skills/memory-save/scripts/memory-save.ts --session-id x`
 - **THEN** it SHALL approve the command because the tolerated redirect token is skipped when locating the invocation entrypoint (it is not a real argument), while the first-token allow-list check still operates on the original tokens
 
 #### Scenario: Generic-command rejection writes a single cause-specific audit entry
@@ -301,13 +306,13 @@ The restricted-mode ACP permission gate SHALL approve a generic bash command (fi
 
 #### Scenario: Shared home-rooted tool-output directory never within bounds
 
-- **GIVEN** a restricted-mode session whose runtime `HOME` is `/home/deno`
-- **WHEN** the agent requests `cat ~/.local/share/opencode/tool-output/tool_x`, `cat $HOME/.local/share/opencode/tool-output/tool_x`, or `cat /home/deno/.local/share/opencode/tool-output/tool_x`
+- **GIVEN** a restricted-mode session whose runtime `HOME` is `/home/air`
+- **WHEN** the agent requests `cat ~/.local/share/opencode/tool-output/tool_x`, `cat $HOME/.local/share/opencode/tool-output/tool_x`, or `cat /home/air/.local/share/opencode/tool-output/tool_x`
 - **THEN** the gate SHALL reject the command because the shared home-rooted tool-output directory is not within bounds
 
 #### Scenario: Home-anchored sensitive file still rejected
 
-- **GIVEN** a restricted-mode session whose runtime `HOME` is `/home/deno`
+- **GIVEN** a restricted-mode session whose runtime `HOME` is `/home/air`
 - **WHEN** the agent requests `cat ~/.ssh/id_rsa`, `cat $HOME/.git-credentials`, `cat $HOME/../etc/passwd`, `cat '${HOME}/.ssh/known_hosts'`, or `cat -o$HOME/.ssh/x`
 - **THEN** the gate SHALL reject the command because the expanded path resolves outside every allowed directory or is an attached absolute path
 
@@ -404,7 +409,7 @@ The per-token path checks of the ACP permission gate SHALL reject argument token
 
 #### Scenario: Unquoted unknown variable rejected
 
-- **GIVEN** a restricted-mode session whose runtime `HOME` is `/home/deno`
+- **GIVEN** a restricted-mode session whose runtime `HOME` is `/home/air`
 - **WHEN** the agent requests `cat $IFS/etc/passwd`, `cat ${OTHER}/etc/shadow`, or `cat $VAR/../etc/passwd`
 - **THEN** the gate SHALL reject the command because the token contains an unquoted `$VAR` reference that is not a harness-set variable and could expand to an out-of-workspace path
 
@@ -435,7 +440,7 @@ The per-token path checks of the ACP permission gate SHALL reject argument token
 #### Scenario: Skill payload variables keep working
 
 - **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts` and a session with `TMPDIR`/`SESSION_ID` set
-- **WHEN** the matcher evaluates `deno run skills/memory-save/scripts/memory-save.ts --content-file $TMPDIR/$SESSION_ID/x.md --session-id x`
+- **WHEN** the matcher evaluates `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml skills/memory-save/scripts/memory-save.ts --content-file $TMPDIR/$SESSION_ID/x.md --session-id x`
 - **THEN** it SHALL approve the command because `$TMPDIR`/`$SESSION_ID` are known harness-set variables in the skill matcher and the entrypoint is the whitelisted script
 
 #### Scenario: Attached-option value judged after flag-prefix normalization
@@ -629,3 +634,42 @@ Each sandbox capability probe SHALL run its tool with the fixed probe arguments 
 #### Scenario: Real host agrees with the probe
 - **WHEN** the network-namespace probe runs on the test host
 - **THEN** its result SHALL equal whether `unshare --user --map-root --net true` exits 0 when run directly on that host
+
+### Requirement: Exact Bun Skill Invocation Grammar
+
+The approval gate SHALL approve a trusted script only when it is executed directly by a path containing a slash, or after the exact literal prefix `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml` followed by such a path; every other `bun` form SHALL be denied.
+
+#### Scenario: Plain bun run denied
+- **GIVEN** a trusted script `skills/memory-save/scripts/memory-save.ts`
+- **WHEN** the gate evaluates `bun run skills/memory-save/scripts/memory-save.ts --session-id x`
+- **THEN** it SHALL deny the command
+
+#### Scenario: Extra flag denied
+- **WHEN** the gate evaluates the literal prefix with `--preload ./evil.ts`, `--require`, `--import`, `--inspect`, `--env-file`, `--cwd` or `--tsconfig-override` added before the script
+- **THEN** it SHALL deny each command
+
+#### Scenario: Other bun commands denied by the gate itself
+- **WHEN** the gate evaluates `bun -e 'console.log(1)'`, `bun x cowsay`, `bun ./workspace/evil.ts`, or the literal prefix followed by a non-granted path such as `./workspace/evil.ts`
+- **THEN** it SHALL deny each command, independently of the OpenCode `bun *: ask` routing
+
+#### Scenario: Slashless script token denied
+- **WHEN** the gate evaluates the literal prefix followed by `memory-save.ts`
+- **THEN** it SHALL deny the command, because `bun run <name>` looks up `package.json` scripts first
+
+#### Scenario: Environment prefix denied
+- **WHEN** the gate evaluates `BUN_OPTIONS=--preload=./evil.ts` followed by the literal prefix and the trusted script
+- **THEN** it SHALL deny the command
+
+### Requirement: Trusted Skills Ignore Working-Directory Configuration
+
+A trusted skill run directly or through the literal `bun run` form SHALL load no `.env`, `.env.local`, `bunfig.toml`, `tsconfig.json`, `package.json` or `node_modules` content from its working directory.
+
+#### Scenario: Attacker directory
+- **GIVEN** an agent-writable directory containing a `.env` and `.env.local` that set a marker variable, a `bunfig.toml` with a `preload` that writes a marker file, a `tsconfig.json` path mapping, a `package.json` with a same-named script and a `node_modules` package shadowing a skill import
+- **WHEN** a trusted skill runs from that directory in each accepted form
+- **THEN** no marker variable SHALL be visible to the skill, no marker file SHALL exist, and the skill SHALL use its own imports
+
+#### Scenario: Missing trusted config
+- **GIVEN** `/opt/air/skill-bunfig.toml` does not exist
+- **WHEN** a trusted skill runs in either accepted form
+- **THEN** it SHALL exit non-zero without running the skill body

@@ -10,6 +10,7 @@ import {
   buildSkillAutoApproveList,
   decodeLiteralToken,
   isUnderRoot,
+  LITERAL_BUN_RUN,
   matchesScriptEntrypoint,
   type SkillAutoApproveList,
   type SkillInventoryFs,
@@ -23,6 +24,9 @@ import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** The supported agent types; both construct the identical inventory. */
 const AGENT_TYPES = ["opencode", "omp"] as const;
+
+/** The one literal prefix the gate accepts before a script spelling. */
+const BUN_RUN = LITERAL_BUN_RUN.join(" ");
 
 function list(
   agentType: (typeof AGENT_TYPES)[number],
@@ -90,7 +94,7 @@ test("inventory - a non-bundled installed .ts script is eligible for BOTH agent 
         `${agentType}: ${String(configured)}`,
       );
       assertEquals(
-        matchesScriptEntrypoint(`deno run ${scriptPath}`, inv, { sessionCwd: undefined }),
+        matchesScriptEntrypoint(`${BUN_RUN} ${scriptPath}`, inv, { sessionCwd: undefined }),
         true,
         `${agentType}: ${String(configured)}`,
       );
@@ -102,8 +106,8 @@ test("inventory - a non-bundled installed .ts script is eligible for BOTH agent 
 });
 
 test("inventory - a non-.ts script is eligible for neither agent type", () => {
-  // `scripts/*.ts` with `deno` as the sole allowlisted interpreter stays the
-  // only enumerable form: a `.py` or shell script grants nothing anywhere.
+  // `scripts/*.ts` with the exact two-form Bun grammar stays the only
+  // enumerable form: a `.py` or shell script grants nothing anywhere.
   const root = makeRoot(["memory-save"]);
   for (
     const [name, file] of [["py-skill", "py-skill.py"], ["shell-skill", "shell-skill.sh"]] as const
@@ -126,9 +130,9 @@ test("inventory - a non-.ts script is eligible for neither agent type", () => {
       ]
     ) {
       assertEquals(
-        matchesScriptEntrypoint(`deno run ${path}`, inv, { sessionCwd: undefined }),
+        matchesScriptEntrypoint(`${BUN_RUN} ${path}`, inv, { sessionCwd: undefined }),
         false,
-        `${agentType}: deno run ${path}`,
+        `${agentType}: ${BUN_RUN} ${path}`,
       );
       assertEquals(
         matchesScriptEntrypoint(path, inv, { sessionCwd: undefined }),
@@ -232,7 +236,7 @@ test("matcher - absolute canonical approval; suffix and prefix tricks denied", (
   try {
     assertEquals(
       matchesScriptEntrypoint(
-        `deno run ${root}/memory-save/scripts/memory-save.ts --session-id x`,
+        `${BUN_RUN} ${root}/memory-save/scripts/memory-save.ts --session-id x`,
         inv,
         decisionCtx(cwd),
       ),
@@ -241,7 +245,7 @@ test("matcher - absolute canonical approval; suffix and prefix tricks denied", (
     // Suffix spelling of the SAME file at another location: denied.
     assertEquals(
       matchesScriptEntrypoint(
-        `deno run ${cwd}/memory-save/scripts/memory-save.ts`,
+        `${BUN_RUN} ${cwd}/memory-save/scripts/memory-save.ts`,
         inv,
         decisionCtx(cwd),
       ),
@@ -258,7 +262,7 @@ test("matcher - absolute canonical approval; suffix and prefix tricks denied", (
     );
     assertEquals(
       matchesScriptEntrypoint(
-        `deno run ${cwd}/evil-skills/memory-save/scripts/memory-save.ts`,
+        `${BUN_RUN} ${cwd}/evil-skills/memory-save/scripts/memory-save.ts`,
         inv,
         decisionCtx(cwd),
       ),
@@ -269,7 +273,7 @@ test("matcher - absolute canonical approval; suffix and prefix tricks denied", (
     // matcher approves what the kernel would actually exec.
     assertEquals(
       matchesScriptEntrypoint(
-        `deno run ${root}/memory-save/../memory-save/scripts/memory-save.ts`,
+        `${BUN_RUN} ${root}/memory-save/../memory-save/scripts/memory-save.ts`,
         inv,
         decisionCtx(cwd),
       ),
@@ -292,14 +296,14 @@ test("matcher - relative anchors ONLY at the registered session cwd", () => {
     fs.writeFileSync(`${cwd}/localskill/scripts/localskill.ts`, "// real");
     const invLocal = list("opencode", cwd);
     assertEquals(
-      matchesScriptEntrypoint("deno run localskill/scripts/localskill.ts", invLocal, {
+      matchesScriptEntrypoint("localskill/scripts/localskill.ts", invLocal, {
         sessionCwd: cwd,
       }),
       true,
     );
     // Unregistered session: relative never resolves (no daemon-cwd fallback).
     assertEquals(
-      matchesScriptEntrypoint("deno run localskill/scripts/localskill.ts", invLocal, {
+      matchesScriptEntrypoint("localskill/scripts/localskill.ts", invLocal, {
         sessionCwd: undefined,
       }),
       false,
@@ -308,7 +312,7 @@ test("matcher - relative anchors ONLY at the registered session cwd", () => {
     // PHYSICAL: cwd + `localskill/../localskill/scripts/localskill.ts` is the
     // same file — approved, because that is what the kernel execs.
     assertEquals(
-      matchesScriptEntrypoint("deno run localskill/../localskill/scripts/localskill.ts", invLocal, {
+      matchesScriptEntrypoint("localskill/../localskill/scripts/localskill.ts", invLocal, {
         sessionCwd: cwd,
       }),
       true,
@@ -319,7 +323,7 @@ test("matcher - relative anchors ONLY at the registered session cwd", () => {
       false,
     );
     assertEquals(
-      matchesScriptEntrypoint("deno run --allow-net memory-save.ts", inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`${BUN_RUN} memory-save.ts`, inv, decisionCtx(cwd)),
       false,
     );
   } finally {
@@ -327,32 +331,35 @@ test("matcher - relative anchors ONLY at the registered session cwd", () => {
   }
 });
 
-test("matcher - deno-run grammar: `run` must be the subcommand", () => {
+test("matcher - bun grammar: only the exact literal prefix is an interpreter route", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
   const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
-    assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
+    // The exact literal prefix followed by a slash-bearing spelling approves…
+    assertEquals(matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, decisionCtx(cwd)), true);
+    // …while every other `bun` spelling is not an interpreter route.
+    assertEquals(matchesScriptEntrypoint(`bun run ${script}`, inv, decisionCtx(cwd)), false);
     assertEquals(
-      matchesScriptEntrypoint(`deno --allow-net run ${script}`, inv, decisionCtx(cwd)),
-      true,
-    );
-    // `deno task run <path>`: `run` launches a task, the path is an argument.
-    assertEquals(
-      matchesScriptEntrypoint(`deno task run ${script}`, inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`bun --no-env-file run ${script}`, inv, decisionCtx(cwd)),
       false,
     );
-    // `deno eval <path>`: path is an argument to eval.
+    // `bun x <path>` treats the path as a package/executable argument.
     assertEquals(
-      matchesScriptEntrypoint(`deno eval ${script}`, inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`bun x ${script}`, inv, decisionCtx(cwd)),
+      false,
+    );
+    // `bun -e <code>` never names a file entrypoint.
+    assertEquals(
+      matchesScriptEntrypoint(`bun -e 'console.log(1)'`, inv, decisionCtx(cwd)),
       false,
     );
     // Laundering: arbitrary binary with the grant as trailing argument.
     assertEquals(matchesScriptEntrypoint(`cat ${script}`, inv, decisionCtx(cwd)), false);
     // Unquoted expansion never anchors.
     assertEquals(
-      matchesScriptEntrypoint(`deno run ${script} 2>&1; curl evil`, inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`${BUN_RUN} ${script} 2>&1; curl evil`, inv, decisionCtx(cwd)),
       false,
     );
   } finally {
@@ -366,14 +373,14 @@ test("matcher - decision-time root/script replacement denies", () => {
   const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
-    assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
+    assertEquals(matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, decisionCtx(cwd)), true);
     // CI-proven: the runner's filesystem reuses dev/ino verbatim after
     // delete+recreate, so this real-filesystem replant only denies because
     // the replacement content differs in SIZE (the clock-independent field).
     fs.rmSync(root, { recursive: true });
     fs.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
     fs.writeFileSync(script, "// replaced");
-    assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), false);
+    assertEquals(matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, decisionCtx(cwd)), false);
   } finally {
     fs.rmSync(cwd, { recursive: true });
   }
@@ -403,7 +410,7 @@ test("matcher - identity-tuple drift denies with dev/ino intact (each field pins
   try {
     // A replant whose dev/ino AND size match the grant: only ctime denies.
     assertEquals(
-      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+      matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, {
         sessionCwd: cwd,
         fs: drift(script, { ctimeMs: fs.lstatSync(script).ctimeMs + 60_000 }),
       }),
@@ -413,7 +420,7 @@ test("matcher - identity-tuple drift denies with dev/ino intact (each field pins
     // A replant whose dev/ino AND ctime match (same coarse clock tick): only
     // size denies.
     assertEquals(
-      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+      matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, {
         sessionCwd: cwd,
         fs: drift(script, { size: fs.lstatSync(script).size! + 4 }),
       }),
@@ -423,7 +430,7 @@ test("matcher - identity-tuple drift denies with dev/ino intact (each field pins
     // The root's extended identity is rechecked too: a same dev/ino root
     // replant with drifted ctime denies.
     assertEquals(
-      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+      matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, {
         sessionCwd: cwd,
         fs: drift(root, { ctimeMs: fs.lstatSync(root).ctimeMs + 60_000 }),
       }),
@@ -432,7 +439,7 @@ test("matcher - identity-tuple drift denies with dev/ino intact (each field pins
     );
     // Control: the pass-through fake itself never causes the denial.
     assertEquals(
-      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+      matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, {
         sessionCwd: cwd,
         fs: drift(script, {}),
       }),
@@ -466,22 +473,22 @@ test("isUnderRoot - boundary-safe containment", () => {
 
 // --- Post-implementation review fold-in (B1/B2/N1) ---
 
-test("matcher - unflagged and allow-listed-flag deno run spellings still approve", () => {
+test("matcher - direct and literal bun run spellings approve", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
   const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
-    // The ordinary unflagged posture (production's dominant shape) is
-    // unaffected by the flag allow-list…
-    assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
-    // …and value-less permission flags from the allow-list skip harmlessly.
+    // Direct execution of the slash-bearing path (the kernel applies shebang).
+    assertEquals(matchesScriptEntrypoint(script, inv, decisionCtx(cwd)), true);
+    // The exact literal prefix followed by the same spelling.
     assertEquals(
-      matchesScriptEntrypoint(`deno run --allow-read --no-check ${script}`, inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`${BUN_RUN} ${script}`, inv, decisionCtx(cwd)),
       true,
     );
+    // Skill arguments after the spelling are not part of the grammar.
     assertEquals(
-      matchesScriptEntrypoint(`deno run -A --quiet ${script}`, inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`${BUN_RUN} ${script} --session-id x`, inv, decisionCtx(cwd)),
       true,
     );
   } finally {
@@ -489,60 +496,47 @@ test("matcher - unflagged and allow-listed-flag deno run spellings still approve
   }
 });
 
-test("matcher - module-affecting deno run flags deny fail-closed (B2)", () => {
+test("matcher - any bun flag outside the literal prefix denies fail-closed (B2)", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
   const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
-  // A trusted grant used as the (perceived) entrypoint while a PRELOAD module
-  // actually executes: `--preload <trusted> <planted>` — the old skip-all-flags
-  // grammar read <trusted> as the entrypoint and approved while Deno executed
-  // an unapproved main.
+  // A module-affecting flag before the script would run an unapproved module
+  // and leave the trusted token as the apparent entrypoint. Every flag is
+  // outside the grammar now, so each spelling fails closed.
   fs.mkdirSync(`${cwd}/evil`, { recursive: true });
   fs.writeFileSync(`${cwd}/evil/main.ts`, "import { grant } from '...';");
+  const inside = (flag: string): string =>
+    [LITERAL_BUN_RUN[0], LITERAL_BUN_RUN[1], flag, ...LITERAL_BUN_RUN.slice(2), script].join(" ");
+  const after = (flag: string): string => [...LITERAL_BUN_RUN, flag, script].join(" ");
   try {
-    assertEquals(
-      matchesScriptEntrypoint(
-        `deno run --preload ${script} ${cwd}/evil/main.ts`,
-        inv,
-        decisionCtx(cwd),
-      ),
-      false,
-    );
-    assertEquals(
-      matchesScriptEntrypoint(
-        `deno run --import ${script} ${cwd}/evil/main.ts`,
-        inv,
-        decisionCtx(cwd),
-      ),
-      false,
-    );
-    // Arity-guessable flags never fall through to the next token either.
-    assertEquals(
-      matchesScriptEntrypoint(
-        `deno run --config ${script} ${cwd}/evil/main.ts`,
-        inv,
-        decisionCtx(cwd),
-      ),
-      false,
-    );
-    assertEquals(
-      matchesScriptEntrypoint(
-        `deno run --allow-read=${script} ${cwd}/evil/main.ts`,
-        inv,
-        decisionCtx(cwd),
-      ),
-      false,
-    );
-    assertEquals(matchesScriptEntrypoint(`deno run -- ${script}`, inv, decisionCtx(cwd)), false);
-    assertEquals(
-      matchesScriptEntrypoint(
-        `deno run --v8-flags=--experimental ${script}`,
-        inv,
-        decisionCtx(cwd),
-      ),
-      false,
-    );
+    for (
+      const flag of [
+        "--preload=./evil.ts",
+        "--preload ./evil.ts",
+        "--require=./evil.ts",
+        "--import=./evil.ts",
+        "--inspect=127.0.0.1:9229",
+        "--env-file=.env",
+        "--cwd=/tmp",
+        "--tsconfig-override=/tmp/tsconfig.json",
+      ]
+    ) {
+      assertEquals(
+        matchesScriptEntrypoint(inside(flag), inv, decisionCtx(cwd)),
+        false,
+        `flag inside the prefix: ${flag}`,
+      );
+      assertEquals(
+        matchesScriptEntrypoint(after(flag), inv, decisionCtx(cwd)),
+        false,
+        `flag before the script: ${flag}`,
+      );
+    }
+    // Any other `bun` subcommand spelling is outside the grammar as well.
+    assertEquals(matchesScriptEntrypoint(`bunx ${script}`, inv, decisionCtx(cwd)), false);
+    assertEquals(matchesScriptEntrypoint(`bun x ${script}`, inv, decisionCtx(cwd)), false);
+    assertEquals(matchesScriptEntrypoint(`bun ${script}`, inv, decisionCtx(cwd)), false);
   } finally {
     fs.rmSync(cwd, { recursive: true });
   }
@@ -552,16 +546,17 @@ test("matcher - .. spellings crossing a symlinked directory deny (B1)", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
   // Session cwd W: a symlink `jump` INTO the grant's skill directory, plus a
-  // planted regular file at the cwd-relative lexical landing point. Deno's
-  // loader lexicalizes `jump/../memory-save/scripts/...` to the PLANTED file,
-  // while the kernel physically traverses the link to the real grant — the
-  // old physical-only matcher approved while the wrong module executed.
+  // planted regular file at the cwd-relative lexical landing point. Bun's
+  // loader lexicalizes `jump/../memory-save/scripts/...` to the PLANTED file
+  // (observed on the pinned 1.4.2), while the kernel physically traverses the
+  // link to the real grant — so the old physical-only matcher approved while
+  // the wrong module executed.
   const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   fs.symlinkSync(`${root}/memory-save`, `${cwd}/jump`);
   fs.mkdirSync(`${cwd}/memory-save/scripts`, { recursive: true });
   fs.writeFileSync(`${cwd}/memory-save/scripts/memory-save.ts`, 'console.log("LOADED: planted")');
   try {
-    // Loader ground truth: `deno run` of this relative spelling EXECUTES the
+    // Loader ground truth: `bun run` of this relative spelling EXECUTES the
     // planted file (lexical landing), never the physically-traversed grant —
     // so the divergence is real and the ambiguous spelling must deny.
     const loaderProbe = spawnSync(process.execPath, [
@@ -574,7 +569,7 @@ test("matcher - .. spellings crossing a symlinked directory deny (B1)", () => {
     assertEquals(loaderProbe.stdout.trim(), "LOADED: planted");
     assertEquals(
       matchesScriptEntrypoint(
-        "deno run jump/../memory-save/scripts/memory-save.ts",
+        `${BUN_RUN} jump/../memory-save/scripts/memory-save.ts`,
         inv,
         decisionCtx(cwd),
       ),
@@ -582,13 +577,17 @@ test("matcher - .. spellings crossing a symlinked directory deny (B1)", () => {
     );
     // The planted lexical target itself stays denied on its own spelling too.
     assertEquals(
-      matchesScriptEntrypoint("deno run memory-save/scripts/memory-save.ts", inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(
+        `${BUN_RUN} memory-save/scripts/memory-save.ts`,
+        inv,
+        decisionCtx(cwd),
+      ),
       false,
     );
     // The symlinked spelling WITHOUT `..` stays approved: lexical and physical
     // agree, so the guard is inactive.
     assertEquals(
-      matchesScriptEntrypoint("deno run jump/scripts/memory-save.ts", inv, decisionCtx(cwd)),
+      matchesScriptEntrypoint(`${BUN_RUN} jump/scripts/memory-save.ts`, inv, decisionCtx(cwd)),
       true,
     );
   } finally {
@@ -660,7 +659,7 @@ test("inventory - a WRITABLE installed root is enumerated and matched for BOTH a
     const inv = list(agentType, root);
     assertEquals(inv.scripts.map((s) => s.canonicalPath), [entrypoint], agentType);
     assertEquals(
-      matchesScriptEntrypoint(`deno run ${entrypoint}`, inv, { sessionCwd: undefined }),
+      matchesScriptEntrypoint(`${BUN_RUN} ${entrypoint}`, inv, { sessionCwd: undefined }),
       true,
       agentType,
     );

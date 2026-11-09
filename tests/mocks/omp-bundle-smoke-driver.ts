@@ -17,6 +17,8 @@
  * official host binary invoking or honoring it.
  */
 
+export {};
+
 const bundleUrl = process.argv[2];
 
 if (!bundleUrl) {

@@ -226,8 +226,8 @@ export async function runAcpInitialize(options: {
       reason: `failed to start "${options.executable}"`,
     };
   }
-  const stdoutStream = Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>;
-  const stderrStream = Readable.toWeb(child.stderr!) as ReadableStream<Uint8Array>;
+  const stdoutStream = Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>;
+  const stderrStream = Readable.toWeb(child.stderr!) as unknown as ReadableStream<Uint8Array>;
   const stderrTail = drainTail(stderrStream, STDERR_KEEP_BYTES);
 
   // Await the write callback: on Bun 1.4.2 `Writable.toWeb` propagates no backpressure to a
@@ -274,7 +274,7 @@ export async function runAcpInitialize(options: {
   const stderr = await stderrTail;
   // The variable is assigned from `error` event callbacks, which control-flow analysis does
   // not track; the annotation restores the real union at the report site.
-  const failure: Error | null = spawnFailure;
+  const failure = spawnFailure as Error | null;
 
   if (response === null) {
     return {

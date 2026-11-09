@@ -493,7 +493,7 @@ test("OMP connector: a context replaced mid-observation never authorizes the req
   try {
     await f.connector.createSession([]);
     let revoked = false;
-    fsp.realpath = async (value) => {
+    fsp.realpath = (async (value) => {
       const result = await originalRealPath(value);
       if (!revoked) {
         revoked = true;
@@ -504,7 +504,7 @@ test("OMP connector: a context replaced mid-observation never authorizes the req
         });
       }
       return result;
-    };
+    }) as typeof fsp.realpath;
     await assertRejects(
       () =>
         f.client.readTextFile({
@@ -564,7 +564,7 @@ test("OMP connector: a disconnect during an in-flight artifact read denies it", 
     await f.connector.createSession([]);
     const callsBefore = f.contentCalls.length;
     let disconnected = false;
-    fsp.realpath = async (value) => {
+    fsp.realpath = (async (value) => {
       const result = await originalRealPath(value);
       if (!disconnected) {
         disconnected = true;
@@ -572,7 +572,7 @@ test("OMP connector: a disconnect during an in-flight artifact read denies it", 
         await f.connector.disconnect();
       }
       return result;
-    };
+    }) as typeof fsp.realpath;
     await assertRejects(
       () =>
         f.client.readTextFile({

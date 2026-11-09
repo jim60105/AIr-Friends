@@ -17,7 +17,11 @@
 
 import { assertEquals } from "@std/assert";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
-import { buildSkillAutoApproveList, matchesScriptEntrypoint } from "@acp/skill-inventory.ts";
+import {
+  buildSkillAutoApproveList,
+  LITERAL_BUN_RUN,
+  matchesScriptEntrypoint,
+} from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot, resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { resolve } from "node:path";
 import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
@@ -39,6 +43,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { test } from "bun:test";
 import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
+
+/** The one literal prefix the gate accepts before a script spelling. */
+const BUN_RUN = LITERAL_BUN_RUN.join(" ");
 
 /**
  * The ONE deployment-resolved root in the repository-development shape
@@ -315,7 +322,7 @@ test("external publication - the shared root admits the installed script for eit
           `${agentType} admits the external script (configured=${String(configured)})`,
         );
         assertEquals(
-          matchesScriptEntrypoint(`deno run ${scriptPath}`, inventory, {
+          matchesScriptEntrypoint(`${BUN_RUN} ${scriptPath}`, inventory, {
             sessionCwd: undefined,
           }),
           true,

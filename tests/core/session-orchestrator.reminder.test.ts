@@ -16,7 +16,7 @@ import type {
   EmailReplyEligibilityResolver,
   EmailReplyEligibilityResult,
 } from "../../src/platforms/email/reply-eligibility.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import { resolve } from "node:path";
 import fs from "node:fs";
 import fsp from "node:fs/promises";

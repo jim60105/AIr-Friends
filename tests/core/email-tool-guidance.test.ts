@@ -22,10 +22,10 @@
 
 import { assert, assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
 import { join } from "node:path";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import { ChatbotClient } from "@acp/client.ts";
 import { getRetryPromptStrategy } from "@acp/agent-factory.ts";
-import { buildSkillAutoApproveList } from "@acp/skill-inventory.ts";
+import { buildSkillAutoApproveList, LITERAL_BUN_RUN } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -52,6 +52,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { test } from "bun:test";
 import { makeTempDir, makeTempDirSync } from "../../src/utils/fs-compat.ts";
+
+/** The one literal prefix the gate accepts before a script spelling. */
+const BUN_RUN = LITERAL_BUN_RUN.join(" ");
 
 const PROMPTS_DIR = join(import.meta.dirname ?? ".", "..", "..", "prompts");
 const SKILLS_ROOT = fs.realpathSync(join(import.meta.dirname ?? ".", "..", "..", "skills"));
@@ -387,7 +390,7 @@ for (const agentType of ["opencode", "omp"] as const) {
       assertEquals(await verdict(client, SESSION_ID, skillCall("memory-save")), "allow-1");
 
       // Direct/interpreted script shape.
-      const command = `deno run --allow-net ${root}/send-email/scripts/send-email.ts ` +
+      const command = `${BUN_RUN} ${root}/send-email/scripts/send-email.ts ` +
         `--session-id ${SESSION_ID}`;
       assertEquals(await verdict(client, SESSION_ID, execCall(command)), "reject-1");
       assertEquals(await verdict(client, "sess_yolo_hidden", execCall(command)), "reject-1");

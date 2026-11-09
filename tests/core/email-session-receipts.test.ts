@@ -22,7 +22,7 @@
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join, resolve } from "node:path";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import { AgentCore } from "@core/agent-core.ts";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";

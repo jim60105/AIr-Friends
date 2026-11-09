@@ -226,7 +226,7 @@ In restricted (non-YOLO) mode, the system SHALL selectively approve or deny perm
 - **THEN** it SHALL auto-approve the request
 
 #### Scenario: Skill command with legacy free-text flag rejected
-- **GIVEN** a permission request to execute a whitelisted skill command that carries a legacy free-text flag, e.g. `deno run .../send-reply.ts --session-id "$SESSION_ID" --message "定價 $0.435"` or `... --message=定價`
+- **GIVEN** a permission request to execute a whitelisted skill command that carries a legacy free-text flag, e.g. `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml .../send-reply.ts --session-id "$SESSION_ID" --message "定價 $0.435"` or `... --message=定價`
 - **WHEN** `requestPermission()` evaluates the command tokens
 - **THEN** it SHALL reject the request with a `permission_denied` audit entry
 - **AND** a command using `--message-id "msg_x"` or `--message-file "$TMPDIR/$SESSION_ID/reply.md"` SHALL NOT be rejected on these grounds
@@ -1821,7 +1821,7 @@ Restricted script approval SHALL require the invocation entrypoint to match an e
 #### Scenario: Literal trusted recipe is approved
 
 - **GIVEN** an observed script under the resolved root and an otherwise valid restricted invocation
-- **WHEN** the script is invoked directly or as the entrypoint after `deno run`
+- **WHEN** the script is invoked directly or as the entrypoint after the exact literal prefix `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml`
 - **THEN** it SHALL be approved by exact canonical script membership
 - **AND** quoting the absolute script path or adding a tolerated fd redirect SHALL preserve the result
 
@@ -1921,7 +1921,7 @@ Script inventory SHALL use the single explicit resolved root and canonical absol
 - **GIVEN** the resolved root contains a skill whose scripts directory holds only a non-`.ts` executable (for example a `.py` or shell script)
 - **WHEN** the auto-approve inventory is constructed for either agent type and that script is invoked
 - **THEN** no inventory entry and no grant SHALL be created for it
-- **AND** enumeration SHALL remain limited to `scripts/*.ts` with the `deno` interpreter as the sole allowlisted entrypoint
+- **AND** enumeration SHALL remain limited to `scripts/*.ts` with direct execution and the exact literal `bun run` prefix as the only accepted invocation forms
 
 ### Requirement: Inventory Denial Invariants Survive The Ownership Relaxation
 

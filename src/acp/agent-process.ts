@@ -117,8 +117,8 @@ export function createAgentProcess(options: AgentProcessOptions): AgentProcessHa
   return {
     pid: child.pid!,
     stdin,
-    stdout: Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
-    stderr: Readable.toWeb(child.stderr!) as ReadableStream<Uint8Array>,
+    stdout: Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>,
+    stderr: Readable.toWeb(child.stderr!) as unknown as ReadableStream<Uint8Array>,
     exited,
     kill: (signal) => {
       try {

@@ -28,16 +28,21 @@
 // - Prerequisites are EXACT. With `EMAIL_INTENT_OPENCODE_ACCEPTANCE=1` (the
 //   documented acceptance mode) every unavailable prerequisite is a FAILED test
 //   naming the precise reason; without it the native leg stays UNEXERCISED
-//   (Deno reports the test as ignored) rather than claiming native success.
+//   (Bun reports the test as skipped) rather than claiming native success.
 // - No assertion here inspects engine sources or compares tool-result payload
 //   bytes. Assertions are about the requested operation, the denial the engine
 //   reported, and the absence of every side effect.
 
 import * as acp from "@agentclientprotocol/sdk";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { dirname, join, resolve } from "@std/path";
+import { dirname, join, resolve } from "node:path";
 import { createEmailIntentAgentConfig } from "@acp/agent-factory.ts";
 import type { AgentConfig } from "@acp/types.ts";
+import { createAgentProcess } from "../../../src/acp/agent-process.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 /** Checkout root (this file lives at `<root>/tests/integration/email-intent/`). */
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..", "..", "..");
@@ -46,7 +51,7 @@ const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..", ".."
 const SHIPPED_ASSET_PATH = join(REPO_ROOT, "agent-config/email-intent-opencode.json");
 
 /** Acceptance mode: every unavailable prerequisite becomes a named failure. */
-const ACCEPTANCE_MODE = Deno.env.get("EMAIL_INTENT_OPENCODE_ACCEPTANCE") === "1";
+const ACCEPTANCE_MODE = process.env["EMAIL_INTENT_OPENCODE_ACCEPTANCE"] === "1";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
@@ -131,9 +136,10 @@ function toolResultCount(body: unknown): number {
 function startScriptedProvider(plan: readonly PlannedCall[]): ScriptedProvider {
   const requests: unknown[] = [];
   const pathCounts = new Map<string, number>();
-  const service = Deno.serve(
-    { hostname: LOOPBACK_HOST, port: 0, onListen: () => {} },
-    async (request) => {
+  const service = Bun.serve({
+    hostname: LOOPBACK_HOST,
+    port: 0,
+    async fetch(request) {
       const url = new URL(request.url);
       pathCounts.set(url.pathname, (pathCounts.get(url.pathname) ?? 0) + 1);
       if (url.pathname === WEBFETCH_PATH) {
@@ -201,12 +207,12 @@ function startScriptedProvider(plan: readonly PlannedCall[]): ScriptedProvider {
       });
       return new Response(stream, { headers: { "content-type": "text/event-stream" } });
     },
-  );
+  });
   return {
-    origin: `http://${LOOPBACK_HOST}:${service.addr.port}`,
+    origin: `http://${LOOPBACK_HOST}:${service.port}`,
     requests,
     pathCounts,
-    shutdown: () => service.shutdown(),
+    shutdown: () => service.stop(true),
   };
 }
 
@@ -226,16 +232,12 @@ async function runProfilePrompt(
   agentConfig: AgentConfig,
   promptText: string,
 ): Promise<ClientObservations> {
-  const command = new Deno.Command(agentConfig.command, {
+  const child = createAgentProcess({
+    command: agentConfig.command,
     args: agentConfig.args,
     cwd: agentConfig.cwd,
-    clearEnv: true,
-    env: agentConfig.env,
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
+    env: agentConfig.env ?? {},
   });
-  const process = command.spawn();
   const observations = {
     plannedToolCallIds: new Set<string>(),
     failedToolCalls: new Map<string, string>(),
@@ -245,7 +247,7 @@ async function runProfilePrompt(
     fsReads: 0,
     fsWrites: 0,
   };
-  const stream = acp.ndJsonStream(process.stdin, process.stdout);
+  const stream = acp.ndJsonStream(child.stdin, child.stdout);
   const connection = new acp.ClientSideConnection(
     () => ({
       sessionUpdate: (notification) => {
@@ -324,23 +326,19 @@ async function runProfilePrompt(
     assertEquals(prompt.stopReason, "end_turn");
     return observations;
   } finally {
-    try {
-      process.kill();
-    } catch {
-      // Already gone.
-    }
-    await process.status;
-    await process.stderr.cancel().catch(() => {});
+    child.kill("SIGKILL");
+    await child.exited;
+    await child.stderr.cancel().catch(() => {});
   }
 }
 
 /** Synchronous probe: is the pinned executable available on PATH? */
 function executableAvailable(name: string): string | undefined {
-  for (const segment of (Deno.env.get("PATH") ?? "").split(":")) {
+  for (const segment of (process.env["PATH"] ?? "").split(":")) {
     if (segment === "") continue;
     const candidate = join(segment, name);
     try {
-      if (Deno.statSync(candidate).isFile) return candidate;
+      if (fs.statSync(candidate).isFile()) return candidate;
     } catch {
       // Keep looking.
     }
@@ -350,10 +348,9 @@ function executableAvailable(name: string): string | undefined {
 
 const OPENCODE_BINARY = executableAvailable("opencode");
 
-Deno.test({
-  name: "email-intent OpenCode profile - scripts every native surface and observes zero effects",
-  ignore: !ACCEPTANCE_MODE,
-  async fn() {
+test.skipIf(!ACCEPTANCE_MODE)(
+  "email-intent OpenCode profile - scripts every native surface and observes zero effects",
+  async function () {
     if (OPENCODE_BINARY === undefined) {
       throw new Error(
         "EMAIL_INTENT_OPENCODE_ACCEPTANCE=1 requires the real `opencode` executable on PATH; " +
@@ -361,13 +358,13 @@ Deno.test({
       );
     }
 
-    const root = await Deno.makeTempDir({ prefix: "email-intent-native-" });
+    const root = await makeTempDir({ prefix: "email-intent-native-" });
     // A sentinel file OUTSIDE the profile's private roots: if any read tool ever
     // ran, its marker would travel back to the scripted provider.
     const outside = join(root, "outside");
-    Deno.mkdirSync(outside, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
     const readSentinel = join(outside, "sentinel.txt");
-    Deno.writeTextFileSync(readSentinel, `# sentinel\n\n${READ_SENTINEL_MARKER}\n`);
+    fs.writeFileSync(readSentinel, `# sentinel\n\n${READ_SENTINEL_MARKER}\n`);
     const bashSentinel = join(outside, "bash-escaped.txt");
 
     const plan: PlannedCall[] = [];
@@ -399,7 +396,7 @@ Deno.test({
     plan.push(...calls);
 
     const catalogPath = join(root, "catalog.json");
-    Deno.writeTextFileSync(
+    fs.writeFileSync(
       catalogPath,
       JSON.stringify({
         $schema: "https://opencode.ai/config.json",
@@ -449,7 +446,7 @@ Deno.test({
       // Zero side effects.
       let bashExisted = true;
       try {
-        Deno.statSync(bashSentinel);
+        fs.statSync(bashSentinel);
       } catch {
         bashExisted = false;
       }
@@ -496,7 +493,7 @@ Deno.test({
       );
     } finally {
       await provider.shutdown();
-      await Deno.remove(root, { recursive: true });
+      await fsp.rm(root, { recursive: true });
     }
   },
-});
+);

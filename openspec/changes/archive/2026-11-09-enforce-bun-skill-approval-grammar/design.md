@@ -49,7 +49,9 @@ The three Deno-named tests in `tests/acp/skill-inventory.test.ts` become `matche
 
 ### D5. Step 6 exit gate
 
-After all tasks: `grep -rnE 'Deno\.[A-Za-z]+' src tests skills scripts | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)'` prints nothing; `bun run check`, `bun run lint`, `bun run fmt:check` exit 0; `bun test --timeout=120000 tests/` passes; full parity without `--scope` and without `--allow-deferred` exits 0. Skill-executing tests deferred in step 4 must pass here.
+After all tasks: `grep -rnE --include='*.ts' 'Deno\.[A-Za-z]+' src tests skills scripts | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)'` prints nothing; `bun run check`, `bun run lint`, `bun run fmt:check` exit 0; `bun test --timeout=120000 tests/` passes; full parity without `--scope` and without `--allow-deferred` exits 0. Skill-executing tests deferred in step 4 must pass here.
+
+Deviation (task 5.1): the scan is scoped to `*.ts` executable sources. `tests/fixtures/**` also carries tracked fixture data — notably `tests/fixtures/memory-recall/notes/deno-ffi-binding-notes.md`, whose prose names `Deno.dlopen` because the memory-recall query expects that exact note. That file is data, not converted code, and is kept byte-identical, so it is excluded from the scan.
 
 ## Risks / Trade-offs
 
