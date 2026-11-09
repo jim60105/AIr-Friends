@@ -48,18 +48,6 @@
       "name": "AgentConnector - MCP config conversion",
       "disposition": "removed",
       "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 3 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
-    },
-    {
-      "file": "tests/acp/agent-factory.test.ts",
-      "name": "createAgentConfig - NO_PROXY includes allowlisted egress hosts",
-      "disposition": "skipped",
-      "reason": "TEMPORARY, owner-owed deletion: blocked by `Deno.listen` in `startEgressProxy` at `src/utils/egress-proxy.ts:375`, owned by `port-egress-proxy-and-gelf-to-node-net`. `ensureEgressProxy` raises `ReferenceError: Deno is not defined` before the assertion, so the test is skipped until that change ports the listener. Must be deleted, and the test un-skipped, by that owner."
-    },
-    {
-      "file": "tests/acp/agent-factory.test.ts",
-      "name": "createAgentConfig - NO_PROXY unchanged with an empty allowlist",
-      "disposition": "skipped",
-      "reason": "TEMPORARY, owner-owed deletion: blocked by `Deno.listen` in `startEgressProxy` at `src/utils/egress-proxy.ts:375`, owned by `port-egress-proxy-and-gelf-to-node-net`. `ensureEgressProxy` raises `ReferenceError: Deno is not defined` before the assertion, so the test is skipped until that change ports the listener. Must be deleted, and the test un-skipped, by that owner."
     }
   ]
 }
