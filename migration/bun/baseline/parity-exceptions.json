@@ -6,6 +6,30 @@
       "name": "assertOmpNativeCacheComplete - accepts a matching payload and names every mismatch",
       "disposition": "removed",
       "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 13 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/config-loader.test.ts",
+      "name": "config-loader - mcpServers",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 13 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/config-loader.test.ts",
+      "name": "convertUserMCPServerConfigs",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 5 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/config-loader.test.ts",
+      "name": "loadConfig - autoApproveSkills validation",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 4 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/config-loader.test.ts",
+      "name": "loadConfig - externalSkills validation",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 3 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
     }
   ]
 }

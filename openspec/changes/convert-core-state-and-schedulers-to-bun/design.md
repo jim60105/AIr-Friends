@@ -21,7 +21,9 @@ Observed in this slice: 1,124 `Deno.` matches. Manual hotspots:
 **Non-Goals:**
 
 - No change to test names, assertions, test intent or production behavior. A test that cannot keep its name gets a `parity-exceptions.json` entry with a reason, never a silent rename.
-- No edit to any file outside D1 except `migration/bun/baseline/parity-exceptions.json`.
+- No edit to any file outside D1 except `migration/bun/baseline/parity-exceptions.json` and the
+  supervisor-authorized import/runtime sites listed under D1's "Scope deviations (supervisor-
+  authorized at apply time)".
 - No port of a high-risk symbol owned by a step 5 or step 6 change (README D4). Calls to those symbols stay, and the tests that reach them fail with `ReferenceError: Deno is not defined` until the owner lands.
 - No change to `DENO_ENV` handling or to YAML semantics beyond the parser swap.
 
@@ -115,9 +117,64 @@ scripts/migrate-memory-v2.ts
 scripts/memory-recall-benchmark.ts
 ```
 
+Scope deviations (supervisor-authorized at apply time):
+
+- Import-specifier only, identical imported names, one line per file. Without these the D1
+  test files abort at module load with `error: Cannot find module '<specifier>' from <file>`,
+  which parity cannot treat as a deferred `ReferenceError`; the sibling order-5/6 changes that
+  own these files are not applied yet. Each owner must still convert the file's remaining
+  `Deno.*` calls.
+  - `src/core/workspace-manager.ts`: `@std/path` → `node:path` (`SEPARATOR` → `sep as SEPARATOR`).
+    Removes the load error for 11 D1 test files (identity-registry, context-assembler,
+    memory-store, memory-store-v2, memory-maintenance-scheduler, memory-recall retriever /
+    snapshot-cache / benchmark, and the three memory integration files). Owner:
+    `convert-core-sessions-and-workspaces-to-bun`.
+  - `src/core/session-orchestrator.ts`: `@std/path` → `node:path`. Owner:
+    `convert-core-sessions-and-workspaces-to-bun`.
+  - `src/acp/agent-factory.ts`: `@std/path` → `node:path` and `@std/yaml` → `yaml` (same
+    `parse as parseYaml`). Removes the load error for `config-loader.test.ts` and
+    `self-research-untrusted-rss.test.ts`. Owner: `convert-acp-client-and-factory-to-bun`.
+  - `src/platforms/email/message-store.ts`, `src/platforms/email/durable-files.ts`,
+    `src/platforms/email/attachment-materializer.ts`: `@std/path` → `node:path`. Removes the
+    load error for `reminder-store.test.ts` and `self-research-untrusted-rss.test.ts`. Owner:
+    `convert-email-platform-to-bun`.
+  - `src/skills/email-handler.ts`: `@std/path` → `node:path` (`SEPARATOR` → `sep as SEPARATOR`).
+    Removes the load error for `reminder-store.test.ts`. Owner:
+    `convert-skills-dashboard-and-skill-api-support-to-bun` / `convert-email-platform-to-bun`.
+  - `src/acp/skill-inventory.ts`, `src/acp/filesystem-access.ts`,
+    `src/acp/filesystem-roots.ts`, `src/acp/command-path-policy.ts`,
+    `src/acp/filesystem-policy.ts`: `@std/path` → `node:path` (`SEPARATOR` →
+    `sep as SEPARATOR` where imported). Removes the load error for
+    `self-research-untrusted-rss.test.ts`. Owner: `convert-acp-policy-and-filesystem-to-bun`.
+  - `src/acp/client.ts`, `src/acp/omp/session-artifacts.ts`: `@std/path` → `node:path`
+    (`SEPARATOR` → `sep as SEPARATOR` in `client.ts`). Same load error. Owner:
+    `convert-acp-client-and-factory-to-bun`.
+- `src/core/workspace-manager.ts`, runtime sites, no other line: `readWorkspaceFile` reads with
+  `fsp.readFile(path, "utf8")` instead of `Deno.readTextFile`, and `appendWorkspaceFile` appends
+  with `fsp.appendFile` instead of `Deno.writeTextFile(..., { append: true })`; the two
+  `error instanceof Deno.errors.NotFound` checks reached by the D1 stores become
+  `isNotFoundError(error)` (import from `../utils/fs-compat.ts`). With the Deno globals still
+  absent, `Deno.errors` itself throws `ReferenceError` rather than reporting a missing file, so
+  the D4 format guard (`memory-v2`, `identity-linked-memory`) could not pass. Everything else in
+  the file stays: `Deno.readDir` in `listWorkspaces`, the remaining write/stat/readDir/FileInfo
+  calls and their not-found checks are the deferral left for
+  `convert-core-sessions-and-workspaces-to-bun` (one `memory-maintenance-scheduler` test is
+  deferred with `ReferenceError: Deno is not defined` at `workspace-manager.ts:448`).
+  One remaining site there is not loud: `getOrCreateWorkspace` still runs
+  `const stat = await Deno.stat(path)` inside `try { ... } catch { /* Ignore stat errors */ }`,
+  so under Bun the swallowed `ReferenceError` leaves `WorkspaceInfo.createdAt` undefined for an
+  existing workspace. `createdAt` is currently write-only, so no D1 assertion observes it and
+  parity cannot see it. Hand-off: `convert-core-sessions-and-workspaces-to-bun` converts that
+  stat and adds a `createdAt` assertion.
+- `migration/bun/baseline/parity-exceptions.json` gains the four `t.step` container entries of
+  `tests/core/config-loader.test.ts`, the same disposition and reason as the existing
+  `tests/utils/omp-native-cache.test.ts` entry: Deno reported the container as its own passing
+  case, bun:test has no case for a bare `describe` suite, and an empty `test(parent)` would be a
+  fake pass.
+
 ### D2. YAML
 
-`config-loader.ts` uses `parse` from `yaml` (YAML 1.2 core schema, duplicate keys rejected), like `@std/yaml`. Keep every existing config test unchanged; a config test that now fails is a semantic difference and must be reported, not worked around. The benchmark script's YAML use follows README D5.
+`config-loader.ts` uses `parse` from `yaml` (YAML 1.2 core schema, duplicate keys rejected), like `@std/yaml`. Core schema is the decided semantics: date-like scalars stay strings and `<<` merge keys are not resolved (`@std/yaml`'s timestamp/merge behavior is not preserved), and no repo config or fixture uses them; a later config that needs them must say so explicitly rather than rely on parser defaults. Keep every existing config test unchanged; a config test that now fails is a semantic difference and must be reported, not worked around. The benchmark script's YAML use follows README D5.
 
 ### D3. Scripts
 
