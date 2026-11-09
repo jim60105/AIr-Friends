@@ -90,11 +90,23 @@ check_skill_config() {
     set -eu
     test "$(stat -c "%U:%G %a %s" /opt/air/skill-bunfig.toml)" = "root:root 444 0"
     test "$(stat -c "%U:%G %a" /opt/air)" = "root:root 755"
-    # Each attempt MUST fail for the runtime user, and the file MUST stay empty.
-    ! rm -f /opt/air/skill-bunfig.toml
-    ! mv /opt/air/skill-bunfig.toml /opt/air/skill-bunfig.toml.bak
-    ! sh -c ": > /opt/air/skill-bunfig.toml"
-    test ! -s /opt/air/skill-bunfig.toml
+    # Each attempt MUST fail for the runtime user. Written as explicit guards
+    # because `! cmd` under `set -e` is not a portable failure (bash exempts it
+    # from errexit), which would let a successful mutation pass the check.
+    if rm -f /opt/air/skill-bunfig.toml; then
+      echo "removing the trusted config unexpectedly succeeded" >&2
+      exit 1
+    fi
+    if mv /opt/air/skill-bunfig.toml /opt/air/skill-bunfig.toml.bak; then
+      echo "renaming the trusted config unexpectedly succeeded" >&2
+      exit 1
+    fi
+    if sh -c ": > /opt/air/skill-bunfig.toml"; then
+      echo "overwriting the trusted config unexpectedly succeeded" >&2
+      exit 1
+    fi
+    # The file MUST survive every attempt unchanged.
+    test "$(stat -c "%U:%G %a %s" /opt/air/skill-bunfig.toml)" = "root:root 444 0"
   ' || fail skill-config "the trusted skill config is not immutable for UID 1000"
   echo "ok skill-config"
 }
