@@ -757,10 +757,13 @@ test("search - recall makes no network request", async () => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "a", content: "鍵盤" })]);
     const originalFetch = globalThis.fetch;
     let called = false;
-    globalThis.fetch = () => {
+    // Test double: the call must never be observed, and Bun's fetch type
+    // carries an extra `preconnect` hook this double does not implement.
+    const fetchDouble = (() => {
       called = true;
       throw new Error("network access during recall");
-    };
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchDouble;
 
     try {
       const result = await permissiveRetriever(fixture.store).search({

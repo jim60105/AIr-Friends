@@ -16,7 +16,7 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { join } from "node:path";
 import { FakeTime } from "@std/testing/time";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import type { EmailIntentProviderSelection } from "@acp/agent-factory.ts";
 import type { AgentConnectorOptions, AgentType } from "@acp/types.ts";
 import { AgentConnector, type AgentProcessEvidence } from "../../src/acp/agent-connector.ts";

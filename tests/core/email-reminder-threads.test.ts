@@ -69,7 +69,7 @@ import type { SkillContext } from "../../src/skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { AgentConnector, AgentProcessEvidence } from "../../src/acp/agent-connector.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { test } from "bun:test";

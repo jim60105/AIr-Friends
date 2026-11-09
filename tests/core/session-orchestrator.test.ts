@@ -40,7 +40,7 @@ import {
   RecoveryHookError,
 } from "../../src/acp/agent-connector.ts";
 import { RecoveryOwnershipError } from "../../src/acp/recovery-ownership.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import { dirname, join, relative, resolve } from "node:path";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -813,9 +813,9 @@ test("workspace cleanup failure never replaces the computed session response", a
       failRemoval(path);
       return originalUnlinkSync(path);
     }) as typeof fs.unlinkSync;
-    fs.rmdirSync = ((path: string | URL, options?: unknown) => {
+    fs.rmdirSync = ((path: string | URL) => {
       failRemoval(path);
-      return originalRmdirSync(path, options as never);
+      return originalRmdirSync(path);
     }) as typeof fs.rmdirSync;
     let response;
     try {

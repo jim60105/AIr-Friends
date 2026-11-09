@@ -175,8 +175,13 @@ test("F1 - control: WITHOUT clearEnv, parent secret leaks (documents the bug)", 
       HOME: process.env["HOME"] ?? "/tmp",
     };
     // Deliberately reproduce the merge the boundary must prevent.
-    const childEnv = await spawnAndReadChildEnv({ ...process.env, ...builtEnv });
-    assertEquals(childEnv[fakeSecret], "leaked-value");
+    const merged = { ...process.env, ...builtEnv };
+    const childInput: Record<string, string> = {};
+    for (const [key, value] of Object.entries(merged)) {
+      if (value !== undefined) childInput[key] = value;
+    }
+    const observedEnv = await spawnAndReadChildEnv(childInput);
+    assertEquals(observedEnv[fakeSecret], "leaked-value");
   } finally {
     delete process.env[fakeSecret];
   }
