@@ -511,7 +511,7 @@ export async function syncDirectory(dirPath: string): Promise<void> {
       "Failed to sync directory to persistent storage",
     );
   } finally {
-    dirFile?.close();
+    await dirFile?.close();
   }
 }
 
@@ -521,14 +521,14 @@ export async function syncDirectory(dirPath: string): Promise<void> {
 async function writeAllBytes(file: FileHandle, bytes: Uint8Array): Promise<void> {
   let offset = 0;
   while (offset < bytes.length) {
-    const written = await file.write(bytes.subarray(offset));
-    if (written === 0) {
+    const { bytesWritten } = await file.write(bytes.subarray(offset));
+    if (bytesWritten === 0) {
       throw new DurableFileError(
         DurableDiagnosticCode.WRITE_FAILED,
         "Zero bytes written during writeAll operation",
       );
     }
-    offset += written;
+    offset += bytesWritten;
   }
 }
 
@@ -928,7 +928,7 @@ export async function appendDurable<T>(
         "Failed to write and sync durable journal record",
       );
     } finally {
-      file?.close();
+      await file?.close();
     }
 
     // Sync containing directory to ensure directory entry durability
@@ -997,7 +997,7 @@ export async function replaceSnapshot<T>(
       await tmpFile.sync();
     } catch (err) {
       if (tmpFile) {
-        tmpFile.close();
+        await tmpFile.close();
         tmpFile = null;
       }
       await removePath(tmpPath).catch(() => {});
@@ -1007,7 +1007,7 @@ export async function replaceSnapshot<T>(
         "Failed to write and sync snapshot temporary file",
       );
     } finally {
-      tmpFile?.close();
+      await tmpFile?.close();
     }
 
     // Verify destination target is not a symlink before renaming

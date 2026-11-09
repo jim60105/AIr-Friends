@@ -623,14 +623,16 @@ test("workspace cleanup waits for a per-spawn background tool child before recla
   } finally {
     if (wrapper.child) {
       const child = wrapper.child;
-      const exited = Promise.withResolvers<void>();
-      child.once("close", () => exited.resolve());
       try {
         child.kill("SIGTERM");
       } catch {
         // Already gone.
       }
-      await exited.promise;
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = Promise.withResolvers<void>();
+        child.once("close", () => exited.resolve());
+        await exited.promise;
+      }
     }
     await fsp.rm(tempDir, { recursive: true });
   }
@@ -718,14 +720,16 @@ test("workspace cleanup retains staged files when a re-spawn superseded the drai
   } finally {
     if (wrapper.child) {
       const child = wrapper.child;
-      const exited = Promise.withResolvers<void>();
-      child.once("close", () => exited.resolve());
       try {
         child.kill("SIGKILL");
       } catch {
         // Already gone.
       }
-      await exited.promise;
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = Promise.withResolvers<void>();
+        child.once("close", () => exited.resolve());
+        await exited.promise;
+      }
     }
     await fsp.rm(tempDir, { recursive: true });
   }
@@ -6502,8 +6506,10 @@ test("SessionOrchestrator - attachment-only email trigger and history stage into
           const historyFile = files.find((file) =>
             file.includes(`attachments/${historyAttachment.attachmentId}/history.png`)
           );
-          if (triggerFile) stagedTriggerBytes = await fsp.readFile(triggerFile);
-          if (historyFile) stagedHistoryBytes = await fsp.readFile(historyFile);
+          // `fsp.readFile` yields a Buffer; copy into a plain `Uint8Array` so the
+          // byte comparison matches the expected `Uint8Array` value.
+          if (triggerFile) stagedTriggerBytes = new Uint8Array(await fsp.readFile(triggerFile));
+          if (historyFile) stagedHistoryBytes = new Uint8Array(await fsp.readFile(historyFile));
         },
       },
     );

@@ -1229,15 +1229,15 @@ export class EmailMessageStore {
 
       let offset = 0;
       while (offset < bytes.length) {
-        const written = await tmpFile.write(bytes.subarray(offset));
-        if (written === 0) {
+        const { bytesWritten } = await tmpFile.write(bytes.subarray(offset));
+        if (bytesWritten === 0) {
           throw new Error("Zero bytes written");
         }
-        offset += written;
+        offset += bytesWritten;
       }
       await tmpFile.sync();
     } finally {
-      tmpFile?.close();
+      await tmpFile?.close();
     }
 
     await fsp.rename(tmpPath, filePath);
