@@ -11,25 +11,29 @@ import { SkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
+import fsp from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { test } from "bun:test";
+import { makeTempDir, makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const TEST_SKILL_SECRET = "0123456789abcdef0123456789abcdef01";
 
 function withEnv(key: string, value: string | undefined, fn: () => Promise<void>): Promise<void> {
-  const prev = Deno.env.get(key);
+  const prev = process.env[key];
   if (value === undefined) {
-    Deno.env.delete(key);
+    delete process.env[key];
   } else {
-    Deno.env.set(key, value);
+    process.env[key] = value;
   }
   return fn().finally(() => {
-    if (prev === undefined) Deno.env.delete(key);
-    else Deno.env.set(key, prev);
+    if (prev === undefined) delete process.env[key];
+    else process.env[key] = prev;
   });
 }
 
-Deno.test("resolveOwningSessionId - uses the active.json pointer in shared mode", async () => {
-  const jwtDir = Deno.makeTempDirSync();
-  await Deno.writeTextFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId: "sess_pointer" }));
+test("resolveOwningSessionId - uses the active.json pointer in shared mode", async () => {
+  const jwtDir = makeTempDirSync();
+  await fsp.writeFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId: "sess_pointer" }));
   await withEnv("SKILL_SHARED_PROCESS", "1", async () => {
     await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
       await withEnv("SESSION_ID", "sess_stale_env", async () => {
@@ -38,26 +42,23 @@ Deno.test("resolveOwningSessionId - uses the active.json pointer in shared mode"
       });
     });
   });
-  await Deno.remove(jwtDir, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
 });
 
-Deno.test("resolveOwningSessionId - $SESSION_ID wins over a stale pointer in per-spawn mode", async () => {
-  const jwtDir = Deno.makeTempDirSync();
-  await Deno.writeTextFile(
-    `${jwtDir}/active.json`,
-    JSON.stringify({ sessionId: "sess_stale_pointer" }),
-  );
+test("resolveOwningSessionId - $SESSION_ID wins over a stale pointer in per-spawn mode", async () => {
+  const jwtDir = makeTempDirSync();
+  await fsp.writeFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId: "sess_stale_pointer" }));
   await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
     await withEnv("SESSION_ID", "sess_env_owner", async () => {
       await Promise.resolve();
       assertEquals(resolveOwningSessionId(), "sess_env_owner");
     });
   });
-  await Deno.remove(jwtDir, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
 });
 
-Deno.test("resolveOwningSessionId - shared mode without a pointer fails SKILL_SESSION_UNRESOLVED (no env fallback)", async () => {
-  const jwtDir = Deno.makeTempDirSync();
+test("resolveOwningSessionId - shared mode without a pointer fails SKILL_SESSION_UNRESOLVED (no env fallback)", async () => {
+  const jwtDir = makeTempDirSync();
   try {
     await withEnv("SKILL_SHARED_PROCESS", "1", async () => {
       await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
@@ -79,14 +80,14 @@ Deno.test("resolveOwningSessionId - shared mode without a pointer fails SKILL_SE
       });
     });
   } finally {
-    await Deno.remove(jwtDir, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
   }
 });
 
-Deno.test("resolveOwningSessionId - shared mode with a malformed pointer (non-string sessionId) fails loud", async () => {
-  const jwtDir = Deno.makeTempDirSync();
+test("resolveOwningSessionId - shared mode with a malformed pointer (non-string sessionId) fails loud", async () => {
+  const jwtDir = makeTempDirSync();
   try {
-    await Deno.writeTextFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId: 42 }));
+    await fsp.writeFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId: 42 }));
     await withEnv("SKILL_SHARED_PROCESS", "1", async () => {
       await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
         await Promise.resolve();
@@ -104,11 +105,11 @@ Deno.test("resolveOwningSessionId - shared mode with a malformed pointer (non-st
       });
     });
   } finally {
-    await Deno.remove(jwtDir, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
   }
 });
 
-Deno.test("resolveOwningSessionId - falls back to $SESSION_ID in per-spawn mode", async () => {
+test("resolveOwningSessionId - falls back to $SESSION_ID in per-spawn mode", async () => {
   await withEnv("SKILL_JWT_DIR", undefined, async () => {
     await withEnv("SESSION_ID", "sess_env", async () => {
       await Promise.resolve();
@@ -117,7 +118,7 @@ Deno.test("resolveOwningSessionId - falls back to $SESSION_ID in per-spawn mode"
   });
 });
 
-Deno.test("resolveOwningSessionId - throws when neither source is available", async () => {
+test("resolveOwningSessionId - throws when neither source is available", async () => {
   await withEnv("SKILL_JWT_DIR", undefined, async () => {
     await withEnv("SESSION_ID", undefined, async () => {
       await Promise.resolve();
@@ -130,28 +131,28 @@ Deno.test("resolveOwningSessionId - throws when neither source is available", as
   });
 });
 
-Deno.test("readSkillJwt - reads the per-session JWT file", async () => {
-  const jwtDir = Deno.makeTempDirSync();
+test("readSkillJwt - reads the per-session JWT file", async () => {
+  const jwtDir = makeTempDirSync();
   const jwt = await createSkillJwt(TEST_SKILL_SECRET, {
     sub: "sess_ab12",
     channel: "discord/123",
     jti: "tok1",
   });
-  await Deno.writeTextFile(`${jwtDir}/sess_ab12.jwt`, jwt + "\n");
+  await fsp.writeFile(`${jwtDir}/sess_ab12.jwt`, jwt + "\n");
   await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
     await Promise.resolve();
     assertEquals(readSkillJwt("sess_ab12"), jwt);
   });
-  await Deno.remove(jwtDir, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
 });
 
 // Pooled skill scripts run with the tool cwd chosen by OpenCode (the session
 // workspace), NOT the bot process cwd. With an absolute SKILL_JWT_DIR the
 // pointer + JWT lookups must succeed on the first attempt from ANY cwd. Runs in
 // a subprocess so its cwd truly differs from the JWT directory's parent.
-Deno.test("SKILL_JWT_DIR is cwd-independent (pointer + JWT from a foreign working directory)", async () => {
-  const jwtDir = Deno.makeTempDirSync();
-  const foreignCwd = Deno.makeTempDirSync();
+test("SKILL_JWT_DIR is cwd-independent (pointer + JWT from a foreign working directory)", async () => {
+  const jwtDir = makeTempDirSync();
+  const foreignCwd = makeTempDirSync();
   try {
     const sessionId = "sess_cwd_indep";
     const jwt = await createSkillJwt(TEST_SKILL_SECRET, {
@@ -159,20 +160,20 @@ Deno.test("SKILL_JWT_DIR is cwd-independent (pointer + JWT from a foreign workin
       channel: "discord/123",
       jti: "tok1",
     });
-    await Deno.writeTextFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId }));
-    await Deno.writeTextFile(`${jwtDir}/${sessionId}.jwt`, jwt + "\n");
+    await fsp.writeFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId }));
+    await fsp.writeFile(`${jwtDir}/${sessionId}.jwt`, jwt + "\n");
 
-    const clientUrl = new URL("../../skills/lib/client.ts", import.meta.url).href;
+    const clientPath = fileURLToPath(new URL("../../skills/lib/client.ts", import.meta.url));
     const script = `
-import { resolveOwningSessionId, readSkillJwt } from ${JSON.stringify(clientUrl)};
+import { resolveOwningSessionId, readSkillJwt } from ${JSON.stringify(clientPath)};
 const owned = resolveOwningSessionId();
 const jwt = readSkillJwt(owned);
 console.log(JSON.stringify({ owned, jwt }));
 `;
     const scriptPath = `${jwtDir}/probe.ts`;
-    await Deno.writeTextFile(scriptPath, script);
+    await fsp.writeFile(scriptPath, script);
 
-    const baseEnv = Deno.env.toObject();
+    const baseEnv = { ...process.env };
     const env: Record<string, string> = {
       SKILL_SHARED_PROCESS: "1",
       SKILL_JWT_DIR: jwtDir,
@@ -182,17 +183,21 @@ console.log(JSON.stringify({ owned, jwt }));
       if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
     }
 
-    const output = await new Deno.Command(Deno.execPath(), {
-      args: ["run", "--no-check", "--allow-read", "--allow-env", scriptPath],
+    const output = Bun.spawn([process.execPath, "run", scriptPath], {
       cwd: foreignCwd,
       env,
-      clearEnv: true,
-    }).output();
-    const stdout = new TextDecoder().decode(output.stdout);
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(output.stdout).text(),
+      new Response(output.stderr).text(),
+      output.exited,
+    ]);
     assertEquals(
-      output.code,
+      code,
       0,
-      `child failed: ${stdout}${new TextDecoder().decode(output.stderr)}`,
+      `child failed: ${stdout}${stderr}`,
     );
     const result = JSON.parse(stdout.trim().split("\n").at(-1)!) as {
       owned: string;
@@ -201,13 +206,13 @@ console.log(JSON.stringify({ owned, jwt }));
     assertEquals(result.owned, sessionId);
     assertEquals(result.jwt, jwt);
   } finally {
-    await Deno.remove(jwtDir, { recursive: true });
-    await Deno.remove(foreignCwd, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
+    await fsp.rm(foreignCwd, { recursive: true });
   }
 });
 
-Deno.test("callSkillApi - presents the per-session JWT end-to-end", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("callSkillApi - presents the per-session JWT end-to-end", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -236,15 +241,15 @@ Deno.test("callSkillApi - presents the per-session JWT end-to-end", async () => 
 
     // Issue the per-session JWT exactly as the process pool does at lease acquisition.
     const jwtDir = `${tempDir}/skill-jwt`;
-    await Deno.mkdir(jwtDir, { recursive: true });
+    await fsp.mkdir(jwtDir, { recursive: true });
     const jwt = await createSkillJwt(TEST_SKILL_SECRET, {
       sub: sessionId,
       channel: "discord/456",
       jti: callerToken,
     });
-    await Deno.writeTextFile(`${jwtDir}/${sessionId}.jwt`, jwt + "\n");
+    await fsp.writeFile(`${jwtDir}/${sessionId}.jwt`, jwt + "\n");
     // Write the active pointer (the pool writes it while the lease is held).
-    await Deno.writeTextFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId }));
+    await fsp.writeFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId }));
 
     const port = 3301;
     const server = new SkillAPIServer(
@@ -269,6 +274,6 @@ Deno.test("callSkillApi - presents the per-session JWT end-to-end", async () => 
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
