@@ -18,7 +18,8 @@
     "fmt": "dprint fmt",
     "fmt:check": "dprint check",
     "lint": "oxlint src tests",
-    "check": "tsc --noEmit -p tsconfig.json"
+    "check": "tsc --noEmit -p tsconfig.json",
+    "bundle:omp-extension": "sh scripts/omp/bundle-omp-extension.sh . build/omp-extension"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.14.1",
