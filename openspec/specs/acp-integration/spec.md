@@ -1805,7 +1805,7 @@ The combined lifecycle suite SHALL be deterministic: timer-driven paths SHALL us
 #### Scenario: Integration task stays live-acceptance-free
 - **GIVEN** the repository's integration test task executes the new suite
 - **WHEN** the suite runs
-- **THEN** only in-process fixtures and `deno`-launched mock subprocesses SHALL be spawned
+- **THEN** only in-process fixtures and `bun`-launched mock subprocesses SHALL be spawned
 - **AND** no `omp --version`, container build, bwrap invocation, or external provider request SHALL occur
 
 #### Scenario: No live external dependencies
@@ -2510,3 +2510,17 @@ When a disconnect escalates to `SIGKILL`, the connector SHALL send `SIGKILL` to 
 - **GIVEN** an agent that exits on `SIGTERM`
 - **WHEN** the connector disconnects
 - **THEN** no `SIGKILL` SHALL be sent
+
+### Requirement: Integration Suites Leave No Leaked Descriptors Or Processes
+
+Each agent integration test SHALL end with the test process's open file-descriptor count and its descendant-process count back at the values measured before the test started.
+
+#### Scenario: Shared-process suite teardown
+- **GIVEN** a shared-process integration test that spawned mock agents
+- **WHEN** the test's teardown has completed
+- **THEN** the test process SHALL have no descendant process and no more open descriptors than before the test
+
+#### Scenario: Leak is reported
+- **GIVEN** a test that leaves one spawned mock agent running
+- **WHEN** the leak check runs after teardown
+- **THEN** the check SHALL fail and name the surviving PID
