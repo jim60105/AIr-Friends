@@ -1,10 +1,12 @@
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import {
   isReservedOmpNativeCachePath,
   ompNativeCacheExclusionPathspecs,
 } from "@utils/omp-native-cache.ts";
 import type { GitBackupConfig } from "../types/config.ts";
+import fsp from "node:fs/promises";
+import { removePath } from "../utils/fs-compat.ts";
 
 const logger = createLogger("GitBackupService");
 
@@ -81,7 +83,7 @@ export class GitBackupService {
   /** Check if a directory is empty. */
   private async isDirEmpty(path: string): Promise<boolean> {
     try {
-      for await (const _entry of Deno.readDir(path)) {
+      for (const _entry of await fsp.readdir(path, { withFileTypes: true })) {
         return false;
       }
       return true;
@@ -363,7 +365,7 @@ export class GitBackupService {
   /** Build the authenticated remote URL with credentials injected. */
   private getAuthenticatedUrl(): string {
     const password = this.config.authPassword ??
-      Deno.env.get("GITHUB_TOKEN") ?? "";
+      process.env["GITHUB_TOKEN"] ?? "";
     if (!password) return this.config.remoteUrl;
 
     const username = this.config.authUser ??
@@ -507,7 +509,7 @@ export class GitBackupService {
     // Also remove .gitmodules if it was auto-created
     const gitmodulesPath = `${this.dataDir}/.gitmodules`;
     try {
-      await Deno.remove(gitmodulesPath);
+      await removePath(gitmodulesPath);
     } catch {
       // .gitmodules doesn't exist — this is the normal case
     }
@@ -526,8 +528,8 @@ export class GitBackupService {
   /** Check if a directory exists. */
   private async dirExists(path: string): Promise<boolean> {
     try {
-      const stat = await Deno.stat(path);
-      return stat.isDirectory;
+      const stat = await fsp.stat(path);
+      return stat.isDirectory();
     } catch {
       return false;
     }
@@ -537,7 +539,7 @@ export class GitBackupService {
   private async cleanStaleLockFiles(): Promise<void> {
     const lockPath = `${this.dataDir}/.git/index.lock`;
     try {
-      await Deno.remove(lockPath);
+      await removePath(lockPath);
       logger.warn("Removed stale Git lock file: {lockPath}", { lockPath });
     } catch {
       // Lock file doesn't exist — this is the normal case

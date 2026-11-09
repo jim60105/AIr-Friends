@@ -10,7 +10,11 @@
  */
 
 import { join, resolve } from "node:path";
+import fsp from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
+import { isNotFoundError } from "../../utils/fs-compat.ts";
+import { runtimeOs } from "../../utils/runtime-platform.ts";
 import {
   appendDurable,
   assertSafePath,
@@ -745,9 +749,9 @@ export class EmailMessageStore {
       const sourceRel = `${SOURCE_SUBDIR}/${validRecord}.eml`;
       const sourcePath = await assertSafePath(emailRoot, sourceRel);
       try {
-        return await Deno.readFile(sourcePath);
+        return await fsp.readFile(sourcePath);
       } catch (err) {
-        if (err instanceof Deno.errors.NotFound) return undefined;
+        if (isNotFoundError(err)) return undefined;
         throw err;
       }
     });
@@ -887,9 +891,9 @@ export class EmailMessageStore {
       const attRel = `${ATTACHMENTS_SUBDIR}/${validRecord}/${validAtt}`;
       const attPath = await assertSafePath(emailRoot, attRel);
       try {
-        return await Deno.readFile(attPath);
+        return await fsp.readFile(attPath);
       } catch (err) {
-        if (err instanceof Deno.errors.NotFound) return undefined;
+        if (isNotFoundError(err)) return undefined;
         throw err;
       }
     });
@@ -1038,7 +1042,7 @@ export class EmailMessageStore {
       let snapshot: StoredEmailRecord | undefined;
       try {
         const parsedPath = await assertSafePath(emailRoot, parsedRel);
-        const text = await Deno.readTextFile(parsedPath);
+        const text = await fsp.readFile(parsedPath, "utf8");
         snapshot = JSON.parse(text) as StoredEmailRecord;
         if (snapshot.recordId !== record.recordId || snapshot.owner !== owner) {
           throw new Error("Snapshot record ID or owner mismatch");
@@ -1215,16 +1219,12 @@ export class EmailMessageStore {
     const basename = idx >= 0 ? filePath.slice(idx + 1) : filePath;
     const tmpPath = resolve(parentDir, `.${basename}.tmp-${crypto.randomUUID()}`);
 
-    let tmpFile: Deno.FsFile | null = null;
+    let tmpFile: FileHandle | null = null;
     try {
-      tmpFile = await Deno.open(tmpPath, {
-        createNew: true,
-        write: true,
-        mode: 0o600,
-      });
+      tmpFile = await fsp.open(tmpPath, "wx", 0o600);
 
-      if (Deno.build.os !== "windows") {
-        await Deno.chmod(tmpPath, 0o600);
+      if (runtimeOs() !== "windows") {
+        await fsp.chmod(tmpPath, 0o600);
       }
 
       let offset = 0;
@@ -1240,7 +1240,7 @@ export class EmailMessageStore {
       tmpFile?.close();
     }
 
-    await Deno.rename(tmpPath, filePath);
+    await fsp.rename(tmpPath, filePath);
     await syncDirectory(parentDir);
   }
 
