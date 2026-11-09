@@ -15,6 +15,11 @@ import {
   type SkillInventoryFs,
 } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
+import fs from "node:fs";
+import type { Dirent, Stats } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** The supported agent types; both construct the identical inventory. */
 const AGENT_TYPES = ["opencode", "omp"] as const;
@@ -35,23 +40,23 @@ function list(
 }
 
 function makeRoot(scriptSkills: string[], commandSkills: string[] = []): string {
-  const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-inv-" }));
+  const root = fs.realpathSync(makeTempDirSync({ prefix: "air-inv-" }));
   for (const name of scriptSkills) {
-    Deno.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
-    Deno.writeTextFileSync(`${root}/${name}/scripts/${name}.ts`, "// real");
+    fs.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
+    fs.writeFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
+    fs.writeFileSync(`${root}/${name}/scripts/${name}.ts`, "// real");
   }
   for (const name of commandSkills) {
-    Deno.mkdirSync(`${root}/${name}`, { recursive: true });
-    Deno.writeTextFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
+    fs.mkdirSync(`${root}/${name}`, { recursive: true });
+    fs.writeFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
   }
   return root;
 }
 
-Deno.test("inventory - the explicit root is scanned for either agent type; lib reserved excluded", () => {
+test("inventory - the explicit root is scanned for either agent type; lib reserved excluded", () => {
   const root = makeRoot(["memory-save", "send-reply"], ["agent-browser"]);
-  Deno.mkdirSync(`${root}/lib`, { recursive: true });
-  Deno.writeTextFileSync(`${root}/lib/client.ts`, "// shared library");
+  fs.mkdirSync(`${root}/lib`, { recursive: true });
+  fs.writeFileSync(`${root}/lib/client.ts`, "// shared library");
   for (const agentType of AGENT_TYPES) {
     const inv = list(agentType, root);
     assertEquals(
@@ -68,7 +73,7 @@ Deno.test("inventory - the explicit root is scanned for either agent type; lib r
   }
 });
 
-Deno.test("inventory - a non-bundled installed .ts script is eligible for BOTH agent types", () => {
+test("inventory - a non-bundled installed .ts script is eligible for BOTH agent types", () => {
   // A runtime-installed external addition that is not in the authored catalog
   // shares the one resolved root: no catalog entry is required for either agent
   // type, under an empty AND an explicitly configured approval list.
@@ -96,16 +101,16 @@ Deno.test("inventory - a non-bundled installed .ts script is eligible for BOTH a
   }
 });
 
-Deno.test("inventory - a non-.ts script is eligible for neither agent type", () => {
+test("inventory - a non-.ts script is eligible for neither agent type", () => {
   // `scripts/*.ts` with `deno` as the sole allowlisted interpreter stays the
   // only enumerable form: a `.py` or shell script grants nothing anywhere.
   const root = makeRoot(["memory-save"]);
   for (
     const [name, file] of [["py-skill", "py-skill.py"], ["shell-skill", "shell-skill.sh"]] as const
   ) {
-    Deno.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
-    Deno.writeTextFileSync(`${root}/${name}/scripts/${file}`, "// never executable");
+    fs.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
+    fs.writeFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
+    fs.writeFileSync(`${root}/${name}/scripts/${file}`, "// never executable");
   }
   for (const agentType of AGENT_TYPES) {
     const inv = list(agentType, root);
@@ -136,7 +141,7 @@ Deno.test("inventory - a non-.ts script is eligible for neither agent type", () 
   }
 });
 
-Deno.test("inventory - configured names filter observed entries; absent skills grant nothing", () => {
+test("inventory - configured names filter observed entries; absent skills grant nothing", () => {
   const root = makeRoot(["memory-save", "send-reply"], ["agent-browser"]);
   // Configured filter keeps only listed, OBSERVED skills.
   const filtered = list("opencode", root, ["memory-save", "agent-browser"]);
@@ -154,7 +159,7 @@ Deno.test("inventory - configured names filter observed entries; absent skills g
   assertEquals(absent.commandPrefixes.size, 0);
 });
 
-Deno.test("inventory - no catalog bounds or expands the configured list for either agent type", () => {
+test("inventory - no catalog bounds or expands the configured list for either agent type", () => {
   const root = makeRoot(["memory-save", "create-blog-post"], ["agent-browser"]);
   for (const agentType of AGENT_TYPES) {
     // An explicitly configured external name that IS present is admitted…
@@ -171,7 +176,7 @@ Deno.test("inventory - no catalog bounds or expands the configured list for eith
   }
 });
 
-Deno.test("inventory - invalid skill names contribute nothing", () => {
+test("inventory - invalid skill names contribute nothing", () => {
   const root = makeRoot(["memory-save"]);
   // Malicious configured spellings can neither add grants nor crash the build.
   const inv = list("opencode", root, ["../outside", "a/b", "/abs", ".", "", "memo..ry"]);
@@ -182,18 +187,18 @@ Deno.test("inventory - invalid skill names contribute nothing", () => {
   // only canonical single components are ever enumerated.
 });
 
-Deno.test("inventory - non-regular/non-.ts scripts and unreadable script dirs", () => {
+test("inventory - non-regular/non-.ts scripts and unreadable script dirs", () => {
   const root = makeRoot(["memory-save"]);
-  Deno.mkdirSync(`${root}/mixed`, { recursive: true });
-  Deno.writeTextFileSync(`${root}/mixed/SKILL.md`, "# mixed");
-  Deno.mkdirSync(`${root}/mixed/scripts`, { recursive: true });
-  Deno.writeTextFileSync(`${root}/mixed/scripts/helper.js`, "// not TS");
-  Deno.mkdirSync(`${root}/mixed/scripts/nested.ts`, { recursive: true }); // directory named .ts
+  fs.mkdirSync(`${root}/mixed`, { recursive: true });
+  fs.writeFileSync(`${root}/mixed/SKILL.md`, "# mixed");
+  fs.mkdirSync(`${root}/mixed/scripts`, { recursive: true });
+  fs.writeFileSync(`${root}/mixed/scripts/helper.js`, "// not TS");
+  fs.mkdirSync(`${root}/mixed/scripts/nested.ts`, { recursive: true }); // directory named .ts
   // A script skill whose scripts dir was REPLACED by a file (error shape):
   // never reinterpreted as a command-based skill.
-  Deno.mkdirSync(`${root}/broken`, { recursive: true });
-  Deno.writeTextFileSync(`${root}/broken/SKILL.md`, "# broken");
-  Deno.writeTextFileSync(`${root}/broken/scripts`, "not a directory");
+  fs.mkdirSync(`${root}/broken`, { recursive: true });
+  fs.writeFileSync(`${root}/broken/SKILL.md`, "# broken");
+  fs.writeFileSync(`${root}/broken/scripts`, "not a directory");
   const inv = list("opencode", root);
   assertEquals(
     inv.scripts.map((s) => s.canonicalPath),
@@ -203,7 +208,7 @@ Deno.test("inventory - non-regular/non-.ts scripts and unreadable script dirs", 
   assertEquals([...inv.commandPrefixes].includes("mixed"), false);
 });
 
-Deno.test("inventory - requires an identity-bearing observation and a canonical directory", () => {
+test("inventory - requires an identity-bearing observation and a canonical directory", () => {
   // Missing root: resolver itself refuses (explicit ConfigError).
   assertThrows(() => observeTrustedSkillsRoot("opencode", "/definitely/not/here"));
   // A root observation without a recorded identity cannot anchor rechecks.
@@ -220,10 +225,10 @@ function decisionCtx(sessionCwd: string | undefined) {
   return { sessionCwd };
 }
 
-Deno.test("matcher - absolute canonical approval; suffix and prefix tricks denied", () => {
+test("matcher - absolute canonical approval; suffix and prefix tricks denied", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   try {
     assertEquals(
       matchesScriptEntrypoint(
@@ -246,8 +251,8 @@ Deno.test("matcher - absolute canonical approval; suffix and prefix tricks denie
     // ENDING in `skills/memory-save/scripts/memory-save.ts` — including a
     // planted tree at `evil-skills/memory-save/...`. Physical membership
     // denies it even when the file is real.
-    Deno.mkdirSync(`${cwd}/evil-skills/memory-save/scripts`, { recursive: true });
-    Deno.copyFileSync(
+    fs.mkdirSync(`${cwd}/evil-skills/memory-save/scripts`, { recursive: true });
+    fs.copyFileSync(
       `${root}/memory-save/scripts/memory-save.ts`,
       `${cwd}/evil-skills/memory-save/scripts/memory-save.ts`,
     );
@@ -271,20 +276,20 @@ Deno.test("matcher - absolute canonical approval; suffix and prefix tricks denie
       true,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("matcher - relative anchors ONLY at the registered session cwd", () => {
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+test("matcher - relative anchors ONLY at the registered session cwd", () => {
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const root = makeRoot(["memory-save"]);
-  Deno.mkdirSync(`${cwd}/skills`, { recursive: true });
-  Deno.symlinkSync(root, `${cwd}/skills/linked-root`);
+  fs.mkdirSync(`${cwd}/skills`, { recursive: true });
+  fs.symlinkSync(root, `${cwd}/skills/linked-root`);
   const inv = list("opencode", root);
   try {
     // A real relative grant anchored at the registered session cwd:
-    Deno.mkdirSync(`${cwd}/localskill/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${cwd}/localskill/scripts/localskill.ts`, "// real");
+    fs.mkdirSync(`${cwd}/localskill/scripts`, { recursive: true });
+    fs.writeFileSync(`${cwd}/localskill/scripts/localskill.ts`, "// real");
     const invLocal = list("opencode", cwd);
     assertEquals(
       matchesScriptEntrypoint("deno run localskill/scripts/localskill.ts", invLocal, {
@@ -318,14 +323,14 @@ Deno.test("matcher - relative anchors ONLY at the registered session cwd", () =>
       false,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("matcher - deno-run grammar: `run` must be the subcommand", () => {
+test("matcher - deno-run grammar: `run` must be the subcommand", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
     assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
@@ -351,49 +356,56 @@ Deno.test("matcher - deno-run grammar: `run` must be the subcommand", () => {
       false,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("matcher - decision-time root/script replacement denies", () => {
+test("matcher - decision-time root/script replacement denies", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
     assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
     // CI-proven: the runner's filesystem reuses dev/ino verbatim after
     // delete+recreate, so this real-filesystem replant only denies because
     // the replacement content differs in SIZE (the clock-independent field).
-    Deno.removeSync(root, { recursive: true });
-    Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
-    Deno.writeTextFileSync(script, "// replaced");
+    fs.rmSync(root, { recursive: true });
+    fs.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
+    fs.writeFileSync(script, "// replaced");
     assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), false);
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("matcher - identity-tuple drift denies with dev/ino intact (each field pins)", () => {
+test("matcher - identity-tuple drift denies with dev/ino intact (each field pins)", () => {
   // The seam-pinned counterpart of the real-filesystem replacement test:
   // identical dev/ino AND identical size/ctime respectively, so each extended
   // identity field is proven to participate on its own, deterministically,
   // without clock or inode-allocation luck.
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
-  const drift = (path: string, over: Partial<Deno.FileInfo>): SkillInventoryFs => ({
-    lstat: (p): Deno.FileInfo => ({ ...Deno.lstatSync(p), ...(p === path ? over : {}) }),
-    readDir: (p): Deno.DirEntry[] => [...Deno.readDirSync(p)],
-    realPath: (p) => Deno.realPathSync(p),
+  const drift = (path: string, over: Partial<Stats>): SkillInventoryFs => ({
+    lstat: (p): Stats => {
+      const stat = fs.lstatSync(p);
+      // A `Stats` spread loses the prototype methods; copy onto a real
+      // prototype so `isFile()`/`isDirectory()` stay callable.
+      return p === path
+        ? Object.assign(Object.create(Object.getPrototypeOf(stat)) as Stats, stat, over)
+        : stat;
+    },
+    readDir: (p): Dirent[] => [...fs.readdirSync(p, { withFileTypes: true })],
+    realPath: (p) => fs.realpathSync(p),
   });
   try {
     // A replant whose dev/ino AND size match the grant: only ctime denies.
     assertEquals(
       matchesScriptEntrypoint(`deno run ${script}`, inv, {
         sessionCwd: cwd,
-        fs: drift(script, { ctime: new Date(Deno.lstatSync(script).ctime!.getTime() + 60_000) }),
+        fs: drift(script, { ctimeMs: fs.lstatSync(script).ctimeMs + 60_000 }),
       }),
       false,
       "a same-size script replant with drifted ctime must deny",
@@ -403,7 +415,7 @@ Deno.test("matcher - identity-tuple drift denies with dev/ino intact (each field
     assertEquals(
       matchesScriptEntrypoint(`deno run ${script}`, inv, {
         sessionCwd: cwd,
-        fs: drift(script, { size: Deno.lstatSync(script).size! + 4 }),
+        fs: drift(script, { size: fs.lstatSync(script).size! + 4 }),
       }),
       false,
       "a same-ctime script replant with drifted size must deny",
@@ -413,7 +425,7 @@ Deno.test("matcher - identity-tuple drift denies with dev/ino intact (each field
     assertEquals(
       matchesScriptEntrypoint(`deno run ${script}`, inv, {
         sessionCwd: cwd,
-        fs: drift(root, { ctime: new Date(Deno.lstatSync(root).ctime!.getTime() + 60_000) }),
+        fs: drift(root, { ctimeMs: fs.lstatSync(root).ctimeMs + 60_000 }),
       }),
       false,
       "a root replant with drifted ctime must deny",
@@ -427,12 +439,12 @@ Deno.test("matcher - identity-tuple drift denies with dev/ino intact (each field
       true,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
-    Deno.removeSync(root, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
+    fs.rmSync(root, { recursive: true });
   }
 });
 
-Deno.test("decodeLiteralToken - fail-closed quoting", () => {
+test("decodeLiteralToken - fail-closed quoting", () => {
   assertEquals(decodeLiteralToken("plain"), "plain");
   assertEquals(decodeLiteralToken("'single'"), "single");
   assertEquals(decodeLiteralToken('"double"'), "double");
@@ -445,7 +457,7 @@ Deno.test("decodeLiteralToken - fail-closed quoting", () => {
   assertEquals(decodeLiteralToken('"a`b"'), undefined);
 });
 
-Deno.test("isUnderRoot - boundary-safe containment", () => {
+test("isUnderRoot - boundary-safe containment", () => {
   assertEquals(isUnderRoot("/a/b", "/a"), true);
   assertEquals(isUnderRoot("/a", "/a"), true);
   assertEquals(isUnderRoot("/ab", "/a"), false);
@@ -454,10 +466,10 @@ Deno.test("isUnderRoot - boundary-safe containment", () => {
 
 // --- Post-implementation review fold-in (B1/B2/N1) ---
 
-Deno.test("matcher - unflagged and allow-listed-flag deno run spellings still approve", () => {
+test("matcher - unflagged and allow-listed-flag deno run spellings still approve", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
     // The ordinary unflagged posture (production's dominant shape) is
@@ -473,21 +485,21 @@ Deno.test("matcher - unflagged and allow-listed-flag deno run spellings still ap
       true,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("matcher - module-affecting deno run flags deny fail-closed (B2)", () => {
+test("matcher - module-affecting deno run flags deny fail-closed (B2)", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   // A trusted grant used as the (perceived) entrypoint while a PRELOAD module
   // actually executes: `--preload <trusted> <planted>` — the old skip-all-flags
   // grammar read <trusted> as the entrypoint and approved while Deno executed
   // an unapproved main.
-  Deno.mkdirSync(`${cwd}/evil`, { recursive: true });
-  Deno.writeTextFileSync(`${cwd}/evil/main.ts`, "import { grant } from '...';");
+  fs.mkdirSync(`${cwd}/evil`, { recursive: true });
+  fs.writeFileSync(`${cwd}/evil/main.ts`, "import { grant } from '...';");
   try {
     assertEquals(
       matchesScriptEntrypoint(
@@ -532,11 +544,11 @@ Deno.test("matcher - module-affecting deno run flags deny fail-closed (B2)", () 
       false,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("matcher - .. spellings crossing a symlinked directory deny (B1)", async () => {
+test("matcher - .. spellings crossing a symlinked directory deny (B1)", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
   // Session cwd W: a symlink `jump` INTO the grant's skill directory, plus a
@@ -544,24 +556,22 @@ Deno.test("matcher - .. spellings crossing a symlinked directory deny (B1)", asy
   // loader lexicalizes `jump/../memory-save/scripts/...` to the PLANTED file,
   // while the kernel physically traverses the link to the real grant — the
   // old physical-only matcher approved while the wrong module executed.
-  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
-  Deno.symlinkSync(`${root}/memory-save`, `${cwd}/jump`);
-  Deno.mkdirSync(`${cwd}/memory-save/scripts`, { recursive: true });
-  Deno.writeTextFileSync(
-    `${cwd}/memory-save/scripts/memory-save.ts`,
-    'console.log("LOADED: planted")',
-  );
+  const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));
+  fs.symlinkSync(`${root}/memory-save`, `${cwd}/jump`);
+  fs.mkdirSync(`${cwd}/memory-save/scripts`, { recursive: true });
+  fs.writeFileSync(`${cwd}/memory-save/scripts/memory-save.ts`, 'console.log("LOADED: planted")');
   try {
     // Loader ground truth: `deno run` of this relative spelling EXECUTES the
     // planted file (lexical landing), never the physically-traversed grant —
     // so the divergence is real and the ambiguous spelling must deny.
-    const loaderProbe = await new Deno.Command(Deno.execPath(), {
-      args: ["run", "jump/../memory-save/scripts/memory-save.ts"],
+    const loaderProbe = spawnSync(process.execPath, [
+      "run",
+      "jump/../memory-save/scripts/memory-save.ts",
+    ], {
       cwd,
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-    assertEquals(new TextDecoder().decode(loaderProbe.stdout).trim(), "LOADED: planted");
+      encoding: "utf8",
+    });
+    assertEquals(loaderProbe.stdout.trim(), "LOADED: planted");
     assertEquals(
       matchesScriptEntrypoint(
         "deno run jump/../memory-save/scripts/memory-save.ts",
@@ -582,40 +592,48 @@ Deno.test("matcher - .. spellings crossing a symlinked directory deny (B1)", asy
       true,
     );
   } finally {
-    Deno.removeSync(cwd, { recursive: true });
+    fs.rmSync(cwd, { recursive: true });
   }
 });
 
-Deno.test("inventory - unobservable scripts path never promotes a command prefix (N1)", () => {
+test("inventory - unobservable scripts path never promotes a command prefix (N1)", () => {
   const root = makeRoot(["agent-browser"]);
-  const stat = Deno.statSync(root);
+  const stat = fs.statSync(root);
   const rootObservation = { root, identity: { dev: stat.dev!, ino: stat.ino! } };
   // scripts readDir fails AND lstat fails with a non-NotFound error: absence
   // is NOT provable, so no command prefix may be granted.
-  const fs = {
-    lstat: (path: string): Deno.FileInfo => {
-      if (path.endsWith("/scripts")) throw new Deno.errors.PermissionDenied("unreadable");
-      return Deno.lstatSync(path);
+  const seam = {
+    lstat: (path: string): Stats => {
+      if (path.endsWith("/scripts")) {
+        throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+      }
+      return fs.lstatSync(path);
     },
-    readDir: (path: string): Deno.DirEntry[] => {
-      if (path.endsWith("/scripts")) throw new Deno.errors.PermissionDenied("unreadable");
-      return [...Deno.readDirSync(path)];
+    readDir: (path: string): Dirent[] => {
+      if (path.endsWith("/scripts")) {
+        throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+      }
+      return [...fs.readdirSync(path, { withFileTypes: true })];
     },
-    realPath: (path: string) => Deno.realPathSync(path),
+    realPath: (path: string) => fs.realpathSync(path),
   };
-  const inv = buildSkillAutoApproveList({ rootObservation, fs });
+  const inv = buildSkillAutoApproveList({ rootObservation, fs: seam });
   assertEquals(inv.commandPrefixes.size, 0);
   // NotFound on the lstat — genuine absence — still promotes the prefix.
   const absentFs = {
-    lstat: (path: string): Deno.FileInfo => {
-      if (path.endsWith("/scripts")) throw new Deno.errors.NotFound("absent");
-      return Deno.lstatSync(path);
+    lstat: (path: string): Stats => {
+      if (path.endsWith("/scripts")) {
+        throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      }
+      return fs.lstatSync(path);
     },
-    readDir: (path: string): Deno.DirEntry[] => {
-      if (path.endsWith("/scripts")) throw new Deno.errors.NotFound("absent");
-      return [...Deno.readDirSync(path)];
+    readDir: (path: string): Dirent[] => {
+      if (path.endsWith("/scripts")) {
+        throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      }
+      return [...fs.readdirSync(path, { withFileTypes: true })];
     },
-    realPath: (path: string) => Deno.realPathSync(path),
+    realPath: (path: string) => fs.realpathSync(path),
   };
   const promoted = buildSkillAutoApproveList({
     rootObservation,
@@ -624,7 +642,7 @@ Deno.test("inventory - unobservable scripts path never promotes a command prefix
   assert(promoted.commandPrefixes.has("agent-browser"));
 });
 
-Deno.test("inventory - a WRITABLE installed root is enumerated and matched for BOTH agent types", () => {
+test("inventory - a WRITABLE installed root is enumerated and matched for BOTH agent types", () => {
   // `align-omp-skill-trust-to-shared-root` 1.2/4.2: the deployment-resolved
   // root is the packaged personal tree (non-root-owned, agent-writable,
   // group/other-writable). The inventory judges names, structure and physical
@@ -632,11 +650,11 @@ Deno.test("inventory - a WRITABLE installed root is enumerated and matched for B
   // external skill under that root is a grant for BOTH agent types.
   const root = makeRoot(["external-skill"]);
   for (const directory of [root, `${root}/external-skill`, `${root}/external-skill/scripts`]) {
-    Deno.chmodSync(directory, 0o775);
+    fs.chmodSync(directory, 0o775);
   }
   const entrypoint = `${root}/external-skill/scripts/external-skill.ts`;
   for (const file of [`${root}/external-skill/SKILL.md`, entrypoint]) {
-    Deno.chmodSync(file, 0o664);
+    fs.chmodSync(file, 0o664);
   }
   for (const agentType of AGENT_TYPES) {
     const inv = list(agentType, root);

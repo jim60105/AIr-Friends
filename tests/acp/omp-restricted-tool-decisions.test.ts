@@ -17,6 +17,7 @@ import {
   OMP_TOOL_CAPABILITY_MAP,
   type OmpToolCapability,
 } from "@acp/omp/tool-inventory.ts";
+import { test } from "bun:test";
 
 const MAPPED_NAMES: ReadonlyArray<readonly [string, OmpToolCapability]> = [
   ["read", "read"],
@@ -32,13 +33,13 @@ const MAPPED_NAMES: ReadonlyArray<readonly [string, OmpToolCapability]> = [
   ["move", "destructive"],
 ];
 
-Deno.test("decideOmpToolCapability - every mapped name continues with its capability", () => {
+test("decideOmpToolCapability - every mapped name continues with its capability", () => {
   for (const [name, capability] of MAPPED_NAMES) {
     assertEquals(decideOmpToolCapability(name), { decision: "continue", capability });
   }
 });
 
-Deno.test("decideOmpToolCapability - an unmatched name blocks with the bounded reason", () => {
+test("decideOmpToolCapability - an unmatched name blocks with the bounded reason", () => {
   for (const name of ["skill", "fetch", "unknown_tool", "Read", "read ", " bash"]) {
     assertEquals(decideOmpToolCapability(name), {
       decision: "block",
@@ -47,7 +48,7 @@ Deno.test("decideOmpToolCapability - an unmatched name blocks with the bounded r
   }
 });
 
-Deno.test("decideOmpToolCapability - prototype-shaped and empty names block (own-property membership)", () => {
+test("decideOmpToolCapability - prototype-shaped and empty names block (own-property membership)", () => {
   for (const name of ["__proto__", "toString", "constructor", "hasOwnProperty", ""]) {
     assertEquals(decideOmpToolCapability(name), {
       decision: "block",
@@ -56,7 +57,7 @@ Deno.test("decideOmpToolCapability - prototype-shaped and empty names block (own
   }
 });
 
-Deno.test("OMP_TOOL_CAPABILITY_MAP - is frozen and holds exactly the eleven mapped names", () => {
+test("OMP_TOOL_CAPABILITY_MAP - is frozen and holds exactly the eleven mapped names", () => {
   assertStrictEquals(Object.isFrozen(OMP_TOOL_CAPABILITY_MAP), true);
   assertEquals(
     Object.keys(OMP_TOOL_CAPABILITY_MAP),

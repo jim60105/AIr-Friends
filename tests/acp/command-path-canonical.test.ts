@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import {
   buildCommandGateRoots,
   DANGEROUS_GENERIC_FLAGS,
@@ -9,8 +9,12 @@ import {
 } from "@acp/command-path-policy.ts";
 import { defaultMetadataReader, type MetadataReader } from "@acp/filesystem-roots.ts";
 import { createCommandFixture } from "./command-test-fixture.ts";
+import fs from "node:fs";
+import type { Stats } from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 
-Deno.test("command parity manifest fixes the complete allowlist and dangerous flags", () => {
+test("command parity manifest fixes the complete allowlist and dangerous flags", () => {
   assertEquals([...GENERIC_COMMAND_ALLOWLIST], [
     "rg",
     "cat",
@@ -46,7 +50,7 @@ Deno.test("command parity manifest fixes the complete allowlist and dangerous fl
   ]);
 });
 
-Deno.test("canonical command parent/final escapes deny; contained links and prospective outputs approve", async () => {
+test("canonical command parent/final escapes deny; contained links and prospective outputs approve", async () => {
   const f = createCommandFixture();
   const causes: string[] = [];
   const context = { ...f.context, logFailure: (reason: string) => causes.push(reason) };
@@ -58,7 +62,7 @@ Deno.test("canonical command parent/final escapes deny; contained links and pros
         ["external-parent", f.root],
         ["foreign-parent", f.sibling],
       ]
-    ) Deno.symlinkSync(target, join(f.workspace, name));
+    ) fs.symlinkSync(target, join(f.workspace, name));
     for (
       const path of [
         "external-file",
@@ -74,8 +78,8 @@ Deno.test("canonical command parent/final escapes deny; contained links and pros
       );
       assertEquals(causes, ["symlink_escape"]);
     }
-    Deno.symlinkSync(join(f.workspace, "notes.md"), join(f.workspace, "contained-file"));
-    Deno.symlinkSync(join(f.workspace, "subdir"), join(f.workspace, "contained-parent"));
+    fs.symlinkSync(join(f.workspace, "notes.md"), join(f.workspace, "contained-file"));
+    fs.symlinkSync(join(f.workspace, "subdir"), join(f.workspace, "contained-parent"));
     assertEquals(await genericCommandRejectionReason("cat contained-file", context), null);
     assertEquals(
       await genericCommandRejectionReason("cat contained-parent/file.txt", context),
@@ -97,13 +101,13 @@ Deno.test("canonical command parent/final escapes deny; contained links and pros
   }
 });
 
-Deno.test("canonical command dangling and loop links fail closed with predecessor causes", async () => {
+test("canonical command dangling and loop links fail closed with predecessor causes", async () => {
   const f = createCommandFixture();
   const causes: string[] = [];
   const context = { ...f.context, logFailure: (reason: string) => causes.push(reason) };
   try {
-    Deno.symlinkSync(join(f.workspace, "missing"), join(f.workspace, "dangling"));
-    Deno.symlinkSync(join(f.workspace, "loop"), join(f.workspace, "loop"));
+    fs.symlinkSync(join(f.workspace, "missing"), join(f.workspace, "dangling"));
+    fs.symlinkSync(join(f.workspace, "loop"), join(f.workspace, "loop"));
     for (const [path, reason] of [["dangling", "dangling_symlink"], ["loop", "symlink_loop"]]) {
       causes.length = 0;
       assertEquals(
@@ -117,7 +121,7 @@ Deno.test("canonical command dangling and loop links fail closed with predecesso
   }
 });
 
-Deno.test("canonical command root/identity/metadata/context unavailability never falls back lexically", async () => {
+test("canonical command root/identity/metadata/context unavailability never falls back lexically", async () => {
   const f = createCommandFixture();
   const causes: string[] = [];
   try {
@@ -125,18 +129,25 @@ Deno.test("canonical command root/identity/metadata/context unavailability never
       const [reader, expected] of [
         [{
           ...defaultMetadataReader,
-          realPath: (_path: string) => Promise.reject(new Deno.errors.PermissionDenied()),
+          realPath: (_path: string) =>
+            Promise.reject(Object.assign(new Error("denied"), { code: "EACCES" })),
         }, "root_unavailable"],
         [{
           ...defaultMetadataReader,
-          lstat: async (path: string) => ({ ...await Deno.lstat(path), dev: null, ino: null }),
+          lstat: async (path: string) => {
+            const stat = await fsp.lstat(path);
+            return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+              dev: null,
+              ino: null,
+            }) as Stats;
+          },
         }, "root_unavailable"],
         [{
           ...defaultMetadataReader,
           lstat: (path: string) =>
             path.endsWith("notes.md")
-              ? Promise.reject(new Deno.errors.PermissionDenied())
-              : Deno.lstat(path),
+              ? Promise.reject(Object.assign(new Error("denied"), { code: "EACCES" }))
+              : fsp.lstat(path),
         }, "canonicalization_failed"],
       ] as [MetadataReader, string][]
     ) {
@@ -158,7 +169,7 @@ Deno.test("canonical command root/identity/metadata/context unavailability never
       }),
       "path_outside_boundary",
     );
-    Deno.removeSync(f.workspace, { recursive: true });
+    fs.rmSync(f.workspace, { recursive: true });
     assertEquals(
       await genericCommandRejectionReason("cat notes.md", f.context),
       "path_outside_boundary",
@@ -168,7 +179,7 @@ Deno.test("canonical command root/identity/metadata/context unavailability never
   }
 });
 
-Deno.test("canonical command detects changed target and root identities during observation", async () => {
+test("canonical command detects changed target and root identities during observation", async () => {
   const f = createCommandFixture();
   const causes: string[] = [];
   try {
@@ -176,7 +187,7 @@ Deno.test("canonical command detects changed target and root identities during o
     const reader: MetadataReader = {
       ...defaultMetadataReader,
       realPath: (path) =>
-        path === target ? Promise.resolve(join(f.workspace, "data.json")) : Deno.realPath(path),
+        path === target ? Promise.resolve(join(f.workspace, "data.json")) : fsp.realpath(path),
     };
     assertEquals(
       await genericCommandRejectionReason("cat notes.md", {
@@ -192,7 +203,7 @@ Deno.test("canonical command detects changed target and root identities during o
     const changedRoot: MetadataReader = {
       ...defaultMetadataReader,
       lstat: async (path) => {
-        const info = await Deno.lstat(path);
+        const info = await fsp.lstat(path);
         if (path === f.workspace && ++workspaceStats > 2) {
           return { ...info, ino: (info.ino ?? 0) + 1 };
         }
@@ -213,12 +224,12 @@ Deno.test("canonical command detects changed target and root identities during o
   }
 });
 
-Deno.test("canonical data isolation overrides workspace including alias and root enumeration", async () => {
+test("canonical data isolation overrides workspace including alias and root enumeration", async () => {
   const f = createCommandFixture();
   try {
     const foreign = join(f.dataRoot, "sess_other", "opencode", "tool-output");
-    Deno.symlinkSync(foreign, join(f.workspace, "foreign-data"));
-    Deno.symlinkSync(f.dataRoot, join(f.workspace, "data-listing"));
+    fs.symlinkSync(foreign, join(f.workspace, "foreign-data"));
+    fs.symlinkSync(f.dataRoot, join(f.workspace, "data-listing"));
     for (
       const command of [
         `ls ${f.dataRoot}`,
@@ -242,7 +253,7 @@ Deno.test("canonical data isolation overrides workspace including alias and root
   }
 });
 
-Deno.test("command root role sets grant per-spawn/shared tmp and pool tool-output only", async () => {
+test("command root role sets grant per-spawn/shared tmp and pool tool-output only", async () => {
   const f = createCommandFixture();
   try {
     const perSpawn = await buildCommandGateRoots({ ...f.context, sharedWorkspacePath: f.shared });
@@ -298,16 +309,16 @@ Deno.test("command root role sets grant per-spawn/shared tmp and pool tool-outpu
   }
 });
 
-Deno.test("tool-output foreign/home resolutions grant nothing and missing output does not poison workspace", async () => {
+test("tool-output foreign/home resolutions grant nothing and missing output does not poison workspace", async () => {
   const f = createCommandFixture();
   try {
-    Deno.removeSync(f.toolOutput, { recursive: true });
+    fs.rmSync(f.toolOutput, { recursive: true });
     assertEquals(await genericCommandRejectionReason("cat notes.md", f.context), null);
     assertEquals(
       await genericCommandRejectionReason(`pdftotext notes.md ${f.toolOutput}/new.txt`, f.context),
       null,
     );
-    Deno.symlinkSync(f.sibling, f.toolOutput);
+    fs.symlinkSync(f.sibling, f.toolOutput);
     const foreign = await buildCommandGateRoots(f.context);
     assert(foreign.ok);
     assertEquals(foreign.value.grants.map((grant) => grant.role), ["workspace"]);
@@ -331,18 +342,18 @@ Deno.test("tool-output foreign/home resolutions grant nothing and missing output
   }
 });
 
-Deno.test("syntax rejects unavailable expansions before metadata IO and chains preserve first failure", async () => {
+test("syntax rejects unavailable expansions before metadata IO and chains preserve first failure", async () => {
   const f = createCommandFixture();
   let observations = 0;
   try {
     const reader: MetadataReader = {
       lstat: (path) => {
         observations++;
-        return Deno.lstat(path);
+        return fsp.lstat(path);
       },
       realPath: (path) => {
         observations++;
-        return Deno.realPath(path);
+        return fsp.realpath(path);
       },
     };
     const context = { ...f.context, reader };
@@ -387,7 +398,7 @@ Deno.test("syntax rejects unavailable expansions before metadata IO and chains p
   }
 });
 
-Deno.test("expanded home/data spellings preserve contained inputs and attached-option denial", async () => {
+test("expanded home/data spellings preserve contained inputs and attached-option denial", async () => {
   const f = createCommandFixture();
   try {
     const context = { ...f.context, home: f.workspace };
@@ -406,8 +417,8 @@ Deno.test("expanded home/data spellings preserve contained inputs and attached-o
       await genericCommandRejectionReason("cat -o$HOME/notes.md", context),
       "path_outside_boundary",
     );
-    Deno.removeSync(f.toolOutput, { recursive: true });
-    Deno.symlinkSync(join(f.dataRoot, "sess_other", "opencode", "tool-output"), f.toolOutput);
+    fs.rmSync(f.toolOutput, { recursive: true });
+    fs.symlinkSync(join(f.dataRoot, "sess_other", "opencode", "tool-output"), f.toolOutput);
     const roots = await buildCommandGateRoots(f.context);
     assert(roots.ok);
     assertEquals(roots.value.grants.map((grant) => grant.role), ["workspace"]);

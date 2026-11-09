@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import {
   authorizeDestructiveTargets,
   decodeDestructiveIntent,
@@ -17,8 +17,11 @@ import {
   resolveSessionPath,
   type SessionContext,
 } from "@acp/filesystem-roots.ts";
+import fs from "node:fs";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
-Deno.test("Destructive normalization: shared fixtures have complete ordered targets or bounded failure", () => {
+test("Destructive normalization: shared fixtures have complete ordered targets or bounded failure", () => {
   for (const fixture of DESTRUCTIVE_CONFORMANCE_FIXTURES) {
     const decoded = decodeDestructiveIntent(fixture.input);
     const result = normalizeDestructiveIntent(
@@ -47,7 +50,7 @@ Deno.test("Destructive normalization: shared fixtures have complete ordered targ
   });
 });
 
-Deno.test("Destructive normalization: untrusted native shapes never become synthetic decoder input", () => {
+test("Destructive normalization: untrusted native shapes never become synthetic decoder input", () => {
   for (const raw of [null, [], "text", { operations: [{ kind: "unknown" }] }]) {
     const input: DestructiveIntentInput = {
       nativeTool: "delete",
@@ -96,14 +99,14 @@ Deno.test("Destructive normalization: untrusted native shapes never become synth
   assertEquals(isDestructiveRequest("cat", "execute", null), false);
 });
 
-Deno.test("Destructive targets: real observations reuse ordinary write decisions in both modes", async () => {
-  const base = Deno.makeTempDirSync();
+test("Destructive targets: real observations reuse ordinary write decisions in both modes", async () => {
+  const base = makeTempDirSync();
   const workspace = join(base, "workspace");
   const staging = join(workspace, "tmp", "skill");
   const shared = join(base, "shared");
   const skills = join(base, "skills");
   const sibling = join(base, "workspace-sibling");
-  for (const path of [staging, shared, skills, sibling]) Deno.mkdirSync(path, { recursive: true });
+  for (const path of [staging, shared, skills, sibling]) fs.mkdirSync(path, { recursive: true });
   const context: SessionContext = {
     acpSessionId: "acp",
     skillSessionId: "skill",
@@ -125,20 +128,20 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
         join(skills, "SKILL.md"),
         join(sibling, "outside.md"),
       ]
-    ) Deno.writeTextFileSync(path, "sentinel");
-    Deno.symlinkSync(sibling, join(staging, "escape"));
+    ) fs.writeFileSync(path, "sentinel");
+    fs.symlinkSync(sibling, join(staging, "escape"));
     // Row 28 review follow-up: root construction requires an attested
     // rootIdentity unconditionally, and the trusted root must carry the
     // image's agent-unwritable posture — seal the stand-in owned tree and
     // pass its real identity, the way the producer always does.
-    Deno.chmodSync(skills, 0o555);
+    fs.chmodSync(skills, 0o555);
     let roots = await canonicalizeSessionRoots(rootContext, {
       ownedRootPath: skills,
       source: "deployment_owned",
       rootIdentity: { dev: 0, ino: 0 },
     });
     assertEquals(roots.ok, false); // attested identity must match the tree
-    const skillsInfo = Deno.statSync(skills);
+    const skillsInfo = fs.statSync(skills);
     if (skillsInfo.dev === null || skillsInfo.ino === null) {
       throw new Error("fixture identity unavailable");
     }
@@ -181,7 +184,7 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
               authorizeFilesystemWrite({ ...params, target: observed.value }),
             );
           } else assertEquals(result.ok, false);
-          assertEquals(Deno.readTextFileSync(path), "sentinel");
+          assertEquals(fs.readFileSync(path, "utf8"), "sentinel");
         }
       }
     }
@@ -233,8 +236,8 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
       assertEquals(clientSurface.completeness, expected.completeness);
       assertEquals(clientSurface.outcomeReason, expected.outcomeReason);
       assertEquals(clientSurface.targets.length, expected.targets.length);
-      assertEquals(Deno.readTextFileSync(join(staging, "a.md")), "sentinel");
-      assertEquals(Deno.readTextFileSync(join(staging, "b.md")), "sentinel");
+      assertEquals(fs.readFileSync(join(staging, "a.md"), "utf8"), "sentinel");
+      assertEquals(fs.readFileSync(join(staging, "b.md"), "utf8"), "sentinel");
     }
     for (const intent of ["delete", "write"] as const) {
       const path = join(staging, "missing", "source.md");
@@ -251,21 +254,21 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
         authorizeDestructiveTargets(normalized, [], { roots: roots.value, yolo: false }).ok,
         false,
       );
-      assertEquals(Deno.statSync(staging).isDirectory, true);
+      assertEquals(fs.statSync(staging).isDirectory(), true);
       try {
-        Deno.statSync(join(staging, "missing"));
+        fs.statSync(join(staging, "missing"));
         throw new Error("unexpected parent creation");
       } catch (error) {
-        assert(error instanceof Deno.errors.NotFound);
+        assert(isNotFoundError(error));
       }
     }
   } finally {
-    Deno.chmodSync(skills, 0o755);
-    Deno.removeSync(base, { recursive: true });
+    fs.chmodSync(skills, 0o755);
+    fs.rmSync(base, { recursive: true });
   }
 });
 
-Deno.test("Destructive normalization: canonical OMP single-operation payloads decode completely", () => {
+test("Destructive normalization: canonical OMP single-operation payloads decode completely", () => {
   // The exact canonical strings the OMP ingress adapter serializes for a native
   // delete/move must decode to complete ordered targets, and a location set that
   // disagrees with the decoded targets must keep the shared binding denial.

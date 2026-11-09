@@ -12,6 +12,7 @@ import {
   RecoveryOwnershipError,
   verifyRecoveryOwnership,
 } from "@acp/recovery-ownership.ts";
+import { test } from "bun:test";
 
 const OMP_RESTRICTED_NS = "/data/omp-pools/discord:c1/omp-agent/restricted";
 const OMP_YOLO_NS = "/data/omp-pools/discord:c1/omp-agent/native-yolo";
@@ -33,7 +34,7 @@ const ocActual = {
   processNamespace: OC_NS,
 };
 
-Deno.test("verifyRecoveryOwnership - OMP same mode + same namespace matches", () => {
+test("verifyRecoveryOwnership - OMP same mode + same namespace matches", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
@@ -43,7 +44,7 @@ Deno.test("verifyRecoveryOwnership - OMP same mode + same namespace matches", ()
   );
 });
 
-Deno.test("verifyRecoveryOwnership - restricted recovery context vs native-YOLO-owned record is mode-mismatch", () => {
+test("verifyRecoveryOwnership - restricted recovery context vs native-YOLO-owned record is mode-mismatch", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
@@ -53,7 +54,7 @@ Deno.test("verifyRecoveryOwnership - restricted recovery context vs native-YOLO-
   );
 });
 
-Deno.test("verifyRecoveryOwnership - native-YOLO recovery context vs restricted-owned record is mode-mismatch (second direction)", () => {
+test("verifyRecoveryOwnership - native-YOLO recovery context vs restricted-owned record is mode-mismatch (second direction)", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "omp", permissionMode: "restricted", processNamespace: OMP_RESTRICTED_NS },
@@ -63,7 +64,7 @@ Deno.test("verifyRecoveryOwnership - native-YOLO recovery context vs restricted-
   );
 });
 
-Deno.test("verifyRecoveryOwnership - same mode but different namespace is namespace-mismatch", () => {
+test("verifyRecoveryOwnership - same mode but different namespace is namespace-mismatch", () => {
   assertEquals(
     verifyRecoveryOwnership(
       {
@@ -77,11 +78,11 @@ Deno.test("verifyRecoveryOwnership - same mode but different namespace is namesp
   );
 });
 
-Deno.test("verifyRecoveryOwnership - OMP absent record fails closed as unverified", () => {
+test("verifyRecoveryOwnership - OMP absent record fails closed as unverified", () => {
   assertEquals(verifyRecoveryOwnership(undefined, ompRestrictedActual), "unverified");
 });
 
-Deno.test("verifyRecoveryOwnership - OMP incomplete records fail closed as unverified", () => {
+test("verifyRecoveryOwnership - OMP incomplete records fail closed as unverified", () => {
   // Empty namespace.
   assertEquals(
     verifyRecoveryOwnership(
@@ -116,7 +117,7 @@ Deno.test("verifyRecoveryOwnership - OMP incomplete records fail closed as unver
   );
 });
 
-Deno.test("verifyRecoveryOwnership - OpenCode yolo-switch record + matching data root matches by construction", () => {
+test("verifyRecoveryOwnership - OpenCode yolo-switch record + matching data root matches by construction", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "opencode", permissionMode: "yolo-switch", processNamespace: OC_NS },
@@ -126,11 +127,11 @@ Deno.test("verifyRecoveryOwnership - OpenCode yolo-switch record + matching data
   );
 });
 
-Deno.test("verifyRecoveryOwnership - OpenCode ABSENT record passes (today's behavior preserved)", () => {
+test("verifyRecoveryOwnership - OpenCode ABSENT record passes (today's behavior preserved)", () => {
   assertEquals(verifyRecoveryOwnership(undefined, ocActual), "match");
 });
 
-Deno.test("verifyRecoveryOwnership - OpenCode data-root identity mismatch is namespace-mismatch", () => {
+test("verifyRecoveryOwnership - OpenCode data-root identity mismatch is namespace-mismatch", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "opencode", permissionMode: "yolo-switch", processNamespace: "/data/other" },
@@ -140,7 +141,7 @@ Deno.test("verifyRecoveryOwnership - OpenCode data-root identity mismatch is nam
   );
 });
 
-Deno.test("verifyRecoveryOwnership - OpenCode with unreadable data root is unverified, never a mismatch", () => {
+test("verifyRecoveryOwnership - OpenCode with unreadable data root is unverified, never a mismatch", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "opencode", permissionMode: "yolo-switch", processNamespace: OC_NS },
@@ -150,7 +151,7 @@ Deno.test("verifyRecoveryOwnership - OpenCode with unreadable data root is unver
   );
 });
 
-Deno.test("verifyRecoveryOwnership - record under a different agent type cannot authorize", () => {
+test("verifyRecoveryOwnership - record under a different agent type cannot authorize", () => {
   assertEquals(
     verifyRecoveryOwnership(
       { agentType: "opencode", permissionMode: "yolo-switch", processNamespace: OC_NS },
@@ -167,7 +168,7 @@ Deno.test("verifyRecoveryOwnership - record under a different agent type cannot 
   );
 });
 
-Deno.test("deriveActualRecoveryTarget - OMP reads mode/namespace from the factory env, never recomputes", () => {
+test("deriveActualRecoveryTarget - OMP reads mode/namespace from the factory env, never recomputes", () => {
   assertEquals(
     deriveActualRecoveryTarget("omp", {
       XDG_DATA_HOME: `${OMP_RESTRICTED_NS}/xdg-data`,
@@ -206,7 +207,7 @@ Deno.test("deriveActualRecoveryTarget - OMP reads mode/namespace from the factor
   });
 });
 
-Deno.test("deriveActualRecoveryTarget - OpenCode is the fixed yolo-switch identity over the pool data root", () => {
+test("deriveActualRecoveryTarget - OpenCode is the fixed yolo-switch identity over the pool data root", () => {
   assertEquals(deriveActualRecoveryTarget("opencode", { XDG_DATA_HOME: OC_NS }), {
     agentType: "opencode",
     permissionMode: "yolo-switch",
@@ -219,13 +220,13 @@ Deno.test("deriveActualRecoveryTarget - OpenCode is the fixed yolo-switch identi
   });
 });
 
-Deno.test("mapOwnershipVerdictToReason - pinned verdict vocabulary", () => {
+test("mapOwnershipVerdictToReason - pinned verdict vocabulary", () => {
   assertEquals(mapOwnershipVerdictToReason("mode-mismatch"), "ownership_violation");
   assertEquals(mapOwnershipVerdictToReason("namespace-mismatch"), "namespace_mismatch");
   assertEquals(mapOwnershipVerdictToReason("unverified"), "ownership_unverified");
 });
 
-Deno.test("RecoveryOwnershipError - bounded single-line message names session and mismatch, no secrets", () => {
+test("RecoveryOwnershipError - bounded single-line message names session and mismatch, no secrets", () => {
   const SECRET = "MCP-HEADER-SECRET-DO-NOT-LEAK";
   const err = new RecoveryOwnershipError({
     sessionId: "sess_42",
