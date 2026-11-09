@@ -65,7 +65,7 @@ async function runBundleSmoke(options: { allowEnv?: boolean } = {}): Promise<Smo
   const buildTarget = `${repoRoot}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH.replace(/\/[^/]+$/, "")}`;
   const buildOutput = spawnSync(
     `${repoRoot}/scripts/omp/bundle-omp-extension.sh`,
-    [repoRoot, buildTarget, `${repoRoot}/deno.lock`],
+    [repoRoot, buildTarget],
     { cwd: repoRoot, encoding: "utf8" },
   );
   assertEquals(buildOutput.status, 0, buildOutput.stderr);

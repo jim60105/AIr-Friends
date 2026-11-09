@@ -369,20 +369,44 @@ The owner confirmed these decisions on 2026-11-09:
 
 ## 9. P0 release blockers
 
-- [ ] Unauthorized parent secrets are absent from real OpenCode and OMP child environments, and
-      required variables are present.
-- [ ] ACP handshake, large NDJSON traffic, stderr consumption, backpressure, EOF, timeout,
-      cancellation and abrupt exit all pass.
-- [ ] SIGTERM, SIGKILL after 2 seconds, container stop, pool cleanup and restart leave no orphan
-      processes.
-- [ ] `openat2`/`statx` confinement passes on `amd64` and `arm64`, including fail-closed behavior.
-- [ ] Egress-proxy DNS, metadata, IP pinning, HTTP CONNECT and half-close regression tests pass.
-- [ ] The injection suite passes.
-- [ ] Sandbox detection and fail-closed behavior pass under the target container permissions.
-- [ ] Memory, reminders, workspaces, Skill API token validation and permission isolation keep their
-      behavior across restart.
-- [ ] Native dependencies and external tools work on both architectures.
-- [ ] CI, container deployment and a rollback drill pass with no known cutover blocker.
+- [x] Unauthorized parent secrets are absent from real OpenCode and OMP child environments, and
+      required variables are present. P0-1; owning change `adopt-bun-agent-process-boundary`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] ACP handshake, large NDJSON traffic, stderr consumption, backpressure, EOF, timeout,
+      cancellation and abrupt exit all pass. P0-2; owning changes
+      `adopt-bun-agent-process-boundary`, `convert-agent-integration-suites-to-bun`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] SIGTERM, SIGKILL after 2 seconds, container stop, pool cleanup and restart leave no orphan
+      processes. P0-3; owning changes `adopt-bun-agent-process-boundary`,
+      `port-process-lifecycle-and-pool-to-bun`, `port-signals-and-entrypoint-to-bun`,
+      `drill-bun-cutover-and-rollback`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] `openat2`/`statx` confinement passes on `amd64` and `arm64`, including fail-closed behavior.
+      P0-4; owning changes `port-filesystem-ffi-to-bun-ffi`, `package-bun-container-image`,
+      `migrate-ci-and-docs-to-bun`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] Egress-proxy DNS, metadata, IP pinning, HTTP CONNECT and half-close regression tests pass.
+      P0-5; owning change `port-egress-proxy-and-gelf-to-node-net`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] The injection suite passes. P0-6; owning changes `convert-builtin-skills-to-bun`,
+      `enforce-bun-skill-approval-grammar`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] Sandbox detection and fail-closed behavior pass under the target container permissions. P0-7;
+      owning changes `port-command-call-sites-and-sandbox-probe-to-bun`,
+      `package-bun-container-image`, `migrate-ci-and-docs-to-bun`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] Memory, reminders, workspaces, Skill API token validation and permission isolation keep their
+      behavior across restart. P0-8; owning change `drill-bun-cutover-and-rollback` (container
+      restart-persistence tests and the drill); CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] Native dependencies and external tools work on both architectures. P0-9; owning changes
+      `add-bun-package-manifest`, `package-bun-container-image`, `migrate-ci-and-docs-to-bun`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success).
+- [x] CI, container deployment and a rollback drill pass with no known cutover blocker. P0-10;
+      owning changes `package-bun-container-image`, `migrate-ci-and-docs-to-bun`,
+      `drill-bun-cutover-and-rollback`, `cut-over-to-bun-release`; CI
+      https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 (success). The live platform
+      trial is deferred by the owner (2026-11-10); the `0.37.0` changelog records that caveat.
 
 ## 10. Cutover and rollback
 
