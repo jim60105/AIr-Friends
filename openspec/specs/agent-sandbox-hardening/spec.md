@@ -576,13 +576,13 @@ When filesystem confinement is enabled (`sandbox.filesystemConfinement`), the ag
 
 ### Requirement: Shared Resolved Skill Tree Has Read-Only Runtime Visibility
 
-Filesystem confinement SHALL expose the single resolved skill tree at that same absolute path as a read-only runtime mount for either agent type. Skill mounting SHALL consume the explicit deployment input rather than rediscover a tree from HOME or session cwd. Legitimate container access under `/home/deno/.agents` SHALL remain read-only. A mount SHALL NOT grant script auto-approval, owned provenance or workspace write permission.
+Filesystem confinement SHALL expose the single resolved skill tree at that same absolute path as a read-only runtime mount for either agent type. Skill mounting SHALL consume the explicit deployment input rather than rediscover a tree from HOME or session cwd. Legitimate container access under `/home/air/.agents` SHALL remain read-only. A mount SHALL NOT grant script auto-approval, owned provenance or workspace write permission.
 
 #### Scenario: OpenCode container personal installation remains accessible
 
-- **GIVEN** the resolved install root is `/home/deno/.agents/skills`
+- **GIVEN** the resolved install root is `/home/air/.agents/skills`
 - **WHEN** confinement arguments are constructed
-- **THEN** the existing legitimate `/home/deno/.agents` read-only visibility SHALL remain available
+- **THEN** the existing legitimate `/home/air/.agents` read-only visibility SHALL remain available
 - **AND** the installed skill tree SHALL appear at its exact resolved path without a writable mount
 
 #### Scenario: The single resolved root is exposed for either agent type
@@ -673,3 +673,15 @@ A trusted skill run directly or through the literal `bun run` form SHALL load no
 - **GIVEN** `/opt/air/skill-bunfig.toml` does not exist
 - **WHEN** a trusted skill runs in either accepted form
 - **THEN** it SHALL exit non-zero without running the skill body
+
+### Requirement: Confinement Exposes The Bun Skill Runtime Read-Only
+
+The default filesystem confinement SHALL bind the trusted skill config `/opt/air/skill-bunfig.toml` read-only and SHALL bind no Deno cache, Deno manifest or Deno lock path.
+
+#### Scenario: Default read-only paths
+- **WHEN** the default confinement read-only path list is read
+- **THEN** it SHALL contain `/opt/air/skill-bunfig.toml` and SHALL contain no path with the segment `deno` or `deno-dir`
+
+#### Scenario: Default writable runtime paths
+- **WHEN** the default confinement writable runtime path list is read
+- **THEN** every entry SHALL be under `/home/air`
