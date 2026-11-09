@@ -23,10 +23,11 @@ Prerequisite: `package-bun-container-image` is applied. Verify with `test -f scr
 
 ## 4. CI evidence
 
-- [ ] 4.1 Ask the owner to push `feat/migrate-to-bun` and run `gh workflow run ci.yaml --ref feat/migrate-to-bun`. Verify: `gh run list --workflow ci.yaml --branch feat/migrate-to-bun --limit 1 --json conclusion,url` shows `"conclusion":"success"`; paste the run URL and the `image` job's arm64 smoke output (P0-4, P0-9 arm64; P0-7 both environments; P0-10 CI).
-  - Pending: the previous green run https://github.com/jim60105/AIr-Friends/actions/runs/42655960657 was on `8b63c4a` (before the download-retry hardening); a new run on the hardened tip is required and becomes the final evidence. Its x64 image job hit a transient GitHub release 500 after four attempts, while arm64 passed the same build in that run.
+- [x] 4.1 Ask the owner to push `feat/migrate-to-bun` and run `gh workflow run ci.yaml --ref feat/migrate-to-bun`. Verify: `gh run list --workflow ci.yaml --branch feat/migrate-to-bun --limit 1 --json conclusion,url` shows `"conclusion":"success"`; paste the run URL and the `image` job's arm64 smoke output (P0-4, P0-9 arm64; P0-7 both environments; P0-10 CI).
+  - Verified: https://github.com/jim60105/AIr-Friends/actions/runs/42670377760 on headSha `9868b56a4b7e59f13911129802e43e55f44a71fe`, conclusion `success`. Jobs all `success`: Code Quality; Test Coverage; Run Tests (ubuntu-26.04, userns open); Run Tests (ubuntu-26.04, userns restricted); Run Tests (ubuntu-26.04-arm, userns open); Image Smoke (ubuntu-26.04); Image Smoke (ubuntu-26.04-arm). Arm64 `Run image smoke test`: `ok help`, `ok tools`, `ok skill-config`, `ok skill-run`, `ok in-image-tests` (40 tests, 0 fail), `ok seccomp-enosys`.
+  - Flake observation: the earlier attempt of this same tip, run https://github.com/jim60105/AIr-Friends/actions/runs/42663168970, stalled in the restricted unit job and was cancelled; the rerun of the identical commit completed in the normal time. Treated as a runner-side stall, not a code defect; no code change made.
 
 ## 5. Housekeeping
 
 - [x] 5.1 Verify: `git status --porcelain` lists only the files in `proposal.md` Impact and this change directory.
-  - Verified: `git status --porcelain` was empty immediately before this evidence commit; after it, all changed paths are the proposal Impact set, the recorded deviations (Containerfile/workflows/test fixtures) and this change directory.
+  - Verified: fresh `git status --porcelain` is empty; all changed paths in this change are the proposal Impact set, the recorded deviations (Containerfile/workflows/test fixtures) and this change directory.
