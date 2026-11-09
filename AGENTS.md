@@ -10,7 +10,7 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 
 - **We are the ACP Client**: We spawn and communicate with external ACP Agents
 - **External CLI tool is the Agent**: OpenCode CLI executes AI tasks
-- **Skills are shell-based**: We provide Deno TypeScript skill scripts that Agents can execute
+- **Skills are shell-based**: We provide Bun TypeScript skill scripts that Agents can execute
 - **Skill API Server**: HTTP server for skills to communicate back to the main bot
 - **Workspace isolation**: Each conversation context has its own isolated working directory
 
@@ -18,13 +18,13 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 
 | Component       | Technology               | Version       |
 | --------------- | ------------------------ | ------------- |
-| Runtime         | Deno                     | 2.x           |
-| Language        | TypeScript               | (Deno native) |
+| Runtime         | Bun                      | 1.4.2         |
+| Language        | TypeScript               | (Bun native)  |
 | ACP SDK         | @agentclientprotocol/sdk | 0.14.1        |
 | Discord Library | discord.js               | ^14.0.0       |
 | Misskey Library | misskey-js               | 2026.10.0     |
-| Configuration   | YAML (via @std/yaml)     | -             |
-| Testing         | Deno.test + @std/assert  | -             |
+| Configuration   | YAML (via yaml)          | -             |
+| Testing         | bun:test + @std/assert   | -             |
 
 ## Architecture
 
@@ -43,7 +43,7 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 │  (OpenCode CLI)                                             │
 │           ↓ (executes our shell-based skills)               │
 ├─────────────────────────────────────────────────────────────┤
-│  Shell Skills (Deno scripts in skills/ directory)           │
+│  Shell Skills (Bun scripts in skills/ directory)            │
 │           ↓ (calls back via HTTP)                           │
 │  Skill API Server (HTTP endpoint)                           │
 │           ↓                                                 │
@@ -72,53 +72,47 @@ Always run these commands from the project root:
 
 ```bash
 # Development (with hot reload)
-deno task dev
+bun run dev
 
 # Production
-deno task start
+bun run start
 
 # Run all tests
-deno task test
+bun run test
 
 # Format code (REQUIRED before commit)
-deno fmt src/ tests/
+bun run fmt
 
 # Lint code (REQUIRED before commit)
-deno lint src/ tests/
+bun run lint
 
 # Type check
-deno check src/main.ts
+bun run check
 
 # Format check only (CI uses this)
-deno fmt --check src/ tests/
+bun run fmt:check
 ```
 
-### Deno Permissions
+### Bun Runtime Configuration
 
-When running manually, use these explicit permissions:
+When running manually, pass `--no-env-file` and the trusted config so a local
+`.env` is not loaded:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts
+bun run --no-env-file --config=./bunfig.toml src/main.ts
 ```
 
-**Never use `--allow-all`**. Required permissions:
-
-| Permission      | Purpose                                                    |
-| --------------- | ---------------------------------------------------------- |
-| `--allow-net`   | Discord API, Misskey API, external connections             |
-| `--allow-read`  | Configuration files, workspace files, memory logs          |
-| `--allow-write` | Memory log files in workspace directories                  |
-| `--allow-env`   | Environment variables (tokens, configuration)              |
-| `--allow-run`   | Spawning ACP agent subprocesses and skill scripts          |
-| `--allow-ffi`   | Loading the jieba native binding (memory recall tokenizer) |
-| `--allow-sys`   | Node-compat `os.hostname()` required by pino via imapflow  |
+Bun has no permission-flag model. The daemon's boundaries are the pinned Bun
+version, the container's `cap_drop: [ALL]` / `no-new-privileges` posture, and
+the agent sandbox described in `docs/agent/security-and-sandbox.md`. Start
+commands never load a `.env` file implicitly.
 
 #### YOLO Mode
 
 The `--yolo` flag enables automatic approval of ALL permission requests from the ACP agent:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --yolo
+bun run --no-env-file --config=./bunfig.toml src/main.ts --yolo
 ```
 
 YOLO mode can also be configured per-channel via the `yolo` field in `channels` configuration:
@@ -153,7 +147,7 @@ channels:
 The `--dry-run` flag enables dry run / debug mode. The system assembles context but does NOT call the ACP Agent — instead, the assembled prompt is written to an output directory:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts --dry-run
+bun run --no-env-file --config=./bunfig.toml src/main.ts --dry-run
 ```
 
 **Use cases**:
@@ -182,7 +176,8 @@ agent:
 
 ## Code Style & Formatting
 
-This project uses Deno's built-in formatter and linter. Configuration is in `deno.json`:
+This project uses dprint for formatting and oxlint for linting. Formatting
+settings are in `dprint.json`; lint settings are in `.oxlintrc.json`:
 
 | Rule          | Setting  |
 | ------------- | -------- |
@@ -194,7 +189,7 @@ This project uses Deno's built-in formatter and linter. Configuration is in `den
 
 ### Import Conventions
 
-Use path aliases defined in `deno.json`:
+Use path aliases defined in `tsconfig.json`:
 
 ```typescript
 // ✅ Correct - use aliases
@@ -415,7 +410,7 @@ conversationSummary:
 
 **Shell-Based Skills Architecture**:
 
-- Skills are Deno TypeScript scripts in `skills/{skill-name}/scripts/` directories
+- Skills are Bun TypeScript scripts in `skills/{skill-name}/scripts/` directories
 - Each skill has a `SKILL.md` file describing its usage for the agent
 - External Agents execute these scripts with `--session-id` parameter
 - Scripts use shared client library in `skills/lib/client.ts`
@@ -735,7 +730,7 @@ The ACP permission request shape changed in OpenCode v1.17.13 (PR #34079 "enrich
 
 **OMP Version Contract** (`package-pinned-omp-runtime`):
 
-- **Container pin**: `Containerfile` (`omp-unpacker` stage) downloads a pinned `OMP_VERSION` (default `18.6.1`) with per-arch SHA-256 checksum verification (`OMP_SHA256_X64` / `OMP_SHA256_ARM64`, plus `OMP_LICENSE_SHA256` / `OMP_NOTICES_SHA256` for the release notices) instead of a moving tag, so ACP contract changes cannot silently degrade the harness. Every OMP artifact follows the image's ordinary `$UID:0` + `775` install convention — the executable at `/usr/local/bin/omp`, the release notices under `/licenses/omp/`, the mode settings and the `SYSTEM.md` prompt artifact under `/opt/air/omp/`, and the generated extension bundle at `/opt/air/omp/extension/index.js`. `/opt/air/omp` is a stable deployment location, not an ownership authority, and no internal artifact digest manifest exists; the dev→image path mapping lives in `src/utils/omp-paths.ts`. The trusted extension is ONE generated native-loadable ESM bundle (`/opt/air/omp/extension/index.js`, cut at image build by `deno task bundle:omp-extension` from canonical source + frozen lock; development presents the same generated entry at `build/omp-extension/index.js`, never the raw source tree). No step installs a JavaScript/Bun runtime — the official executable is self-contained. Bump deliberately and recompute ALL four digests against the real assets. See `docs/agent/acp-engine.md`.
+- **Container pin**: `Containerfile` (`omp-unpacker` stage) downloads a pinned `OMP_VERSION` (default `18.6.1`) with per-arch SHA-256 checksum verification (`OMP_SHA256_X64` / `OMP_SHA256_ARM64`, plus `OMP_LICENSE_SHA256` / `OMP_NOTICES_SHA256` for the release notices) instead of a moving tag, so ACP contract changes cannot silently degrade the harness. Every OMP artifact follows the image's ordinary `$UID:0` + `775` install convention — the executable at `/usr/local/bin/omp`, the release notices under `/licenses/omp/`, the mode settings and the `SYSTEM.md` prompt artifact under `/opt/air/omp/`, and the generated extension bundle at `/opt/air/omp/extension/index.js`. `/opt/air/omp` is a stable deployment location, not an ownership authority, and no internal artifact digest manifest exists; the dev→image path mapping lives in `src/utils/omp-paths.ts`. The trusted extension is ONE generated native-loadable ESM bundle (`/opt/air/omp/extension/index.js`, cut at image build by `bun run bundle:omp-extension` from canonical source + frozen lock; development presents the same generated entry at `build/omp-extension/index.js`, never the raw source tree). No step installs a JavaScript/Bun runtime — the official executable is self-contained. Bump deliberately and recompute ALL four digests against the real assets. See `docs/agent/acp-engine.md`.
 - **Bootstrap check**: `verifyOmpVersion()` (in `src/utils/omp-version.ts`) runs at bootstrap ONLY when the resolved agent type is `omp`, spawns `omp --version` (5s timeout, no network, never starts an ACP session) and logs a structured, greppable marker: `OMP version check: OK|BELOW_MINIMUM|UNKNOWN`. Below-minimum or undeterminable versions only WARN — startup never blocks. The known-good minimum is `18.6.1`, overridable via `AGENT_OMP_MIN_VERSION` (documented in `config.example.yaml`, `.env.example`, `helm/values.yaml`). This is an observability measure, NOT a functional gate.
 
 **Idle Timeout Detection**:
@@ -1363,9 +1358,9 @@ You are Yuna. This is a private chat.
   - `rg` - ripgrep (from the Debian apt package) for agent-side in-workspace file reading
   - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
   - `node` / `npm` - Node.js 24 LTS, pinned as an official tarball with per-arch SHA-256 (NOT the Debian `nodejs`/`npm` packages, whose Node 20 is below what the `skills` installer CLI and the globally installed `agent-browser` require)
-- OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
-- Skills are copied to `/home/deno/.agents/skills/`, which is also the stock image's declared `AGENT_SKILLS_DIR` value — the ONE skill root both agent types resolve
-- At startup the bot GENERATES the OpenCode-side skill-discovery declaration into that configuration: `skills.paths` is set to exactly the resolved skill root and `agent.build.permission.external_directory` gains one `"<root>/**": "allow"` entry, while every other setting in the file keeps its bytes (the `deno run *` / `*.ts*` routing to the approval gate included). It inspects before writing — an already-correct document is left untouched, an absent one is created carrying exactly those entries, and a document that must change but cannot be written fails startup explicitly (`docs/admin/configuration.md`, "Generated Skill Discovery Declaration")
+- OpenCode configuration is pre-configured at `/home/air/.config/opencode/opencode.json`
+- Skills are copied to `/home/air/.agents/skills/`, which is also the stock image's declared `AGENT_SKILLS_DIR` value — the ONE skill root both agent types resolve
+- At startup the bot GENERATES the OpenCode-side skill-discovery declaration into that configuration: `skills.paths` is set to exactly the resolved skill root and `agent.build.permission.external_directory` gains one `"<root>/**": "allow"` entry, while every other setting in the file keeps its bytes (the `bun *` / `*.ts*` routing to the approval gate included). It inspects before writing — an already-correct document is left untouched, an absent one is created carrying exactly those entries, and a document that must change but cannot be written fails startup explicitly (`docs/admin/configuration.md`, "Generated Skill Discovery Declaration")
 
 **Example compose.yml:**
 
@@ -1481,14 +1476,15 @@ log line per token. Buffering is unaffected: chunks still accumulate in
 
 - Unit tests: `{module}.test.ts`
 - Integration tests: `{feature}.integration.test.ts`
-- Use `Deno.test()` with `@std/assert`
-- Tests run one module at a time: `deno task test` and `deno task test:unit` deliberately pass no `--parallel`, because Deno shares `Deno.env` between parallel modules and the environment-override tests would observe another module's transient variables
+- Use `test()` from `bun:test` with `@std/assert`
+- Tests run one module at a time: `bun run test` and `bun run test:unit` deliberately pass no `--isolate`, because Bun shares `process.env` between test files in one process and the environment-override tests would observe another module's transient variables
 - **Test coverage MUST be over 75%** — CI enforces this threshold; PRs below 75% coverage will fail
 
 ```typescript
 import { assertEquals } from "@std/assert";
+import { test } from "bun:test";
 
-Deno.test("WorkspaceManager - generates correct workspace key", () => {
+test("WorkspaceManager - generates correct workspace key", () => {
   const key = getWorkspaceKey({
     platform: "discord",
     user_id: "123",
@@ -1564,7 +1560,7 @@ one of the three files without a row here fails that test (fail-closed).
 | `agent.defaultAgentType` / `AGENT_DEFAULT_TYPE` | row 7 (`add-omp-agent-configuration`)            | yes — `config.example.yaml` (config key + `${AGENT_DEFAULT_TYPE}` reference), `.env.example`, `helm/values.yaml`     | none — all three state the `opencode` (default) / `omp` domain and load-time rejection of unknown values |
 | `AGENT_OMP_MIN_VERSION`                         | row 20 (`package-pinned-omp-runtime`)            | yes — commented-out with default `18.6.1` in all three, mirroring the `AGENT_OPENCODE_MIN_VERSION` sibling treatment | none — WARN-only observability wording consistent across the trio                                        |
 | `OMP_VERSION`                                   | row 20 (consumed reference, not a runtime field) | yes — cited in trio comments as the `Containerfile` build arg owning the pin                                         | none — never a runtime config/env input; documented solely as the packaging pin the comments point at    |
-| `agent.skillsDir` / `AGENT_SKILLS_DIR`          | `unify-skill-root-and-inventory`                 | yes — `config.example.yaml` (config key + env reference), `.env.example` (commented `skills` default), `helm/values.yaml` (`/home/deno/.agents/skills`) | widened — formerly described as the OpenCode-only installed root; it is now the ONE shared skill-script root and external-install destination for BOTH agent types, and the trio names no OMP-specific skill root |
+| `agent.skillsDir` / `AGENT_SKILLS_DIR`          | `unify-skill-root-and-inventory`                 | yes — `config.example.yaml` (config key + env reference), `.env.example` (commented `skills` default), `helm/values.yaml` (`/home/air/.agents/skills`) | widened — formerly described as the OpenCode-only installed root; it is now the ONE shared skill-script root and external-install destination for BOTH agent types, and the trio names no OMP-specific skill root |
 
 Zero-new-field claims audited (each verified by trio grep: the owning change
 added no field to any of the three files): rows 8, 10, 12, 14a/14b, 15, 16,
@@ -1644,7 +1640,7 @@ AIr-Friends/
 │   ├── memory-save/
 │   │   ├── SKILL.md         # Skill definition for agent
 │   │   └── scripts/
-│   │       └── send-reply.ts # Deno script
+│   │       └── send-reply.ts # Bun script
 │   ├── memory-search/
 │   │   ├── SKILL.md
 │   │   └── scripts/
@@ -1689,8 +1685,8 @@ AIr-Friends/
 │   └── main.test.ts
 ├── agent-config/             # Agent CLI configuration files
 │   └── opencode.json         # OpenCode CLI configuration
-├── deno.json                 # Deno configuration
-├── deno.lock                 # Dependency lock file
+├── package.json              # Bun package manifest and scripts
+├── bun.lock                  # Dependency lock file
 ├── config.yaml               # Runtime configuration
 └── Containerfile             # Container build definition
 ```
@@ -1699,10 +1695,10 @@ AIr-Friends/
 
 Before committing, ensure:
 
-1. ✅ `deno fmt --check src/ tests/` passes
-2. ✅ `deno lint src/ tests/` passes
-3. ✅ `deno check src/main.ts` passes
-4. ✅ `deno test` passes
+1. ✅ `bun run fmt:check` passes
+2. ✅ `bun run lint` passes
+3. ✅ `bun run check` passes
+4. ✅ `bun run test` passes
 5. ✅ Test coverage is over 75%
 6. ✅ All CI checks pass — PRs will only be merged after all CI jobs succeed
 7. ✅ No sensitive data in code or logs

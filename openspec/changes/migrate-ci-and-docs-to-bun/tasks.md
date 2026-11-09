@@ -4,17 +4,22 @@ Prerequisite: `package-bun-container-image` is applied. Verify with `test -f scr
 
 ## 1. Coverage floor
 
-- [ ] 1.1 Create `scripts/coverage-floor.ts` and `tests/scripts/coverage-floor.test.ts` per design D2. Verify: `bun test tests/scripts/coverage-floor.test.ts` passes, and `bun run test:coverage && bun run --no-env-file scripts/coverage-floor.ts coverage/lcov.info 75` prints a percentage and exits 0 (record the value).
+- [x] 1.1 Create `scripts/coverage-floor.ts` and `tests/scripts/coverage-floor.test.ts` per design D2. Verify: `bun test tests/scripts/coverage-floor.test.ts` passes, and `bun run test:coverage && bun run --no-env-file scripts/coverage-floor.ts coverage/lcov.info 75` prints a percentage and exits 0 (record the value).
+  - Verified: floor test 6 pass. Non-root composition (host `bun --no-env-file test` over 201 files + `tests/utils/metrics.test.ts` alone + the four trusted-config files in `air-friends:bun-test`): merged JUnit 3997 cases, 0 failures, 12 skips. First Bun line figure: **92.61%** (floor 75, exit 0).
 
 ## 2. Workflows
 
-- [ ] 2.1 Rewrite `.github/workflows/ci.yaml` per design D1. Verify: `grep -ni 'deno' .github/workflows/ci.yaml` prints nothing, and `bun -e 'import { parse } from "yaml"; parse(await Bun.file(".github/workflows/ci.yaml").text())'` exits 0.
-- [ ] 2.2 Rewrite the `release.yml` test job and `copilot-setup-steps.yml` per design D3. Verify: `grep -rni 'deno' .github/workflows/release.yml .github/workflows/copilot-setup-steps.yml .github/workflows/docker-publish-latest.yml .github/workflows/docker-reused-setup-steps/action.yml` prints nothing, and each file parses with the `yaml` check from 2.1.
-- [ ] 2.3 Delete `deno.json` and `deno.lock`. Verify: `git ls-files deno.json deno.lock` prints nothing and `bun install --frozen-lockfile && bun run check` exits 0.
+- [x] 2.1 Rewrite `.github/workflows/ci.yaml` per design D1. Verify: `grep -ni 'deno' .github/workflows/ci.yaml` prints nothing, and `bun -e 'import { parse } from "yaml"; parse(await Bun.file(".github/workflows/ci.yaml").text())'` exits 0.
+  - Verified: no `deno` match; YAML parsed and the jobs/needs/matrices match D1.
+- [x] 2.2 Rewrite the `release.yml` test job and `copilot-setup-steps.yml` per design D3. Verify: `grep -rni 'deno' .github/workflows/release.yml .github/workflows/copilot-setup-steps.yml .github/workflows/docker-publish-latest.yml .github/workflows/docker-reused-setup-steps/action.yml` prints nothing, and each file parses with the `yaml` check from 2.1.
+  - Verified: no `deno` match in any of the four files; all five workflow files parsed.
+- [x] 2.3 Delete `deno.json` and `deno.lock`. Verify: `git ls-files deno.json deno.lock` prints nothing and `bun install --frozen-lockfile && bun run check` exits 0.
+  - Verified: `git ls-files` prints nothing after staging the deletions; frozen install and tsc exit 0.
 
 ## 3. Docs
 
-- [ ] 3.1 Apply design D4 to `AGENTS.md`, `README.md`, `tests/README.md` and the `docs/` files listed in design Context, and edit the Purpose line of `openspec/specs/configuration-and-deployment/spec.md`. Verify: `grep -rniE 'deno' AGENTS.md README.md tests/README.md docs --include='*.md' | grep -v 'docs/superpowers/'` prints only lines that describe the migration history (list them; expected none), and `openspec validate --specs --strict` exits 0.
+- [x] 3.1 Apply design D4 to `AGENTS.md`, `README.md`, `tests/README.md` and the `docs/` files listed in design Context, and edit the Purpose line of `openspec/specs/configuration-and-deployment/spec.md`. Verify: `grep -rniE 'deno' AGENTS.md README.md tests/README.md docs --include='*.md' | grep -v 'docs/superpowers/'` prints only lines that describe the migration history (list them; expected none), and `openspec validate --specs --strict` exits 0.
+  - Verified: the scoped residual prints nothing (all remaining matches are under the excluded `docs/superpowers/` history); `openspec validate --specs --strict` 87 passed, 0 failed.
 
 ## 4. CI evidence
 

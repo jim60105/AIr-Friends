@@ -25,7 +25,7 @@ AIr-Friends 是一套專為社群對話打造的多平台對話式 AI 機器人�
 │  (OpenCode CLI / Oh-My-Pi OMP)                              │
 │           ↓ (執行 shell 技能腳本)                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Shell 技能 (位於 skills/ 目錄中的 Deno 腳本)               │
+│  Shell 技能 (位於 skills/ 目錄中的 Bun 腳本)                │
 │           ↓ (透過 HTTP 回呼)                                │
 │  Skill API 伺服器 (HTTP 端點)                               │
 │           ↓                                                 │
