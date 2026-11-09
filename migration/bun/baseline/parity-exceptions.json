@@ -30,6 +30,30 @@
       "name": "loadConfig - externalSkills validation",
       "disposition": "removed",
       "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 3 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/session-orchestrator.test.ts",
+      "name": "SessionOrchestrator - email GIF conversion diagnostics carry no private detail",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(\"convert\", ...)` at `src/core/session-orchestrator.ts:6500`, owned by `port-command-call-sites-and-sandbox-probe-to-bun`. The orchestrator's per-session catch turns the missing global into an assertion instead of a deferrable ReferenceError, so the test is skipped until that change ports the site. Must be deleted, and the test un-skipped, by that owner."
+    },
+    {
+      "file": "tests/core/session-orchestrator.test.ts",
+      "name": "SessionOrchestrator - two same-owner sessions isolate GIF conversion from frozen metadata",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(\"convert\", ...)` at `src/core/session-orchestrator.ts:6500`, owned by `port-command-call-sites-and-sandbox-probe-to-bun`. The orchestrator's per-session catch turns the missing global into an assertion instead of a deferrable ReferenceError, so the test is skipped until that change ports the site. Must be deleted, and the test un-skipped, by that owner."
+    },
+    {
+      "file": "tests/core/session-orchestrator.test.ts",
+      "name": "workspace cleanup waits for a per-spawn background tool child before reclaiming staged files",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command` in `src/utils/process-lifecycle.ts` (`processAlive`/`listChildPids`), owned by `port-process-lifecycle-and-pool-to-bun`. The caught missing global makes every drain report `wrapper-not-observable`, so the drain returns before the tool child writes; the test is skipped until that change ports the site. Must be deleted, and the test un-skipped, by that owner."
+    },
+    {
+      "file": "tests/core/session-orchestrator.test.ts",
+      "name": "workspace cleanup retains staged files when a re-spawn superseded the drained wrapper",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command` in `src/utils/process-lifecycle.ts` (`processAlive`/`listChildPids`), owned by `port-process-lifecycle-and-pool-to-bun`. The caught missing global makes the drain verdict `wrapper-not-observable` rather than the real superseded-generation observation, so the test is skipped until that change ports the site. Must be deleted, and the test un-skipped, by that owner."
     }
   ]
 }

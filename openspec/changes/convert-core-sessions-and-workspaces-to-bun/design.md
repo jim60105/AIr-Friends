@@ -102,3 +102,21 @@ is touched.
   journal, snapshot and exclusive-write paths.
 - `src/platforms/email/attachment-materializer.ts` (same owner): `Deno.mkdir`/`writeFile`/
   `rename`/`remove` in the attachment publish path.
+
+## Temporary parity exceptions (owner-owed deletions)
+
+`migration/bun/baseline/parity-exceptions.json` gains four `skipped` entries, each marked
+TEMPORARY and to be deleted (with the test un-skipped) by its owner when it lands:
+
+- `tests/core/session-orchestrator.test.ts` — "email GIF conversion diagnostics carry no private
+  detail" and "two same-owner sessions isolate GIF conversion from frozen metadata": blocked by
+  `new Deno.Command("convert", ...)` at `src/core/session-orchestrator.ts:6500`, owner
+  `port-command-call-sites-and-sandbox-probe-to-bun`.
+- `tests/core/session-orchestrator.test.ts` — "workspace cleanup waits for a per-spawn background
+  tool child before reclaiming staged files" and "workspace cleanup retains staged files when a
+  re-spawn superseded the drained wrapper": blocked by `new Deno.Command` in
+  `src/utils/process-lifecycle.ts` (`processAlive`/`listChildPids`), owner
+  `port-process-lifecycle-and-pool-to-bun`.
+
+The four tests keep their exact names and assertions; only their registration is temporarily
+`test.skip`, because the caught missing global is not a deferrable `ReferenceError`.
