@@ -1,5 +1,7 @@
 // src/utils/gelf-transport.ts
 
+import * as dgram from "node:dgram";
+import * as net from "node:net";
 import type { LogEntry } from "../types/logger.ts";
 import type { GelfConfig } from "../types/config.ts";
 
@@ -32,6 +34,57 @@ const LOG_LEVEL_TO_SYSLOG: Record<string, number> = {
   DEBUG: 7,
 };
 
+/** Connect to `host:port`, resolving once the TCP handshake completes. */
+function connectTcp(host: string, port: number): Promise<net.Socket> {
+  const { promise, resolve, reject } = Promise.withResolvers<net.Socket>();
+  const socket = net.connect({ host, port });
+  const onConnect = () => {
+    cleanup();
+    resolve(socket);
+  };
+  const onError = (err: Error) => {
+    cleanup();
+    socket.destroy();
+    reject(err);
+  };
+  function cleanup() {
+    socket.off("connect", onConnect);
+    socket.off("error", onError);
+  }
+  socket.once("connect", onConnect);
+  socket.once("error", onError);
+  return promise;
+}
+
+/** Write every byte of `data`, settling once the socket has flushed it (or failed). */
+function writeTcp(socket: net.Socket, data: Uint8Array): Promise<void> {
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  if (socket.destroyed) {
+    reject(new Error("socket destroyed"));
+    return promise;
+  }
+  socket.write(data, (err) => {
+    if (err) reject(err);
+    else resolve();
+  });
+  return promise;
+}
+
+/** Send one datagram, settling on the asynchronous send result. */
+function sendDatagram(
+  socket: dgram.Socket,
+  data: Uint8Array,
+  port: number,
+  hostname: string,
+): Promise<void> {
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  socket.send(data, port, hostname, (err) => {
+    if (err) reject(err);
+    else resolve();
+  });
+  return promise;
+}
+
 /**
  * GelfTransport sends log entries to a GELF endpoint asynchronously.
  * Supports both HTTP POST and raw TCP protocols.
@@ -44,9 +97,9 @@ export class GelfTransport {
   private readonly endpoint: string;
   private readonly hostname: string;
   private readonly protocol: "http" | "tcp" | "udp";
-  private tcpConnection: Deno.TcpConn | null = null;
+  private tcpConnection: net.Socket | null = null;
   private connecting: boolean = false;
-  private udpConn: Deno.DatagramConn | null = null;
+  private udpConn: dgram.Socket | null = null;
   private readonly compress: boolean;
   private readonly maxChunkSize: number;
 
@@ -81,7 +134,7 @@ export class GelfTransport {
   close(): void {
     if (this.tcpConnection) {
       try {
-        this.tcpConnection.close();
+        this.tcpConnection.destroy();
       } catch {
         // Ignore close errors
       }
@@ -128,7 +181,7 @@ export class GelfTransport {
 
     const doSend = async () => {
       const conn = await this.getTcpConnection();
-      await conn.write(payload);
+      await writeTcp(conn, payload);
     };
 
     doSend().catch((_err) => {
@@ -136,7 +189,7 @@ export class GelfTransport {
       this.closeTcpConnection();
       const doRetry = async () => {
         const conn = await this.getTcpConnection();
-        await conn.write(payload);
+        await writeTcp(conn, payload);
       };
       doRetry().catch((retryErr) => {
         this.closeTcpConnection();
@@ -162,11 +215,11 @@ export class GelfTransport {
       const conn = this.getUdpConnection();
 
       if (payload.length <= this.maxChunkSize) {
-        await conn.send(payload, { transport: "udp", hostname, port });
+        await sendDatagram(conn, payload, port, hostname);
       } else {
         const chunks = this.chunkPayload(payload);
         for (const chunk of chunks) {
-          await conn.send(chunk, { transport: "udp", hostname, port });
+          await sendDatagram(conn, chunk, port, hostname);
         }
       }
     };
@@ -181,16 +234,20 @@ export class GelfTransport {
   }
 
   /**
-   * Get or create a UDP connection for sending datagrams.
-   * Binds to an ephemeral local port.
+   * Get or create a UDP socket for sending datagrams.
+   * The first `send` binds an ephemeral local port, as `port: 0` did.
    */
-  private getUdpConnection(): Deno.DatagramConn {
+  private getUdpConnection(): dgram.Socket {
     if (!this.udpConn) {
-      this.udpConn = Deno.listenDatagram({
-        transport: "udp",
-        hostname: "0.0.0.0",
-        port: 0,
+      const socket = dgram.createSocket("udp4");
+      // `node:dgram` reports asynchronous send failures as `error` events, and an unhandled
+      // one terminates the process. Keep the transport fire-and-forget: log and continue.
+      socket.on("error", (err) => {
+        console.error(
+          `[GelfTransport] Failed to send log to ${this.endpoint}: ${err.message}`,
+        );
       });
+      this.udpConn = socket;
     }
     return this.udpConn;
   }
@@ -317,7 +374,7 @@ export class GelfTransport {
    * Get or create a TCP connection to the GELF endpoint.
    * Parses host and port from the endpoint URL.
    */
-  private async getTcpConnection(): Promise<Deno.TcpConn> {
+  private async getTcpConnection(): Promise<net.Socket> {
     if (this.tcpConnection) {
       return this.tcpConnection;
     }
@@ -332,8 +389,16 @@ export class GelfTransport {
     this.connecting = true;
     try {
       const { hostname, port } = this.parseTcpEndpoint();
-      this.tcpConnection = await Deno.connect({ hostname, port });
-      return this.tcpConnection;
+      const socket = await connectTcp(hostname, port);
+      this.tcpConnection = socket;
+      // A broken connection must not stay cached, or every later send fails on it.
+      socket.on("error", () => {
+        if (this.tcpConnection === socket) this.tcpConnection = null;
+      });
+      socket.on("close", () => {
+        if (this.tcpConnection === socket) this.tcpConnection = null;
+      });
+      return socket;
     } finally {
       this.connecting = false;
     }
@@ -380,7 +445,7 @@ export class GelfTransport {
   private closeTcpConnection(): void {
     if (this.tcpConnection) {
       try {
-        this.tcpConnection.close();
+        this.tcpConnection.destroy();
       } catch {
         // Ignore close errors
       }

@@ -17,6 +17,8 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { isDisallowedAddress } from "@utils/ssrf.ts";
+import { Resolver } from "node:dns/promises";
+import * as net from "node:net";
 
 const logger = createLogger("EgressProxy");
 
@@ -160,9 +162,17 @@ export function isMetadataAddress(addr: string): boolean {
   return false;
 }
 
-// Minimal structural read type (Deno.Reader was removed). `Deno.Conn` satisfies it.
-interface ByteReader {
-  read(p: Uint8Array): Promise<number | null>;
+/** The two record families the proxy resolves; the suite swaps in a fake DNS server. */
+export interface EgressResolver {
+  resolve4(host: string): Promise<string[]>;
+  resolve6(host: string): Promise<string[]>;
+}
+
+let activeResolver: EgressResolver = new Resolver();
+
+/** Replace the resolver used for host lookups (`undefined` restores the default). */
+export function setEgressResolver(resolver: EgressResolver | undefined): void {
+  activeResolver = resolver ?? new Resolver();
 }
 
 /** Resolve a host to its addresses (literal IPs pass through) for range validation. */
@@ -171,12 +181,12 @@ async function resolveAddresses(host: string): Promise<string[]> {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return [host];
   const out: string[] = [];
   try {
-    out.push(...(await Deno.resolveDns(host, "A")));
+    out.push(...(await activeResolver.resolve4(host)));
   } catch {
     // no A records
   }
   try {
-    out.push(...(await Deno.resolveDns(host, "AAAA")));
+    out.push(...(await activeResolver.resolve6(host)));
   } catch {
     // no AAAA records
   }
@@ -186,7 +196,7 @@ async function resolveAddresses(host: string): Promise<string[]> {
 /**
  * Resolve a host, validate every resolved address, and return a single validated address to
  * PIN the connection to. Returning the pinned address (rather than re-resolving at connect
- * time) closes the DNS-rebinding gap: `Deno.connect`/`fetch` must never perform a second,
+ * time) closes the DNS-rebinding gap: `net.connect`/`fetch` must never perform a second,
  * independent resolution that an attacker's short-TTL record could answer with an internal IP.
  * Fails closed — an unresolvable host, or any resolved address in a disallowed range, yields
  * `{ allowed: false }`.
@@ -246,41 +256,68 @@ function parseAuthority(authority: string, defaultPort: number): { host: string;
 
 /**
  * Copy bytes from one side of a tunnel to the other. On EOF, PROPAGATE the half-close
- * (`closeWrite`, i.e. forward the FIN) to the destination — without this, a client whose
+ * (`to.end()`, i.e. forward the FIN) to the destination — without this, a client whose
  * upstream closed an idle keep-alive connection never learns the tunnel is dead: its
  * connection pool reuses the zombie tunnel and the next request either hangs forever or
  * dies with "socket connection was closed" (observed with OpenCode's pooled LLM streams).
  * On error (reset), tear down BOTH connections so the opposite pipe unblocks immediately.
+ *
+ * `net.Socket.write` never reports a short write: it buffers, and `false` means the peer's
+ * window is full. Pausing `from` until `to` drains is what keeps a large transfer bounded
+ * instead of buffering the whole payload in the proxy.
  */
-async function tunnelPipe(from: Deno.Conn, to: Deno.Conn): Promise<void> {
-  const buf = new Uint8Array(16 * 1024);
-  try {
-    while (true) {
-      const n = await from.read(buf);
-      if (n === null) break;
-      // `Deno.Conn.write` may perform a SHORT write and return fewer bytes than requested
-      // (TCP backpressure on a large transfer). Loop until every byte is flushed — dropping
-      // the remainder here silently corrupts a tunneled TLS stream ("bad record mac") and
-      // manifests as intermittent "socket connection was closed" once request bodies grow
-      // (e.g. after a skill inflates the LLM context).
-      let off = 0;
-      while (off < n) {
-        off += await to.write(buf.subarray(off, n));
+function tunnelPipe(from: net.Socket, to: net.Socket): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let ended = false;
+    const done = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
       }
+    };
+    const fail = () => {
+      from.destroy();
+      to.destroy();
+      done();
+    };
+    // A peer may already be gone before the tunnel is installed (client abort during
+    // validation): without this, no future `end`/`close` event would ever settle the pipe.
+    if (from.destroyed || to.destroyed) {
+      from.destroy();
+      to.destroy();
+      done();
+      return;
     }
-    await to.closeWrite();
-  } catch {
-    try {
-      from.close();
-    } catch {
-      // already closed
+    // The source may already have received FIN while validation was pending. With the
+    // socket paused, `end` is still queued, but `readableEnded` marks the already-consumed
+    // case; route both through the same flush-aware half-close.
+    if (from.readableEnded) {
+      ended = true;
+      to.end(() => done());
     }
-    try {
-      to.close();
-    } catch {
-      // already closed
-    }
-  }
+    from.on("data", (chunk: Buffer) => {
+      if (!to.write(chunk)) {
+        from.pause();
+        to.once("drain", () => from.resume());
+      }
+    });
+    from.once("end", () => {
+      // Half-close the destination, but settle only once its buffered bytes have flushed:
+      // resolving first lets `tunnelConnections` destroy the sockets with data still queued.
+      ended = true;
+      if (to.destroyed) done();
+      else to.end(() => done());
+    });
+    from.once("error", fail);
+    to.once("error", fail);
+    from.once("close", () => {
+      if (!ended) done();
+    });
+    to.once("close", done);
+    // `readHead` leaves the socket paused; the data listener alone must start the flow.
+    from.resume();
+  });
 }
 
 /**
@@ -289,50 +326,112 @@ async function tunnelPipe(from: Deno.Conn, to: Deno.Conn): Promise<void> {
  * FIN-propagation behavior (the proxy's target validation forbids loopback upstreams, so
  * the tunnel semantics cannot be exercised through the full proxy path in tests).
  */
-export async function tunnelConnections(client: Deno.Conn, upstream: Deno.Conn): Promise<void> {
+export async function tunnelConnections(client: net.Socket, upstream: net.Socket): Promise<void> {
   await Promise.all([tunnelPipe(client, upstream), tunnelPipe(upstream, client)]);
+  // `end` flushes whatever is still buffered before the handle is dropped.
+  upstream.end();
+  client.end();
+  upstream.destroy();
+  client.destroy();
+}
+
+/**
+ * Write every byte of `data` to `socket`, waiting for `drain` while it buffers.
+ * `net.Socket.write` accepts the whole buffer, so only the backpressure wait remains.
+ */
+async function writeFull(socket: net.Socket, data: Uint8Array): Promise<void> {
+  if (socket.destroyed) throw new Error("socket destroyed");
+  if (socket.write(data)) return;
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const onDrain = () => {
+    cleanup();
+    resolve();
+  };
+  const onError = (err: Error) => {
+    cleanup();
+    reject(err);
+  };
+  const onClose = () => {
+    cleanup();
+    resolve();
+  };
+  function cleanup() {
+    socket.off("drain", onDrain);
+    socket.off("error", onError);
+    socket.off("close", onClose);
+  }
+  socket.once("drain", onDrain);
+  socket.once("error", onError);
+  socket.once("close", onClose);
+  await promise;
+}
+
+async function writeAll(socket: net.Socket, text: string): Promise<void> {
+  await writeFull(socket, encoder.encode(text));
+}
+
+/** Upper bound on the request head: enough for any real header block. */
+const HEAD_LIMIT = 64 * 1024;
+
+/** Wait until the paused socket has data, or has ended. */
+function waitForReadable(socket: net.Socket): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const done = () => {
+    socket.off("readable", done);
+    socket.off("end", done);
+    socket.off("close", done);
+    resolve();
+  };
+  socket.once("readable", done);
+  socket.once("end", done);
+  socket.once("close", done);
+  if (socket.readableLength > 0 || socket.readableEnded || socket.destroyed) done();
+  return promise;
+}
+
+/** The request head plus any body bytes the OS delivered in the same reads. */
+interface RequestHead {
+  head: string;
+  body: Uint8Array;
+}
+
+/**
+ * Read the first request line + headers block from a proxied connection. The socket stays
+ * paused and is pulled with `read()`, so bytes that arrive after the head stay in
+ * `body` instead of escaping to a `data` listener. The head is decoded as latin1 (the
+ * header encoding) so every byte round-trips unchanged, and the body is kept as raw bytes:
+ * decoding it as text would corrupt binary uploads that arrive coalesced with the head.
+ */
+async function readHead(socket: net.Socket): Promise<RequestHead> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  let boundary = -1;
+  socket.pause();
+  while (boundary === -1) {
+    const chunk = socket.read() as Buffer | null;
+    if (chunk === null) {
+      if (socket.readableEnded || socket.destroyed) break;
+      await waitForReadable(socket);
+      continue;
+    }
+    chunks.push(chunk);
+    length += chunk.length;
+    boundary = Buffer.concat(chunks, length).indexOf("\r\n\r\n");
+    if (length > HEAD_LIMIT) break;
+  }
+  const all = Buffer.concat(chunks, length);
+  const end = boundary === -1 ? all.length : boundary + 4;
+  return { head: all.subarray(0, end).toString("latin1"), body: all.subarray(end) };
+}
+
+/** Write a terminal response, then fully dispose of the client socket. */
+async function respondAndClose(conn: net.Socket, text: string): Promise<void> {
   try {
-    upstream.close();
+    await writeAll(conn, text);
   } catch {
-    // already closed
+    // The client is already gone; there is nothing left to deliver.
   }
-  try {
-    client.close();
-  } catch {
-    // already closed
-  }
-}
-
-/** Write every byte of `data` to `conn`, looping over short writes. */
-async function writeFull(
-  conn: { write(p: Uint8Array): Promise<number> },
-  data: Uint8Array,
-): Promise<void> {
-  let off = 0;
-  while (off < data.length) {
-    off += await conn.write(data.subarray(off));
-  }
-}
-
-async function writeAll(
-  conn: { write(p: Uint8Array): Promise<number> },
-  text: string,
-): Promise<void> {
-  await writeFull(conn, encoder.encode(text));
-}
-
-/** Read the first request line + headers block from a proxied connection. */
-async function readHead(conn: ByteReader): Promise<string> {
-  const buf = new Uint8Array(64 * 1024);
-  let acc = "";
-  while (!acc.includes("\r\n\r\n")) {
-    const chunk = new Uint8Array(4096);
-    const n = await conn.read(chunk);
-    if (n === null) break;
-    acc += new TextDecoder().decode(chunk.subarray(0, n));
-    if (acc.length > buf.length) break;
-  }
-  return acc;
+  conn.end(() => conn.destroy());
 }
 
 export interface EgressProxyHandle {
@@ -340,15 +439,54 @@ export interface EgressProxyHandle {
   close(): void;
 }
 
+/** Connect to `host:port` with the half-close semantics the tunnel relies on. */
+function connectUpstream(host: string, port: number): Promise<net.Socket> {
+  const { promise, resolve, reject } = Promise.withResolvers<net.Socket>();
+  const socket = net.connect({ host, port, allowHalfOpen: true });
+  const onConnect = () => {
+    cleanup();
+    resolve(socket);
+  };
+  const onError = (err: Error) => {
+    cleanup();
+    socket.destroy();
+    reject(err);
+  };
+  function cleanup() {
+    socket.off("connect", onConnect);
+    socket.off("error", onError);
+  }
+  socket.once("connect", onConnect);
+  socket.once("error", onError);
+  return promise;
+}
+
 /** Process-wide singleton so all agent sessions share one validating proxy. */
 let sharedProxy: EgressProxyHandle | undefined;
+/** In-flight start, so concurrent callers share one listener instead of racing. */
+let sharedProxyPromise: Promise<EgressProxyHandle> | undefined;
 
-/** Start (once) and return the shared validating egress proxy. */
-export function ensureEgressProxy(port: number): EgressProxyHandle {
-  if (!sharedProxy) {
-    sharedProxy = startEgressProxy(port);
+/**
+ * Start (once) and return the shared validating egress proxy. `net.Server` reports its
+ * bound port asynchronously, so starting is a promise; the in-flight promise is cached so
+ * two concurrent calls share one listener.
+ */
+export async function ensureEgressProxy(port: number): Promise<EgressProxyHandle> {
+  if (sharedProxy) return sharedProxy;
+  if (!sharedProxyPromise) {
+    const started = startEgressProxy(port);
+    const promise: Promise<EgressProxyHandle> = started.then((proxy) => {
+      // A concurrent `stopEgressProxy` clears the slot before this resolves; never publish
+      // a listener the stop already promised to shut down.
+      if (sharedProxyPromise === promise) sharedProxy = proxy;
+      return proxy;
+    }).catch((err: unknown) => {
+      if (sharedProxyPromise === promise) sharedProxyPromise = undefined;
+      throw err;
+    });
+    sharedProxyPromise = promise;
   }
-  return sharedProxy;
+  return await sharedProxyPromise;
 }
 
 /**
@@ -362,52 +500,72 @@ export function getRunningEgressProxyUrl(): string | undefined {
 }
 
 /** Stop the shared egress proxy (used on shutdown / in tests). */
-export function stopEgressProxy(): void {
-  sharedProxy?.close();
+export async function stopEgressProxy(): Promise<void> {
+  const pending = sharedProxyPromise;
+  const running = sharedProxy;
+  sharedProxyPromise = undefined;
   sharedProxy = undefined;
+  if (running) {
+    running.close();
+  }
+  if (pending) {
+    try {
+      const proxy = await pending;
+      if (proxy !== running) proxy.close();
+    } catch {
+      // a failed start leaves nothing to close
+    }
+  }
 }
 
 /**
  * Start the validating forward proxy on `127.0.0.1:<port>` (port 0 = ephemeral).
- * Returns a handle exposing the bound port and a `close()`.
+ * Returns a handle exposing the bound port and a `close()`. Unlike `Deno.listen`,
+ * `net.Server` reports its bound port asynchronously, so starting is a promise.
  */
-export function startEgressProxy(port: number): EgressProxyHandle {
-  const listener = Deno.listen({ hostname: "127.0.0.1", port });
-  const boundPort = (listener.addr as Deno.NetAddr).port;
-  logger.info("Validating egress proxy listening on 127.0.0.1:{port}", { port: boundPort });
-
-  (async () => {
-    for await (const conn of listener) {
-      handleConnection(conn).catch(() => {
-        try {
-          conn.close();
-        } catch {
-          // already closed
-        }
-      });
+export function startEgressProxy(port: number): Promise<EgressProxyHandle> {
+  const { promise, resolve, reject } = Promise.withResolvers<EgressProxyHandle>();
+  let settled = false;
+  const server = net.createServer({ allowHalfOpen: true }, (conn) => {
+    // `node:net` reports peer resets as `error` events, and an unheard one ends the
+    // process. Deno's listener loop only ever saw them as a rejected read; keeping a
+    // baseline listener preserves that "one bad client cannot take the proxy down"
+    // behavior for the whole pre-tunnel lifetime (`readHead`, validation, connect).
+    conn.on("error", () => {});
+    handleConnection(conn).catch(() => {
+      conn.destroy();
+    });
+  });
+  server.on("error", (err: Error) => {
+    if (settled) {
+      logger.error("Egress proxy error: {error}", { error: err.message });
+      return;
     }
-  })();
-
-  return {
-    port: boundPort,
-    close: () => {
-      try {
-        listener.close();
-      } catch {
-        // already closed
-      }
-    },
-  };
+    settled = true;
+    reject(err);
+  });
+  server.once("listening", () => {
+    settled = true;
+    const boundPort = (server.address() as net.AddressInfo).port;
+    logger.info("Validating egress proxy listening on 127.0.0.1:{port}", { port: boundPort });
+    resolve({
+      port: boundPort,
+      close: () => {
+        server.close();
+      },
+    });
+  });
+  server.listen(port, "127.0.0.1");
+  return promise;
 }
 
-async function handleConnection(conn: Deno.Conn): Promise<void> {
-  const head = await readHead(conn);
+async function handleConnection(conn: net.Socket): Promise<void> {
+  const { head, body } = await readHead(conn);
   const requestLine = head.split("\r\n")[0] ?? "";
   const [method, target] = requestLine.split(" ");
 
   if (!method || !target) {
-    await writeAll(conn, "HTTP/1.1 400 Bad Request\r\n\r\n");
-    conn.close();
+    await respondAndClose(conn, "HTTP/1.1 400 Bad Request\r\n\r\n");
     return;
   }
 
@@ -419,20 +577,25 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
     const verdict = await resolveAndValidateEgress(host);
     if (!verdict.allowed || !verdict.address) {
       logger.warn("Blocked CONNECT to disallowed egress target: {host}", { host });
-      await writeAll(conn, "HTTP/1.1 403 Forbidden\r\n\r\n");
-      conn.close();
+      await respondAndClose(conn, "HTTP/1.1 403 Forbidden\r\n\r\n");
       return;
     }
-    let upstream: Deno.Conn;
+    let upstream: net.Socket;
     try {
-      upstream = await Deno.connect({ hostname: verdict.address, port });
+      upstream = await connectUpstream(verdict.address, port);
     } catch {
-      await writeAll(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n");
-      conn.close();
+      await respondAndClose(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n");
       return;
     }
-    await writeAll(conn, "HTTP/1.1 200 Connection Established\r\n\r\n");
-    await tunnelConnections(conn, upstream);
+    try {
+      await writeAll(conn, "HTTP/1.1 200 Connection Established\r\n\r\n");
+      // Early bytes the client pipelined with the CONNECT head belong to the tunnel.
+      if (body.length > 0) await writeFull(upstream, body);
+      await tunnelConnections(conn, upstream);
+    } catch {
+      upstream.destroy();
+      conn.destroy();
+    }
     return;
   }
 
@@ -441,15 +604,13 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
   try {
     url = new URL(target);
   } catch {
-    await writeAll(conn, "HTTP/1.1 400 Bad Request\r\n\r\n");
-    conn.close();
+    await respondAndClose(conn, "HTTP/1.1 400 Bad Request\r\n\r\n");
     return;
   }
   const scheme = url.protocol.replace(/:$/, "").toLowerCase();
   if (scheme !== "http") {
     // Only plain HTTP arrives in absolute-form here; HTTPS uses CONNECT above.
-    await writeAll(conn, "HTTP/1.1 403 Forbidden\r\n\r\n");
-    conn.close();
+    await respondAndClose(conn, "HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
   const verdict = await resolveAndValidateEgress(url.hostname);
@@ -457,8 +618,7 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
     logger.warn("Blocked HTTP request to disallowed egress target: {host}", {
       host: url.hostname,
     });
-    await writeAll(conn, "HTTP/1.1 403 Forbidden\r\n\r\n");
-    conn.close();
+    await respondAndClose(conn, "HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
 
@@ -467,28 +627,25 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
   // pins the connection to the validated address — unlike `fetch`, which would re-resolve the
   // hostname and could be DNS-rebound to an internal IP between validation and connection.
   const port = url.port ? Number(url.port) : 80;
-  let upstream: Deno.Conn;
+  let upstream: net.Socket;
   try {
-    upstream = await Deno.connect({ hostname: verdict.address, port });
+    upstream = await connectUpstream(verdict.address, port);
   } catch {
-    await writeAll(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n");
-    conn.close();
+    await respondAndClose(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n");
     return;
   }
   const originPath = (url.pathname || "/") + url.search;
   const rewrittenHead = rewriteForwardHead(head, method, originPath);
   try {
-    await writeFull(upstream, encoder.encode(rewrittenHead));
+    // Headers are latin1; encoding as UTF-8 would rewrite bytes >= 0x80.
+    await writeFull(upstream, Buffer.from(rewrittenHead, "latin1"));
+    // Body bytes read with the head are forwarded verbatim, never re-decoded.
+    if (body.length > 0) await writeFull(upstream, body);
+    await tunnelConnections(conn, upstream);
   } catch {
-    try {
-      upstream.close();
-    } catch {
-      // already closed
-    }
-    conn.close();
-    return;
+    upstream.destroy();
+    conn.destroy();
   }
-  await tunnelConnections(conn, upstream);
 }
 
 /**
