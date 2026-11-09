@@ -27,6 +27,8 @@ import type {
   QueryOutcome,
   RecallThresholds,
 } from "../../../scripts/memory-recall-benchmark.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 
 /** Fixture scenarios the requirement lists; each maps to a `case` tag. */
 const REQUIRED_CASES: Record<string, string> = {
@@ -84,7 +86,7 @@ interface RecordedMetrics {
   };
 }
 
-const recorded = JSON.parse(await Deno.readTextFile(METRICS_URL)) as RecordedMetrics;
+const recorded = JSON.parse(await fsp.readFile(METRICS_URL, "utf8")) as RecordedMetrics;
 const { corpus, queries, notes } = await loadFixture();
 const defaults: RecallThresholds = {
   minRecallScore: DEFAULT_RECALL_CONFIG.minRecallScore,
@@ -111,7 +113,7 @@ function idsOf(outcome: QueryOutcome): string[] {
   return outcome.selected;
 }
 
-Deno.test("fixture - every corpus line is a memory log event of a known source", () => {
+test("fixture - every corpus line is a memory log event of a known source", () => {
   const sources = new Set(corpus.map((entry) => entry.source));
   assertEquals([...sources].sort(), ["channel", "user-private", "user-public"]);
 
@@ -170,7 +172,7 @@ Deno.test("fixture - every corpus line is a memory log event of a known source",
   );
 });
 
-Deno.test("fixture - queries are labeled, cover every required case, and reference the corpus", () => {
+test("fixture - queries are labeled, cover every required case, and reference the corpus", () => {
   const ids = new Set(corpus.map((entry) => entry.event.id));
   const queryIds = queries.map((query) => query.id);
   assertEquals(new Set(queryIds).size, queryIds.length, "query ids are unique");
@@ -213,7 +215,7 @@ Deno.test("fixture - queries are labeled, cover every required case, and referen
   );
 });
 
-Deno.test("fixture - every expected note exists and the note queries are labeled", () => {
+test("fixture - every expected note exists and the note queries are labeled", () => {
   const noteKeys = new Set(notes.map((note) => note.path));
   assert(notes.length >= 10, `expected about 10 notes, got ${notes.length}`);
   for (const note of notes) {
@@ -248,7 +250,7 @@ Deno.test("fixture - every expected note exists and the note queries are labeled
   }
 });
 
-Deno.test("benchmark - adversarial hint-word negatives fire the intended hint", () => {
+test("benchmark - adversarial hint-word negatives fire the intended hint", () => {
   for (const [id, expected] of Object.entries(HINT_WORD_EXPECTATIONS)) {
     const query = queries.find((item) => item.id === id);
     assert(query !== undefined, `fixture query ${id} is missing`);
@@ -257,7 +259,7 @@ Deno.test("benchmark - adversarial hint-word negatives fire the intended hint", 
   }
 });
 
-Deno.test("benchmark - the fixture and the recorded thresholds stay in sync", () => {
+test("benchmark - the fixture and the recorded thresholds stay in sync", () => {
   assertEquals(memoryQueries.length, recorded.queryCount);
   assertEquals(
     memoryQueries.filter((query) => query.expected.length > 0).length,
@@ -276,7 +278,7 @@ Deno.test("benchmark - the fixture and the recorded thresholds stay in sync", ()
   assertEquals(defaults.secondNoteRecallScore, recorded.notes.secondNoteRecallScore);
 });
 
-Deno.test("benchmark - the default configuration reproduces the recorded metrics", async () => {
+test("benchmark - the default configuration reproduces the recorded metrics", async () => {
   const { outcomes, p95LatencyMs } = await runPassOnFixture(corpus, notes, queries, defaults);
   const metrics = computeMetrics(memoryOutcomes(outcomes));
 
@@ -294,7 +296,7 @@ Deno.test("benchmark - the default configuration reproduces the recorded metrics
   );
 });
 
-Deno.test("benchmark - the default configuration reproduces the recorded note metrics", async () => {
+test("benchmark - the default configuration reproduces the recorded note metrics", async () => {
   const { outcomes } = await runPassOnFixture(corpus, notes, queries, defaults);
   const metrics = computeNoteMetrics(outcomes);
 
@@ -312,7 +314,7 @@ Deno.test("benchmark - the default configuration reproduces the recorded note me
   );
 });
 
-Deno.test("benchmark - the relatedTo expansion returns the related memory", async () => {
+test("benchmark - the relatedTo expansion returns the related memory", async () => {
   const { outcomes } = await runPassOnFixture(corpus, notes, queries, defaults);
   const related = queries.find((query) => query.case === "related-to-expansion");
   assert(related !== undefined, "the fixture has a relatedTo query");
@@ -328,7 +330,7 @@ Deno.test("benchmark - the relatedTo expansion returns the related memory", asyn
   assert(idsOf(outcome).includes("m20"), `expected the parent memory m20`);
 });
 
-Deno.test("benchmark - the grid search finds the recorded thresholds", async () => {
+test("benchmark - the grid search finds the recorded thresholds", async () => {
   const result = await runBenchmark();
   assert(result.calibration.feasible, "the fixture has a feasible calibration");
   assertEquals(result.calibration.thresholds, {
@@ -342,7 +344,7 @@ Deno.test("benchmark - the grid search finds the recorded thresholds", async () 
   );
 });
 
-Deno.test("benchmark - the note grid search finds the recorded thresholds", async () => {
+test("benchmark - the note grid search finds the recorded thresholds", async () => {
   const result = await runBenchmark();
   assert(result.calibration.noteFeasible, "the fixture has a feasible note calibration");
   assertEquals(result.calibration.noteThresholds, {
@@ -353,7 +355,7 @@ Deno.test("benchmark - the note grid search finds the recorded thresholds", asyn
   assertEquals(metricTuple(result.noteMetrics), metricTuple(computeNoteMetrics(result.outcomes)));
 });
 
-Deno.test("benchmark - the note thresholds are pinned away from the grid bounds", async () => {
+test("benchmark - the note thresholds are pinned away from the grid bounds", async () => {
   const result = await runBenchmark();
   const thresholds = result.calibration.noteThresholds;
   assert(thresholds !== undefined, "the note calibration is feasible");
@@ -386,7 +388,7 @@ Deno.test("benchmark - the note thresholds are pinned away from the grid bounds"
   );
 });
 
-Deno.test("benchmark - lowering minRecallScore by 1.0 moves the metrics", async () => {
+test("benchmark - lowering minRecallScore by 1.0 moves the metrics", async () => {
   const lowered = await runPassOnFixture(corpus, notes, queries, {
     minRecallScore: defaults.minRecallScore - 1,
     secondRecallScore: defaults.secondRecallScore,
@@ -408,7 +410,7 @@ Deno.test("benchmark - lowering minRecallScore by 1.0 moves the metrics", async 
   );
 });
 
-Deno.test("benchmark - lowering noteMinRecallScore by 1.0 moves the note metrics", async () => {
+test("benchmark - lowering noteMinRecallScore by 1.0 moves the note metrics", async () => {
   const lowered = await runPassOnFixture(corpus, notes, queries, {
     ...defaults,
     noteMinRecallScore: defaults.noteMinRecallScore - 1,

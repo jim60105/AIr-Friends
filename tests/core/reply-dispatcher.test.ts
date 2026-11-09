@@ -5,6 +5,7 @@ import { ReplyDispatcher } from "@core/reply-dispatcher.ts";
 import type { SessionResponse } from "@core/session-orchestrator.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyOptions, ReplyResult } from "../../src/types/platform.ts";
+import { test } from "bun:test";
 
 // Mock PlatformAdapter
 class MockPlatformAdapter implements Partial<PlatformAdapter> {
@@ -41,7 +42,7 @@ class MockPlatformAdapter implements Partial<PlatformAdapter> {
   }
 }
 
-Deno.test("ReplyDispatcher - does not dispatch for successful response", async () => {
+test("ReplyDispatcher - does not dispatch for successful response", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -61,7 +62,7 @@ Deno.test("ReplyDispatcher - does not dispatch for successful response", async (
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - does not dispatch if reply was already sent", async () => {
+test("ReplyDispatcher - does not dispatch if reply was already sent", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -82,7 +83,7 @@ Deno.test("ReplyDispatcher - does not dispatch if reply was already sent", async
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - dispatches error message for failed response", async () => {
+test("ReplyDispatcher - dispatches error message for failed response", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -112,7 +113,7 @@ Deno.test("ReplyDispatcher - dispatches error message for failed response", asyn
   assertEquals(sentReply.options?.replyToMessageId, "original_msg_id");
 });
 
-Deno.test("ReplyDispatcher - skips error dispatch for duplicate event errors", async () => {
+test("ReplyDispatcher - skips error dispatch for duplicate event errors", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -133,7 +134,7 @@ Deno.test("ReplyDispatcher - skips error dispatch for duplicate event errors", a
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - skips error dispatch for cancelled errors", async () => {
+test("ReplyDispatcher - skips error dispatch for cancelled errors", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -154,7 +155,7 @@ Deno.test("ReplyDispatcher - skips error dispatch for cancelled errors", async (
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - does not dispatch error for rate limited", async () => {
+test("ReplyDispatcher - does not dispatch error for rate limited", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -176,7 +177,7 @@ Deno.test("ReplyDispatcher - does not dispatch error for rate limited", async ()
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - handles platform send failure gracefully", async () => {
+test("ReplyDispatcher - handles platform send failure gracefully", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   mockAdapter.shouldFail = true;
@@ -197,7 +198,7 @@ Deno.test("ReplyDispatcher - handles platform send failure gracefully", async ()
   assertEquals(dispatched, false); // Failed to send
 });
 
-Deno.test("ReplyDispatcher - suppresses the fallback notice after a submitted email", async () => {
+test("ReplyDispatcher - suppresses the fallback notice after a submitted email", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -215,7 +216,7 @@ Deno.test("ReplyDispatcher - suppresses the fallback notice after a submitted em
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - suppresses the fallback notice after an unresolved email", async () => {
+test("ReplyDispatcher - suppresses the fallback notice after an unresolved email", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -233,7 +234,7 @@ Deno.test("ReplyDispatcher - suppresses the fallback notice after an unresolved 
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
-Deno.test("ReplyDispatcher - an email notice reuses the host reply slot context", async () => {
+test("ReplyDispatcher - an email notice reuses the host reply slot context", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -262,7 +263,7 @@ Deno.test("ReplyDispatcher - an email notice reuses the host reply slot context"
   assertEquals(mockAdapter.sentReplies[0].options?.replyToMessageId, "trigger-1");
 });
 
-Deno.test("ReplyDispatcher - an ordinary failure carries no email context", async () => {
+test("ReplyDispatcher - an ordinary failure carries no email context", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();
   const adapter = mockAdapter as unknown as PlatformAdapter;

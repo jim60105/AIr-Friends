@@ -4,16 +4,17 @@ import { assertEquals } from "@std/assert";
 import { resolveModel, resolveReasoningEffort } from "@core/model-router.ts";
 import type { ModelRoutingConfig } from "../../src/types/config.ts";
 import type { ModelRoutingContext } from "@core/model-router.ts";
+import { test } from "bun:test";
 
 const FALLBACK_MODEL = "default-model";
 const FALLBACK_EFFORT = "default";
 
-Deno.test("resolveModel - should return fallback when routing is undefined", () => {
+test("resolveModel - should return fallback when routing is undefined", () => {
   const context: ModelRoutingContext = { sessionType: "message" };
   assertEquals(resolveModel(undefined, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should return fallback when routing is disabled", () => {
+test("resolveModel - should return fallback when routing is disabled", () => {
   const config: ModelRoutingConfig = {
     enabled: false,
     rules: [{ match: { sessionType: "message" }, model: "other-model" }],
@@ -22,13 +23,13 @@ Deno.test("resolveModel - should return fallback when routing is disabled", () =
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should return fallback when rules array is empty", () => {
+test("resolveModel - should return fallback when rules array is empty", () => {
   const config: ModelRoutingConfig = { enabled: true, rules: [] };
   const context: ModelRoutingContext = { sessionType: "message" };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should match whitelist account rule", () => {
+test("resolveModel - should match whitelist account rule", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: "discord/account/12345678901234567" }, model: "premium-model" }],
@@ -41,7 +42,7 @@ Deno.test("resolveModel - should match whitelist account rule", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "premium-model");
 });
 
-Deno.test("resolveModel - should match whitelist channel rule", () => {
+test("resolveModel - should match whitelist channel rule", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: "discord/channel/45678901234567890" }, model: "channel-model" }],
@@ -54,7 +55,7 @@ Deno.test("resolveModel - should match whitelist channel rule", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "channel-model");
 });
 
-Deno.test("resolveModel - should not match whitelist when platform differs", () => {
+test("resolveModel - should not match whitelist when platform differs", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: "discord/account/12345678901234567" }, model: "premium-model" }],
@@ -67,7 +68,7 @@ Deno.test("resolveModel - should not match whitelist when platform differs", () 
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should not match whitelist when user ID differs", () => {
+test("resolveModel - should not match whitelist when user ID differs", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: "discord/account/12345678901234567" }, model: "premium-model" }],
@@ -80,7 +81,7 @@ Deno.test("resolveModel - should not match whitelist when user ID differs", () =
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should match sessionType: message", () => {
+test("resolveModel - should match sessionType: message", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "message" }, model: "msg-model" }],
@@ -89,7 +90,7 @@ Deno.test("resolveModel - should match sessionType: message", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "msg-model");
 });
 
-Deno.test("resolveModel - should match sessionType: spontaneous", () => {
+test("resolveModel - should match sessionType: spontaneous", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "spontaneous" }, model: "sp-model" }],
@@ -98,7 +99,7 @@ Deno.test("resolveModel - should match sessionType: spontaneous", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "sp-model");
 });
 
-Deno.test("resolveModel - should match sessionType: self-research", () => {
+test("resolveModel - should match sessionType: self-research", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "self-research" }, model: "sr-model" }],
@@ -107,7 +108,7 @@ Deno.test("resolveModel - should match sessionType: self-research", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "sr-model");
 });
 
-Deno.test("resolveModel - should match sessionType: memory-maintenance", () => {
+test("resolveModel - should match sessionType: memory-maintenance", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "memory-maintenance" }, model: "mm-model" }],
@@ -116,7 +117,7 @@ Deno.test("resolveModel - should match sessionType: memory-maintenance", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "mm-model");
 });
 
-Deno.test("resolveModel - should not match different sessionType", () => {
+test("resolveModel - should not match different sessionType", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "spontaneous" }, model: "sp-model" }],
@@ -125,7 +126,7 @@ Deno.test("resolveModel - should not match different sessionType", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should use first matching rule when multiple rules match", () => {
+test("resolveModel - should use first matching rule when multiple rules match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [
@@ -141,7 +142,7 @@ Deno.test("resolveModel - should use first matching rule when multiple rules mat
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "first-model");
 });
 
-Deno.test("resolveModel - should return fallback when no rules match", () => {
+test("resolveModel - should return fallback when no rules match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [
@@ -159,7 +160,7 @@ Deno.test("resolveModel - should return fallback when no rules match", () => {
 
 // --- contentKeywords tests ---
 
-Deno.test("resolveModel - should match when message contains keyword (case-insensitive)", () => {
+test("resolveModel - should match when message contains keyword (case-insensitive)", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { contentKeywords: ["研究"] }, model: "research-model" }],
@@ -171,7 +172,7 @@ Deno.test("resolveModel - should match when message contains keyword (case-insen
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "research-model");
 });
 
-Deno.test("resolveModel - should match when message contains any keyword (OR logic)", () => {
+test("resolveModel - should match when message contains any keyword (OR logic)", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { contentKeywords: ["研究", "research", "paper"] }, model: "research-model" }],
@@ -183,7 +184,7 @@ Deno.test("resolveModel - should match when message contains any keyword (OR log
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "research-model");
 });
 
-Deno.test("resolveModel - should not match when message contains no keywords", () => {
+test("resolveModel - should not match when message contains no keywords", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { contentKeywords: ["研究", "research"] }, model: "research-model" }],
@@ -195,7 +196,7 @@ Deno.test("resolveModel - should not match when message contains no keywords", (
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should not match contentKeywords for non-message session types", () => {
+test("resolveModel - should not match contentKeywords for non-message session types", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { contentKeywords: ["研究"] }, model: "research-model" }],
@@ -207,7 +208,7 @@ Deno.test("resolveModel - should not match contentKeywords for non-message sessi
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should not match contentKeywords when messageContent is undefined", () => {
+test("resolveModel - should not match contentKeywords when messageContent is undefined", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { contentKeywords: ["研究"] }, model: "research-model" }],
@@ -216,7 +217,7 @@ Deno.test("resolveModel - should not match contentKeywords when messageContent i
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - contentKeywords case-insensitive match", () => {
+test("resolveModel - contentKeywords case-insensitive match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { contentKeywords: ["Research"] }, model: "research-model" }],
@@ -230,7 +231,7 @@ Deno.test("resolveModel - contentKeywords case-insensitive match", () => {
 
 // --- AND combination tests ---
 
-Deno.test("resolveModel - should match when whitelist AND contentKeywords both match", () => {
+test("resolveModel - should match when whitelist AND contentKeywords both match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
@@ -247,7 +248,7 @@ Deno.test("resolveModel - should match when whitelist AND contentKeywords both m
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "combo-model");
 });
 
-Deno.test("resolveModel - should not match when whitelist matches but contentKeywords does not", () => {
+test("resolveModel - should not match when whitelist matches but contentKeywords does not", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
@@ -264,7 +265,7 @@ Deno.test("resolveModel - should not match when whitelist matches but contentKey
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should not match when contentKeywords matches but whitelist does not", () => {
+test("resolveModel - should not match when contentKeywords matches but whitelist does not", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
@@ -281,7 +282,7 @@ Deno.test("resolveModel - should not match when contentKeywords matches but whit
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should match when whitelist AND sessionType both match", () => {
+test("resolveModel - should match when whitelist AND sessionType both match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
@@ -297,7 +298,7 @@ Deno.test("resolveModel - should match when whitelist AND sessionType both match
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "combo-model");
 });
 
-Deno.test("resolveModel - should match when all three conditions match", () => {
+test("resolveModel - should match when all three conditions match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
@@ -318,7 +319,7 @@ Deno.test("resolveModel - should match when all three conditions match", () => {
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "triple-model");
 });
 
-Deno.test("resolveModel - should not match when one of three conditions fails", () => {
+test("resolveModel - should not match when one of three conditions fails", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
@@ -339,7 +340,7 @@ Deno.test("resolveModel - should not match when one of three conditions fails", 
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - should not match when match object has no conditions", () => {
+test("resolveModel - should not match when match object has no conditions", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: {}, model: "empty-model" }],
@@ -350,7 +351,7 @@ Deno.test("resolveModel - should not match when match object has no conditions",
 
 // --- Backward compatibility ---
 
-Deno.test("resolveModel - backward compat: single whitelist condition still works", () => {
+test("resolveModel - backward compat: single whitelist condition still works", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: "discord/account/12345678901234567" }, model: "premium-model" }],
@@ -363,7 +364,7 @@ Deno.test("resolveModel - backward compat: single whitelist condition still work
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "premium-model");
 });
 
-Deno.test("resolveModel - backward compat: single sessionType condition still works", () => {
+test("resolveModel - backward compat: single sessionType condition still works", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "spontaneous" }, model: "sp-model" }],
@@ -374,12 +375,12 @@ Deno.test("resolveModel - backward compat: single sessionType condition still wo
 
 // --- resolveReasoningEffort tests ---
 
-Deno.test("resolveReasoningEffort - returns fallback when routing undefined", () => {
+test("resolveReasoningEffort - returns fallback when routing undefined", () => {
   const context: ModelRoutingContext = { sessionType: "message" };
   assertEquals(resolveReasoningEffort(undefined, context, FALLBACK_EFFORT), "default");
 });
 
-Deno.test("resolveReasoningEffort - returns fallback when routing disabled", () => {
+test("resolveReasoningEffort - returns fallback when routing disabled", () => {
   const config: ModelRoutingConfig = {
     enabled: false,
     rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "high" }],
@@ -388,7 +389,7 @@ Deno.test("resolveReasoningEffort - returns fallback when routing disabled", () 
   assertEquals(resolveReasoningEffort(config, context, FALLBACK_EFFORT), "default");
 });
 
-Deno.test("resolveReasoningEffort - matched rule with effort wins", () => {
+test("resolveReasoningEffort - matched rule with effort wins", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "high" }],
@@ -397,7 +398,7 @@ Deno.test("resolveReasoningEffort - matched rule with effort wins", () => {
   assertEquals(resolveReasoningEffort(config, context, "low"), "high");
 });
 
-Deno.test("resolveReasoningEffort - matched rule without effort falls back", () => {
+test("resolveReasoningEffort - matched rule without effort falls back", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "message" }, model: "m" }],
@@ -406,7 +407,7 @@ Deno.test("resolveReasoningEffort - matched rule without effort falls back", () 
   assertEquals(resolveReasoningEffort(config, context, "low"), "low");
 });
 
-Deno.test("resolveReasoningEffort - no rule matches returns fallback", () => {
+test("resolveReasoningEffort - no rule matches returns fallback", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "spontaneous" }, model: "m", reasoningEffort: "high" }],
@@ -415,7 +416,7 @@ Deno.test("resolveReasoningEffort - no rule matches returns fallback", () => {
   assertEquals(resolveReasoningEffort(config, context, "medium"), "medium");
 });
 
-Deno.test("resolveReasoningEffort - first matching rule wins even if later rule has effort", () => {
+test("resolveReasoningEffort - first matching rule wins even if later rule has effort", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [
@@ -428,7 +429,7 @@ Deno.test("resolveReasoningEffort - first matching rule wins even if later rule 
   assertEquals(resolveReasoningEffort(config, context, "low"), "low");
 });
 
-Deno.test("resolveReasoningEffort - extended rule value overrides section value", () => {
+test("resolveReasoningEffort - extended rule value overrides section value", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "self-research" }, model: "m", reasoningEffort: "max" }],
@@ -437,18 +438,18 @@ Deno.test("resolveReasoningEffort - extended rule value overrides section value"
   assertEquals(resolveReasoningEffort(config, context, "xhigh"), "max");
 });
 
-Deno.test("resolveReasoningEffort - extended section value resolves when no rule contributes", () => {
+test("resolveReasoningEffort - extended section value resolves when no rule contributes", () => {
   const context: ModelRoutingContext = { sessionType: "self-research" };
   // No routing (or no matching rule) -> section value "xhigh" resolves as-is.
   assertEquals(resolveReasoningEffort(undefined, context, "xhigh"), "xhigh");
 });
 
-Deno.test("resolveReasoningEffort - extended global value resolves when nothing else contributes", () => {
+test("resolveReasoningEffort - extended global value resolves when nothing else contributes", () => {
   const context: ModelRoutingContext = { sessionType: "message" };
   assertEquals(resolveReasoningEffort(undefined, context, "max"), "max");
 });
 
-Deno.test("resolveReasoningEffort - model and effort resolved from same matched rule", () => {
+test("resolveReasoningEffort - model and effort resolved from same matched rule", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "message" }, model: "routed-model", reasoningEffort: "high" }],
@@ -458,7 +459,7 @@ Deno.test("resolveReasoningEffort - model and effort resolved from same matched 
   assertEquals(resolveReasoningEffort(config, context, FALLBACK_EFFORT), "high");
 });
 
-Deno.test("resolveReasoningEffort - empty-string effort on rule treated as fallback", () => {
+test("resolveReasoningEffort - empty-string effort on rule treated as fallback", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "" }],
@@ -467,7 +468,7 @@ Deno.test("resolveReasoningEffort - empty-string effort on rule treated as fallb
   assertEquals(resolveReasoningEffort(config, context, "medium"), "medium");
 });
 
-Deno.test("resolveReasoningEffort - explicit 'default' on matched rule terminates chain", () => {
+test("resolveReasoningEffort - explicit 'default' on matched rule terminates chain", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "default" }],
@@ -488,7 +489,7 @@ const EMAIL_USER_ID = `e_${"a1".repeat(32)}`;
 /** A different, valid email user id of the same shape. */
 const OTHER_EMAIL_USER_ID = `e_${"7f".repeat(32)}`;
 
-Deno.test("resolveModel - should match an email account rule on the canonical user id", () => {
+test("resolveModel - should match an email account rule on the canonical user id", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" }],
@@ -502,7 +503,7 @@ Deno.test("resolveModel - should match an email account rule on the canonical us
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "email-model");
 });
 
-Deno.test("resolveModel - email account rule does not match another email user", () => {
+test("resolveModel - email account rule does not match another email user", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" }],
@@ -515,7 +516,7 @@ Deno.test("resolveModel - email account rule does not match another email user",
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - an email account rule does not match a non-email platform", () => {
+test("resolveModel - an email account rule does not match a non-email platform", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{ match: { channel: `email/account/${EMAIL_USER_ID}` }, model: "email-model" }],
@@ -528,7 +529,7 @@ Deno.test("resolveModel - an email account rule does not match a non-email platf
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - an email rule keyed on the raw address never matches the hashed user id", () => {
+test("resolveModel - an email rule keyed on the raw address never matches the hashed user id", () => {
   // Channel entries are normalized to `email/account/<userId>` at load time, so a rule
   // written with the raw address must not silently match the canonical session context.
   const config: ModelRoutingConfig = {
@@ -546,7 +547,7 @@ Deno.test("resolveModel - an email rule keyed on the raw address never matches t
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
 
-Deno.test("resolveModel - email account, discord and misskey rules stay independent", () => {
+test("resolveModel - email account, discord and misskey rules stay independent", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [

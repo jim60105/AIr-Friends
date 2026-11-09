@@ -2,6 +2,7 @@
 
 import { assertEquals } from "@std/assert";
 import { BaseScheduler } from "@core/base-scheduler.ts";
+import { test } from "bun:test";
 
 /** Concrete test implementation of BaseScheduler */
 class TestScheduler extends BaseScheduler {
@@ -62,7 +63,7 @@ class TestScheduler extends BaseScheduler {
   }
 }
 
-Deno.test("BaseScheduler - start sets started flag and calls onStarted", () => {
+test("BaseScheduler - start sets started flag and calls onStarted", () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 999999;
   scheduler.start();
@@ -72,7 +73,7 @@ Deno.test("BaseScheduler - start sets started flag and calls onStarted", () => {
   scheduler.stop();
 });
 
-Deno.test("BaseScheduler - start when disabled does nothing", () => {
+test("BaseScheduler - start when disabled does nothing", () => {
   const scheduler = new TestScheduler();
   scheduler.enabled = false;
   scheduler.start();
@@ -80,7 +81,7 @@ Deno.test("BaseScheduler - start when disabled does nothing", () => {
   assertEquals(scheduler.onStartedCalled, false);
 });
 
-Deno.test("BaseScheduler - double start is prevented", () => {
+test("BaseScheduler - double start is prevented", () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 999999;
   scheduler.start();
@@ -90,7 +91,7 @@ Deno.test("BaseScheduler - double start is prevented", () => {
   scheduler.stop();
 });
 
-Deno.test("BaseScheduler - stop clears timer and resets state", () => {
+test("BaseScheduler - stop clears timer and resets state", () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 999999;
   scheduler.start();
@@ -101,7 +102,7 @@ Deno.test("BaseScheduler - stop clears timer and resets state", () => {
   assertEquals(scheduler.getStatus().nextScheduledAt, null);
 });
 
-Deno.test("BaseScheduler - getStatus returns correct values", () => {
+test("BaseScheduler - getStatus returns correct values", () => {
   const scheduler = new TestScheduler();
   const status = scheduler.getStatus();
   assertEquals(status.isRunning, false);
@@ -109,7 +110,7 @@ Deno.test("BaseScheduler - getStatus returns correct values", () => {
   assertEquals(status.nextScheduledAt, null);
 });
 
-Deno.test("BaseScheduler - execute runs callback and records lastExecutedAt", async () => {
+test("BaseScheduler - execute runs callback and records lastExecutedAt", async () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 10;
   scheduler.start();
@@ -121,7 +122,7 @@ Deno.test("BaseScheduler - execute runs callback and records lastExecutedAt", as
   scheduler.stop();
 });
 
-Deno.test("BaseScheduler - execute handles callback errors gracefully", async () => {
+test("BaseScheduler - execute handles callback errors gracefully", async () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 10;
   scheduler.shouldThrow = true;
@@ -136,7 +137,7 @@ Deno.test("BaseScheduler - execute handles callback errors gracefully", async ()
   scheduler.stop();
 });
 
-Deno.test("BaseScheduler - concurrency guard skips overlapping execution", async () => {
+test("BaseScheduler - concurrency guard skips overlapping execution", async () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 20;
 
@@ -159,7 +160,7 @@ Deno.test("BaseScheduler - concurrency guard skips overlapping execution", async
   scheduler.stop();
 });
 
-Deno.test("BaseScheduler - start with restored state uses resolveScheduleTime", async () => {
+test("BaseScheduler - start with restored state uses resolveScheduleTime", async () => {
   const scheduler = new TestScheduler();
   scheduler.delayMs = 10;
   scheduler.maxInterval = 100000;
@@ -175,7 +176,7 @@ Deno.test("BaseScheduler - start with restored state uses resolveScheduleTime", 
   scheduler.stop();
 });
 
-Deno.test("BaseScheduler - state persistence via stateStore", async () => {
+test("BaseScheduler - state persistence via stateStore", async () => {
   const savedEntries: { key: string; nextAt: Date }[] = [];
   const mockStore = {
     load: () => Promise.resolve({}),

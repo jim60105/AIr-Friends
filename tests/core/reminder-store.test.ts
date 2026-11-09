@@ -6,6 +6,9 @@ import {
 } from "@core/reminder-store.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { ReminderEntry } from "../../src/types/reminder.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 function makeWorkspace(dir: string): WorkspaceInfo {
   return {
@@ -31,15 +34,15 @@ function makeEntry(overrides: Partial<ReminderEntry> = {}): ReminderEntry {
   };
 }
 
-Deno.test("ReminderStore - addReminder writes JSONL correctly", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - addReminder writes JSONL correctly", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
     const entry = makeEntry({ message: "remind me" });
     await store.addReminder(ws, entry);
 
-    const raw = await Deno.readTextFile(`${tmp}/reminders.jsonl`);
+    const raw = await fsp.readFile(`${tmp}/reminders.jsonl`, "utf8");
     const lines = raw.trim().split("\n");
     assertEquals(lines.length, 1);
     const obj = JSON.parse(lines[0]);
@@ -47,12 +50,12 @@ Deno.test("ReminderStore - addReminder writes JSONL correctly", async () => {
     assertEquals(obj.id, entry.id);
     assertEquals(obj.message, "remind me");
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - cancelReminder appends a patch event", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - cancelReminder appends a patch event", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -60,7 +63,7 @@ Deno.test("ReminderStore - cancelReminder appends a patch event", async () => {
     await store.addReminder(ws, entry);
     await store.cancelReminder(ws, entry.id);
 
-    const raw = await Deno.readTextFile(`${tmp}/reminders.jsonl`);
+    const raw = await fsp.readFile(`${tmp}/reminders.jsonl`, "utf8");
     const lines = raw.trim().split("\n");
     assertEquals(lines.length, 2);
     const patch = JSON.parse(lines[1]);
@@ -68,12 +71,12 @@ Deno.test("ReminderStore - cancelReminder appends a patch event", async () => {
     assertEquals(patch.targetId, entry.id);
     assertEquals(patch.changes.enabled, false);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - loadReminders resolves patches correctly", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - loadReminders resolves patches correctly", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -86,24 +89,24 @@ Deno.test("ReminderStore - loadReminders resolves patches correctly", async () =
     assertEquals(reminders[0].id, entry.id);
     assertEquals(reminders[0].enabled, false);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - loadReminders returns empty array when file doesn't exist", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - loadReminders returns empty array when file doesn't exist", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
     const reminders = await store.loadReminders(ws);
     assertEquals(reminders, []);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - loadReminders handles invalid JSON lines gracefully", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - loadReminders handles invalid JSON lines gracefully", async () => {
+  const tmp = await makeTempDir();
   try {
     const file = `${tmp}/reminders.jsonl`;
     const validEntry: ReminderEntry = {
@@ -116,7 +119,7 @@ Deno.test("ReminderStore - loadReminders handles invalid JSON lines gracefully",
       userId: "user1",
       enabled: true,
     };
-    await Deno.writeTextFile(file, "not json\n" + JSON.stringify(validEntry) + "\n");
+    await fsp.writeFile(file, "not json\n" + JSON.stringify(validEntry) + "\n");
 
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -124,12 +127,12 @@ Deno.test("ReminderStore - loadReminders handles invalid JSON lines gracefully",
     assertEquals(reminders.length, 1);
     assertEquals(reminders[0].id, "rem_valid");
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - getDueReminders returns only enabled reminders with scheduledAt <= now", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - getDueReminders returns only enabled reminders with scheduledAt <= now", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -150,12 +153,12 @@ Deno.test("ReminderStore - getDueReminders returns only enabled reminders with s
     assertEquals(due.length, 1);
     assertEquals(due[0].message, "past");
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - getDueReminders excludes disabled reminders", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - getDueReminders excludes disabled reminders", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -168,12 +171,12 @@ Deno.test("ReminderStore - getDueReminders excludes disabled reminders", async (
     const due = await store.getDueReminders(ws);
     assertEquals(due.length, 0);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - getActiveCount counts only enabled future reminders", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - getActiveCount counts only enabled future reminders", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -191,12 +194,12 @@ Deno.test("ReminderStore - getActiveCount counts only enabled future reminders",
     const count = await store.getActiveCount(ws);
     assertEquals(count, 1);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - multiple patches on same reminder, last patch wins", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - multiple patches on same reminder, last patch wins", async () => {
+  const tmp = await makeTempDir();
   try {
     const file = `${tmp}/reminders.jsonl`;
     const reminder: ReminderEntry = {
@@ -209,7 +212,7 @@ Deno.test("ReminderStore - multiple patches on same reminder, last patch wins", 
       userId: "user1",
       enabled: true,
     };
-    await Deno.writeTextFile(file, JSON.stringify(reminder) + "\n");
+    await fsp.writeFile(file, JSON.stringify(reminder) + "\n");
     // first patch disables
     const p1 = {
       type: "reminder-patch",
@@ -217,7 +220,7 @@ Deno.test("ReminderStore - multiple patches on same reminder, last patch wins", 
       ts: new Date(Date.now() + 1).toISOString(),
       changes: { enabled: false },
     };
-    await Deno.writeTextFile(file, JSON.stringify(p1) + "\n", { append: true });
+    await fsp.appendFile(file, JSON.stringify(p1) + "\n");
     // second patch enables again
     const p2 = {
       type: "reminder-patch",
@@ -225,7 +228,7 @@ Deno.test("ReminderStore - multiple patches on same reminder, last patch wins", 
       ts: new Date(Date.now() + 2).toISOString(),
       changes: { enabled: true },
     };
-    await Deno.writeTextFile(file, JSON.stringify(p2) + "\n", { append: true });
+    await fsp.appendFile(file, JSON.stringify(p2) + "\n");
 
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -233,20 +236,20 @@ Deno.test("ReminderStore - multiple patches on same reminder, last patch wins", 
     assertEquals(reminders.length, 1);
     assertEquals(reminders[0].enabled, true);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - empty file returns empty array", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - empty file returns empty array", async () => {
+  const tmp = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${tmp}/reminders.jsonl`, "");
+    await fsp.writeFile(`${tmp}/reminders.jsonl`, "");
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
     const reminders = await store.loadReminders(ws);
     assertEquals(reminders, []);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
@@ -260,8 +263,8 @@ const EMAIL_ORIGIN = {
   replyAnchorRecordId: "44444444-4444-4444-8444-444444444444",
 };
 
-Deno.test("ReminderStore - email reminder origin round-trips through replay", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - email reminder origin round-trips through replay", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -279,12 +282,12 @@ Deno.test("ReminderStore - email reminder origin round-trips through replay", as
     assertEquals(reminders[0].origin, EMAIL_ORIGIN);
     assertEquals(reminders[0].enabled, false);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - legacy records without origin resolve unchanged", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - legacy records without origin resolve unchanged", async () => {
+  const tmp = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     const ws = makeWorkspace(tmp);
@@ -295,12 +298,12 @@ Deno.test("ReminderStore - legacy records without origin resolve unchanged", asy
     assertEquals(reminders[0].origin, undefined);
     assertEquals("origin" in reminders[0], false);
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("ReminderStore - a malformed origin is replayed as absent, never guessed", async () => {
-  const tmp = await Deno.makeTempDir();
+test("ReminderStore - a malformed origin is replayed as absent, never guessed", async () => {
+  const tmp = await makeTempDir();
   try {
     const file = `${tmp}/reminders.jsonl`;
     const base = {
@@ -313,7 +316,7 @@ Deno.test("ReminderStore - a malformed origin is replayed as absent, never guess
       userId: EMAIL_OWNER_ID,
       enabled: true,
     };
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       file,
       [
         JSON.stringify({ ...base, id: "rem_null", origin: null }),
@@ -336,18 +339,18 @@ Deno.test("ReminderStore - a malformed origin is replayed as absent, never guess
       assertEquals(reminder.origin, undefined);
     }
   } finally {
-    await Deno.remove(tmp, { recursive: true });
+    await fsp.rm(tmp, { recursive: true });
   }
 });
 
-Deno.test("reminderOperationKey - stable logical operation of one reminder", () => {
+test("reminderOperationKey - stable logical operation of one reminder", () => {
   assertEquals(reminderOperationKey("rem_1"), {
     workId: "rem_1",
     actionSlot: "reminder:rem_1",
   });
 });
 
-Deno.test("sessionEmailOperation - reminder sessions bind their own slot only", () => {
+test("sessionEmailOperation - reminder sessions bind their own slot only", () => {
   assertEquals(
     sessionEmailOperation({ emailReminder: { reminderId: "rem_9" } }),
     { workId: "rem_9", slots: ["reminder:rem_9"] },

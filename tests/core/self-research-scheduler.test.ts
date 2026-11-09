@@ -3,6 +3,7 @@
 import { assertEquals } from "@std/assert";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import type { Config } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 function createConfig(overrides?: {
   enabled?: boolean;
@@ -54,7 +55,7 @@ function createConfig(overrides?: {
   };
 }
 
-Deno.test("SelfResearchScheduler - does not start when disabled", () => {
+test("SelfResearchScheduler - does not start when disabled", () => {
   const config = createConfig({ enabled: false });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -66,7 +67,7 @@ Deno.test("SelfResearchScheduler - does not start when disabled", () => {
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - starts when enabled", () => {
+test("SelfResearchScheduler - starts when enabled", () => {
   const config = createConfig({ enabled: true });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -80,7 +81,7 @@ Deno.test("SelfResearchScheduler - starts when enabled", () => {
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - invokes callback on timer trigger", async () => {
+test("SelfResearchScheduler - invokes callback on timer trigger", async () => {
   const config = createConfig({ enabled: true, minIntervalMs: 30, maxIntervalMs: 40 });
 
   let callbackInvoked = false;
@@ -97,7 +98,7 @@ Deno.test("SelfResearchScheduler - invokes callback on timer trigger", async () 
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - schedules next execution even on callback failure", async () => {
+test("SelfResearchScheduler - schedules next execution even on callback failure", async () => {
   const config = createConfig({ enabled: true, minIntervalMs: 30, maxIntervalMs: 40 });
 
   let callCount = 0;
@@ -115,7 +116,7 @@ Deno.test("SelfResearchScheduler - schedules next execution even on callback fai
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - stop() clears timer", () => {
+test("SelfResearchScheduler - stop() clears timer", () => {
   const config = createConfig({ enabled: true });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -127,7 +128,7 @@ Deno.test("SelfResearchScheduler - stop() clears timer", () => {
   assertEquals(scheduler.getStatus().nextScheduledAt, null);
 });
 
-Deno.test("SelfResearchScheduler - start() is idempotent", () => {
+test("SelfResearchScheduler - start() is idempotent", () => {
   const config = createConfig({ enabled: true });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -141,7 +142,7 @@ Deno.test("SelfResearchScheduler - start() is idempotent", () => {
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - lastExecutedAt is set after callback runs", async () => {
+test("SelfResearchScheduler - lastExecutedAt is set after callback runs", async () => {
   const config = createConfig({ enabled: true, minIntervalMs: 30, maxIntervalMs: 40 });
 
   const scheduler = new SelfResearchScheduler(config);
@@ -158,7 +159,7 @@ Deno.test("SelfResearchScheduler - lastExecutedAt is set after callback runs", a
 
 // === State Restoration Tests ===
 
-Deno.test("SelfResearchScheduler - uses restored schedule time within valid range", () => {
+test("SelfResearchScheduler - uses restored schedule time within valid range", () => {
   const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 5000 });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -170,7 +171,7 @@ Deno.test("SelfResearchScheduler - uses restored schedule time within valid rang
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - executes immediately when restored time is past", async () => {
+test("SelfResearchScheduler - executes immediately when restored time is past", async () => {
   const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 5000 });
   const scheduler = new SelfResearchScheduler(config);
   let executed = false;
@@ -186,7 +187,7 @@ Deno.test("SelfResearchScheduler - executes immediately when restored time is pa
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - reschedules when restored time exceeds max range", () => {
+test("SelfResearchScheduler - reschedules when restored time exceeds max range", () => {
   const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 200 });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -199,7 +200,7 @@ Deno.test("SelfResearchScheduler - reschedules when restored time exceeds max ra
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - works normally without restored state", () => {
+test("SelfResearchScheduler - works normally without restored state", () => {
   const config = createConfig({ enabled: true });
   const scheduler = new SelfResearchScheduler(config);
   scheduler.setCallback(async () => {});
@@ -209,7 +210,7 @@ Deno.test("SelfResearchScheduler - works normally without restored state", () =>
   scheduler.stop();
 });
 
-Deno.test("SelfResearchScheduler - persists next time via stateStore", () => {
+test("SelfResearchScheduler - persists next time via stateStore", () => {
   const config = createConfig({ enabled: true, minIntervalMs: 50, maxIntervalMs: 100 });
   const scheduler = new SelfResearchScheduler(config);
 

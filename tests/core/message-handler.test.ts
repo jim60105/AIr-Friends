@@ -7,6 +7,7 @@ import type { SessionOrchestrator, SessionResponse } from "@core/session-orchest
 import type { NormalizedEvent } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { RateLimitConfig } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   enabled: false,
@@ -59,7 +60,7 @@ function createTestEvent(messageId: string): NormalizedEvent {
   };
 }
 
-Deno.test("MessageHandler - handles event successfully", async () => {
+test("MessageHandler - handles event successfully", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
@@ -70,7 +71,7 @@ Deno.test("MessageHandler - handles event successfully", async () => {
   assertEquals(response.replySent, true);
 });
 
-Deno.test("MessageHandler - handles failed events", async () => {
+test("MessageHandler - handles failed events", async () => {
   const orchestrator = new MockSessionOrchestrator(false, false) as unknown as SessionOrchestrator;
   const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
@@ -82,7 +83,7 @@ Deno.test("MessageHandler - handles failed events", async () => {
   assertEquals(response.error, "Mock error");
 });
 
-Deno.test("MessageHandler - prevents duplicate event processing", async () => {
+test("MessageHandler - prevents duplicate event processing", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
@@ -106,7 +107,7 @@ Deno.test("MessageHandler - prevents duplicate event processing", async () => {
   assertEquals(!!duplicateError, true, "Should have duplicate error");
 });
 
-Deno.test("MessageHandler - tracks processing state", async () => {
+test("MessageHandler - tracks processing state", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
@@ -130,7 +131,7 @@ Deno.test("MessageHandler - tracks processing state", async () => {
   assertEquals(handler.getActiveCount(), 0);
 });
 
-Deno.test("MessageHandler - handles multiple events concurrently", async () => {
+test("MessageHandler - handles multiple events concurrently", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
@@ -155,7 +156,7 @@ Deno.test("MessageHandler - handles multiple events concurrently", async () => {
   assertEquals(handler.getActiveCount(), 0);
 });
 
-Deno.test("MessageHandler - rate limited event returns error", async () => {
+test("MessageHandler - rate limited event returns error", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const rateLimitConfig: RateLimitConfig = {
     enabled: true,
@@ -179,7 +180,7 @@ Deno.test("MessageHandler - rate limited event returns error", async () => {
   handler.dispose();
 });
 
-Deno.test("MessageHandler - rate limited event does not call orchestrator", async () => {
+test("MessageHandler - rate limited event does not call orchestrator", async () => {
   let orchestratorCallCount = 0;
   const orchestrator = {
     processMessage(): Promise<SessionResponse> {
@@ -204,7 +205,7 @@ Deno.test("MessageHandler - rate limited event does not call orchestrator", asyn
   handler.dispose();
 });
 
-Deno.test("MessageHandler - duplicate events not counted in rate limit", async () => {
+test("MessageHandler - duplicate events not counted in rate limit", async () => {
   let orchestratorCallCount = 0;
   const orchestrator = {
     async processMessage(): Promise<SessionResponse> {
@@ -239,7 +240,7 @@ Deno.test("MessageHandler - duplicate events not counted in rate limit", async (
   handler.dispose();
 });
 
-Deno.test("MessageHandler - whitelisted account bypasses rate limit", async () => {
+test("MessageHandler - whitelisted account bypasses rate limit", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const rateLimitConfig: RateLimitConfig = {
     enabled: true,
@@ -267,7 +268,7 @@ Deno.test("MessageHandler - whitelisted account bypasses rate limit", async () =
   handler.dispose();
 });
 
-Deno.test("MessageHandler - whitelisted channel user still rate limited", async () => {
+test("MessageHandler - whitelisted channel user still rate limited", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const rateLimitConfig: RateLimitConfig = {
     enabled: true,
@@ -289,7 +290,7 @@ Deno.test("MessageHandler - whitelisted channel user still rate limited", async 
   handler.dispose();
 });
 
-Deno.test("MessageHandler - non-whitelisted account rate limited normally", async () => {
+test("MessageHandler - non-whitelisted account rate limited normally", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
   const rateLimitConfig: RateLimitConfig = {
     enabled: true,
@@ -313,7 +314,7 @@ Deno.test("MessageHandler - non-whitelisted account rate limited normally", asyn
 
 // === activeEvents release tests (handle-agent-process-crash) ===
 
-Deno.test("MessageHandler - releases activeEvents entry even when orchestrator.processMessage rejects", async () => {
+test("MessageHandler - releases activeEvents entry even when orchestrator.processMessage rejects", async () => {
   // Simulates a crash-signal-shaped rejection propagating all the way up (rather than the
   // { success: false } response SessionOrchestrator's own try/catch normally produces).
   // The activeEvents dedup entry must still be released — otherwise a retried delivery of

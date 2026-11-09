@@ -2,8 +2,9 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { index } from "./memory-fixture.ts";
+import { test } from "bun:test";
 
-Deno.test("indexMemory - indexes a mixed-script memory", () => {
+test("indexMemory - indexes a mixed-script memory", () => {
   const indexed = index({ content: "我在 AIr-Friends 用 Air75 V3 打字" });
 
   // Entities are the entity tokens; the tf keys carry the kind.
@@ -25,7 +26,7 @@ Deno.test("indexMemory - indexes a mixed-script memory", () => {
   assert(indexed.length > 0);
 });
 
-Deno.test("indexMemory - counts repeated terms and keeps the token count", () => {
+test("indexMemory - counts repeated terms and keeps the token count", () => {
   const indexed = index({ content: "keyboard keyboard" });
   assertEquals(indexed.tf.size, 1);
   assertEquals(indexed.tf.get("word:keyboard"), 2);
@@ -33,7 +34,7 @@ Deno.test("indexMemory - counts repeated terms and keeps the token count", () =>
   assertEquals(indexed.entities.size, 0);
 });
 
-Deno.test("indexMemory - a word and a bigram with the same characters stay distinct", () => {
+test("indexMemory - a word and a bigram with the same characters stay distinct", () => {
   const indexed = index({ content: "喜歡" });
   assertEquals(indexed.tf.get("word:喜歡"), 1);
   assertEquals(indexed.tf.get("bigram:喜歡"), 1);
