@@ -215,18 +215,23 @@ describe.skipIf(!DUMB_INIT_AVAILABLE)("agent process boundary", () => {
       const elapsedMs = performance.now() - started;
 
       const exit = await within(handle.exited, 30_000, "the escalated exit");
+      const exitedAt = performance.now();
       assert(elapsedMs >= 1900, `SIGKILL came after only ${elapsedMs.toFixed(0)} ms`);
       assert(elapsedMs <= 3000, `SIGKILL came after ${elapsedMs.toFixed(0)} ms, past the grace`);
+      // SIGTERM is the only signal the connector sends THROUGH the handle. Its
+      // escalation is the whole-tree SIGKILL `disconnect()` sends directly (a
+      // wrapper-only SIGKILL leaves dumb-init's descendants running), so the
+      // escalation is observed where the OS reports it: the wrapper's own exit.
       assertEquals(
         sent.map((entry) => entry.signal),
-        ["SIGTERM", "SIGKILL"],
-        "the connector must send SIGTERM first and SIGKILL only on escalation",
-      );
-      assert(
-        sent[1].at - sent[0].at >= 1900,
-        `SIGKILL followed SIGTERM after only ${(sent[1].at - sent[0].at).toFixed(0)} ms`,
+        ["SIGTERM"],
+        "the handle receives SIGTERM and nothing before the escalation",
       );
       assertEquals(exit, { code: null, signal: "SIGKILL", success: false });
+      assert(
+        exitedAt - sent[0].at >= 1900,
+        `SIGKILL followed SIGTERM after only ${(exitedAt - sent[0].at).toFixed(0)} ms`,
+      );
     } finally {
       // The wrapper-only SIGKILL reparents the SIGTERM-ignoring child.
       if (childPid !== undefined) {
