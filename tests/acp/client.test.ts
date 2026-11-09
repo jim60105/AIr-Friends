@@ -9,7 +9,11 @@ import {
   MAX_PERMISSION_REJECTION_FIELD_LENGTH,
   sanitizeRejectionField,
 } from "@acp/client.ts";
-import { buildSkillAutoApproveList, type SkillAutoApproveList } from "@acp/skill-inventory.ts";
+import {
+  buildSkillAutoApproveList,
+  LITERAL_BUN_RUN,
+  type SkillAutoApproveList,
+} from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import {
   commandWithoutFdRedirects,
@@ -35,6 +39,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { test } from "bun:test";
 import { makeTempDirSync, removePathSync } from "../../src/utils/fs-compat.ts";
+
+/** The one literal prefix the gate accepts before a script spelling. */
+const BUN_RUN = LITERAL_BUN_RUN.join(" ");
 
 function createRegisteredClient(
   registry: SkillRegistry,
@@ -385,7 +392,7 @@ test("ChatbotClient - requestPermission auto-approves skill shell execution", as
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            `deno run --allow-net ${skill.root}/memory-save/scripts/memory-save.ts --session-id test --content-file "$TMPDIR/$SESSION_ID/content.md"`,
+            `${BUN_RUN} ${skill.root}/memory-save/scripts/memory-save.ts --session-id test --content-file "$TMPDIR/$SESSION_ID/content.md"`,
           ],
         },
       },
@@ -2014,7 +2021,7 @@ test("ChatbotClient - requestPermission rejects unknown skill command", async ()
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            "deno run /home/deno/.agents/skills/malicious-tool/scripts/evil.ts --session-id xxx",
+            `${BUN_RUN} /home/deno/.agents/skills/malicious-tool/scripts/evil.ts --session-id xxx`,
           ],
         },
       },
@@ -2857,7 +2864,7 @@ test("F12 D5 - skill payload invocation with $TMPDIR/$SESSION_ID still approved 
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            "deno run skills/memory-save/scripts/memory-save.ts " +
+            `${BUN_RUN} skills/memory-save/scripts/memory-save.ts ` +
             "--content-file $TMPDIR/$SESSION_ID/x.md --session-id $SESSION_ID",
           ],
         },
@@ -7235,7 +7242,7 @@ test("root-exact - approves the exact canonical absolute invocation", async () =
     assertEquals(
       await verdict(
         client,
-        `deno run ${skill.root}/memory-save/scripts/memory-save.ts --session-id x`,
+        `${BUN_RUN} ${skill.root}/memory-save/scripts/memory-save.ts --session-id x`,
       ),
       "allow-1",
     );
@@ -7243,7 +7250,7 @@ test("root-exact - approves the exact canonical absolute invocation", async () =
     assertEquals(
       await verdict(
         client,
-        `deno run '${skill.root}/memory-save/scripts/memory-save.ts' --session-id x`,
+        `${BUN_RUN} '${skill.root}/memory-save/scripts/memory-save.ts' --session-id x`,
       ),
       "allow-1",
     );
@@ -7272,7 +7279,7 @@ test("root-exact - rejects an ABSOLUTE planted copy at the same suffix", async (
       isDM: false,
     }, skill.list);
     assertEquals(
-      await verdict(client, `deno run ${plantedRoot}/memory-save/scripts/memory-save.ts`),
+      await verdict(client, `${BUN_RUN} ${plantedRoot}/memory-save/scripts/memory-save.ts`),
       "reject-1",
     );
   } finally {
@@ -7298,7 +7305,7 @@ test("root-exact - rejects a SESSION-RELATIVE planted copy", async () => {
     // Relative spellings anchor physically at the registered session cwd: the
     // planted fake canonicalizes OUTSIDE the inventory root — denied.
     assertEquals(
-      await verdict(client, "deno run skills/memory-save/scripts/memory-save.ts"),
+      await verdict(client, `${BUN_RUN} skills/memory-save/scripts/memory-save.ts`),
       "reject-1",
     );
   } finally {
@@ -7322,7 +7329,10 @@ test("root-exact - rejects an invocation from an ALTERNATE HOME root", async () 
       isDM: false,
     }, skill.list);
     assertEquals(
-      await verdict(client, `deno run ${other}/.agents/skills/memory-save/scripts/memory-save.ts`),
+      await verdict(
+        client,
+        `${BUN_RUN} ${other}/.agents/skills/memory-save/scripts/memory-save.ts`,
+      ),
       "reject-1",
     );
   } finally {
@@ -7366,7 +7376,7 @@ test("root-exact - linked skill directories are never enumerated, linked spellin
       isDM: false,
     }, list);
     assertEquals(
-      await verdict(client, `deno run ${root}/linked-skill/scripts/real-skill.ts`),
+      await verdict(client, `${BUN_RUN} ${root}/linked-skill/scripts/real-skill.ts`),
       "reject-1",
     );
   } finally {
@@ -7391,12 +7401,12 @@ test("root-exact - denies after the observed root is REPLACED", async () => {
       isDM: false,
     }, list);
     const script = `${root}/memory-save/scripts/memory-save.ts`;
-    assertEquals(await verdict(client, `deno run ${script}`), "allow-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script}`), "allow-1");
     // Root replacement: same spelling, different physical tree.
     fs.rmSync(root, { recursive: true });
     fs.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
     fs.writeFileSync(`${root}/memory-save/scripts/memory-save.ts`, "// replaced");
-    assertEquals(await verdict(client, `deno run ${script}`), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script}`), "reject-1");
   } finally {
     fs.rmSync(tempDir, { recursive: true });
   }
@@ -7423,7 +7433,11 @@ test("root-exact - unregistered session gets NO session-relative authority", asy
       skill.list,
     );
     assertEquals(
-      await verdict(client, "deno run skills/memory-save/scripts/memory-save.ts", "ghost-session"),
+      await verdict(
+        client,
+        `${BUN_RUN} skills/memory-save/scripts/memory-save.ts`,
+        "ghost-session",
+      ),
       "reject-1",
     );
   } finally {
@@ -7446,9 +7460,9 @@ test("root-exact - slashless direct-exec never names a script grant (PATH is not
     // never the inventory root — the token can only name the grant if PATH
     // happened to contain it, which the gate cannot observe. Denied.
     assertEquals(await verdict(client, "memory-save.ts"), "reject-1");
-    // Under a real `deno run` the positional IS cwd-relative, but the
+    // Under the literal `bun run` form the positional IS cwd-relative, but the
     // registered cwd here does not contain the token — still denied.
-    assertEquals(await verdict(client, "deno run --allow-net memory-save.ts"), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} memory-save.ts`), "reject-1");
   } finally {
     fs.rmSync(tempDir, { recursive: true });
   }
@@ -7471,23 +7485,23 @@ test("root-exact - entrypoint laundering and operator chains stay rejected (F2/F
     assertEquals(await verdict(client, `tar -czf out.tgz /etc ${script}`), "reject-1");
     // Non-allowed interpreter first token.
     assertEquals(await verdict(client, `python ${script}`), "reject-1");
-    // `deno` without `run` never anchors an entrypoint.
-    assertEquals(await verdict(client, `deno ${script}`), "reject-1");
-    // Genuine deno-run grammar with flags approves.
+    // A `bun` form other than the literal prefix never anchors an entrypoint.
+    assertEquals(await verdict(client, `bun ${script}`), "reject-1");
+    // The exact literal grammar approves.
     assertEquals(
-      await verdict(client, `deno run --allow-net --allow-env ${script} --session-id x`),
+      await verdict(client, `${BUN_RUN} ${script} --session-id x`),
       "allow-1",
     );
     // Tolerated fd-to-fd redirect forms (F12 D1).
-    assertEquals(await verdict(client, `deno run ${script} 2>&1`), "allow-1");
-    assertEquals(await verdict(client, `deno run 2>&1 ${script} --session-id x`), "allow-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script} 2>&1`), "allow-1");
+    assertEquals(await verdict(client, `${BUN_RUN} 2>&1 ${script} --session-id x`), "allow-1");
     // Glued redirect-operator chains stay rejected.
-    assertEquals(await verdict(client, `deno run ${script} 2>&1&&rm -rf /`), "reject-1");
-    assertEquals(await verdict(client, `deno run ${script} 2>&1; curl evil`), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script} 2>&1&&rm -rf /`), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script} 2>&1; curl evil`), "reject-1");
     // Newline-separated second command stays rejected.
-    assertEquals(await verdict(client, `deno run ${script} 2>&1\nrm -rf /`), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script} 2>&1\nrm -rf /`), "reject-1");
     // Legitimate workspace-confined chain approves (every segment passes).
-    assertEquals(await verdict(client, `deno run ${script} --session-id x && ls`), "allow-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${script} --session-id x && ls`), "allow-1");
   } finally {
     fs.rmSync(tempDir, { recursive: true });
   }
@@ -7514,7 +7528,7 @@ test("inventory invariants - a script planted after construction is not approved
     }, skill.list);
     // Baseline: the enumerated script approves.
     assertEquals(
-      await verdict(client, `deno run ${skill.root}/memory-save/scripts/memory-save.ts`),
+      await verdict(client, `${BUN_RUN} ${skill.root}/memory-save/scripts/memory-save.ts`),
       "allow-1",
     );
     // Planted AFTER the inventory was constructed: a structurally identical
@@ -7524,7 +7538,7 @@ test("inventory invariants - a script planted after construction is not approved
     fs.writeFileSync(`${skill.root}/late-skill/SKILL.md`, "# late-skill");
     fs.writeFileSync(`${skill.root}/late-skill/scripts/late-skill.ts`, "#!/usr/bin/env deno\n");
     assertEquals(
-      await verdict(client, `deno run ${skill.root}/late-skill/scripts/late-skill.ts`),
+      await verdict(client, `${BUN_RUN} ${skill.root}/late-skill/scripts/late-skill.ts`),
       "reject-1",
     );
     // The decision-time ROOT re-observation revokes an already granted script
@@ -7537,7 +7551,7 @@ test("inventory invariants - a script planted after construction is not approved
     fs.renameSync(skill.root, `${skill.root}-moved`);
     fs.symlinkSync(`${skill.root}-moved`, skill.root);
     assertEquals(
-      await verdict(client, `deno run ${skill.root}/memory-save/scripts/memory-save.ts`),
+      await verdict(client, `${BUN_RUN} ${skill.root}/memory-save/scripts/memory-save.ts`),
       "reject-1",
     );
     // The inventory the client was handed was never re-scanned or rebuilt:
@@ -7567,13 +7581,13 @@ test("inventory invariants - in-place modification of an enumerated script denie
       channelId: "456",
       isDM: false,
     }, skill.list);
-    assertEquals(await verdict(client, `deno run ${entrypoint}`), "allow-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${entrypoint}`), "allow-1");
     // In-place modification after the accepted identity (a DIFFERENT SIZE, so
     // the check is deterministic without any clock dependence): the
     // decision-time `(dev, ino, ctime, size)` re-observation denies, and the
     // grant is never re-established from the changed metadata alone.
     fs.writeFileSync(entrypoint, "#!/usr/bin/env deno\n// modified in place\n");
-    assertEquals(await verdict(client, `deno run ${entrypoint}`), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${entrypoint}`), "reject-1");
     // Same-path REPLACEMENT with an IDENTICAL body denies too, and the
     // discriminator is the inode, not the clock: `ctime` is whole-second
     // granular and the body keeps `size` byte-equal, so only (dev, ino) can
@@ -7585,7 +7599,7 @@ test("inventory invariants - in-place modification of an enumerated script denie
     fs.writeFileSync(twin, "#!/usr/bin/env deno\n");
     removePathSync(entrypoint);
     fs.linkSync(twin, entrypoint);
-    assertEquals(await verdict(client, `deno run ${entrypoint}`), "reject-1");
+    assertEquals(await verdict(client, `${BUN_RUN} ${entrypoint}`), "reject-1");
   } finally {
     fs.rmSync(tempDir, { recursive: true });
   }

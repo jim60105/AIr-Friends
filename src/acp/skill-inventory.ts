@@ -21,8 +21,8 @@
 // - BOTH agent types discover installed entries by scanning that root; neither
 //   restricts eligibility to an authored name catalog, so an external skill
 //   published into the root is eligible for either agent type. The retained
-//   bounding rules are the `scripts/*.ts`-only enumeration, the `deno`-only
-//   interpreter allowlist, the reserved-entry exclusion and the decision-time
+//   bounding rules are the `scripts/*.ts`-only enumeration, the exact two-form
+//   Bun invocation grammar, the reserved-entry exclusion and the decision-time
 //   identity rechecks below.
 // - A configured name filters observed entries inside the root and contributes
 //   NOTHING for a missing/inaccessible skill: the old absent-skill → command-
@@ -278,34 +278,34 @@ export function isUnderRoot(path: string, root: string): boolean {
 // Decision-time entrypoint matching
 // ---------------------------------------------------------------------------
 
-/** Interpreters that may precede a skill script as the launcher. */
-const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
-
 /**
- * Flags the `deno [flags] run [flags] <script>` grammar may carry without
- * ever introducing or affecting an executable module (post-duck B2: skipping
- * every dash token allowed `--preload <trusted> <evil>` to launder the
- * trusted token as the "entrypoint" while Deno executes the preload module
- * and an unapproved main). ONLY these value-less / value-inconsequential
- * permission-and-noise flags are skipped; anything else — `--preload`/
- * `--import`, `--import-map`, `--inspect`, `--v8-flags`, `--config`, `--env`,
- * `--` and any unknown flag — denies fail-closed rather than guessing arity.
+ * The exact literal `bun run` prefix a skill script may be launched through
+ * (design section 4.4). Every token, in this order, is required; the script
+ * spelling follows it. No other `bun` spelling is an interpreter route.
  */
-const DENO_RUN_SAFE_FLAGS =
-  /^(-A|--allow-all|--allow-(net|read|write|env|run|ffi|hrtime|sys|import)(=\S+)?|--no-check|-r|--quiet|-q|--no-lock)$/;
+export const LITERAL_BUN_RUN = [
+  "bun",
+  "run",
+  "--no-env-file",
+  "--no-install",
+  "--config=/opt/air/skill-bunfig.toml",
+] as const;
 
 /**
  * Locate the invocation ENTRYPOINT and its class.
  *
- * Direct shebang execution: the first token is the entrypoint — but ONLY when
- * it is not a known interpreter. Interpreter launch requires the supported
- * grammar `deno [flags...] run [flags...] <script> <args...>`: the FIRST
- * non-flag token after `deno` must be exactly the `run` subcommand (so
- * `deno task run <script>` — where `run` merely launches a workspace task and
- * the path is its ARGUMENT — is never an interpreter entrypoint), and the
- * entrypoint is the first positional after `run`. Flags after `run` are
- * restricted to {@link DENO_RUN_SAFE_FLAGS}: a flag that can introduce an
- * executable module or take an arity-guessable value aborts the match.
+ * Exactly two forms are accepted (design section 4.4): direct execution of a
+ * slash-containing path (the kernel applies the script's own shebang), or the
+ * exact {@link LITERAL_BUN_RUN} prefix followed by such a path. The safe-flag
+ * set is gone on purpose: a working-directory `.env`, a `bunfig.toml`
+ * `preload`, or a `BUN_OPTIONS` environment prefix would otherwise run
+ * attacker code inside a trusted skill. Every other `bun` form — `bun run
+ * <script>`, `bun -e`, `bun x`, `bun <file>`, any extra or reordered prefix
+ * token — denies fail-closed, and an environment assignment as the first token
+ * is a direct spelling without a slash, which the matcher then denies.
+ *
+ * A dash-prefixed or slashless spelling after the literal prefix also denies:
+ * `bun run <name>` looks up `package.json` scripts before any file.
  */
 function resolveScriptEntrypoint(
   tokens: string[],
@@ -313,36 +313,19 @@ function resolveScriptEntrypoint(
   if (tokens.length === 0) return undefined;
   const first = decodeLiteralToken(tokens[0]);
   if (first === undefined) return undefined;
-  if (!ALLOWED_SCRIPT_INTERPRETERS.has(first)) {
+  if (first !== LITERAL_BUN_RUN[0]) {
     return { token: first, viaInterpreter: false };
   }
-  // Interpreter route: `deno ... run ...`
-  let position = 1;
-  while (position < tokens.length) {
-    const token = decodeLiteralToken(tokens[position]);
-    if (token === undefined) return undefined;
-    if (token.startsWith("-")) {
-      if (!DENO_RUN_SAFE_FLAGS.test(token)) return undefined;
-      position++;
-      continue;
-    }
-    // The first positional after `deno` MUST be the `run` subcommand.
-    if (token !== "run") return undefined;
-    position++;
-    break;
+  // Literal route: the prefix must match token for token, then one spelling.
+  if (tokens.length < LITERAL_BUN_RUN.length + 1) return undefined;
+  for (let i = 1; i < LITERAL_BUN_RUN.length; i++) {
+    if (decodeLiteralToken(tokens[i]) !== LITERAL_BUN_RUN[i]) return undefined;
   }
-  if (position >= tokens.length) return undefined;
-  while (position < tokens.length) {
-    const token = decodeLiteralToken(tokens[position]);
-    if (token === undefined) return undefined;
-    if (token.startsWith("-")) {
-      if (!DENO_RUN_SAFE_FLAGS.test(token)) return undefined;
-      position++;
-      continue;
-    }
-    return { token, viaInterpreter: true };
-  }
-  return undefined;
+  const script = decodeLiteralToken(tokens[LITERAL_BUN_RUN.length]);
+  if (script === undefined) return undefined;
+  if (script.startsWith("-")) return undefined;
+  if (!script.includes("/")) return undefined;
+  return { token: script, viaInterpreter: true };
 }
 
 /**
@@ -416,14 +399,12 @@ export interface ScriptEntrypointDecisionContext {
 }
 
 /**
- * Lexical (no-symlink-traversal) normalization, matching how Deno turns a
- * module argument into a URL (`deno_path_util::normalize_path` collapses
- * `.`/`..` components WITHOUT resolving symlinks). Used ONLY as a disagreement
+ * Lexical (no-symlink-traversal) normalization. Used ONLY as a disagreement
  * guard for spellings containing a `..` component (post-duck B1): when a `..`
  * follows a symlinked directory, the kernel traversal the matcher observes and
- * the loader's lexical target DIFFER (`W/jump/../scripts/x.ts` physically
- * reaches the root grant while Deno lexically lands on `W/scripts/x.ts` — a
- * planted file). Such ambiguous spellings deny; ordinary `..` spellings on
+ * a loader's lexical target DIFFER (`W/jump/../scripts/x.ts` physically
+ * reaches the root grant while lexical normalization lands on `W/scripts/x.ts`
+ * — a planted file). Such ambiguous spellings deny; ordinary `..` spellings on
  * symlink-free paths still approve because lexical and physical agree.
  */
 function lexicallyNormalize(path: string): string {
@@ -451,11 +432,10 @@ function lexicallyNormalize(path: string): string {
  * session cwd by RAW component concatenation and handed to `realPath`, so a
  * symlink-free `..` spelling resolves exactly as the loader would. Exception
  * (post-duck B1): when the spelling contains a `..`, lexical and physical
- * resolution must AGREE — an ambiguous `link/../…` spelling whose loader-side
- * lexical target differs from the kernel traversal denies. A slashless
- * direct-exec token is PATH-resolved by the shell — never cwd — so it can
- * never name a script grant here; a slashless positional after a genuine
- * `deno run` IS cwd-relative to Deno and remains eligible.
+ * resolution must AGREE — an ambiguous `link/../…` spelling whose lexical
+ * target differs from the kernel traversal denies. A slashless token is
+ * PATH-resolved by the shell (direct form) or a `package.json` script name
+ * (literal form) — never a grant — so it is denied in both accepted forms.
  */
 export function matchScriptEntrypoint(
   segment: string,
@@ -475,9 +455,10 @@ export function matchScriptEntrypoint(
   const spelling = entrypoint.token;
   if (spelling.includes("\0")) return undefined;
 
-  // Direct execution of a slashless token goes through the shell's PATH, not
-  // the session cwd: only an explicit pathname can name a script grant.
-  if (!entrypoint.viaInterpreter && !spelling.startsWith("/") && !spelling.includes("/")) {
+  // Both accepted forms require a slash in the spelling: a slashless token
+  // either goes through the shell's PATH (direct form) or through Bun's
+  // `package.json` script lookup (literal form), so it can never name a grant.
+  if (!spelling.startsWith("/") && !spelling.includes("/")) {
     return undefined;
   }
 
