@@ -53,6 +53,25 @@ Shebang `#!/usr/bin/env -S bun run --no-env-file`. Convert with the codemod and 
 
 `tests/acp/sandbox-capabilities.test.ts` writes executable `#!/bin/sh` stubs (`exit 0` or `exit 1`) named `unshare`/`bwrap` into a temp dir and sets `process.env.PATH` to that dir for the test (restored in `finally`), calling `resetSandboxCapabilityCache()` before each test and calling `probeNetworkNamespace()` / `probeFilesystemConfinement()` directly. The "missing" scenario uses an empty temp dir as `PATH`. The real-host scenario runs `spawnSync("unshare", ["--user", "--map-root", "--net", "true"])` directly with the original `PATH` and compares. Tests are sequential (Bun default), so the `PATH` mutation does not leak.
 
+### D5. Out-of-D1 edits under the standing authorization
+
+Four temporary `skipped` entries in `migration/bun/baseline/parity-exceptions.json` are owned by
+this change and must be deleted with their tests un-skipped. Two name the `convert` site ported
+here; the other two name `src/utils/process-lifecycle.ts` (`processAlive`/`listChildPids`),
+whose owner is `port-process-lifecycle-and-pool-to-bun`, but which
+`tests/core/session-orchestrator.test.ts` executes. The standing authorization covers the
+minimum mechanical `Deno.*` → `node:*` conversion of such a sibling-owned file, so:
+
+| File | Line | Change | Owner |
+| --- | --- | --- | --- |
+| `src/utils/process-lifecycle.ts` | 86, 216, 318 | `Deno.Command(...).output()` → `execFile` wrapper; a code-less/signal exit reports `-1`, never `1`, so `pgrep`'s positive empty observation stays unambiguous | `port-process-lifecycle-and-pool-to-bun` |
+| `src/utils/process-lifecycle.ts` | 256 | `Deno.readTextFile` → `fsp.readFile(..., "utf8")` (codemod) | `port-process-lifecycle-and-pool-to-bun` |
+| `tests/core/session-orchestrator.test.ts` | 576, 684, 6601, 6688 | four `test.skip` registrations un-skipped once their blockers were ported | this change's exception ownership |
+| `tests/core/git-backup-service.test.ts` | 312 | obsolete "unported `Deno.Command`" deferral shim removed | this change's port |
+| `tests/core/git-credential-setup.test.ts` | 54 | obsolete "unported `Deno.Command`" deferral shim removed | this change's port |
+| `tests/core/skill-installer.test.ts` | 367 | one real-process test added: the default executor's exact child environment and non-zero-exit path run against a PATH stub instead of only a mock executor | this change's port |
+| `migration/bun/baseline/parity-exceptions.json` | 34–57 | the four owned `skipped` entries deleted | this change |
+
 ## Risks / Trade-offs
 
 - [`execFile` `maxBuffer` truncates large git output] → 64 MiB is above any backup diff the service reads; an overflow raises an error, which the existing error path reports.
