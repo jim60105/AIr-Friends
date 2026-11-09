@@ -363,3 +363,68 @@ test("installExternalSkills - linked .agents ancestor is refused (B5)", async ()
     await fsp.rm(foreign, { recursive: true });
   }
 });
+
+test("installExternalSkills - the default executor runs a real CLI with an exact environment", async () => {
+  // Exercises the ported subprocess boundary itself (not a mock executor): a stand-in `npx`
+  // on PATH materializes the requested skill under the PRIVATE staging HOME, refuses to run
+  // if the daemon's ambient environment leaked into the child, and exits non-zero for one
+  // requested skill so the per-entry failure path is observed end to end.
+  const destination = await makeTempDir();
+  const binDir = await makeTempDir();
+  const originalPath = process.env["PATH"];
+  const originalSentinel = process.env["AIR_SKILL_SENTINEL"];
+  try {
+    await fsp.writeFile(
+      `${binDir}/npx`,
+      `#!/bin/sh
+if [ -n "$AIR_SKILL_SENTINEL" ]; then exit 3; fi
+skill=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-s" ]; then shift; skill="$1"; fi
+  shift
+done
+if [ "$skill" = "failing-skill" ]; then
+  echo "install refused" >&2
+  exit 1
+fi
+mkdir -p "$HOME/.agents/skills/$skill"
+printf '# %s' "$skill" > "$HOME/.agents/skills/$skill/SKILL.md"
+echo installed
+`,
+    );
+    await fsp.chmod(`${binDir}/npx`, 0o755);
+    process.env["PATH"] = `${binDir}:${originalPath ?? ""}`;
+    // Present in the daemon's own environment only: the executor must NOT forward it.
+    process.env["AIR_SKILL_SENTINEL"] = "daemon-only";
+
+    await installExternalSkills(destination, [
+      { repo: "owner/repo-a", skill: "spawned-skill" },
+      { repo: "owner/repo-b", skill: "failing-skill" },
+    ]);
+
+    assertEquals(
+      await fsp.readFile(`${destination}/spawned-skill/SKILL.md`, "utf8"),
+      "# spawned-skill",
+    );
+    let failedPublished = true;
+    try {
+      await fsp.stat(`${destination}/failing-skill`);
+    } catch {
+      failedPublished = false;
+    }
+    assert(!failedPublished, "a non-zero installer exit must publish nothing");
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env["PATH"];
+    } else {
+      process.env["PATH"] = originalPath;
+    }
+    if (originalSentinel === undefined) {
+      delete process.env["AIR_SKILL_SENTINEL"];
+    } else {
+      process.env["AIR_SKILL_SENTINEL"] = originalSentinel;
+    }
+    await fsp.rm(destination, { recursive: true });
+    await fsp.rm(binDir, { recursive: true });
+  }
+});

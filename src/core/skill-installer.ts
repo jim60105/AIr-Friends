@@ -16,9 +16,62 @@ import type { ExternalSkillConfig } from "../types/config.ts";
 import { collidesWithBundledContent, isValidSkillNameComponent } from "@core/bundled-skills.ts";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { isNotFoundError, makeTempDir } from "../utils/fs-compat.ts";
 
 const logger = createLogger("SkillInstaller");
+
+/** Output ceiling for one installer run; the CLI prints a short progress log at most. */
+const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`. A supplied
+ * `env` REPLACES the parent environment (`clearEnv: true` in the Deno call); without one the
+ * child inherits it. An absent binary rejects like the original throw, and a signal-terminated
+ * child reports `-1` rather than reading as success.
+ */
+function runCommand(
+  command: string,
+  args: string[],
+  env?: Record<string, string>,
+): Promise<{ code: number; success: boolean; stdout: Uint8Array; stderr: Uint8Array }> {
+  const pending = Promise.withResolvers<{
+    code: number;
+    success: boolean;
+    stdout: Uint8Array;
+    stderr: Uint8Array;
+  }>();
+  execFile(command, args, {
+    ...(env ? { env } : {}),
+    encoding: "buffer",
+    maxBuffer: MAX_COMMAND_OUTPUT_BYTES,
+  }, (error, stdout, stderr) => {
+    if (error === null) {
+      pending.resolve({
+        code: 0,
+        success: true,
+        stdout: new Uint8Array(stdout),
+        stderr: new Uint8Array(stderr),
+      });
+      return;
+    }
+    if (typeof error.code === "string") {
+      pending.reject(error);
+      return;
+    }
+    pending.resolve({
+      code: typeof error.code === "number" ? error.code : -1,
+      success: false,
+      stdout: new Uint8Array(
+        typeof error.stdout === "string" ? Buffer.from(error.stdout) : error.stdout ?? stdout,
+      ),
+      stderr: new Uint8Array(
+        typeof error.stderr === "string" ? Buffer.from(error.stderr) : error.stderr ?? stderr,
+      ),
+    });
+  });
+  return pending.promise;
+}
 
 /**
  * Build the `npx --yes --package=skills skills add` command for a single external
@@ -59,13 +112,7 @@ export interface SkillInstallExecutor {
 
 const defaultExecutor: SkillInstallExecutor = {
   async run(cmd, args, options) {
-    const command = new Deno.Command(cmd, {
-      args,
-      stdout: "piped",
-      stderr: "piped",
-      ...(options?.env ? { env: options.env, clearEnv: true } : {}),
-    });
-    return await command.output();
+    return await runCommand(cmd, args, options?.env);
   },
 };
 
