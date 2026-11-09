@@ -19,9 +19,6 @@ const BASE_ALLOWED_ENV = [
   "TERM",
   "LANG",
   "LC_ALL",
-  // Deno related
-  "DENO_DIR",
-  "DENO_NO_UPDATE_CHECK",
   // Skill API communication
   "SKILL_API_PORT",
   "SESSION_ID",

@@ -446,7 +446,7 @@ function assertNativePrerequisites(): void {
       throw new Error(
         path === TRUSTED_EXTENSION_PATH
           ? `the generated trusted extension bundle is missing at "${path}"; build it with ` +
-            `deno task bundle:omp-extension`
+            `bun run bundle:omp-extension`
           : `the fixture asset "${path}" is missing`,
       );
     }

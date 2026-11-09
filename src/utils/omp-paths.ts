@@ -28,7 +28,7 @@ export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
 /**
  * Deterministic GENERATED development entry for the trusted extension (C3 D2): the
  * single ESM bundle `scripts/omp/bundle-omp-extension.sh` emits from canonical
- * source plus locked dependencies (frozen lock; `deno task bundle:omp-extension`
+ * source plus locked dependencies (frozen lock; `bun run bundle:omp-extension`
  * builds it). Development launch and the image consume the SAME artifact contract;
  * a missing generated development entry fails the launch preflight with the build
  * remedy — the resolver NEVER falls back to the raw Deno-only source tree.

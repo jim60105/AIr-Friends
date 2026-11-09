@@ -44,3 +44,8 @@ Update assertions to the new values, keeping test names. Where a test name conta
 ## Risks / Trade-offs
 
 - [A deployment still sets `DENO_ENV=production` and silently runs as `development`] → Marked **BREAKING** here and in the changelog (`cut-over-to-bun-release`); the rollout checklist in `drill-bun-cutover-and-rollback` checks the ArgoCD parameters.
+
+## Deviations
+
+- Test gate composition (tasks 2.2). The execution host is strictly non-root, so the suites that execute a built-in skill script or mutate `/opt/air/skill-bunfig.toml` cannot run there. The whole `tests/` set is verified as the union of a host `bun test --isolate` run over every suite except `tests/acp/skill-injection.test.ts` and `tests/skills/{scripts,end-to-end-delivery,staging-compat}.test.ts`, plus an in-container run of those four in `docker.io/oven/bun:1.4.2-debian` after creating the root-owned 0444 `/opt/air/skill-bunfig.toml`. The union JUnit reports are checked with `migration/bun/baseline/parity.ts` over the whole `tests/` baseline, requiring `missing 0`, `failures 0` and `deferred 0` without `--allow-deferred`.
+- Task 2.1 grep expectation. A few `/home/deno` and `deno.lock` spellings remain in `tests/` outside this change's scope: assertions that read the real `Containerfile` (still the Deno image until `package-bun-container-image`), the frozen `deno.lock` argument the bundler script still consumes (removed by `migrate-ci-and-docs-to-bun`), the in-image OMP artifact paths, and the `tests/README.md` Deno task table (docs cleanup owned by `migrate-ci-and-docs-to-bun`). Every other remaining hit asserts that the identifier is absent or ignored.

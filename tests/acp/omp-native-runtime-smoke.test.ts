@@ -128,7 +128,7 @@ const EXPECTED_NATIVE_STATE = ["agent.db", "sessions"];
 /**
  * Acceptance mode. Set for the documented acceptance run so every prerequisite
  * becomes REQUIRED and is reported as a FAILURE naming the exact reason. Unset
- * (ordinary `deno task test` / CI), an unavailable prerequisite leaves the leg
+ * (ordinary `bun test` / CI), an unavailable prerequisite leaves the leg
  * UNEXERCISED instead of passing a native claim.
  */
 const ACCEPTANCE_MODE = process.env["OMP_NATIVE_ACCEPTANCE"] === "1";
@@ -325,7 +325,7 @@ function writeSyntheticNativeCachePayload(base: string): OmpNativeCache {
  *
  * - `"prepared"` (default, the gated native legs): expose the operator's
  *   AMBIENT development cache through `XDG_CACHE_HOME`, so the shipped resolver
- *   selects the REAL payload `deno task prepare:omp-natives` published (the
+ *   selects the REAL payload `bun run prepare:omp-natives` published (the
  *   documented acceptance prerequisite) even though this fixture overrides HOME
  *   to its own temporary tree.
  * - `"synthetic"`: publish a complete stand-in payload under a temporary cache

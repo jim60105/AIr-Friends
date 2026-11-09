@@ -127,11 +127,11 @@ test("Containerfile guard - a second skill tree is surfaced in every form", () =
   assertEquals(
     skillsTreeInstalls(
       [
-        "COPY --link skills/ /home/deno/.agents/skills/",
+        "COPY --link skills/ /home/air/.agents/skills/",
         "COPY --link skills /opt/air/skills/",
       ].join("\n"),
     ),
-    ["/home/deno/.agents/skills/", "/opt/air/skills/"],
+    ["/home/air/.agents/skills/", "/opt/air/skills/"],
   );
   // A tree re-imported from a packaging stage.
   assertEquals(
@@ -140,18 +140,18 @@ test("Containerfile guard - a second skill tree is surfaced in every form", () =
   );
   // A RUN that duplicates the tree, across a continuation.
   assertEquals(
-    skillsTreeInstalls("RUN install -d /tmp/x && \\\n    cp -a /home/deno/.agents/skills /tmp/x"),
-    ["RUN install -d /tmp/x && cp -a /home/deno/.agents/skills /tmp/x"],
+    skillsTreeInstalls("RUN install -d /tmp/x && \\\n    cp -a /home/air/.agents/skills /tmp/x"),
+    ["RUN install -d /tmp/x && cp -a /home/air/.agents/skills /tmp/x"],
   );
   // ...while an equivalent rewrite of the one sanctioned instruction passes in
   // either form and in any flag order.
   assertEquals(
-    skillsTreeInstalls('COPY ["--chmod=775", "skills/", "/home/deno/.agents/skills/"]'),
-    ["/home/deno/.agents/skills/"],
+    skillsTreeInstalls('COPY ["--chmod=775", "skills/", "/home/air/.agents/skills/"]'),
+    ["/home/air/.agents/skills/"],
   );
   assertEquals(
-    skillsTreeInstalls("COPY --chmod=775 --chown=$UID:0 --link skills/ /home/deno/.agents/skills/"),
-    ["/home/deno/.agents/skills/"],
+    skillsTreeInstalls("COPY --chmod=775 --chown=$UID:0 --link skills/ /home/air/.agents/skills/"),
+    ["/home/air/.agents/skills/"],
   );
   // An unrelated copy is not a skill tree.
   assertEquals(skillsTreeInstalls("COPY --link prompts/ /app/prompts/"), []);
@@ -170,7 +170,7 @@ test("Containerfile and Helm declare the same shared installed root; development
   // Stock image declares the SAME tree the COPY installs.
   assert(containerfile.includes("ENV AGENT_SKILLS_DIR=/home/deno/.agents/skills"));
   // Helm default matches the stock image (the drift this task removed).
-  assert(/AGENT_SKILLS_DIR: '\/home\/deno\/\.agents\/skills'/.test(helm), helm.slice(0, 400));
+  assert(/AGENT_SKILLS_DIR: '\/home\/air\/\.agents\/skills'/.test(helm), helm.slice(0, 400));
   // Development default (`skills`) is unchanged in the example env.
   assert(envExample.includes("# AGENT_SKILLS_DIR=skills"));
 });

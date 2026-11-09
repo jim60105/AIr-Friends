@@ -110,7 +110,7 @@ export function ompNativeCachePlatform(
     `Unsupported OMP native runtime cache identity "${os}-${arch}" — the supported identities ` +
       `are ${OMP_NATIVE_CACHE_PLATFORMS.join(", ")} for the pinned OMP executable ` +
       `${OMP_NATIVE_CACHE_VERSION}. Install the supported pinned executable on a supported ` +
-      `platform, or run \`deno task prepare:omp-natives\` on one.`,
+      `platform, or run \`bun run prepare:omp-natives\` on one.`,
   );
 }
 
@@ -382,7 +382,7 @@ export function serializeOmpNativeCacheManifest(manifest: OmpNativeCacheManifest
 
 /** The preparation remedy every native-cache failure names. */
 export function ompNativeCachePrepareRemedy(): string {
-  return "Run `deno task prepare:omp-natives` (optionally `--executable <path>`) with the " +
+  return "Run `bun run prepare:omp-natives` (optionally `--executable <path>`) with the " +
     `pinned OMP ${OMP_NATIVE_CACHE_VERSION} executable for this platform, then restart.`;
 }
 

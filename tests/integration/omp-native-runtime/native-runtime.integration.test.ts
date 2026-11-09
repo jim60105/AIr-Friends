@@ -373,7 +373,7 @@ function assertNativePrerequisites(): void {
   assert(
     TRUSTED_EXTENSION_READY,
     `native prerequisite failed: the generated trusted extension bundle is missing at ` +
-      `"${TRUSTED_EXTENSION_PATH}" — build it with \`deno task bundle:omp-extension\``,
+      `"${TRUSTED_EXTENSION_PATH}" — build it with \`bun run bundle:omp-extension\``,
   );
 }
 

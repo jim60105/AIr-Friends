@@ -329,7 +329,7 @@ function buildBaseAgentConfig(
           throw new Error(
             `Missing trusted extension module at "${trustedExtensionPath}" — ` +
               `build it first from canonical source and locked dependencies with ` +
-              `deno task bundle:omp-extension`,
+              `bun run bundle:omp-extension`,
           );
         }
         args.push("--trusted-extension", trustedExtensionPath);
@@ -732,7 +732,7 @@ export function detectPlaywrightBinarySync(): string | undefined {
       searchDirs.push(join(home, ".cache", "ms-playwright"));
     }
   }
-  const defaultPath = "/home/deno/.cache/ms-playwright";
+  const defaultPath = "/home/air/.cache/ms-playwright";
   if (!searchDirs.includes(defaultPath)) {
     searchDirs.push(defaultPath);
   }
@@ -2239,7 +2239,7 @@ function buildEmailIntentOmpConfig(
   if (!exists(extensionPath)) {
     refuseEmailIntentProfile(
       `Missing trusted extension module at "${extensionPath}" — build it first from canonical ` +
-        `source and locked dependencies with deno task bundle:omp-extension`,
+        `source and locked dependencies with bun run bundle:omp-extension`,
       prefix,
     );
   }

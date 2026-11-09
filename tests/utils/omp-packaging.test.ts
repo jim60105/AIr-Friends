@@ -449,7 +449,7 @@ test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all three", 
 // --- Generated native-loadable bundle (no docker, no download, no omp) -------
 //
 // `package-bun-compatible-omp-extension` REPLACED the mirror-copy + generated
-// deno.json import-map packaging with ONE generated ESM bundle: the single
+// import-map packaging with ONE generated ESM bundle: the single
 // <target>/index.js cut from canonical source and frozen-lock dependencies.
 // The packaging contract asserted here is the generated file set, the emitted-
 // dependency-edge audit (the cutover closure is fully inlined — zero
@@ -483,7 +483,7 @@ test("extension bundle - replay produces the single generated native-loadable en
     const files = (await listFiles(`${target}/extension`)).map((f) =>
       f.slice(`${target}/extension/`.length)
     ).sort();
-    // ONE generated artifact: no mirror tree, no sidecar deno.json import map,
+    // ONE generated artifact: no mirror tree, no sidecar import map,
     // no generated adapter — the scaffolding removal IS the file-set equality.
     assertEquals(files, ["index.js"]);
     // The artifact is exactly the bundler's ESM output: no build-owned

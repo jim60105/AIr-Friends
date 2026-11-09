@@ -18,10 +18,10 @@ The system SHALL load configuration from YAML files with a defined merge order: 
 
 #### Scenario: Environment-Specific Config Override
 
-- **GIVEN** `DENO_ENV` or `ENV` is set to `"production"`
+- **GIVEN** `ENV` is set to `"production"`
 - **WHEN** the config is loaded
 - **THEN** the system SHALL load `config.yaml` first, then deep-merge `config.production.yaml` on top if it exists
-- **AND** the environment SHALL default to `"development"` when neither `DENO_ENV` nor `ENV` is set
+- **AND** the environment SHALL default to `"development"` when `ENV` is not set, and `DENO_ENV` SHALL be ignored
 
 #### Scenario: Environment Variable Syntax in Config Values
 
@@ -702,13 +702,13 @@ The final documentation pass SHALL consolidate the batch's change-history entrie
 
 ### Requirement: Stock Image Declares the Shared Skill Install Root
 
-The stock container deployment SHALL explicitly set the single skill-directory configuration to `/home/deno/.agents/skills`, matching both built-in COPY and external publication for every agent type. Helm and deployment examples SHALL document this same installation contract. Repository development SHALL retain relative `skills` resolved against the deployment working directory. Ambient HOME SHALL NOT supply this configuration.
+The stock container deployment SHALL explicitly set the single skill-directory configuration to `/home/air/.agents/skills`, matching both built-in COPY and external publication for every agent type. Helm and deployment examples SHALL document this same installation contract. Repository development SHALL retain relative `skills` resolved against the deployment working directory. Ambient HOME SHALL NOT supply this configuration.
 
 #### Scenario: Stock image requires no missing cwd skill tree
 
 - **GIVEN** the stock image runs from `/app` without an operator skill-directory override
 - **WHEN** its existing configuration is loaded
-- **THEN** both agent types SHALL select `/home/deno/.agents/skills` from that one configured value
+- **THEN** both agent types SHALL select `/home/air/.agents/skills` from that one configured value
 - **AND** neither agent type SHALL select a separately packaged image tree
 
 ### Requirement: Container Health and Skill Readiness Endpoints
@@ -790,7 +790,7 @@ The system SHALL support automatic installation of external agent skills at star
 
 #### Scenario: Container and development destinations agree with the gate
 
-- **GIVEN** a container's root is `/home/deno/.agents/skills`, or a development deployment's configured root resolves to its repository `skills/`
+- **GIVEN** a container's root is `/home/air/.agents/skills`, or a development deployment's configured root resolves to its repository `skills/`
 - **WHEN** an external skill is successfully published
 - **THEN** its final path SHALL be contained in that exact deployment's script-root inventory for either agent type
 - **AND** changing daemon HOME SHALL change neither the publication destination nor the script grant

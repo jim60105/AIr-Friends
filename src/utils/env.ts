@@ -224,7 +224,7 @@ export function getEnv(name: string, defaultValue: string): string {
  * Get current environment name
  */
 export function getEnvironment(): string {
-  return process.env["DENO_ENV"] ?? process.env["ENV"] ?? "development";
+  return process.env["ENV"] ?? "development";
 }
 
 /**

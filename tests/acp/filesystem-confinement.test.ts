@@ -1,6 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { join } from "node:path";
-import { buildBwrapConfinement } from "@acp/filesystem-confinement.ts";
+import {
+  buildBwrapConfinement,
+  DEFAULT_CONFINEMENT_READONLY_PATHS,
+  DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS,
+} from "@acp/filesystem-confinement.ts";
 import fs from "node:fs";
 import { test } from "bun:test";
 import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
@@ -49,7 +53,25 @@ test("buildBwrapConfinement - shared OpenCode data dir is NOT bound writable (se
   // under its session-scoped XDG_DATA_HOME (inside the workspace), so binding it would only
   // expose stale home-rooted state (e.g. a pre-built auth.json) to the confined process.
   const joined = args.join(" ");
-  assertEquals(joined.includes("/home/deno/.local/share/opencode"), false);
+  assertEquals(joined.includes("/home/air/.local/share/opencode"), false);
+});
+
+test("DEFAULT_CONFINEMENT_READONLY_PATHS - binds the Bun skill config and no Deno runtime path", () => {
+  assertEquals(DEFAULT_CONFINEMENT_READONLY_PATHS.includes("/opt/air/skill-bunfig.toml"), true);
+  for (const path of DEFAULT_CONFINEMENT_READONLY_PATHS) {
+    const segments = path.split("/");
+    assertEquals(
+      segments.includes("deno") || segments.includes("deno-dir"),
+      false,
+      path,
+    );
+  }
+});
+
+test("DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS - every entry lives under /home/air", () => {
+  for (const path of DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS) {
+    assertEquals(path.startsWith("/home/air/"), true, path);
+  }
 });
 
 test("buildBwrapConfinement - shareNet controls network namespace", () => {
@@ -82,8 +104,8 @@ test("buildBwrapConfinement - inner command preserved after separator", () => {
 // Trusted skill root mounts (`unify-skill-root-and-inventory` D4, generalizing
 // `unify-omp-skill-root-resolution` task 4.1): the ONE deployment-resolved root
 // mounts read-only AT ITS LITERAL PATH for BOTH agent types — the stock
-// container root (`/home/deno/.agents/skills`, on top of the ro
-// `/home/deno/.agents` parent) and custom roots alike; a root descending from a
+// container root (`/home/air/.agents/skills`, on top of the ro
+// `/home/air/.agents` parent) and custom roots alike; a root descending from a
 // writable parent is bound AFTER that parent; a root equal to or containing any
 // mandatory writable mount is refused BEFORE spawn; no root means no invented
 // fallback mount.
@@ -121,7 +143,7 @@ test("buildBwrapConfinement - OpenCode container root mounts ro while the legiti
     {
       sessionWorkspace: "/app/data/workspaces/discord/1",
       tmpDir: "/app/data/workspaces/discord/1/tmp",
-      skillRoot: "/home/deno/.agents/skills",
+      skillRoot: "/home/air/.agents/skills",
       shareNet: true,
     },
     "opencode",
@@ -131,14 +153,14 @@ test("buildBwrapConfinement - OpenCode container root mounts ro while the legiti
   // The selected installed root itself is read-only bound at the literal path…
   assertEquals(
     pairs.some(([src, dst]) =>
-      src === "/home/deno/.agents/skills" && dst === "/home/deno/.agents/skills"
+      src === "/home/air/.agents/skills" && dst === "/home/air/.agents/skills"
     ),
     true,
   );
-  // …while the pre-existing OpenCode `/home/deno/.agents` read-only visibility
+  // …while the pre-existing OpenCode `/home/air/.agents` read-only visibility
   // (DEFAULT_CONFINEMENT_READONLY_PATHS) remains — its relationship derives
   // from the selected installed root, not from the hardcoded parent as trust.
-  assertEquals(pairs.some(([src]) => src === "/home/deno/.agents"), true);
+  assertEquals(pairs.some(([src]) => src === "/home/air/.agents"), true);
   // The skill bind is emitted LAST (after every writable mount), directly
   // before the inner-command `--` separator.
   assertEquals(args.lastIndexOf("--ro-bind-try"), args.indexOf("--") - 3);
@@ -225,13 +247,13 @@ test("buildBwrapConfinement - skill root containing the session TMPDIR is refuse
 });
 
 test("buildBwrapConfinement - skill root containing a writable runtime path is refused", () => {
-  // `/home/deno` contains the default writable runtime `/home/deno/.cache`:
+  // `/home/air` contains the default writable runtime `/home/air/.cache`:
   // mounting it read-only would hole the read-only mount where the permission
   // layer still reports the grant — refused, not reordered.
   assertThrows(
     () =>
       buildBwrapConfinement(
-        { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", skillRoot: "/home/deno", shareNet: true },
+        { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", skillRoot: "/home/air", shareNet: true },
         "opencode",
         [],
       ),
