@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import {
   accessSync,
   chmodSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -656,7 +657,7 @@ test.skipIf(!existsSync(CONFIG_PATH))(
 function canManageTrustedConfig(): boolean {
   if (!existsSync(CONFIG_PATH)) return true;
   try {
-    accessSync(dirname(CONFIG_PATH));
+    accessSync(dirname(CONFIG_PATH), constants.W_OK);
     return true;
   } catch {
     return false;

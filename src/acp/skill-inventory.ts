@@ -458,7 +458,7 @@ export function matchScriptEntrypoint(
   // Both accepted forms require a slash in the spelling: a slashless token
   // either goes through the shell's PATH (direct form) or through Bun's
   // `package.json` script lookup (literal form), so it can never name a grant.
-  if (!spelling.startsWith("/") && !spelling.includes("/")) {
+  if (!spelling.includes("/")) {
     return undefined;
   }
 
