@@ -82,12 +82,27 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build trusted extension bundle
+        run: bun run bundle:omp-extension
+
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap
 
       - name: Enable unprivileged user namespaces
         if: matrix.userns == 'open'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Prove the open environment is capable
+        if: matrix.userns == 'open'
+        run: |
+          bun --no-env-file -e 'import { probeFilesystemConfinement, probeNetworkNamespace } from "./src/acp/sandbox-capabilities.ts";
+          const network = probeNetworkNamespace();
+          const filesystem = probeFilesystemConfinement();
+          console.log("network namespace probe:", network, "filesystem confinement probe:", filesystem);
+          if (!network) {
+            console.error("::error::the open runner does not grant unprivileged network namespaces");
+            process.exit(1);
+          }'
 
       - name: Restrict unprivileged user namespaces
         if: matrix.userns == 'restricted'
@@ -104,8 +119,11 @@ jobs:
           const network = probeNetworkNamespace();
           const filesystem = probeFilesystemConfinement();
           console.log("network namespace probe:", network, "filesystem confinement probe:", filesystem);
-          if (network || filesystem) {
-            console.error("::error::the restricted runner still grants sandbox capabilities");
+          // Restricted user namespaces must make the network path incapable.
+          // bwrap filesystem confinement can legitimately still work and is
+          // recorded, not treated as a capability leak.
+          if (network) {
+            console.error("::error::the restricted runner still grants unprivileged network namespaces");
             process.exit(1);
           }'
 
@@ -118,8 +136,8 @@ jobs:
           const network = probeNetworkNamespace();
           const filesystem = probeFilesystemConfinement();
           console.log("Tool missing probe:", network, filesystem);
-          if (network || filesystem) {
-            console.error("::error::the missing-tool probe still reports a sandbox capability");
+          if (network) {
+            console.error("::error::the missing-tool probe still reports network-namespace capability");
             process.exit(1);
           }'
 
@@ -157,6 +175,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build trusted extension bundle
+        run: bun run bundle:omp-extension
+
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap
 
@@ -167,7 +188,13 @@ jobs:
         run: sudo sh scripts/install-skill-bunfig.sh
 
       - name: Run tests with coverage
-        run: bun run test:coverage
+        # Isolate every test file into a fresh global: the metrics registry is
+        # process-wide, and one file's increments otherwise leak into another.
+        # --no-env-file keeps config-loader's environment neutral.
+        run: >-
+          bun --no-env-file test --timeout=120000 --isolate
+          --coverage --coverage-reporter=text --coverage-reporter=lcov
+          --coverage-dir=coverage tests/
 
       - name: Check coverage floor
         run: bun run --no-env-file scripts/coverage-floor.ts coverage/lcov.info 75

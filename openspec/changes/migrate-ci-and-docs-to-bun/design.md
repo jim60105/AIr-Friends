@@ -57,3 +57,10 @@ Replace each `deno task <x>` with `bun run <x>`, `deno test` with `bun test` (or
 ## Open Questions
 
 - Coverage measure: Bun 1.4.2 LCOV has no branch data, so the 75% floor moves from branch coverage to line coverage. The owner confirmed the 75% line floor on 2026-11-09 (the Deno baseline line figure was 83.3%). The floor value is a single argument and does not change this design.
+
+## Recorded deviations
+
+- The coverage job invokes `bun --no-env-file test --timeout=120000 --isolate --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage tests/` instead of `bun run test:coverage`. The package script runs every file in one global object, where the process-wide metrics registry lets `tests/utils/metrics.test.ts` observe counters incremented by earlier files; `--isolate` gives each file a fresh global and `--no-env-file` keeps the config-loader environment neutral. D1's command is superseded for the coverage job only.
+- The `test`, `coverage` and `release.yml` test jobs run `bun run bundle:omp-extension` before the tests. The authored OMP suites require the generated `build/omp-extension/index.js`, which is gitignored and absent from a fresh checkout; CI now satisfies the repository's own "build it first from canonical source and locked dependencies" contract.
+- The user-namespace probes encode the real runner contract: an `open` job fails unless `probeNetworkNamespace()` is true; a `restricted` job fails only when `probeNetworkNamespace()` is true, while a successful `bwrap` filesystem-confinement probe is legitimate and is recorded rather than treated as a capability leak. The missing-key fallback proves the network probe is false with an empty `PATH`.
+- Local non-root verification uses a composition instead of one run: host `bun --no-env-file test` over every file except the image-config-dependent ones, `metrics.test.ts` alone, and the trusted-config files inside `air-friends:bun-test`. The merged JUnit report covers 3997 cases with 0 failures and 12 skips; the host LCOV reports 92.61% line coverage over `src/` (floor 75).

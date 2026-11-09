@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build trusted extension bundle
+        run: bun run bundle:omp-extension
+
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap
 
