@@ -137,7 +137,7 @@ The system SHALL attempt bounded cleanup of disposable workspace `tmp/` entries 
 
 #### Scenario: NotFound error is silently ignored
 - **GIVEN** the workspace `tmp/` directory or a disposable entry does not exist
-- **WHEN** a cleanup filesystem operation reports `Deno.errors.NotFound`
+- **WHEN** a cleanup filesystem operation reports a not-found error (`ENOENT`)
 - **THEN** the system SHALL silently ignore the error
 
 #### Scenario: Other removal errors are warned
