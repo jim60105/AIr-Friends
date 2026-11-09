@@ -20,6 +20,8 @@ import {
 import { MemoryFileType, WorkspaceInfo } from "../types/workspace.ts";
 import type { ChannelWorkspaceInfo } from "../types/workspace.ts";
 import { ErrorCode, MemoryError } from "../types/errors.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 const logger = createLogger("MemoryStore");
 
@@ -475,9 +477,9 @@ export class MemoryStore {
   private async readChannelMemoryFile(channelWorkspace: ChannelWorkspaceInfo): Promise<string> {
     const filePath = this.getChannelMemoryFilePathFor(channelWorkspace);
     try {
-      return await Deno.readTextFile(filePath);
+      return await fsp.readFile(filePath, "utf8");
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return "";
+      if (isNotFoundError(error)) return "";
       throw error;
     }
   }
@@ -570,7 +572,7 @@ export class MemoryStore {
     };
 
     const filePath = this.workspaceManager.getChannelMemoryFilePath(channelWorkspace);
-    await Deno.writeTextFile(filePath, JSON.stringify(entry) + "\n", { append: true });
+    await fsp.appendFile(filePath, JSON.stringify(entry) + "\n");
 
     logger.info("Channel memory {memoryId} added (tier={tier})", {
       channelKey: channelWorkspace.key,
@@ -652,7 +654,7 @@ export class MemoryStore {
     };
 
     const filePath = this.workspaceManager.getChannelMemoryFilePath(channelWorkspace);
-    await Deno.writeTextFile(filePath, JSON.stringify(patchEntry) + "\n", { append: true });
+    await fsp.appendFile(filePath, JSON.stringify(patchEntry) + "\n");
 
     logger.info("Channel memory {targetId} patched", {
       channelKey: channelWorkspace.key,
