@@ -79,3 +79,11 @@ Retype the seam as `lstat(path: string): Stats; readDir(path: string): Dirent[];
 
 - [A converted test now fails for a reason other than a deferred symbol] → Fix the conversion, not the assertion. If the failure is a real Bun behavior difference, stop and report it with the failing test name; do not add an exception for a failing test.
 - [A `Dirent` from `readdirSync(..., { withFileTypes: true })` reports `isSymbolicLink()` differently from Deno's `isSymlink` for a symlink to a directory] → Both report the link itself, not the target; the inventory tests with symlinked scripts are the check.
+
+## Design deviations (apply time)
+
+Every edit below is outside D1 and was pre-authorized by the standing instructions.
+
+| File | Change | Owner / authority |
+| --- | --- | --- |
+| `src/acp/sandbox-capabilities.ts` | Swallowed-Deno class: `runProbeSync`'s `Deno.build.os` check (outside the `try`) became `runtimeOs()`, importing `runtimePlatform.ts`. Left unchanged, the probe threw `ReferenceError: Deno is not defined` while `tests/acp/sandbox-manager.test.ts` evaluated its `test.skipIf(!canConfineFilesystem() ...)` registrations, which aborted the file instead of producing deferrable case results. With the platform check converted, the remaining D4-owned `new Deno.Command(...)` at line 31 sits inside the probe's `catch`, so the probe reports "unsupported" and the two bwrap-spawn tests skip — the baseline status for both is `ignored`, so parity stays green with no exception. `Deno.Command` itself stays for its owner. | `port-command-call-sites-and-sandbox-probe-to-bun` |
