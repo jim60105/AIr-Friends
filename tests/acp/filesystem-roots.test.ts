@@ -3,7 +3,7 @@
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import {
   canonicalizeSessionRoots,
   type MetadataReader,
@@ -14,6 +14,11 @@ import {
   type SessionContext,
   type TrustedSkillsRootConfig,
 } from "../../src/acp/filesystem-roots.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 function unwrap<T>(result: RootPathResult<T>): T {
   if (!result.ok) {
@@ -22,11 +27,20 @@ function unwrap<T>(result: RootPathResult<T>): T {
   return result.value;
 }
 
+/** Minimal `Stats` seam fixture: Deno exposed these as properties, Node as methods. */
+function fakeStats(flags: { file?: boolean; dir?: boolean; symlink?: boolean }): Stats {
+  return {
+    isFile: () => flags.file === true,
+    isDirectory: () => flags.dir === true,
+    isSymbolicLink: () => flags.symlink === true,
+  } as Stats;
+}
+
 // -----------------------------------------------------------------------------
 // Task 3.1: Token expansion, contextual paths, root equality vs sibling prefix
 // -----------------------------------------------------------------------------
 
-Deno.test("Task 3.1: Context validation rejects invalid session contexts", () => {
+test("Task 3.1: Context validation rejects invalid session contexts", () => {
   const baseContext: SessionContext = {
     acpSessionId: "sess-1",
     skillSessionId: "skill-1",
@@ -79,7 +93,7 @@ Deno.test("Task 3.1: Context validation rejects invalid session contexts", () =>
   );
 });
 
-Deno.test("Task 3.1: Token expansion handles legacy braced and unbraced tokens", () => {
+test("Task 3.1: Token expansion handles legacy braced and unbraced tokens", () => {
   const context: SessionContext = {
     acpSessionId: "acp-100",
     skillSessionId: "skill-200",
@@ -121,10 +135,10 @@ Deno.test("Task 3.1: Token expansion handles legacy braced and unbraced tokens",
   // Relative path anchors to sessionCwd, NOT Deno.cwd()
   const relNotes = unwrap(resolveSessionPath("notes.md", context));
   assertEquals(relNotes.normalizedPath, "/data/users/alice/notes.md");
-  assertNotEquals(relNotes.normalizedPath, resolve(Deno.cwd(), "notes.md"));
+  assertNotEquals(relNotes.normalizedPath, resolve(process.cwd(), "notes.md"));
 });
 
-Deno.test("Task 3.1: Token expansion rejects unknown tokens, boundary collisions, devices and URIs", () => {
+test("Task 3.1: Token expansion rejects unknown tokens, boundary collisions, devices and URIs", () => {
   const context: SessionContext = {
     acpSessionId: "acp-100",
     skillSessionId: "skill-200",
@@ -187,15 +201,15 @@ Deno.test("Task 3.1: Token expansion rejects unknown tokens, boundary collisions
 // Task 3.2: Real temporary filesystems, symlinks, containment, and escapes
 // -----------------------------------------------------------------------------
 
-Deno.test("Task 3.2: Canonical roots, host-provisioned aliases, and prospective staging", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "canon_root_test_" });
+test("Task 3.2: Canonical roots, host-provisioned aliases, and prospective staging", async () => {
+  const tempDir = await makeTempDir({ prefix: "canon_root_test_" });
   try {
     const workspaceReal = join(tempDir, "workspace");
-    await Deno.mkdir(workspaceReal);
+    await fsp.mkdir(workspaceReal);
 
     // Host-provisioned symlink alias to workspace
     const workspaceAlias = join(tempDir, "workspace-alias");
-    await Deno.symlink(workspaceReal, workspaceAlias);
+    await fsp.symlink(workspaceReal, workspaceAlias);
 
     const context: SessionContext = {
       acpSessionId: "session-a",
@@ -211,57 +225,57 @@ Deno.test("Task 3.2: Canonical roots, host-provisioned aliases, and prospective 
 
     const wsRoot = roots.roots.find((r) => r.role === "workspace")!;
     assertEquals(wsRoot.configuredPath, workspaceAlias);
-    assertEquals(wsRoot.canonicalPath, await Deno.realPath(workspaceReal));
+    assertEquals(wsRoot.canonicalPath, await fsp.realpath(workspaceReal));
 
     const stagingRoot = roots.roots.find((r) => r.role === "staging")!;
     assertEquals(stagingRoot.isProspective, true);
-    assertEquals(stagingRoot.prospectiveAncestor, await Deno.realPath(workspaceReal));
+    assertEquals(stagingRoot.prospectiveAncestor, await fsp.realpath(workspaceReal));
     assertEquals(stagingRoot.prospectiveMissingSuffix, ["tmp", "skill-x"]);
     assertEquals(
       stagingRoot.canonicalPath,
-      resolve(await Deno.realPath(workspaceReal), "tmp", "skill-x"),
+      resolve(await fsp.realpath(workspaceReal), "tmp", "skill-x"),
     );
 
     // Now create tmp directory; prospective staging should anchor at tmp
-    await Deno.mkdir(join(workspaceReal, "tmp"));
+    await fsp.mkdir(join(workspaceReal, "tmp"));
     const rootsRes2 = await canonicalizeSessionRoots(context);
     const roots2 = unwrap(rootsRes2);
     const stagingRoot2 = roots2.roots.find((r) => r.role === "staging")!;
     assertEquals(stagingRoot2.isProspective, true);
     assertEquals(
       stagingRoot2.prospectiveAncestor,
-      resolve(await Deno.realPath(workspaceReal), "tmp"),
+      resolve(await fsp.realpath(workspaceReal), "tmp"),
     );
     assertEquals(stagingRoot2.prospectiveMissingSuffix, ["skill-x"]);
 
     // Now create physical staging
-    await Deno.mkdir(join(workspaceReal, "tmp", "skill-x"));
+    await fsp.mkdir(join(workspaceReal, "tmp", "skill-x"));
     const rootsRes3 = await canonicalizeSessionRoots(context);
     const roots3 = unwrap(rootsRes3);
     const stagingRoot3 = roots3.roots.find((r) => r.role === "staging")!;
     assertEquals(stagingRoot3.isProspective, undefined);
     assertEquals(
       stagingRoot3.canonicalPath,
-      resolve(await Deno.realPath(workspaceReal), "tmp", "skill-x"),
+      resolve(await fsp.realpath(workspaceReal), "tmp", "skill-x"),
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Task 3.2: Staging alias to other session or ordinary directory fails root construction", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "staging_alias_test_" });
+test("Task 3.2: Staging alias to other session or ordinary directory fails root construction", async () => {
+  const tempDir = await makeTempDir({ prefix: "staging_alias_test_" });
   try {
     const workspace = join(tempDir, "workspace");
-    await Deno.mkdir(workspace);
-    await Deno.mkdir(join(workspace, "tmp"));
+    await fsp.mkdir(workspace);
+    await fsp.mkdir(join(workspace, "tmp"));
 
     // Staging links to a sibling session directory
     const siblingStaging = join(workspace, "tmp", "skill-sibling");
-    await Deno.mkdir(siblingStaging);
+    await fsp.mkdir(siblingStaging);
 
     const myStaging = join(workspace, "tmp", "skill-me");
-    await Deno.symlink(siblingStaging, myStaging);
+    await fsp.symlink(siblingStaging, myStaging);
 
     const context: SessionContext = {
       acpSessionId: "sess-me",
@@ -277,20 +291,20 @@ Deno.test("Task 3.2: Staging alias to other session or ordinary directory fails 
       assertEquals(res.reason, "invalid_root");
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Task 3.2: Dangling staging symlink fails closed with dangling_symlink", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "dangling_staging_test_" });
+test("Task 3.2: Dangling staging symlink fails closed with dangling_symlink", async () => {
+  const tempDir = await makeTempDir({ prefix: "dangling_staging_test_" });
   try {
     const workspace = join(tempDir, "workspace");
-    await Deno.mkdir(workspace);
-    await Deno.mkdir(join(workspace, "tmp"));
+    await fsp.mkdir(workspace);
+    await fsp.mkdir(join(workspace, "tmp"));
 
     // Staging links to a nonexistent destination
     const stagingLink = join(workspace, "tmp", "skill-dangling");
-    await Deno.symlink(join(workspace, "tmp", "does-not-exist"), stagingLink);
+    await fsp.symlink(join(workspace, "tmp", "does-not-exist"), stagingLink);
 
     const context: SessionContext = {
       acpSessionId: "session-dang",
@@ -306,15 +320,15 @@ Deno.test("Task 3.2: Dangling staging symlink fails closed with dangling_symlink
       assertEquals(res.reason, "dangling_symlink");
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Task 3.2: Prospective staging target receives staging role", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "prosp_staging_role_test_" });
+test("Task 3.2: Prospective staging target receives staging role", async () => {
+  const tempDir = await makeTempDir({ prefix: "prosp_staging_role_test_" });
   try {
     const workspace = join(tempDir, "workspace");
-    await Deno.mkdir(workspace);
+    await fsp.mkdir(workspace);
 
     const context: SessionContext = {
       acpSessionId: "session-prosp",
@@ -341,17 +355,17 @@ Deno.test("Task 3.2: Prospective staging target receives staging role", async ()
     assertEquals(targetRes.roles.includes("staging"), true);
     assertEquals(targetRes.targetType, "prospective");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Task 3.2: Existing directory rejected under file-or-new", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "dir_file_or_new_test_" });
+test("Task 3.2: Existing directory rejected under file-or-new", async () => {
+  const tempDir = await makeTempDir({ prefix: "dir_file_or_new_test_" });
   try {
     const workspace = join(tempDir, "workspace");
-    await Deno.mkdir(workspace);
+    await fsp.mkdir(workspace);
     const existingSubdir = join(workspace, "my-dir");
-    await Deno.mkdir(existingSubdir);
+    await fsp.mkdir(existingSubdir);
 
     const context: SessionContext = {
       acpSessionId: "session-dir",
@@ -381,48 +395,48 @@ Deno.test("Task 3.2: Existing directory rejected under file-or-new", async () =>
     );
     assertEquals(resDir.targetType, "directory");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "symlink_containment_test_" });
+test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment", async () => {
+  const tempDir = await makeTempDir({ prefix: "symlink_containment_test_" });
   try {
     const workspace = join(tempDir, "workspace");
     const siblingDir = join(tempDir, "workspace-sibling");
     const externalDir = join(tempDir, "external");
-    await Deno.mkdir(workspace);
-    await Deno.mkdir(siblingDir);
-    await Deno.mkdir(externalDir);
+    await fsp.mkdir(workspace);
+    await fsp.mkdir(siblingDir);
+    await fsp.mkdir(externalDir);
 
     // 1. In-workspace legitimate file and in-workspace symlink
     const realFile = join(workspace, "real.txt");
-    await Deno.writeTextFile(realFile, "hello");
+    await fsp.writeFile(realFile, "hello");
     const linkToFile = join(workspace, "link-to-real.txt");
-    await Deno.symlink(realFile, linkToFile);
+    await fsp.symlink(realFile, linkToFile);
 
     // 2. Escaping symlinks: parent symlink and final-file symlink
     const linkToSibling = join(workspace, "link-to-sibling");
-    await Deno.symlink(siblingDir, linkToSibling);
+    await fsp.symlink(siblingDir, linkToSibling);
 
     const externalFile = join(externalDir, "secret.txt");
-    await Deno.writeTextFile(externalFile, "secret");
+    await fsp.writeFile(externalFile, "secret");
     const linkToExternal = join(workspace, "link-to-external.txt");
-    await Deno.symlink(externalFile, linkToExternal);
+    await fsp.symlink(externalFile, linkToExternal);
 
     // 3. Dangling symlink
     const danglingLink = join(workspace, "dangling.txt");
-    await Deno.symlink(join(workspace, "non-existent.txt"), danglingLink);
+    await fsp.symlink(join(workspace, "non-existent.txt"), danglingLink);
 
     // 4. Staging child link to ordinary workspace directory
-    await Deno.mkdir(join(workspace, "tmp"));
-    await Deno.mkdir(join(workspace, "tmp", "skill-1"));
+    await fsp.mkdir(join(workspace, "tmp"));
+    await fsp.mkdir(join(workspace, "tmp", "skill-1"));
     const ordinaryDir = join(workspace, "ordinary");
-    await Deno.mkdir(ordinaryDir);
+    await fsp.mkdir(ordinaryDir);
     const ordinaryFile = join(ordinaryDir, "doc.txt");
-    await Deno.writeTextFile(ordinaryFile, "content");
+    await fsp.writeFile(ordinaryFile, "content");
     const stagingChildLink = join(workspace, "tmp", "skill-1", "alias-to-ordinary");
-    await Deno.symlink(ordinaryDir, stagingChildLink);
+    await fsp.symlink(ordinaryDir, stagingChildLink);
 
     const context: SessionContext = {
       acpSessionId: "session-1",
@@ -439,7 +453,7 @@ Deno.test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment
     const targetLink = unwrap(
       await resolveFilesystemTarget(pathLink, roots, "existing-file"),
     );
-    assertEquals(targetLink.canonicalTarget, await Deno.realPath(realFile));
+    assertEquals(targetLink.canonicalTarget, await fsp.realpath(realFile));
     assertEquals(targetLink.roles, ["workspace"]);
     assertEquals(targetLink.observedSymlinks.length, 1);
 
@@ -490,7 +504,7 @@ Deno.test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment
     assertEquals(targetStagingChild.roles, ["workspace"]);
     assertEquals(targetStagingChild.roles.includes("staging"), false);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -498,7 +512,7 @@ Deno.test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment
 // Task 3.3: Mocked metadata reader error fixtures, loops, and critical skills
 // -----------------------------------------------------------------------------
 
-Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", async () => {
+test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", async () => {
   const context: SessionContext = {
     acpSessionId: "session-1",
     skillSessionId: "skill-1",
@@ -511,25 +525,17 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
   const loopReader: MetadataReader = {
     lstat: (path: string) => {
       if (path === "/workspace" || path === "/workspace/tmp" || path === "/workspace/tmp/skill-1") {
-        return Promise.resolve({
-          isFile: false,
-          isDirectory: true,
-          isSymlink: false,
-        } as Deno.FileInfo);
+        return Promise.resolve(fakeStats({ dir: true }));
       }
-      return Promise.resolve({
-        isFile: false,
-        isDirectory: false,
-        isSymlink: true,
-      } as Deno.FileInfo);
+      return Promise.resolve(fakeStats({ symlink: true }));
     },
     realPath: (path: string) => {
       if (path === "/workspace" || path === "/workspace/tmp" || path === "/workspace/tmp/skill-1") {
         return Promise.resolve(path);
       }
-      const err = new Error("Too many levels of symbolic links");
-      err.name = "FilesystemLoop";
-      return Promise.reject(err);
+      return Promise.reject(
+        Object.assign(new Error("Too many levels of symbolic links"), { code: "ELOOP" }),
+      );
     },
   };
 
@@ -553,17 +559,9 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
   const disappearingReader: MetadataReader = {
     lstat: (path: string) => {
       if (path === "/workspace" || path === "/workspace/tmp" || path === "/workspace/tmp/skill-1") {
-        return Promise.resolve({
-          isFile: false,
-          isDirectory: true,
-          isSymlink: false,
-        } as Deno.FileInfo);
+        return Promise.resolve(fakeStats({ dir: true }));
       }
-      return Promise.resolve({
-        isFile: true,
-        isDirectory: false,
-        isSymlink: false,
-      } as Deno.FileInfo);
+      return Promise.resolve(fakeStats({ file: true }));
     },
     realPath: (path: string) => {
       callCount++;
@@ -571,9 +569,9 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
         return Promise.resolve(path);
       }
       // On second check, simulate target deleted/changed
-      const err = new Error("No such file or directory");
-      err.name = "NotFound";
-      return Promise.reject(err);
+      return Promise.reject(
+        Object.assign(new Error("No such file or directory"), { code: "ENOENT" }),
+      );
     },
   };
 
@@ -591,13 +589,13 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
   }
 });
 
-Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejection", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "crit_skills_test_" });
+test("Task 3.3: Critical skills contract validation, disjointness and rejection", async () => {
+  const tempDir = await makeTempDir({ prefix: "crit_skills_test_" });
   try {
     const workspace = join(tempDir, "workspace");
     const skillsRoot = join(tempDir, "skills-root");
-    await Deno.mkdir(workspace);
-    await Deno.mkdir(skillsRoot);
+    await fsp.mkdir(workspace);
+    await fsp.mkdir(skillsRoot);
 
     const context: SessionContext = {
       acpSessionId: "session-1",
@@ -612,27 +610,27 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
     // fixture seals the stand-in owned tree and passes its real identity, the
     // way the producer always does.
     const identityOf = (path: string): ObservedIdentity => {
-      const info = Deno.statSync(path);
+      const info = fs.statSync(path);
       if (info.dev === null || info.ino === null) {
         throw new Error("fixture identity unavailable");
       }
       return { dev: info.dev, ino: info.ino };
     };
-    Deno.chmodSync(workspace, 0o555);
+    fs.chmodSync(workspace, 0o555);
     const overlappingSkillsConfig: TrustedSkillsRootConfig = {
       ownedRootPath: workspace,
       source: "deployment_owned",
       rootIdentity: identityOf(workspace),
     };
     const overlapRes = await canonicalizeSessionRoots(context, overlappingSkillsConfig);
-    Deno.chmodSync(workspace, 0o755);
+    fs.chmodSync(workspace, 0o755);
     assertEquals(overlapRes.ok, false);
     if (!overlapRes.ok) {
       assertEquals(overlapRes.reason, "root_overlap");
     }
 
     // 2. Disjoint trusted skills root succeeds with an attested identity
-    Deno.chmodSync(skillsRoot, 0o555);
+    fs.chmodSync(skillsRoot, 0o555);
     const trustedConfig: TrustedSkillsRootConfig = {
       ownedRootPath: skillsRoot,
       source: "deployment_owned",
@@ -646,7 +644,7 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
     // packaged personal tree's own `775` posture (group/other-writable) is
     // STILL admitted — ownership and permission bits are not admission inputs,
     // while identity, canonical spelling and writable-root disjointness are.
-    Deno.chmodSync(skillsRoot, 0o775);
+    fs.chmodSync(skillsRoot, 0o775);
     const writableTrustedConfig: TrustedSkillsRootConfig = {
       ownedRootPath: skillsRoot,
       source: "deployment_owned",
@@ -657,7 +655,7 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
       writableRoots.roots.find((r) => r.role === "trusted-skills")!.readOnly,
       true,
     );
-    Deno.chmodSync(skillsRoot, 0o555);
+    fs.chmodSync(skillsRoot, 0o555);
 
     // Row 28 review follow-up: the dead resolveFilesystemTarget criticalRef
     // ladder is removed; the live client admission gate (identity/source/
@@ -674,12 +672,12 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
     }
   } finally {
     try {
-      Deno.chmodSync(join(tempDir, "skills-root"), 0o755);
-      Deno.chmodSync(join(tempDir, "workspace"), 0o755);
+      fs.chmodSync(join(tempDir, "skills-root"), 0o755);
+      fs.chmodSync(join(tempDir, "workspace"), 0o755);
     } catch {
       // Already unsealed or gone.
     }
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -687,19 +685,19 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
 // Task 3.4: Agent-neutral OpenCode/OMP helper contexts and YOLO expectations
 // -----------------------------------------------------------------------------
 
-Deno.test("Task 3.4: Agent-neutral OpenCode/OMP contexts and broad workspace membership", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "agent_neutral_test_" });
+test("Task 3.4: Agent-neutral OpenCode/OMP contexts and broad workspace membership", async () => {
+  const tempDir = await makeTempDir({ prefix: "agent_neutral_test_" });
   try {
     const workspace = join(tempDir, "workspace");
     const sharedWorkspace = join(tempDir, "shared-workspace");
-    await Deno.mkdir(workspace);
-    await Deno.mkdir(sharedWorkspace);
+    await fsp.mkdir(workspace);
+    await fsp.mkdir(sharedWorkspace);
 
     // In-workspace state files (e.g. .opencode / session data)
     const stateDir = join(workspace, ".opencode");
-    await Deno.mkdir(stateDir);
+    await fsp.mkdir(stateDir);
     const stateFile = join(stateDir, "session.json");
-    await Deno.writeTextFile(stateFile, "{}");
+    await fsp.writeFile(stateFile, "{}");
 
     // Agent-neutral context (works equally for OpenCode and OMP)
     const context: SessionContext = {
@@ -719,11 +717,11 @@ Deno.test("Task 3.4: Agent-neutral OpenCode/OMP contexts and broad workspace mem
       await resolveFilesystemTarget(statePath, roots, "existing-file"),
     );
     assertEquals(stateTarget.roles, ["workspace"]);
-    assertEquals(stateTarget.canonicalTarget, await Deno.realPath(stateFile));
+    assertEquals(stateTarget.canonicalTarget, await fsp.realpath(stateFile));
 
     // Shared workspace file retains shared membership
     const sharedFile = join(sharedWorkspace, "shared-context.md");
-    await Deno.writeTextFile(sharedFile, "# Shared");
+    await fsp.writeFile(sharedFile, "# Shared");
     const sharedPath = unwrap(
       resolveSessionPath("$AGENT_WORKSPACE/shared-context.md", context),
     );
@@ -731,7 +729,7 @@ Deno.test("Task 3.4: Agent-neutral OpenCode/OMP contexts and broad workspace mem
       await resolveFilesystemTarget(sharedPath, roots, "existing-file"),
     );
     assertEquals(sharedTarget.roles, ["shared"]);
-    assertEquals(sharedTarget.canonicalTarget, await Deno.realPath(sharedFile));
+    assertEquals(sharedTarget.canonicalTarget, await fsp.realpath(sharedFile));
 
     // External escape attempt fails closed without restricted clamp
     const outsideTarget = resolveSessionPath("/etc/hosts", context);
@@ -748,12 +746,12 @@ Deno.test("Task 3.4: Agent-neutral OpenCode/OMP contexts and broad workspace mem
       }
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("OMP native state: reservation, optional artifact root and reserved precedence", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("OMP native state: reservation, optional artifact root and reserved precedence", async () => {
+  const tempDir = await makeTempDir();
   try {
     const workspace = join(tempDir, "workspace");
     const sharedWorkspace = join(workspace, "shared");
@@ -763,14 +761,14 @@ Deno.test("OMP native state: reservation, optional artifact root and reserved pr
       bucket,
       "2026-01-02T03-04-05-678Z_0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl",
     );
-    await Deno.mkdir(sharedWorkspace, { recursive: true });
-    await Deno.mkdir(bucket, { recursive: true });
+    await fsp.mkdir(sharedWorkspace, { recursive: true });
+    await fsp.mkdir(bucket, { recursive: true });
     const artifactDirectory = journalPath.slice(0, -".jsonl".length);
-    await Deno.writeTextFile(journalPath, '{"type":"session"}\n');
+    await fsp.writeFile(journalPath, '{"type":"session"}\n');
 
-    const dataInfo = await Deno.lstat(dataRoot);
-    const anchorInfo = await Deno.lstat(bucket);
-    const journalInfo = await Deno.lstat(journalPath);
+    const dataInfo = await fsp.lstat(dataRoot);
+    const anchorInfo = await fsp.lstat(bucket);
+    const journalInfo = await fsp.lstat(journalPath);
     const context: SessionContext = {
       acpSessionId: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
       skillSessionId: "skill-1",
@@ -802,7 +800,7 @@ Deno.test("OMP native state: reservation, optional artifact root and reserved pr
     const prospective = roots.roots.find((root) => root.role === "omp-session-artifacts");
     assertEquals(prospective?.isProspective, true);
     assertEquals(prospective?.prospectiveAncestor, bucket);
-    assertEquals(await Deno.lstat(artifactDirectory).catch(() => null), null);
+    assertEquals(await fsp.lstat(artifactDirectory).catch(() => null), null);
 
     // A native-state target can be admitted by no broad role.
     const journalTarget = unwrap(
@@ -819,7 +817,7 @@ Deno.test("OMP native state: reservation, optional artifact root and reserved pr
     }
     // Ordinary workspace files keep their broad membership.
     const ordinaryPath = unwrap(resolveSessionPath(join(sharedWorkspace, "note.jsonl"), context));
-    await Deno.writeTextFile(join(sharedWorkspace, "note.jsonl"), "{}");
+    await fsp.writeFile(join(sharedWorkspace, "note.jsonl"), "{}");
     const sharedObservation = unwrap(
       await resolveFilesystemTarget(ordinaryPath, roots, "existing-file"),
     );
@@ -827,8 +825,8 @@ Deno.test("OMP native state: reservation, optional artifact root and reserved pr
 
     // A bound identity that no longer matches the directory denies the whole
     // artifact capability (no partial grant).
-    await Deno.mkdir(artifactDirectory);
-    const artifactInfo = await Deno.lstat(artifactDirectory);
+    await fsp.mkdir(artifactDirectory);
+    const artifactInfo = await fsp.lstat(artifactDirectory);
     const rebound = unwrap(
       await canonicalizeSessionRoots({
         ...context,
@@ -879,6 +877,6 @@ Deno.test("OMP native state: reservation, optional artifact root and reserved pr
     assertEquals(movedCwd.ok, false);
     if (!movedCwd.ok) assertEquals(movedCwd.reason, "invalid_context");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });

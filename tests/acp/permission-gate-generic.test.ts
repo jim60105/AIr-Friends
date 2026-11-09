@@ -8,6 +8,7 @@ import { FD_REDIRECT_TOKEN_PATTERN, splitCommandSegments } from "@acp/command-sy
 import { referencesOutOfWorkspacePath } from "@acp/client.ts";
 import { type CommandFixture, createCommandFixture } from "./command-test-fixture.ts";
 import type { CommandGateContext } from "@acp/command-path-policy.ts";
+import { test as bunTest } from "bun:test";
 
 let fixture: CommandFixture;
 let WS: string;
@@ -20,7 +21,7 @@ let DIRS_WITH_AGENT: string[];
 let RUNTIME_ENV: NonNullable<CommandGateContext["runtimeEnv"]>;
 
 function test(name: string, run: () => void | Promise<void>) {
-  Deno.test(name, async () => {
+  bunTest(name, async () => {
     fixture = createCommandFixture();
     WS = fixture.workspace;
     DATA_ROOT = fixture.dataRoot;

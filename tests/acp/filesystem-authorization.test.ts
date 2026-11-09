@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "@acp/client.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
@@ -17,6 +17,10 @@ import {
   destructiveDenialReason,
   normalizeDestructiveIntent,
 } from "@acp/destructive-policy.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 interface FilesystemFixture {
   base: string;
@@ -34,21 +38,21 @@ interface FilesystemFixture {
 }
 
 function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
-  const base = Deno.makeTempDirSync();
+  const base = makeTempDirSync();
   const workspace = join(base, "workspace");
   const shared = join(workspace, "shared");
   const staging = join(workspace, "tmp", "skill-1");
   const skills = join(base, "trusted-skills");
   const sibling = join(base, "workspace-sibling");
   for (const path of [workspace, shared, staging, skills, sibling]) {
-    Deno.mkdirSync(path, { recursive: true });
+    fs.mkdirSync(path, { recursive: true });
   }
   // One owned instruction plus one ordinary owned helper under the shared root.
   const instruction = join(skills, "owned-skill", "SKILL.md");
-  Deno.mkdirSync(join(skills, "owned-skill"), { recursive: true });
-  Deno.writeTextFileSync(instruction, "owned instruction");
+  fs.mkdirSync(join(skills, "owned-skill"), { recursive: true });
+  fs.writeFileSync(instruction, "owned instruction");
   const helper = join(skills, "helper.ts");
-  Deno.writeTextFileSync(helper, "owned helper");
+  fs.writeFileSync(helper, "owned helper");
   const logger = new Logger("test", { level: LogLevel.FATAL });
   const registry = new SkillRegistry(
     new MemoryStore(
@@ -90,7 +94,7 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
   // The shared canonical root observation the connector derives for OMP callbacks: the
   // real deployment root with its dev/ino identity. The daemon callback contract carries
   // no critical-skill metadata, so none is fabricated here.
-  const skillsInfo = Deno.lstatSync(skills);
+  const skillsInfo = fs.lstatSync(skills);
   const trusted: TrustedSkillsSource = {
     ownedRootPath: skills,
     canonicalOwnedRootPath: skills,
@@ -123,14 +127,14 @@ function permission(path: string, kind: "edit" | "read" = "edit"): acp.RequestPe
   };
 }
 
-Deno.test("Destructive permission routing: complete ACP endpoints only; native patches fail closed", async () => {
+test("Destructive permission routing: complete ACP endpoints only; native patches fail closed", async () => {
   const f = fixture();
   try {
     f.register();
     const source = join(f.staging, "a.md");
     const destination = join(f.staging, "b.md");
     const outside = join(f.sibling, "outside.md");
-    for (const path of [source, destination, outside]) Deno.writeTextFileSync(path, "sentinel");
+    for (const path of [source, destination, outside]) fs.writeFileSync(path, "sentinel");
     const request = async (
       kind: "delete" | "move" | "edit",
       rawInput: Record<string, unknown> | undefined,
@@ -158,7 +162,7 @@ Deno.test("Destructive permission routing: complete ACP endpoints only; native p
         expectedReason ? [expectedReason] : [],
       );
       for (const path of [source, destination, outside]) {
-        assertEquals(Deno.readTextFileSync(path), "sentinel");
+        assertEquals(fs.readFileSync(path, "utf8"), "sentinel");
       }
       assertEquals(f.contentCalls, []);
     };
@@ -209,10 +213,13 @@ Deno.test("Destructive permission routing: complete ACP endpoints only; native p
       join(f.staging, "missing", "a.md"),
       destination,
     ], "rejected_filesystem_path_unavailable");
-    assertEquals([...Deno.readDirSync(f.staging)].map((entry) => entry.name).sort(), [
-      "a.md",
-      "b.md",
-    ]);
+    assertEquals(
+      [...fs.readdirSync(f.staging, { withFileTypes: true })].map((entry) => entry.name).sort(),
+      [
+        "a.md",
+        "b.md",
+      ],
+    );
     await request("edit", { path: source, content: "ordinary" }, [source]);
     await request(
       "edit",
@@ -235,17 +242,17 @@ Deno.test("Destructive permission routing: complete ACP endpoints only; native p
       "rejected_trusted_skills_read_only",
       () => f.client.writeTextFile({ sessionId: "acp-1", path: f.instruction, content: "mutated" }),
     );
-    assertEquals(Deno.readTextFileSync(f.instruction), "owned instruction");
+    assertEquals(fs.readFileSync(f.instruction, "utf8"), "owned instruction");
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Destructive ACP and mock adapter conformance: same actual callback provenance", async () => {
+test("Destructive ACP and mock adapter conformance: same actual callback provenance", async () => {
   const f = fixture();
   try {
     f.register();
-    for (const name of ["a.md", "b.md"]) Deno.writeTextFileSync(join(f.staging, name), "sentinel");
+    for (const name of ["a.md", "b.md"]) fs.writeFileSync(join(f.staging, name), "sentinel");
     for (const fixture of DESTRUCTIVE_CONFORMANCE_FIXTURES) {
       // Synthetic fixture provenance is NOT conveyed by ACP. Both wire consumers must
       // reject it, rather than trusting metadata supplied by an agent.
@@ -299,20 +306,20 @@ Deno.test("Destructive ACP and mock adapter conformance: same actual callback pr
         fixture.id,
       );
       for (const name of ["a.md", "b.md"]) {
-        assertEquals(Deno.readTextFileSync(join(f.staging, name)), "sentinel");
+        assertEquals(fs.readFileSync(join(f.staging, name), "utf8"), "sentinel");
       }
     }
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Destructive denials: one sanitized bounded audit and retry record per request", async () => {
+test("Destructive denials: one sanitized bounded audit and retry record per request", async () => {
   const f = fixture();
   try {
     f.register();
     const path = join(f.staging, "a.md");
-    Deno.writeTextFileSync(path, "sentinel");
+    fs.writeFileSync(path, "sentinel");
     const writer = new SessionAuditWriter(f.base, "discord", "u", "destructive-audit", {
       enabled: true,
       retentionDays: 1,
@@ -345,10 +352,10 @@ Deno.test("Destructive denials: one sanitized bounded audit and retry record per
       assertEquals(entries[before].reason, records[0].reason);
       assertEquals(records[0].toolName.length <= 200, true);
       assertEquals(records[0].toolName.includes("\n"), false);
-      assertEquals(Deno.readTextFileSync(path), "sentinel");
+      assertEquals(fs.readFileSync(path, "utf8"), "sentinel");
     }
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
@@ -365,7 +372,7 @@ async function denied(
   assertEquals(f.contentCalls.length, count, "denial must precede all content IO");
 }
 
-Deno.test("Filesystem callbacks: physical roles, independent write policy and readback", async () => {
+test("Filesystem callbacks: physical roles, independent write policy and readback", async () => {
   const f = fixture();
   try {
     f.register();
@@ -375,25 +382,25 @@ Deno.test("Filesystem callbacks: physical roles, independent write policy and re
       path: "$TMPDIR/$SESSION_ID/reply.md",
       content: "定價 $0.435",
     });
-    assertEquals(Deno.readTextFileSync(path), "定價 $0.435");
+    assertEquals(fs.readFileSync(path, "utf8"), "定價 $0.435");
     await f.client.writeTextFile({ sessionId: "acp-1", path, content: "short" });
-    assertEquals(Deno.readTextFileSync(path), "short", "overwrite must truncate old content");
+    assertEquals(fs.readFileSync(path, "utf8"), "short", "overwrite must truncate old content");
     assertEquals((await f.client.readTextFile({ sessionId: "acp-1", path })).content, "short");
     const memory = join(f.workspace, "memory.public.jsonl");
-    Deno.writeTextFileSync(memory, "memory");
+    fs.writeFileSync(memory, "memory");
     assertEquals(
       (await f.client.readTextFile({ sessionId: "acp-1", path: memory })).content,
       "memory",
     );
     const ordinary = join(f.workspace, "notes.md");
-    Deno.writeTextFileSync(ordinary, "sentinel");
+    fs.writeFileSync(ordinary, "sentinel");
     await denied(f, "rejected_workspace_write_restricted", () =>
       f.client.writeTextFile({
         sessionId: "acp-1",
         path: ordinary,
         content: "mutated",
       }));
-    assertEquals(Deno.readTextFileSync(ordinary), "sentinel");
+    assertEquals(fs.readFileSync(ordinary, "utf8"), "sentinel");
     const request = await f.client.requestPermission(permission(ordinary));
     assertEquals(request.outcome, { outcome: "selected", optionId: "reject" });
     assertEquals(
@@ -409,7 +416,7 @@ Deno.test("Filesystem callbacks: physical roles, independent write policy and re
       }));
     f.register({ canWriteAgentWorkspace: true });
     await f.client.writeTextFile({ sessionId: "acp-1", path: shared, content: "shared" });
-    assertEquals(Deno.readTextFileSync(shared), "shared");
+    assertEquals(fs.readFileSync(shared, "utf8"), "shared");
     assertEquals(
       (await f.client.readTextFile({ sessionId: "acp-1", path: shared })).content,
       "shared",
@@ -433,7 +440,7 @@ Deno.test("Filesystem callbacks: physical roles, independent write policy and re
       );
     }
     const json = join(f.staging, "secret.json");
-    Deno.writeTextFileSync(json, "secret content");
+    fs.writeFileSync(json, "secret content");
     await denied(
       f,
       "rejected_read_extension",
@@ -442,23 +449,23 @@ Deno.test("Filesystem callbacks: physical roles, independent write policy and re
     f.register({ yolo: true, canWriteAgentWorkspace: false, allowedWriteExtensions: [] });
     for (const path of [join(f.workspace, "script.py"), join(f.shared, "script.py")]) {
       await f.client.writeTextFile({ sessionId: "acp-1", path, content: "yolo" });
-      assertEquals(Deno.readTextFileSync(path), "yolo");
+      assertEquals(fs.readFileSync(path, "utf8"), "yolo");
     }
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Filesystem callbacks: sibling, escaping/contained links and observation failures", async () => {
+test("Filesystem callbacks: sibling, escaping/contained links and observation failures", async () => {
   const f = fixture();
   try {
     f.register({ yolo: true });
     const sentinel = join(f.sibling, "sentinel.md");
-    Deno.writeTextFileSync(sentinel, "external sentinel");
+    fs.writeFileSync(sentinel, "external sentinel");
     const final = join(f.workspace, "final.md");
     const parent = join(f.workspace, "parent");
-    Deno.symlinkSync(sentinel, final);
-    Deno.symlinkSync(f.sibling, parent);
+    fs.symlinkSync(sentinel, final);
+    fs.symlinkSync(f.sibling, parent);
     for (const path of [sentinel, final, join(parent, "sentinel.md")]) {
       await denied(f, "rejected_write_path_outside_workspace", () =>
         f.client.writeTextFile({
@@ -471,18 +478,18 @@ Deno.test("Filesystem callbacks: sibling, escaping/contained links and observati
         "rejected_filesystem_path_unavailable",
         () => f.client.readTextFile({ sessionId: "acp-1", path }),
       );
-      assertEquals(Deno.readTextFileSync(sentinel), "external sentinel");
+      assertEquals(fs.readFileSync(sentinel, "utf8"), "external sentinel");
     }
     const contained = join(f.workspace, "contained.md");
     const target = join(f.workspace, "target.md");
-    Deno.writeTextFileSync(target, "contained sentinel");
-    Deno.symlinkSync(target, contained);
+    fs.writeFileSync(target, "contained sentinel");
+    fs.symlinkSync(target, contained);
     await denied(
       f,
       "rejected_filesystem_access",
       () => f.client.writeTextFile({ sessionId: "acp-1", path: contained, content: "mutated" }),
     );
-    assertEquals(Deno.readTextFileSync(target), "contained sentinel");
+    assertEquals(fs.readFileSync(target, "utf8"), "contained sentinel");
     for (const path of [join(f.workspace, "missing.md"), f.workspace, "$OTHER/private.md"]) {
       await denied(
         f,
@@ -498,7 +505,7 @@ Deno.test("Filesystem callbacks: sibling, escaping/contained links and observati
         content: "denied",
       }));
     assertEquals(
-      await Deno.lstat(join(f.workspace, "tmp", "unprovisioned")).catch(() => null),
+      await fsp.lstat(join(f.workspace, "tmp", "unprovisioned")).catch(() => null),
       null,
     );
     await denied(
@@ -512,11 +519,11 @@ Deno.test("Filesystem callbacks: sibling, escaping/contained links and observati
       () => f.client.readTextFile({ sessionId: "unknown", path: target }),
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Trusted skills: the shared canonical root admits root-wide reads and stays read-only", async () => {
+test("Trusted skills: the shared canonical root admits root-wide reads and stays read-only", async () => {
   for (const mode of [false, true]) {
     const f = fixture();
     try {
@@ -531,7 +538,7 @@ Deno.test("Trusted skills: the shared canonical root admits root-wide reads and 
         "rejected_trusted_skills_read_only",
         () => f.client.writeTextFile({ sessionId: "acp-1", path: script, content: "mutated" }),
       );
-      assertEquals(Deno.readTextFileSync(script), "owned helper");
+      assertEquals(fs.readFileSync(script, "utf8"), "owned helper");
       if (!mode) {
         assertEquals((await f.client.requestPermission(permission(script, "read"))).outcome, {
           outcome: "selected",
@@ -539,16 +546,16 @@ Deno.test("Trusted skills: the shared canonical root admits root-wide reads and 
         });
       }
     } finally {
-      Deno.removeSync(f.base, { recursive: true });
+      fs.rmSync(f.base, { recursive: true });
     }
   }
 });
 
-Deno.test("Trusted skills: a mismatching, overlapping or absent root observation never admits", async () => {
+test("Trusted skills: a mismatching, overlapping or absent root observation never admits", async () => {
   for (const failure of ["root", "identity", "overlap", "absent"] as const) {
     const f = fixture();
     try {
-      const workspaceInfo = Deno.lstatSync(f.workspace);
+      const workspaceInfo = fs.lstatSync(f.workspace);
       const provenance: TrustedSkillsSource = failure === "root"
         ? { ...f.trusted, ownedRootPath: f.sibling, canonicalOwnedRootPath: f.sibling }
         : failure === "identity"
@@ -574,15 +581,15 @@ Deno.test("Trusted skills: a mismatching, overlapping or absent root observation
         optionId: "reject",
       });
     } finally {
-      Deno.removeSync(f.base, { recursive: true });
+      fs.rmSync(f.base, { recursive: true });
     }
   }
 });
 
-Deno.test("OMP connector registration derives the callback root from agentConfig.skillsRoot", async () => {
+test("OMP connector registration derives the callback root from agentConfig.skillsRoot", async () => {
   const f = fixture();
   try {
-    const skillsInfo = Deno.lstatSync(f.skills);
+    const skillsInfo = fs.lstatSync(f.skills);
     const conflicting: TrustedSkillsSource = {
       ownedRootPath: f.sibling,
       canonicalOwnedRootPath: f.sibling,
@@ -590,7 +597,7 @@ Deno.test("OMP connector registration derives the callback root from agentConfig
       rootIdentity: { dev: skillsInfo.dev!, ino: skillsInfo.ino! },
     };
     const outside = join(f.sibling, "outside.md");
-    Deno.writeTextFileSync(outside, "sibling sentinel");
+    fs.writeFileSync(outside, "sibling sentinel");
     const mkConnector = (skillsRoot: { root: string; identity?: { dev: number; ino: number } }) =>
       new AgentConnector({
         agentConfig: { command: "mock", args: [], cwd: f.workspace, skillsRoot },
@@ -621,7 +628,7 @@ Deno.test("OMP connector registration derives the callback root from agentConfig
       "rejected_trusted_skills_read_only",
       () => f.client.writeTextFile({ sessionId: "acp-1", path: script, content: "mutated" }),
     );
-    assertEquals(Deno.readTextFileSync(script), "owned helper");
+    assertEquals(fs.readFileSync(script, "utf8"), "owned helper");
     await denied(
       f,
       "rejected_filesystem_path_unavailable",
@@ -648,23 +655,23 @@ Deno.test("OMP connector registration derives the callback root from agentConfig
       optionId: "reject",
     });
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Trusted permission classification denies workspace copies and escaping links", async () => {
+test("Trusted permission classification denies workspace copies and escaping links", async () => {
   const f = fixture();
   try {
     f.register({ trustedSkills: f.trusted });
     const copy = join(f.workspace, "SKILL.md");
-    Deno.writeTextFileSync(copy, "unowned");
+    fs.writeFileSync(copy, "unowned");
     const escape = join(f.skills, "escape.md");
-    Deno.symlinkSync(copy, escape);
+    fs.symlinkSync(copy, escape);
     for (
       const path of [
         copy,
         escape,
-        join(Deno.env.get("HOME") ?? f.base, ".agents/skills/send-reply/SKILL.md"),
+        join(process.env["HOME"] ?? f.base, ".agents/skills/send-reply/SKILL.md"),
       ]
     ) {
       assertEquals((await f.client.requestPermission(permission(path, "read"))).outcome, {
@@ -678,55 +685,55 @@ Deno.test("Trusted permission classification denies workspace copies and escapin
       optionId: "reject",
     });
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Filesystem callbacks: deterministic observed-file replacement denies before truncate", async () => {
+test("Filesystem callbacks: deterministic observed-file replacement denies before truncate", async () => {
   let replaced = false;
   let watched = "";
   const f = fixture((path) => {
     if (!replaced && path === watched) {
       replaced = true;
-      Deno.renameSync(path, `${path}.old`);
-      Deno.writeTextFileSync(path, "replacement sentinel");
+      fs.renameSync(path, `${path}.old`);
+      fs.writeFileSync(path, "replacement sentinel");
     }
   });
   try {
     f.register();
     watched = join(f.staging, "replace.md");
-    Deno.writeTextFileSync(watched, "original sentinel");
+    fs.writeFileSync(watched, "original sentinel");
     await denied(
       f,
       "rejected_filesystem_access",
       () => f.client.writeTextFile({ sessionId: "acp-1", path: watched, content: "mutated" }),
     );
     assertEquals(replaced, true);
-    assertEquals(Deno.readTextFileSync(watched), "replacement sentinel");
-    assertEquals(Deno.readTextFileSync(`${watched}.old`), "original sentinel");
+    assertEquals(fs.readFileSync(watched, "utf8"), "replacement sentinel");
+    assertEquals(fs.readFileSync(`${watched}.old`, "utf8"), "original sentinel");
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Filesystem registration: immutable policy and revocation while observations await", async () => {
+test("Filesystem registration: immutable policy and revocation while observations await", async () => {
   for (const operation of ["read", "write", "permission-read", "permission-edit"] as const) {
     const f = fixture();
-    const original = Deno.realPath;
+    const original = fsp.realpath;
     try {
       const withProvenance = operation === "permission-read";
       f.register({ trustedSkills: withProvenance ? f.trusted : undefined });
       const path = operation === "permission-read" ? f.instruction : join(f.staging, "file.md");
-      if (!withProvenance) Deno.writeTextFileSync(path, "sentinel");
+      if (!withProvenance) fs.writeFileSync(path, "sentinel");
       let revoked = false;
-      Deno.realPath = async (value) => {
+      fsp.realpath = (async (value: string) => {
         const result = await original(value);
         if (!revoked) {
           revoked = true;
           f.register({ canWriteAgentWorkspace: false });
         }
         return result;
-      };
+      }) as typeof fsp.realpath;
       if (operation.startsWith("permission")) {
         assertEquals(
           (await f.client.requestPermission(
@@ -745,12 +752,12 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
         );
       }
       assertEquals(
-        Deno.readTextFileSync(path),
+        fs.readFileSync(path, "utf8"),
         withProvenance ? "owned instruction" : "sentinel",
       );
     } finally {
-      Deno.realPath = original;
-      Deno.removeSync(f.base, { recursive: true });
+      fsp.realpath = original;
+      fs.rmSync(f.base, { recursive: true });
     }
   }
   const f = fixture();
@@ -777,11 +784,11 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
         }),
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Filesystem denial: bounded buffer and exactly-once audit mirroring", async () => {
+test("Filesystem denial: bounded buffer and exactly-once audit mirroring", async () => {
   const f = fixture();
   try {
     f.register();
@@ -807,11 +814,11 @@ Deno.test("Filesystem denial: bounded buffer and exactly-once audit mirroring", 
     assertEquals((rejection.commandOrPath?.length ?? 0) <= 200, true);
     assertEquals(rejection.commandOrPath?.includes("\n"), false);
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register the actual owner", async () => {
+test("Filesystem lifecycle: dedicated creation and pooled restore register the actual owner", async () => {
   const f = fixture();
   try {
     const config = { ...f.client["config"], sessionId: "skill-1", canWriteAgentWorkspace: false };
@@ -836,9 +843,9 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
       path: "$TMPDIR/$SESSION_ID/dedicated.md",
       content: "dedicated",
     });
-    assertEquals(Deno.readTextFileSync(join(f.staging, "dedicated.md")), "dedicated");
+    assertEquals(fs.readFileSync(join(f.staging, "dedicated.md"), "utf8"), "dedicated");
     const otherStaging = join(f.sibling, "tmp", "skill-2");
-    Deno.mkdirSync(otherStaging, { recursive: true });
+    fs.mkdirSync(otherStaging, { recursive: true });
     nextSession = "acp-2";
     await connector.createSession([], f.sibling);
     connector.setSessionGateContext("acp-2", {
@@ -867,8 +874,8 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
       path: "$TMPDIR/$SESSION_ID/restored.md",
       content: "restored",
     });
-    assertEquals(Deno.readTextFileSync(join(otherStaging, "restored.md")), "restored");
-    assertEquals(await Deno.lstat(join(f.staging, "restored.md")).catch(() => null), null);
+    assertEquals(fs.readFileSync(join(otherStaging, "restored.md"), "utf8"), "restored");
+    assertEquals(await fsp.lstat(join(f.staging, "restored.md")).catch(() => null), null);
     await restored!.writeTextFile({
       sessionId: "acp-2",
       path: join(f.shared, "restored.txt"),
@@ -885,6 +892,6 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
       "rejected_write_extension",
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });

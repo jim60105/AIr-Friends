@@ -21,11 +21,12 @@
 // can consult them without becoming async.
 
 import { createLogger } from "@utils/logger.ts";
+import { runtimeOs } from "@utils/runtime-platform.ts";
 
 const logger = createLogger("SandboxCapabilities");
 
 function runProbeSync(command: string, args: string[]): boolean {
-  if (Deno.build.os !== "linux") return false;
+  if (runtimeOs() !== "linux") return false;
   try {
     const output = new Deno.Command(command, {
       args,

@@ -29,6 +29,7 @@ import {
   OMP_INTENT_PROFILE_FLAG_VALUE,
   registerOmpCapabilityCallback,
 } from "@acp/omp/extension/native-registration.ts";
+import { test } from "bun:test";
 
 /** The restricted capability map's mapped names (exact native tool names). */
 const MAPPED_TOOL_NAMES = [
@@ -102,7 +103,7 @@ function invokeNativeToolCall(
   return { dispatched };
 }
 
-Deno.test("registerOmpCapabilityCallback attaches exactly one tool_call handler", () => {
+test("registerOmpCapabilityCallback attaches exactly one tool_call handler", () => {
   const { api, events, handlers } = createRecordingApi();
 
   registerOmpCapabilityCallback(api);
@@ -112,7 +113,7 @@ Deno.test("registerOmpCapabilityCallback attaches exactly one tool_call handler"
   assert(typeof handlers[0] === "function");
 });
 
-Deno.test("mapped tool names continue to native dispatch", () => {
+test("mapped tool names continue to native dispatch", () => {
   const handler = createOmpCapabilityToolCallHandler();
 
   for (const toolName of MAPPED_TOOL_NAMES) {
@@ -120,7 +121,7 @@ Deno.test("mapped tool names continue to native dispatch", () => {
   }
 });
 
-Deno.test("unmatched tool names are blocked with the bounded reason", () => {
+test("unmatched tool names are blocked with the bounded reason", () => {
   const handler = createOmpCapabilityToolCallHandler();
 
   for (const toolName of UNMATCHED_TOOL_NAMES) {
@@ -128,7 +129,7 @@ Deno.test("unmatched tool names are blocked with the bounded reason", () => {
   }
 });
 
-Deno.test("prototype-shaped names never match the capability map", () => {
+test("prototype-shaped names never match the capability map", () => {
   const handler = createOmpCapabilityToolCallHandler();
 
   for (const toolName of ["toString", "__proto__", "constructor"]) {
@@ -136,7 +137,7 @@ Deno.test("prototype-shaped names never match the capability map", () => {
   }
 });
 
-Deno.test("a blocked call executes zero operations and a mapped call exactly one", () => {
+test("a blocked call executes zero operations and a mapped call exactly one", () => {
   const handler = createOmpCapabilityToolCallHandler();
   let dispatched = 0;
 
@@ -155,7 +156,7 @@ Deno.test("a blocked call executes zero operations and a mapped call exactly one
   assertEquals(dispatched, MAPPED_TOOL_NAMES.length);
 });
 
-Deno.test("the registered callback decides exactly like the directly created handler", () => {
+test("the registered callback decides exactly like the directly created handler", () => {
   const direct = createOmpCapabilityToolCallHandler();
   const { api, handlers } = createRecordingApi();
   registerOmpCapabilityCallback(api);
@@ -166,7 +167,7 @@ Deno.test("the registered callback decides exactly like the directly created han
   }
 });
 
-Deno.test("the registered callback blocks before dispatch", () => {
+test("the registered callback blocks before dispatch", () => {
   const { api, handlers } = createRecordingApi();
   registerOmpCapabilityCallback(api);
   const registered = handlers[0];
@@ -189,7 +190,7 @@ function processStandIn(env: Record<string, string | undefined>): unknown {
   return { env };
 }
 
-Deno.test("the intent marker is observed, absent and indeterminate exactly once each", () => {
+test("the intent marker is observed, absent and indeterminate exactly once each", () => {
   assertEquals(
     observeOmpLaunchMarker(processStandIn({ [OMP_INTENT_PROFILE_FLAG]: "1" })),
     "intent",
@@ -208,7 +209,7 @@ Deno.test("the intent marker is observed, absent and indeterminate exactly once 
   }
 });
 
-Deno.test("an intent-profile launch blocks every name, mapped and unmatched alike", () => {
+test("an intent-profile launch blocks every name, mapped and unmatched alike", () => {
   const handler = createOmpToolCallHandler({
     host: processStandIn({ [OMP_INTENT_PROFILE_FLAG]: OMP_INTENT_PROFILE_FLAG_VALUE }),
   });
@@ -219,7 +220,7 @@ Deno.test("an intent-profile launch blocks every name, mapped and unmatched alik
   }
 });
 
-Deno.test("a launch whose marker state cannot be observed fails closed to denial", () => {
+test("a launch whose marker state cannot be observed fails closed to denial", () => {
   for (const host of [undefined, null, {}, { env: undefined }, 7]) {
     const handler = createOmpToolCallHandler({ host });
     for (const toolName of [...MAPPED_TOOL_NAMES, ...UNMATCHED_TOOL_NAMES]) {
@@ -228,7 +229,7 @@ Deno.test("a launch whose marker state cannot be observed fails closed to denial
   }
 });
 
-Deno.test("an ordinary launch keeps the restricted capability callback unchanged", () => {
+test("an ordinary launch keeps the restricted capability callback unchanged", () => {
   const handler = createOmpToolCallHandler({ host: processStandIn({}) });
 
   for (const toolName of MAPPED_TOOL_NAMES) {
@@ -239,7 +240,7 @@ Deno.test("an ordinary launch keeps the restricted capability callback unchanged
   }
 });
 
-Deno.test("the deny-all callback ignores the name entirely", () => {
+test("the deny-all callback ignores the name entirely", () => {
   const handler = createOmpIntentToolCallHandler();
 
   for (const toolName of [...MAPPED_TOOL_NAMES, ...UNMATCHED_TOOL_NAMES]) {

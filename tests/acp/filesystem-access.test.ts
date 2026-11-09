@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { readCanonicalTextFile, validateAccessAdmission } from "../../src/acp/filesystem-access.ts";
 import {
   canonicalizeSessionRoots,
@@ -9,6 +9,9 @@ import {
   type SessionContext,
 } from "../../src/acp/filesystem-roots.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 function createValidContext(tmpDir = "/workspace"): SessionContext {
   return {
@@ -59,7 +62,7 @@ function createValidRoots(): CanonicalSessionRoots {
   };
 }
 
-Deno.test("validateAccessAdmission: session ID mismatch returns invalid_context", () => {
+test("validateAccessAdmission: session ID mismatch returns invalid_context", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -82,7 +85,7 @@ Deno.test("validateAccessAdmission: session ID mismatch returns invalid_context"
   }
 });
 
-Deno.test("validateAccessAdmission: generation mismatch returns invalid_context", () => {
+test("validateAccessAdmission: generation mismatch returns invalid_context", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -105,7 +108,7 @@ Deno.test("validateAccessAdmission: generation mismatch returns invalid_context"
   }
 });
 
-Deno.test("validateAccessAdmission: empty session context generation returns invalid_context", () => {
+test("validateAccessAdmission: empty session context generation returns invalid_context", () => {
   const context: SessionContext = {
     ...createValidContext(),
     sessionContextGeneration: "   ",
@@ -131,7 +134,7 @@ Deno.test("validateAccessAdmission: empty session context generation returns inv
   }
 });
 
-Deno.test("validateAccessAdmission: trusted-skills write is denied", () => {
+test("validateAccessAdmission: trusted-skills write is denied", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -154,7 +157,7 @@ Deno.test("validateAccessAdmission: trusted-skills write is denied", () => {
   }
 });
 
-Deno.test("validateAccessAdmission: selected role missing from target.roles returns outside_roots", () => {
+test("validateAccessAdmission: selected role missing from target.roles returns outside_roots", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -177,7 +180,7 @@ Deno.test("validateAccessAdmission: selected role missing from target.roles retu
   }
 });
 
-Deno.test("validateAccessAdmission: target root identity mismatch returns identity_unavailable", () => {
+test("validateAccessAdmission: target root identity mismatch returns identity_unavailable", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -205,7 +208,7 @@ Deno.test("validateAccessAdmission: target root identity mismatch returns identi
   }
 });
 
-Deno.test("validateAccessAdmission: prospective root returns root_unavailable", () => {
+test("validateAccessAdmission: prospective root returns root_unavailable", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -228,7 +231,7 @@ Deno.test("validateAccessAdmission: prospective root returns root_unavailable", 
   }
 });
 
-Deno.test("validateAccessAdmission: request-time symlinks in target returns unsafe_traversal", () => {
+test("validateAccessAdmission: request-time symlinks in target returns unsafe_traversal", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -251,7 +254,7 @@ Deno.test("validateAccessAdmission: request-time symlinks in target returns unsa
   }
 });
 
-Deno.test("validateAccessAdmission: missing parent suffix for prospective new file returns parent_missing", () => {
+test("validateAccessAdmission: missing parent suffix for prospective new file returns parent_missing", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -274,7 +277,7 @@ Deno.test("validateAccessAdmission: missing parent suffix for prospective new fi
   }
 });
 
-Deno.test("validateAccessAdmission: directory target returns wrong_target_type", () => {
+test("validateAccessAdmission: directory target returns wrong_target_type", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -297,7 +300,7 @@ Deno.test("validateAccessAdmission: directory target returns wrong_target_type",
   }
 });
 
-Deno.test("validateAccessAdmission: non-exact safe identity returns identity_unavailable", () => {
+test("validateAccessAdmission: non-exact safe identity returns identity_unavailable", () => {
   const context = createValidContext();
   const roots = createValidRoots();
   const target: CanonicalTarget = {
@@ -320,7 +323,7 @@ Deno.test("validateAccessAdmission: non-exact safe identity returns identity_una
   }
 });
 
-Deno.test("validateAccessAdmission: overlapping workspace and staging roles derives staging-relative path", () => {
+test("validateAccessAdmission: overlapping workspace and staging roles derives staging-relative path", () => {
   const context = createValidContext();
   const roots: CanonicalSessionRoots = {
     acpSessionId: "session-1",
@@ -371,15 +374,15 @@ Deno.test("validateAccessAdmission: overlapping workspace and staging roles deri
   }
 });
 
-Deno.test("End-to-end with real predecessor canonicalizeSessionRoots and resolveFilesystemTarget", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("End-to-end with real predecessor canonicalizeSessionRoots and resolveFilesystemTarget", async () => {
+  const tempDir = await makeTempDir();
   try {
     const wsDir = `${tempDir}/ws`;
     const stagingDir = `${wsDir}/tmp/skill-1`;
-    await Deno.mkdir(stagingDir, { recursive: true });
+    await fsp.mkdir(stagingDir, { recursive: true });
 
     const testFile = `${wsDir}/hello.txt`;
-    await Deno.writeTextFile(testFile, "Predecessor observation content");
+    await fsp.writeFile(testFile, "Predecessor observation content");
 
     const context: SessionContext = {
       acpSessionId: "sess-real-1",
@@ -420,12 +423,12 @@ Deno.test("End-to-end with real predecessor canonicalizeSessionRoots and resolve
       assertEquals(admission.value.isNewFile, false);
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Protected OMP artifact read: the anchor guard re-verifies the journal at open time", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Protected OMP artifact read: the anchor guard re-verifies the journal at open time", async () => {
+  const tempDir = await makeTempDir();
   try {
     const workspace = join(tempDir, "workspace");
     const dataRoot = join(workspace, "tmp", "omp-agent", "restricted", "xdg-data");
@@ -434,15 +437,15 @@ Deno.test("Protected OMP artifact read: the anchor guard re-verifies the journal
       bucket,
       "2026-01-02T03-04-05-678Z_0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl",
     );
-    await Deno.mkdir(bucket, { recursive: true });
-    await Deno.writeTextFile(journalPath, '{"type":"session"}\n');
+    await fsp.mkdir(bucket, { recursive: true });
+    await fsp.writeFile(journalPath, '{"type":"session"}\n');
     const artifactDirectory = journalPath.slice(0, -".jsonl".length);
-    await Deno.mkdir(artifactDirectory);
-    await Deno.writeTextFile(join(artifactDirectory, "17.bash.log"), "spilled text");
+    await fsp.mkdir(artifactDirectory);
+    await fsp.writeFile(join(artifactDirectory, "17.bash.log"), "spilled text");
 
-    const dataInfo = await Deno.lstat(dataRoot);
-    const anchorInfo = await Deno.lstat(bucket);
-    const journalInfo = await Deno.lstat(journalPath);
+    const dataInfo = await fsp.lstat(dataRoot);
+    const anchorInfo = await fsp.lstat(bucket);
+    const journalInfo = await fsp.lstat(journalPath);
     const context: SessionContext = {
       acpSessionId: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
       skillSessionId: "skill-1",
@@ -523,6 +526,6 @@ Deno.test("Protected OMP artifact read: the anchor guard re-verifies the journal
     assertEquals(staleAnchor.ok, false);
     if (!staleAnchor.ok) assertEquals(staleAnchor.reason, "path_changed");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });

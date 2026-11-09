@@ -4,7 +4,7 @@
 // D2, generalizing `unify-omp-skill-root-resolution` D3). One EXPLICIT
 // deployment-resolved absolute root — the output of `resolveTrustedSkillsRoot`,
 // the SAME root for BOTH agent types, never a HOME scan and never a
-// `Deno.cwd()/skills` constructor default — is observed once at construction and
+// process-cwd-relative `skills` constructor default — is observed once at construction and
 // rechecked at every decision:
 //
 // - `scripts` records CANONICAL ABSOLUTE regular-file paths plus their
@@ -48,6 +48,9 @@ import {
   FD_REDIRECT_TOKEN_PATTERN,
   tokenizeShellCommand,
 } from "./command-syntax.ts";
+import fs from "node:fs";
+import type { Dirent, Stats } from "node:fs";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 /**
  * Stat fields beyond (dev, ino) that pin a physical object. `ctimeMs` and
@@ -55,10 +58,12 @@ import {
  * null-equal, so the tuple never tautologically denies; a tuple field that is
  * PRESENT at build time and differs at decision time always denies.
  */
-function statTuple(stat: Deno.FileInfo): { ctimeMs: number | null; size: number | null } {
+function statTuple(stat: Stats): { ctimeMs: number | null; size: number | null } {
   return {
-    ctimeMs: stat.ctime === null ? null : stat.ctime.getTime(),
-    size: stat.size === null ? null : stat.size,
+    // Node reports `ctimeMs` with sub-second precision; the identity rule is
+    // unchanged at whole-second granularity, so the truncation is now explicit.
+    ctimeMs: Math.floor(stat.ctimeMs / 1000) * 1000,
+    size: stat.size,
   };
 }
 
@@ -71,8 +76,8 @@ export interface SkillScriptEntry {
   readonly dev: number;
   readonly ino: number;
   /**
-   * Inode change time at enumeration, in milliseconds but at whole-second
-   * granularity (Deno truncates `ctime` to seconds); null when unobservable.
+   * Inode change time at enumeration, in milliseconds rounded down to
+   * whole-second granularity; null when unobservable.
    */
   readonly ctimeMs: number | null;
   /** Byte size at enumeration: clock-independent replacement discriminator. */
@@ -106,15 +111,15 @@ export interface SkillAutoApproveList {
 
 /** Injectable filesystem seam; defaults to the real filesystem. */
 export interface SkillInventoryFs {
-  lstat(path: string): Deno.FileInfo;
-  readDir(path: string): Deno.DirEntry[];
+  lstat(path: string): Stats;
+  readDir(path: string): Dirent[];
   realPath(path: string): string;
 }
 
 const realFs: SkillInventoryFs = {
-  lstat: (path) => Deno.lstatSync(path),
-  readDir: (path) => [...Deno.readDirSync(path)],
-  realPath: (path) => Deno.realPathSync(path),
+  lstat: (path) => fs.lstatSync(path),
+  readDir: (path) => [...fs.readdirSync(path, { withFileTypes: true })],
+  realPath: (path) => fs.realpathSync(path),
 };
 
 export interface BuildSkillAutoApproveListInput {
@@ -156,7 +161,7 @@ export function buildSkillAutoApproveList(
   // The root must be physically present, a real directory, and still the same
   // physical tree the resolver canonicalized.
   const rootStat = fs.lstat(canonicalPath);
-  if (!rootStat.isDirectory || fs.realPath(canonicalPath) !== canonicalPath) {
+  if (!rootStat.isDirectory() || fs.realPath(canonicalPath) !== canonicalPath) {
     throw new Error(`Skill inventory root "${canonicalPath}" is not a canonical directory`);
   }
 
@@ -168,7 +173,7 @@ export function buildSkillAutoApproveList(
   // entries, exactly as before — with no agent-type (or catalog) restriction.
   const candidateNames: string[] = [];
   for (const entry of fs.readDir(canonicalPath)) {
-    if (!entry.isDirectory) continue;
+    if (!entry.isDirectory()) continue;
     if (RESERVED_SKILL_ENTRIES.includes(entry.name)) continue;
     if (explicitFilter && !configuredSet.has(entry.name)) continue;
     candidateNames.push(entry.name);
@@ -182,7 +187,7 @@ export function buildSkillAutoApproveList(
     let skillIsRealDirectory = false;
     try {
       const stat = fs.lstat(skillDir);
-      skillIsRealDirectory = stat.isDirectory && fs.realPath(skillDir) === skillDir;
+      skillIsRealDirectory = stat.isDirectory() && fs.realPath(skillDir) === skillDir;
     } catch {
       skillIsRealDirectory = false;
     }
@@ -193,18 +198,18 @@ export function buildSkillAutoApproveList(
     }
     let hasSkillDocument = false;
     try {
-      hasSkillDocument = fs.lstat(`${skillDir}${SEPARATOR}SKILL.md`).isFile;
+      hasSkillDocument = fs.lstat(`${skillDir}${SEPARATOR}SKILL.md`).isFile();
     } catch {
       hasSkillDocument = false;
     }
     const scriptsDir = `${skillDir}${SEPARATOR}scripts`;
-    let scriptsEntries: Deno.DirEntry[] | null;
+    let scriptsEntries: Dirent[] | null;
     let scriptsDirAbsent = false;
     try {
       scriptsEntries = fs.readDir(scriptsDir);
     } catch {
       scriptsEntries = null;
-      // ABSENT (nothing exists at the path — Deno.errors.NotFound ONLY) is a
+      // ABSENT (nothing exists at the path — ENOENT ONLY) is a
       // command-based skill shape; a path that EXISTS but fails enumeration,
       // or whose metadata cannot be OBSERVED at all (permission/IO errors —
       // post-duck N1: an unobservable path is not proof of absence), never
@@ -213,7 +218,7 @@ export function buildSkillAutoApproveList(
         fs.lstat(scriptsDir);
         scriptsDirAbsent = false;
       } catch (error) {
-        scriptsDirAbsent = error instanceof Deno.errors.NotFound;
+        scriptsDirAbsent = isNotFoundError(error);
       }
     }
     if (scriptsEntries === null) {
@@ -225,11 +230,11 @@ export function buildSkillAutoApproveList(
       continue;
     }
     for (const script of scriptsEntries) {
-      if (!script.isFile || !script.name.endsWith(".ts")) continue;
+      if (!script.isFile() || !script.name.endsWith(".ts")) continue;
       const scriptPath = `${scriptsDir}${SEPARATOR}${script.name}`;
       try {
         const stat = fs.lstat(scriptPath);
-        if (!stat.isFile) continue;
+        if (!stat.isFile()) continue;
         const canonical = fs.realPath(scriptPath);
         // Reject linked/escaping scripts: the canonical file must remain the
         // exact spelling enumerated under the root.
@@ -511,7 +516,7 @@ export function matchScriptEntrypoint(
   // deny without any suffix/home/cwd retry.
   try {
     const rootStat = fs.lstat(list.root.canonicalPath);
-    if (!rootStat.isDirectory) return undefined;
+    if (!rootStat.isDirectory()) return undefined;
     const rootIdentity = list.root.identity;
     if (
       rootStat.dev !== rootIdentity?.dev ||
@@ -524,7 +529,7 @@ export function matchScriptEntrypoint(
     }
     if (fs.realPath(list.root.canonicalPath) !== list.root.canonicalPath) return undefined;
     const stat = fs.lstat(entry.canonicalPath);
-    if (!stat.isFile) return undefined;
+    if (!stat.isFile()) return undefined;
     const tuple = statTuple(stat);
     if (
       stat.dev !== entry.dev ||

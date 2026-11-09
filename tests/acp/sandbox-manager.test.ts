@@ -1,7 +1,7 @@
 // tests/acp/sandbox-manager.test.ts
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { dirname, join } from "@std/path";
+import { dirname, join } from "node:path";
 import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
 import type { SandboxConfig } from "../../src/types/config.ts";
 import {
@@ -13,6 +13,11 @@ import {
   DEFAULT_CONFINEMENT_READONLY_PATHS,
   DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS,
 } from "../../src/acp/filesystem-confinement.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 // Base helper: raw egress + no confinement, so command/env pass through unwrapped. Tests
 // that exercise wrapping override the relevant flags and pin capability probe results.
@@ -38,7 +43,7 @@ function withCapabilities(network: boolean, confinement: boolean, fn: () => void
   }
 }
 
-Deno.test("SandboxManager - filterEnv: true filters out non-allowed env vars", () => {
+test("SandboxManager - filterEnv: true filters out non-allowed env vars", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
     PATH: "/usr/bin",
@@ -54,7 +59,7 @@ Deno.test("SandboxManager - filterEnv: true filters out non-allowed env vars", (
   assertEquals(opts.env["RANDOM_VAR"], undefined);
 });
 
-Deno.test("SandboxManager - session-scoped XDG_DATA_HOME passes through the filter (F12)", () => {
+test("SandboxManager - session-scoped XDG_DATA_HOME passes through the filter (F12)", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
     PATH: "/usr/bin",
@@ -64,7 +69,7 @@ Deno.test("SandboxManager - session-scoped XDG_DATA_HOME passes through the filt
   assertEquals(opts.env["XDG_DATA_HOME"], "/ws/tmp/opencode-data");
 });
 
-Deno.test("SandboxManager - filterEnv: false passes all env vars through", () => {
+test("SandboxManager - filterEnv: false passes all env vars through", () => {
   const sandbox = new SandboxManager(createSandboxConfig({ filterEnv: false }));
   const baseEnv = { PATH: "/usr/bin", SECRET: "value" };
   const opts = sandbox.buildSpawnOptions("opencode", "opencode", [], baseEnv, "/tmp");
@@ -72,7 +77,7 @@ Deno.test("SandboxManager - filterEnv: false passes all env vars through", () =>
   assertEquals(opts.env["PATH"], "/usr/bin");
 });
 
-Deno.test("SandboxManager - allowedEnvVars adds custom vars to filter", () => {
+test("SandboxManager - allowedEnvVars adds custom vars to filter", () => {
   const sandbox = new SandboxManager(
     createSandboxConfig({ allowedEnvVars: ["MY_CUSTOM_VAR"] }),
   );
@@ -82,7 +87,7 @@ Deno.test("SandboxManager - allowedEnvVars adds custom vars to filter", () => {
   assertEquals(opts.env["OTHER"], undefined);
 });
 
-Deno.test("SandboxManager - opencode agent allows all provider API keys", () => {
+test("SandboxManager - opencode agent allows all provider API keys", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
     PATH: "/usr/bin",
@@ -98,7 +103,7 @@ Deno.test("SandboxManager - opencode agent allows all provider API keys", () => 
   assertEquals(opts.env["GOOGLE_GENERATIVE_AI_API_KEY"], "gg_xxx");
 });
 
-Deno.test("SandboxManager - omp agent allows only Gemini and OpenRouter credentials", () => {
+test("SandboxManager - omp agent allows only Gemini and OpenRouter credentials", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
     PATH: "/usr/bin",
@@ -114,7 +119,7 @@ Deno.test("SandboxManager - omp agent allows only Gemini and OpenRouter credenti
   assertEquals(opts.env["GOOGLE_GENERATIVE_AI_API_KEY"], undefined);
 });
 
-Deno.test("SandboxManager - platform and dashboard credentials never reach any agent", () => {
+test("SandboxManager - platform and dashboard credentials never reach any agent", () => {
   for (const agentType of ["opencode", "omp"]) {
     const sandbox = new SandboxManager(createSandboxConfig());
     const baseEnv = {
@@ -152,7 +157,7 @@ Deno.test("SandboxManager - platform and dashboard credentials never reach any a
   }
 });
 
-Deno.test("SandboxManager - allowedEnvVars cannot widen never-pass credentials or selectors", () => {
+test("SandboxManager - allowedEnvVars cannot widen never-pass credentials or selectors", () => {
   // Verify that an operator attempting to pass never-pass variables via allowedEnvVars is blocked
   const sandbox = new SandboxManager(createSandboxConfig({
     allowedEnvVars: [
@@ -192,7 +197,7 @@ Deno.test("SandboxManager - allowedEnvVars cannot widen never-pass credentials o
   assertEquals(opts.env["OPENROUTER_API_KEY"], "or_xxx");
 });
 
-Deno.test("SandboxManager - egress proxy env vars pass through the filter (F14)", () => {
+test("SandboxManager - egress proxy env vars pass through the filter (F14)", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
     PATH: "/usr/bin",
@@ -206,7 +211,7 @@ Deno.test("SandboxManager - egress proxy env vars pass through the filter (F14)"
   assertEquals(opts.env["NO_PROXY"], "localhost,127.0.0.1,::1");
 });
 
-Deno.test("SandboxManager - unknown agent type only gets base env", () => {
+test("SandboxManager - unknown agent type only gets base env", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
     PATH: "/usr/bin",
@@ -217,7 +222,7 @@ Deno.test("SandboxManager - unknown agent type only gets base env", () => {
   assertEquals(opts.env["OPENCODE_API_KEY"], undefined);
 });
 
-Deno.test("SandboxManager - full networkIsolation wraps with userns-first unshare", () => {
+test("SandboxManager - full networkIsolation wraps with userns-first unshare", () => {
   withCapabilities(true, false, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -235,7 +240,7 @@ Deno.test("SandboxManager - full networkIsolation wraps with userns-first unshar
   });
 });
 
-Deno.test("SandboxManager - networkIsolation fails closed when the probe fails", () => {
+test("SandboxManager - networkIsolation fails closed when the probe fails", () => {
   withCapabilities(false, false, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -253,7 +258,7 @@ Deno.test("SandboxManager - networkIsolation fails closed when the probe fails",
   });
 });
 
-Deno.test("SandboxManager - unrestrictedEgress does not wrap the command", () => {
+test("SandboxManager - unrestrictedEgress does not wrap the command", () => {
   const sandbox = new SandboxManager(
     createSandboxConfig({ unrestrictedEgress: true, filterEnv: false }),
   );
@@ -262,7 +267,7 @@ Deno.test("SandboxManager - unrestrictedEgress does not wrap the command", () =>
   assertEquals(opts.args, ["--acp"]);
 });
 
-Deno.test("SandboxManager - no egress posture configured fails closed", () => {
+test("SandboxManager - no egress posture configured fails closed", () => {
   const sandbox = new SandboxManager(
     createSandboxConfig({
       unrestrictedEgress: false,
@@ -278,7 +283,7 @@ Deno.test("SandboxManager - no egress posture configured fails closed", () => {
   );
 });
 
-Deno.test("SandboxManager - filesystem confinement wraps with bwrap (shared net)", () => {
+test("SandboxManager - filesystem confinement wraps with bwrap (shared net)", () => {
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -308,7 +313,7 @@ Deno.test("SandboxManager - filesystem confinement wraps with bwrap (shared net)
   });
 });
 
-Deno.test("SandboxManager - confinement fails closed when bwrap probe fails", () => {
+test("SandboxManager - confinement fails closed when bwrap probe fails", () => {
   withCapabilities(false, false, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -325,7 +330,7 @@ Deno.test("SandboxManager - confinement fails closed when bwrap probe fails", ()
   });
 });
 
-Deno.test("SandboxManager - confinement + full isolation unshares net inside bwrap", () => {
+test("SandboxManager - confinement + full isolation unshares net inside bwrap", () => {
   withCapabilities(true, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -342,13 +347,13 @@ Deno.test("SandboxManager - confinement + full isolation unshares net inside bwr
   });
 });
 
-Deno.test("SandboxManager - cwd is passed through", () => {
+test("SandboxManager - cwd is passed through", () => {
   const sandbox = new SandboxManager(createSandboxConfig({ filterEnv: false }));
   const opts = sandbox.buildSpawnOptions("opencode", "opencode", [], {}, "/my/workspace");
   assertEquals(opts.cwd, "/my/workspace");
 });
 
-Deno.test("SandboxManager - confinement mounts the resolved skills root read-only for either agent type", () => {
+test("SandboxManager - confinement mounts the resolved skills root read-only for either agent type", () => {
   // `unify-skill-root-and-inventory` D4: the factory's single observation is
   // threaded to the bwrap builder, which mounts that root at its literal path
   // for BOTH agent types (no per-agent image tree).
@@ -378,7 +383,7 @@ Deno.test("SandboxManager - confinement mounts the resolved skills root read-onl
   });
 });
 
-Deno.test("SandboxManager - no skills root invents no fallback mount", () => {
+test("SandboxManager - no skills root invents no fallback mount", () => {
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -451,13 +456,13 @@ function confinementHostUnsupported(): boolean {
   try {
     // `/usr/local` present as a SYMLINK is the known unspawnable topology; a real
     // directory (or its absence) is supported.
-    return Deno.lstatSync("/usr/local").isSymlink;
+    return fs.lstatSync("/usr/local").isSymbolicLink();
   } catch {
     return false;
   }
 }
 
-Deno.test("SandboxManager - OMP runtimeMounts are additive and emitted after the writable binds", () => {
+test("SandboxManager - OMP runtimeMounts are additive and emitted after the writable binds", () => {
   withCapabilities(false, true, () => {
     // F12 filesystem confinement with the shared network kept; filterEnv stays off so the
     // fixtures below exercise the mount policy, not the env policy.
@@ -536,7 +541,7 @@ Deno.test("SandboxManager - OMP runtimeMounts are additive and emitted after the
   });
 });
 
-Deno.test("SandboxManager - a skill root overlapping a runtime writable input is refused", () => {
+test("SandboxManager - a skill root overlapping a runtime writable input is refused", () => {
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -563,20 +568,20 @@ Deno.test("SandboxManager - a skill root overlapping a runtime writable input is
     // spelling are all refused before any mount is emitted.
     assertThrows(() => spawn(data, data), Error, "mandatory writable mount");
     assertThrows(() => spawn("/base/omp-agent", data), Error, "mandatory writable mount");
-    const base = Deno.makeTempDirSync({ prefix: "air-omp-overlap-" });
+    const base = makeTempDirSync({ prefix: "air-omp-overlap-" });
     try {
       const real = join(base, "xdg-data");
-      Deno.mkdirSync(real, { recursive: true });
+      fs.mkdirSync(real, { recursive: true });
       const alias = join(base, "data-alias");
-      Deno.symlinkSync(real, alias);
+      fs.symlinkSync(real, alias);
       assertThrows(() => spawn(real, alias), Error, "mandatory writable mount");
     } finally {
-      Deno.removeSync(base, { recursive: true });
+      fs.rmSync(base, { recursive: true });
     }
   });
 });
 
-Deno.test("SandboxManager - no runtimeMounts emits exactly the shared default mounts", () => {
+test("SandboxManager - no runtimeMounts emits exactly the shared default mounts", () => {
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -630,7 +635,7 @@ Deno.test("SandboxManager - no runtimeMounts emits exactly the shared default mo
 
 const PAYLOAD = "/srv/devhome/.cache/air-friends/omp/linux-x64/natives";
 
-Deno.test("SandboxManager - the OMP payload is a hard ro bind emitted last, after every writable bind and the shadow", () => {
+test("SandboxManager - the OMP payload is a hard ro bind emitted last, after every writable bind and the shadow", () => {
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -706,7 +711,7 @@ Deno.test("SandboxManager - the OMP payload is a hard ro bind emitted last, afte
   });
 });
 
-Deno.test("SandboxManager - a launch without payload inputs emits no hard ro bind (OpenCode unchanged)", () => {
+test("SandboxManager - a launch without payload inputs emits no hard ro bind (OpenCode unchanged)", () => {
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -730,20 +735,16 @@ Deno.test("SandboxManager - a launch without payload inputs emits no hard ro bin
   });
 });
 
-Deno.test({
-  name:
-    "SandboxManager - a vanished payload source fails the confined launch (hard ro bind, no fallback)",
-  // The real spawn needs bwrap AND a host that can materialise the production
-  // mount list; otherwise the leg stays UNEXERCISED.
-  ignore: !canConfineFilesystem() || confinementHostUnsupported(),
-  fn: async () => {
-    const baseRoot = Deno.makeTempDirSync({ prefix: "air-omp-payload-missing-" });
+test.skipIf(!canConfineFilesystem() || confinementHostUnsupported())(
+  "SandboxManager - a vanished payload source fails the confined launch (hard ro bind, no fallback)",
+  async () => {
+    const baseRoot = makeTempDirSync({ prefix: "air-omp-payload-missing-" });
     try {
       const tmpDir = join(baseRoot, "tmp");
-      Deno.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(tmpDir, { recursive: true });
       const missingPayload = join(baseRoot, "native-cache", "natives");
       // The source really is absent, so only a HARD `--ro-bind` can fail the spawn.
-      assertEquals(await Deno.lstat(missingPayload).catch(() => null), null);
+      assertEquals(await fsp.lstat(missingPayload).catch(() => null), null);
 
       const sandbox = new SandboxManager(
         createSandboxConfig({
@@ -757,7 +758,7 @@ Deno.test({
         "omp",
         "sh",
         ["-c", "echo should-not-run"],
-        { PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin", TMPDIR: tmpDir },
+        { PATH: process.env["PATH"] ?? "/usr/bin:/bin", TMPDIR: tmpDir },
         baseRoot,
         undefined,
         { payloadReadOnlyPaths: [missingPayload] },
@@ -767,26 +768,24 @@ Deno.test({
       assert(bindSourceIndex(opts.args, "--ro-bind", missingPayload) > -1);
       assertEquals(bindSources(opts.args, "--ro-bind-try").includes(missingPayload), false);
 
-      const output = await new Deno.Command(opts.command, {
-        args: opts.args,
+      const output = spawnSync(opts.command, opts.args, {
         cwd: opts.cwd,
-        env: opts.env,
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+        env: { ...process.env, ...opts.env },
+        encoding: "buffer",
+      });
       const stdout = new TextDecoder().decode(output.stdout);
       const stderr = new TextDecoder().decode(output.stderr);
       // The missing source fails the launch instead of degrading into a dangling
       // link, and the inner command never starts (no unconfined fallback).
-      assertEquals(output.success, false, `expected a failed launch, stderr: ${stderr}`);
+      assertEquals(output.status === 0, false, `expected a failed launch, stderr: ${stderr}`);
       assertEquals(stdout.includes("should-not-run"), false);
     } finally {
-      Deno.removeSync(baseRoot, { recursive: true });
+      fs.rmSync(baseRoot, { recursive: true });
     }
   },
-});
+);
 
-Deno.test("SandboxManager - an absent payload source is still emitted as a hard ro bind, never a lenient variant", () => {
+test("SandboxManager - an absent payload source is still emitted as a hard ro bind, never a lenient variant", () => {
   withCapabilities(false, true, () => {
     // The path does not exist, yet the mount list must stay hard: a `-try`
     // variant would silently continue and surface an opaque loader error later.
@@ -821,7 +820,7 @@ Deno.test("SandboxManager - an absent payload source is still emitted as a hard 
   });
 });
 
-Deno.test("SandboxManager - with filesystem confinement disabled the payload posture is unchanged", () => {
+test("SandboxManager - with filesystem confinement disabled the payload posture is unchanged", () => {
   // The operator-trusted, confinement-disabled posture mounts nothing: the
   // payload input is simply ignored (no bwrap, no bind, no failure), so this
   // change adds no restriction and no mount to that posture.
@@ -847,16 +846,12 @@ Deno.test("SandboxManager - with filesystem confinement disabled the payload pos
   assertEquals(opts.args.includes("--ro-bind-try"), false);
 });
 
-Deno.test({
-  name: "SandboxManager - confined omp: mounts read, own data written, no sibling access",
-  // Both gates must hold: bwrap can namespace (canConfineFilesystem) AND this host can
-  // materialise the production mount list (confinementHostUnsupported names the one
-  // known-unsupported topology explicitly).
-  ignore: !canConfineFilesystem() || confinementHostUnsupported(),
-  fn: async () => {
+test.skipIf(!canConfineFilesystem() || confinementHostUnsupported())(
+  "SandboxManager - confined omp: mounts read, own data written, no sibling access",
+  async () => {
     // Real spawn through the real confinement builder: the assertions below observe the
     // mounted filesystem (reads, writes, exit statuses), never the argv that produced it.
-    const baseRoot = Deno.makeTempDirSync({ prefix: "air-omp-confinement-" });
+    const baseRoot = makeTempDirSync({ prefix: "air-omp-confinement-" });
     try {
       const home = join(baseRoot, "home");
       const modelsFile = join(home, ".omp", "agent", "models.yml");
@@ -899,25 +894,25 @@ Deno.test({
         payloadVersionDir,
       ];
       for (const directory of directories) {
-        Deno.mkdirSync(directory, { recursive: true });
+        fs.mkdirSync(directory, { recursive: true });
       }
       const modelBytes = "model: deployment-authored";
       const siblingSentinel = "sibling-mode-sentinel";
       const skillInstruction = "trusted instruction";
       const payloadBytes = "shared native payload bytes";
       const cacheHomeSentinel = "cache-home-sentinel";
-      Deno.writeTextFileSync(modelsFile, `${modelBytes}\n`);
-      Deno.writeTextFileSync(siblingMarker, siblingSentinel);
-      Deno.writeTextFileSync(join(skillRoot, "SKILL.md"), `${skillInstruction}\n`);
-      Deno.writeTextFileSync(payloadFile, payloadBytes);
-      Deno.writeTextFileSync(cacheHomeMarker, cacheHomeSentinel);
+      fs.writeFileSync(modelsFile, `${modelBytes}\n`);
+      fs.writeFileSync(siblingMarker, siblingSentinel);
+      fs.writeFileSync(join(skillRoot, "SKILL.md"), `${skillInstruction}\n`);
+      fs.writeFileSync(payloadFile, payloadBytes);
+      fs.writeFileSync(cacheHomeMarker, cacheHomeSentinel);
       // The mode root's reserved `omp/natives` entry: an absolute symlink to the
       // shared payload, exactly as the shipped factory installs it.
-      Deno.symlinkSync(payloadDir, join(nativeDataDir, "natives"));
+      fs.symlinkSync(payloadDir, join(nativeDataDir, "natives"));
       // The sibling marker IS readable outside the confinement, so a failing read inside can
       // only come from the mount policy — not from a missing fixture.
-      assertEquals(Deno.readTextFileSync(siblingMarker), siblingSentinel);
-      assertEquals(Deno.readTextFileSync(cacheHomeMarker), cacheHomeSentinel);
+      assertEquals(fs.readFileSync(siblingMarker, "utf8"), siblingSentinel);
+      assertEquals(fs.readFileSync(cacheHomeMarker, "utf8"), cacheHomeSentinel);
 
       const ownMarker = join(nativeDataDir, "agent-marker");
       const forbiddenInSkillRoot = join(skillRoot, "forbidden.md");
@@ -960,7 +955,7 @@ Deno.test({
         "omp",
         "sh",
         ["-c", script],
-        { PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin", TMPDIR: tmpDir },
+        { PATH: process.env["PATH"] ?? "/usr/bin:/bin", TMPDIR: tmpDir },
         workspace,
         { root: skillRoot },
         {
@@ -979,16 +974,14 @@ Deno.test({
         payloadDir,
         payloadDir,
       ]);
-      const output = await new Deno.Command(opts.command, {
-        args: opts.args,
+      const output = spawnSync(opts.command, opts.args, {
         cwd: opts.cwd,
-        env: opts.env,
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+        env: { ...process.env, ...opts.env },
+        encoding: "buffer",
+      });
       const stdout = new TextDecoder().decode(output.stdout);
       const stderr = new TextDecoder().decode(output.stderr);
-      assert(output.success, `confined sh exited ${output.code}: ${stderr}`);
+      assert(output.status === 0, `confined sh exited ${output.status}: ${stderr}`);
 
       /** The `key=<n>` line the confined script printed; absent means the run aborted early. */
       const status = (key: string): number => {
@@ -1002,12 +995,12 @@ Deno.test({
       assertEquals(status("model_read_status"), 0);
       // (b) The native data child is really writable, and the write lands on the host tree.
       assertEquals(status("native_write_status"), 0);
-      assertEquals(Deno.readTextFileSync(ownMarker), "native-agent-marker");
+      assertEquals(fs.readFileSync(ownMarker, "utf8"), "native-agent-marker");
       // The skill root is admitted read-only (its instruction reads) but refuses writes.
       assertEquals(stdout.includes(skillInstruction), true, stdout);
       assertEquals(status("skill_read_status"), 0);
       assertEquals(status("skill_write_status") !== 0, true);
-      assertEquals(await Deno.lstat(forbiddenInSkillRoot).catch(() => null), null);
+      assertEquals(await fsp.lstat(forbiddenInSkillRoot).catch(() => null), null);
       // (c) The SIBLING mode's marker is absent from the mount namespace.
       assertEquals(status("sibling_read_status") !== 0, true);
       assertEquals(stdout.includes(siblingSentinel), false, stdout);
@@ -1017,11 +1010,11 @@ Deno.test({
       assertEquals(stdout.includes(payloadBytes), true, stdout);
       assertEquals(status("payload_read_status"), 0);
       assertEquals(status("payload_write_status") !== 0, true);
-      assertEquals(Deno.readTextFileSync(payloadFile), payloadBytes);
+      assertEquals(fs.readFileSync(payloadFile, "utf8"), payloadBytes);
       assertEquals(status("cache_home_read_status") !== 0, true);
       assertEquals(stdout.includes(cacheHomeSentinel), false, stdout);
     } finally {
-      Deno.removeSync(baseRoot, { recursive: true });
+      fs.rmSync(baseRoot, { recursive: true });
     }
   },
-});
+);
