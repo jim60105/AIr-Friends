@@ -17,6 +17,8 @@ import {
   readJournal,
   replaceSnapshot,
 } from "./durable-files.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../../utils/fs-compat.ts";
 
 const logger = createLogger("EmailMailboxStore");
 
@@ -445,9 +447,9 @@ export class MailboxStore {
           canonicalRoot,
           MAILBOX_SNAPSHOT_FILENAME,
         );
-        rawSnapshotContent = await Deno.readTextFile(snapshotPath);
+        rawSnapshotContent = await fsp.readFile(snapshotPath, "utf8");
       } catch (err) {
-        if (!(err instanceof Deno.errors.NotFound)) {
+        if (!(isNotFoundError(err))) {
           throw err;
         }
       }
@@ -747,7 +749,7 @@ export class MailboxStore {
           canonicalRoot,
           MAILBOX_SNAPSHOT_FILENAME,
         );
-        const existingRaw = await Deno.readTextFile(snapshotPath);
+        const existingRaw = await fsp.readFile(snapshotPath, "utf8");
         const existing = JSON.parse(existingRaw) as MailboxSnapshot;
         if (existing.fingerprint !== this.configuredFingerprint) {
           throw new MailboxStoreError(
@@ -767,7 +769,7 @@ export class MailboxStore {
           "Mailbox snapshot already exists on disk with different boundary or uidValidity",
         );
       } catch (err) {
-        if (!(err instanceof Deno.errors.NotFound)) {
+        if (!(isNotFoundError(err))) {
           if (err instanceof MailboxStoreError) throw err;
           throw new MailboxStoreError(
             MailboxDiagnosticCode.SNAPSHOT_MALFORMED,

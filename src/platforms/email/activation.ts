@@ -20,7 +20,7 @@
 // - Shutdown stops poll admission and settles the in-flight round first, then drains in-flight
 //   submissions and their journal writes, then closes the protocol clients. It never resends.
 
-import { join } from "@std/path";
+import { join } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import type { Logger } from "@utils/logger.ts";
 import { ConfigError, ErrorCode } from "../../types/errors.ts";

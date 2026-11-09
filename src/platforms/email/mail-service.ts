@@ -25,7 +25,7 @@
 // This module is intentionally NOT registered in production bootstrap; email activation
 // remains guarded until the final batch cutover.
 
-import { basename, join, resolve } from "@std/path";
+import { basename, join, resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
 import type { ChannelConfig, EmailConfig } from "../../types/config.ts";
@@ -61,6 +61,11 @@ import {
   SubmissionStoreError,
   validateOperationKey,
 } from "./submission-store.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import { isNotFoundError, removePath } from "../../utils/fs-compat.ts";
+import { runtimeOs } from "../../utils/runtime-platform.ts";
 
 const logger = createLogger("EmailMailService");
 
@@ -243,17 +248,17 @@ interface EvidenceBundle {
 }
 
 /** Write every byte of a buffer to an open handle, refusing partial writes. */
-async function writeAllBytes(file: Deno.FsFile, bytes: Uint8Array): Promise<void> {
+async function writeAllBytes(file: FileHandle, bytes: Uint8Array): Promise<void> {
   let offset = 0;
   while (offset < bytes.length) {
-    const written = await file.write(bytes.subarray(offset));
-    if (written === 0) {
+    const { bytesWritten } = await file.write(bytes.subarray(offset));
+    if (bytesWritten === 0) {
       throw new EmailMailServiceError(
         EmailSubmissionDiagnosticCode.EVIDENCE_WRITE_FAILED,
         "Zero bytes written while publishing submission evidence",
       );
     }
-    offset += written;
+    offset += bytesWritten;
   }
 }
 
@@ -977,45 +982,45 @@ export class EmailMailService {
     await ensureDurableDir(canonicalRoot, parentDir);
 
     try {
-      const stat = await Deno.lstat(target);
-      if (stat.isSymlink) {
+      const stat = await fsp.lstat(target);
+      if (stat.isSymbolicLink()) {
         throw new EmailMailServiceError(
           EmailSubmissionDiagnosticCode.EVIDENCE_WRITE_FAILED,
           "Submission evidence path is a symlink",
         );
       }
     } catch (err) {
-      if (!(err instanceof Deno.errors.NotFound)) {
+      if (!(isNotFoundError(err))) {
         throw err;
       }
     }
 
     const tmpPath = join(parentDir, `.${basename(target)}.tmp-${crypto.randomUUID()}`);
-    let file: Deno.FsFile | null = null;
+    let file: FileHandle | null = null;
     try {
-      file = await Deno.open(tmpPath, { createNew: true, write: true, mode: 0o600 });
-      if (Deno.build.os !== "windows") {
-        await Deno.chmod(tmpPath, 0o600);
+      file = await fsp.open(tmpPath, "wx", 0o600);
+      if (runtimeOs() !== "windows") {
+        await fsp.chmod(tmpPath, 0o600);
       }
       await writeAllBytes(file, bytes);
       await file.sync();
     } catch (err) {
-      file?.close();
+      await file?.close();
       file = null;
-      await Deno.remove(tmpPath).catch(() => {});
+      await removePath(tmpPath).catch(() => {});
       throw err instanceof EmailMailServiceError ? err : new EmailMailServiceError(
         EmailSubmissionDiagnosticCode.EVIDENCE_WRITE_FAILED,
         "Failed to write durable submission evidence",
         { cause: String(err) },
       );
     } finally {
-      file?.close();
+      await file?.close();
     }
 
     try {
-      await Deno.rename(tmpPath, target);
+      await fsp.rename(tmpPath, target);
     } catch (err) {
-      await Deno.remove(tmpPath).catch(() => {});
+      await removePath(tmpPath).catch(() => {});
       throw new EmailMailServiceError(
         EmailSubmissionDiagnosticCode.EVIDENCE_WRITE_FAILED,
         "Failed to publish durable submission evidence",
@@ -1035,7 +1040,7 @@ export class EmailMailService {
     let emlBytes: Uint8Array;
     try {
       const emlPath = await assertSafePath(canonicalRoot, outboundEvidenceRef(operationId));
-      emlBytes = await Deno.readFile(emlPath);
+      emlBytes = new Uint8Array(await fsp.readFile(emlPath));
     } catch {
       return undefined;
     }
@@ -1043,7 +1048,7 @@ export class EmailMailService {
     let meta: OutboundEvidenceMeta;
     try {
       const metaPath = await assertSafePath(canonicalRoot, outboundEvidenceMetaRef(operationId));
-      const parsed = JSON.parse(await Deno.readTextFile(metaPath)) as OutboundEvidenceMeta;
+      const parsed = JSON.parse(await fsp.readFile(metaPath, "utf8")) as OutboundEvidenceMeta;
       if (
         !parsed || parsed.v !== OUTBOUND_EVIDENCE_VERSION ||
         parsed.operationId !== operationId || typeof parsed.digest !== "string" ||
@@ -1093,7 +1098,7 @@ export class EmailMailService {
     }
     try {
       const parsed = JSON.parse(
-        Deno.readTextFileSync(join(this.emailRoot, outboundEvidenceMetaRef(operationId))),
+        fs.readFileSync(join(this.emailRoot, outboundEvidenceMetaRef(operationId)), "utf8"),
       ) as OutboundEvidenceMeta;
       return parsed?.operationId === operationId ? parsed : undefined;
     } catch {

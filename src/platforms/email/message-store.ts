@@ -749,7 +749,7 @@ export class EmailMessageStore {
       const sourceRel = `${SOURCE_SUBDIR}/${validRecord}.eml`;
       const sourcePath = await assertSafePath(emailRoot, sourceRel);
       try {
-        return await fsp.readFile(sourcePath);
+        return new Uint8Array(await fsp.readFile(sourcePath));
       } catch (err) {
         if (isNotFoundError(err)) return undefined;
         throw err;
@@ -891,7 +891,7 @@ export class EmailMessageStore {
       const attRel = `${ATTACHMENTS_SUBDIR}/${validRecord}/${validAtt}`;
       const attPath = await assertSafePath(emailRoot, attRel);
       try {
-        return await fsp.readFile(attPath);
+        return new Uint8Array(await fsp.readFile(attPath));
       } catch (err) {
         if (isNotFoundError(err)) return undefined;
         throw err;
