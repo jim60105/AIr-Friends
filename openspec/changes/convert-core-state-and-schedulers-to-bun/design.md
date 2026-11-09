@@ -166,6 +166,17 @@ Scope deviations (supervisor-authorized at apply time):
   existing workspace. `createdAt` is currently write-only, so no D1 assertion observes it and
   parity cannot see it. Hand-off: `convert-core-sessions-and-workspaces-to-bun` converts that
   stat and adds a `createdAt` assertion.
+  Two further `Deno.writeTextFile` sites in that file are reachable from no D1 test, so parity
+  stays green while they remain broken under Bun: `writeWorkspaceFile` (`workspace-manager.ts:295`)
+  and the two writes in `initializeAgentWorkspaceFiles` (`:346`, `:369`). Hand-off: that change
+  must convert both to `fsp.writeFile` and add coverage that reaches them.
+- Read decoding: `fsp.readFile(path, "utf8")` preserves a leading UTF-8 BOM that
+  `Deno.readTextFile` dropped, for every converted text reader (`config-loader`, `memory-store`,
+  `reminder-store`, `scheduler-state-store`, `workspace-manager`). Writes stay byte-identical, so
+  the D4 guard cannot see it; only external/hand-edited files that carry a BOM are affected (the
+  first JSONL line would fail `JSON.parse`, and scheduler state would reset). Config YAML is not
+  affected because the `yaml` parser accepts a leading BOM. In-app writers never emit one; no
+  fixture has one. Accepted for this step and recorded here rather than adding a read helper.
 - `migration/bun/baseline/parity-exceptions.json` gains the four `t.step` container entries of
   `tests/core/config-loader.test.ts`, the same disposition and reason as the existing
   `tests/utils/omp-native-cache.test.ts` entry: Deno reported the container as its own passing
