@@ -11,13 +11,19 @@
 // dependency, and every bounded wait polls an explicitly observable fact.
 //
 // EVIDENCE BOUNDARY (docs/OMP_EVIDENCE design §15): every subprocess here is
-// a `deno run` mock; every catalog/observation is synthetic. Nothing in this
+// a `bun run` mock; every catalog/observation is synthetic. Nothing in this
 // file demonstrates or claims that the native OMP binary invokes the attached
 // handler, honors a denial, emits readiness, or suppresses a language server.
 // The scenario names and comments identify the evidence as mock evidence.
+//
+// Deno's `sanitizeOps`/`sanitizeResources` options have no Bun equivalent, so
+// every test measures this process's own descriptor table and descendant tree
+// instead (`tests/helpers/leak-check.ts`) once its teardown has finished.
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { AgentConfig, AgentConnectorOptions, OmpPermissionMode } from "@acp/types.ts";
@@ -36,19 +42,13 @@ import {
   processAlive,
   useMockOmpAgent,
 } from "../../mocks/omp-mock-session.ts";
+import { isNotFoundError, makeTempDir } from "../../../src/utils/fs-compat.ts";
+import { assertNoLeak, snapshot, teardownWithLeakCheck } from "../../helpers/leak-check.ts";
 
 const logger = createLogger("OmpLifecycleIntegration");
 
-async function binaryAvailable(name: string): Promise<boolean> {
-  try {
-    const res = await new Deno.Command("which", { args: [name] }).output();
-    return res.code === 0;
-  } catch {
-    return false;
-  }
-}
-
-const CAN_RUN_SUBPROCESS = await binaryAvailable("dumb-init") && await binaryAvailable("deno");
+/** The connector wraps every agent launch in `dumb-init`; without it nothing spawns. */
+const DUMB_INIT_READY = Bun.which("dumb-init") !== null;
 
 const SKILL_SECRET = "0123456789abcdef0123456789abcdef01";
 
@@ -63,7 +63,7 @@ interface RecordedLine {
 
 async function readRpcLines(file: string): Promise<RecordedLine[]> {
   try {
-    const text = await Deno.readTextFile(file);
+    const text = await fsp.readFile(file, "utf8");
     return text
       .trim()
       .split("\n")
@@ -86,18 +86,36 @@ interface Harness {
   shellSessionId: string;
 }
 
+/**
+ * Bounded wait until `method` appears in the mock's RPC record. A notification
+ * (e.g. `session/cancel`) has no response to await, so its recorded line is the
+ * observable fact that the mock consumed it — waiting on it keeps the recorded
+ * sequence deterministic instead of racing the process replacement. Real delay
+ * on purpose: a child process's own processing is not clock-controllable.
+ */
+async function waitForRecordedMethod(file: string, method: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if ((await readRpcLines(file)).some((line) => line.method === method)) return;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 20);
+    await promise;
+  }
+  throw new Error(`RPC ${method} was never recorded in ${file}`);
+}
+
 /** Per-test hermetic harness: temp repo root, registry, real pool. */
 async function createHarness(poolKey: string): Promise<Harness> {
-  const tempDir = await Deno.makeTempDir({ prefix: "omp-lifecycle-" });
+  const tempDir = await makeTempDir({ prefix: "omp-lifecycle-" });
   const jwtDir = join(tempDir, "skill-jwt");
-  await Deno.mkdir(jwtDir, { recursive: true });
+  await fsp.mkdir(jwtDir, { recursive: true });
   const config = createOmpTestConfig({ tempRepoRoot: tempDir, poolKey });
   const sessionRegistry = new SessionRegistry();
   const workspaceManager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
   const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
   const workspacePath = join(tempDir, "session-cwd");
-  await Deno.mkdir(workspacePath, { recursive: true });
+  await fsp.mkdir(workspacePath, { recursive: true });
   // shellSessionId stays null in pool options: these scenarios exercise
   // lifecycle/lease/recovery wiring, not the Skill-API JWT/pointer machinery,
   // so no registry session is required — the id below is gate-context data.
@@ -147,13 +165,13 @@ async function teardownHarness(h: Harness, livePids: (number | undefined)[]): Pr
       // Best effort during teardown.
     }
   }
-  h.pool.stop();
+  await h.pool.stop();
   h.sessionRegistry.stop();
   for (const pid of livePids) {
     if (pid !== undefined) await expectProcessGone(pid, "pool agent process", 200);
   }
   try {
-    await Deno.remove(h.tempDir, { recursive: true });
+    await fsp.rm(h.tempDir, { recursive: true });
   } catch {
     // Temp-dir cleanup is best effort.
   }
@@ -265,13 +283,10 @@ function assertOmpLaunchPosture(args: string[], mode: OmpPermissionMode): void {
 // 3.1 Happy path: initialize/new/prompt/cancel/load through REAL pool wiring
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name:
-    "OMP lifecycle 3.1: happy-path initialize/new/prompt/cancel/load composes through the real pool entry with mode-keyed cache and lease release",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!DUMB_INIT_READY)(
+  "OMP lifecycle 3.1: happy-path initialize/new/prompt/cancel/load composes through the real pool entry with mode-keyed cache and lease release",
+  async () => {
+    const before = await snapshot();
     const h = await createHarness("discord:lifecycle-31");
     const stateDir = join(h.tempDir, "state-31");
     const rpcFile = join(stateDir, "rpc.jsonl");
@@ -305,6 +320,7 @@ Deno.test({
         assertEquals(response.stopReason, "end_turn");
 
         await connector.cancel(acpSessionId);
+        await waitForRecordedMethod(rpcFile, "session/cancel");
 
         // Load on the same live connection (the mock replays a catalog).
         assert(connector.supportsLoadSession());
@@ -371,22 +387,21 @@ Deno.test({
       const cache = h.spawned[0]["sessionConfigOptions"].get(result.acpSessionId!);
       assert(cache !== undefined && cache.length > 0, "config-options cache populated");
     } finally {
-      await teardownHarness(h, livePids);
+      await teardownWithLeakCheck(before, async () => {
+        await teardownHarness(h, livePids);
+      });
     }
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // 3.2 Crash → reconnect → same-mode load, one recovery flow
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name:
-    "OMP lifecycle 3.2: recovery resumes on same mode-composed pool entry — load catalog + model + reasoning reapplied, recovered session's own gate context restored for real, sibling context untouched",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!DUMB_INIT_READY)(
+  "OMP lifecycle 3.2: recovery resumes on same mode-composed pool entry — load catalog + model + reasoning reapplied, recovered session's own gate context restored for real, sibling context untouched",
+  async () => {
+    const before = await snapshot();
     const poolKey = "discord:lifecycle-32";
     const h = await createHarness(poolKey);
     const stateDir = join(h.tempDir, "state-32");
@@ -447,7 +462,10 @@ Deno.test({
         // B2: witness the side-process death HERE — before the release-path
         // drain could reap it independently of the crash. The mock wrote the
         // side-process pid file before its synchronous SIGKILLs.
-        const sidePid = parseInt(await Deno.readTextFile(join(stateDir, "mock-sidebro.pid")), 10);
+        const sidePid = parseInt(
+          await fsp.readFile(join(stateDir, "mock-sidebro.pid"), "utf8"),
+          10,
+        );
         await expectProcessGone(sidePid, "mock side process (crash witness)");
         assertEquals(
           processAlive(entryIdentity.pid!),
@@ -488,14 +506,14 @@ Deno.test({
         // The restricted write ALLOW (in-cwd, .md) is a staging-root
         // client-policy composition result, not native evidence.
         const stagingRoot = join(opts.sessionCwd, "tmp", h.shellSessionId);
-        await Deno.mkdir(stagingRoot, { recursive: true });
+        await fsp.mkdir(stagingRoot, { recursive: true });
         await client.writeTextFile({
           sessionId: acpSessionId,
           path: join(stagingRoot, "recovered.md"),
           content: "recovered",
         });
         assertEquals(
-          await Deno.readTextFile(join(stagingRoot, "recovered.md")),
+          await fsp.readFile(join(stagingRoot, "recovered.md"), "utf8"),
           "recovered",
           "re-issued filesystem decision executes against the restored context",
         );
@@ -510,7 +528,7 @@ Deno.test({
             }),
           Error,
         );
-        await assertRejects(() => Deno.stat(join(opts.sessionCwd, "outside.md")));
+        await assertRejects(() => fsp.stat(join(opts.sessionCwd, "outside.md")));
 
         // Sibling context replayed UNCHANGED (never substituted, never dropped).
         assertEquals(
@@ -553,10 +571,12 @@ Deno.test({
       // shipped posture before and after the respawn.
       assertOmpLaunchPosture(scoped.factoryArgs, "restricted");
     } finally {
-      await teardownHarness(h, livePids);
+      await teardownWithLeakCheck(before, async () => {
+        await teardownHarness(h, livePids);
+      });
     }
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // 3.3 Mode-separated recovery through each entry's own connector options
@@ -642,25 +662,23 @@ async function modeRecoveryThroughOwnOptions(mode: OmpPermissionMode): Promise<v
   }
 }
 
-Deno.test({
-  name:
-    "OMP lifecycle 3.3: each mode's entry crashes and recovers through its own connector options with no ownership prerequisite, no mode promotion and no sibling substitution",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
-    await modeRecoveryThroughOwnOptions("restricted");
-    await modeRecoveryThroughOwnOptions("native-yolo");
+test.skipIf(!DUMB_INIT_READY)(
+  "OMP lifecycle 3.3: each mode's entry crashes and recovers through its own connector options with no ownership prerequisite, no mode promotion and no sibling substitution",
+  async () => {
+    const before = await snapshot();
+    try {
+      await modeRecoveryThroughOwnOptions("restricted");
+      await modeRecoveryThroughOwnOptions("native-yolo");
+    } finally {
+      await assertNoLeak(before);
+    }
   },
-});
+);
 
-Deno.test({
-  name:
-    "OMP lifecycle 3.3b: post-load catalog miss fails ONLY the recovering session through the shipped error; sibling flows on the same entry keep running",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!DUMB_INIT_READY)(
+  "OMP lifecycle 3.3b: post-load catalog miss fails ONLY the recovering session through the shipped error; sibling flows on the same entry keep running",
+  async () => {
+    const before = await snapshot();
     const poolKey = "discord:lifecycle-33b";
     const h = await createHarness(poolKey);
     const stateDir = join(h.tempDir, "state-33b");
@@ -726,22 +744,21 @@ Deno.test({
       );
       assert(recoveryGen.includes("session/new"), "sibling newSession ran on the same entry");
     } finally {
-      await teardownHarness(h, livePids);
+      await teardownWithLeakCheck(before, async () => {
+        await teardownHarness(h, livePids);
+      });
     }
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // 4.1 Absent-handler composition: client policy denies, posture pinned
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name:
-    "OMP lifecycle 4.1: absent-handler restricted session denies an unauthorized ACP-mediated write at the real client policy with zero side effect; pinned non-YOLO approval posture unchanged, no handshake/fallback/mode promotion",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!DUMB_INIT_READY)(
+  "OMP lifecycle 4.1: absent-handler restricted session denies an unauthorized ACP-mediated write at the real client policy with zero side effect; pinned non-YOLO approval posture unchanged, no handshake/fallback/mode promotion",
+  async () => {
+    const before = await snapshot();
     const poolKey = "discord:lifecycle-41";
     const h = await createHarness(poolKey);
     const stateDir = join(h.tempDir, "state-41");
@@ -777,10 +794,10 @@ Deno.test({
             }),
           Error,
         );
-        await assertRejects(
-          () => Deno.stat(join(opts.sessionCwd, "unauthorized.json")),
-          Deno.errors.NotFound,
+        const notFound = await assertRejects(
+          () => fsp.stat(join(opts.sessionCwd, "unauthorized.json")),
         );
+        assert(isNotFoundError(notFound), "the denied write left no file behind");
         // Bounded denial recorded for retry feedback, no operation side effect.
         const rejections = client.getRecentPermissionRejections();
         assertEquals(rejections.length, 1, "exactly one bounded denial recorded");
@@ -814,22 +831,21 @@ Deno.test({
       });
       assertEquals(result.cancelledByDeadline, false);
     } finally {
-      await teardownHarness(h, livePids);
+      await teardownWithLeakCheck(before, async () => {
+        await teardownHarness(h, livePids);
+      });
     }
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // 4.3 Dual-mode coexistence on the global lease + launch posture across respawn
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name:
-    "OMP lifecycle 4.3: restricted and native-YOLO sessions coexist under mode-keyed entries and serialize on the single execution lease; both modes' pinned launch posture survives crash-respawn and same-mode load, YOLO without restricted policy",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!DUMB_INIT_READY)(
+  "OMP lifecycle 4.3: restricted and native-YOLO sessions coexist under mode-keyed entries and serialize on the single execution lease; both modes' pinned launch posture survives crash-respawn and same-mode load, YOLO without restricted policy",
+  async () => {
+    const before = await snapshot();
     const poolKey = "discord:lifecycle-43";
     const h = await createHarness(poolKey);
     const stateDir = join(h.tempDir, "state-43");
@@ -934,7 +950,9 @@ Deno.test({
       // pinned launch args are the claim's full extent (docs/OMP_COMPATIBILITY
       // §1a).
     } finally {
-      await teardownHarness(h, livePids);
+      await teardownWithLeakCheck(before, async () => {
+        await teardownHarness(h, livePids);
+      });
     }
   },
-});
+);

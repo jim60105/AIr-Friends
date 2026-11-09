@@ -676,6 +676,14 @@ export class DashboardServer {
     const model = body.model ?? this.deps.appConfig.agent.model;
     const chatSessionId = crypto.randomUUID();
 
+    /**
+     * The connector this attempt created. A failure AFTER the agent process was
+     * spawned must release it before returning, or the subprocess tree outlives
+     * the request (the leak the integration suites' descriptor/process checks
+     * surfaced).
+     */
+    let pendingConnector: AgentConnector | undefined;
+
     try {
       // Create workspace for web chat
       const workspacePath = join(
@@ -718,6 +726,7 @@ export class DashboardServer {
       };
 
       const connector = new AgentConnector(connectorOptions);
+      pendingConnector = connector;
       await connector.connect();
 
       const acpSessionId = await connector.createSession();
@@ -757,6 +766,27 @@ export class DashboardServer {
       logger.error("Failed to connect chat session: {error}", {
         error: error instanceof Error ? error.message : String(error),
       });
+      // Release the spawned agent tree on EVERY failure path. The launch failure
+      // stays the reported cause; a release failure is logged separately and
+      // never replaces it.
+      if (pendingConnector !== undefined) {
+        const session = this.chatSession;
+        if (session !== null && session.connector === pendingConnector) {
+          // A failure after the session was published must not leave a session
+          // (or its idle timer) that the client can never disconnect.
+          clearTimeout(session.idleTimer ?? undefined);
+          this.chatSession = null;
+        }
+        try {
+          await pendingConnector.disconnect();
+        } catch (disconnectError) {
+          logger.warn("Error releasing the agent after a failed chat connect: {error}", {
+            error: disconnectError instanceof Error
+              ? disconnectError.message
+              : String(disconnectError),
+          });
+        }
+      }
       return this.json({ error: "Failed to connect to agent" }, 500);
     }
   }
