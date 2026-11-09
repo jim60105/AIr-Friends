@@ -1,6 +1,8 @@
 // tests/main.test.ts
 
 import { assertEquals, assertExists } from "@std/assert";
+import { test } from "bun:test";
+import { parseCliArgs } from "../src/main.ts";
 import { ShutdownHandler } from "../src/shutdown.ts";
 import { HealthCheckServer } from "../src/healthcheck.ts";
 import { configureLogger, createLogger } from "../src/utils/logger.ts";
@@ -8,12 +10,12 @@ import type { AppContext } from "../src/bootstrap.ts";
 import { ConnectionState } from "../src/types/platform.ts";
 
 // ShutdownHandler tests
-Deno.test("ShutdownHandler - initial state", () => {
+test("ShutdownHandler - initial state", () => {
   const handler = new ShutdownHandler();
   assertEquals(handler.isShutdownInProgress(), false);
 });
 
-Deno.test("ShutdownHandler - can set context", () => {
+test("ShutdownHandler - can set context", () => {
   const handler = new ShutdownHandler();
   const mockContext = {
     config: {},
@@ -28,26 +30,26 @@ Deno.test("ShutdownHandler - can set context", () => {
   assertEquals(handler.isShutdownInProgress(), false);
 });
 
-Deno.test("ShutdownHandler - shutdown without context", async () => {
+test("ShutdownHandler - shutdown without context", async () => {
   const handler = new ShutdownHandler();
 
   // Mock Deno.exit to prevent test from exiting
-  const originalExit = Deno.exit;
+  const originalExit = process.exit;
   let exitCode = -1;
-  Deno.exit = ((code: number) => {
+  process.exit = ((code: number) => {
     exitCode = code;
-  }) as typeof Deno.exit;
+  }) as typeof process.exit;
 
   try {
     await handler.shutdown();
     assertEquals(exitCode, 0);
     assertEquals(handler.isShutdownInProgress(), true);
   } finally {
-    Deno.exit = originalExit;
+    process.exit = originalExit;
   }
 });
 
-Deno.test("ShutdownHandler - shutdown with context", async () => {
+test("ShutdownHandler - shutdown with context", async () => {
   const handler = new ShutdownHandler();
   let disconnectCalled = false;
   let shutdownCalled = false;
@@ -71,11 +73,11 @@ Deno.test("ShutdownHandler - shutdown with context", async () => {
 
   handler.setContext(mockContext);
 
-  const originalExit = Deno.exit;
+  const originalExit = process.exit;
   let exitCode = -1;
-  Deno.exit = ((code: number) => {
+  process.exit = ((code: number) => {
     exitCode = code;
-  }) as typeof Deno.exit;
+  }) as typeof process.exit;
 
   try {
     await handler.shutdown();
@@ -84,11 +86,11 @@ Deno.test("ShutdownHandler - shutdown with context", async () => {
     assertEquals(exitCode, 0);
     assertEquals(handler.isShutdownInProgress(), true);
   } finally {
-    Deno.exit = originalExit;
+    process.exit = originalExit;
   }
 });
 
-Deno.test("ShutdownHandler - shutdown stops memoryMaintenanceScheduler", async () => {
+test("ShutdownHandler - shutdown stops memoryMaintenanceScheduler", async () => {
   const handler = new ShutdownHandler();
   let maintenanceStopCalled = false;
 
@@ -110,18 +112,18 @@ Deno.test("ShutdownHandler - shutdown stops memoryMaintenanceScheduler", async (
 
   handler.setContext(mockContext);
 
-  const originalExit = Deno.exit;
-  Deno.exit = ((_code: number) => {}) as typeof Deno.exit;
+  const originalExit = process.exit;
+  process.exit = ((_code: number) => {}) as typeof process.exit;
 
   try {
     await handler.shutdown();
     assertEquals(maintenanceStopCalled, true);
   } finally {
-    Deno.exit = originalExit;
+    process.exit = originalExit;
   }
 });
 
-Deno.test("ShutdownHandler - shutdown handles errors", async () => {
+test("ShutdownHandler - shutdown handles errors", async () => {
   const handler = new ShutdownHandler();
   const mockContext = {
     config: {},
@@ -134,21 +136,21 @@ Deno.test("ShutdownHandler - shutdown handles errors", async () => {
 
   handler.setContext(mockContext);
 
-  const originalExit = Deno.exit;
+  const originalExit = process.exit;
   let exitCode = -1;
-  Deno.exit = ((code: number) => {
+  process.exit = ((code: number) => {
     exitCode = code;
-  }) as typeof Deno.exit;
+  }) as typeof process.exit;
 
   try {
     await handler.shutdown();
     assertEquals(exitCode, 1);
   } finally {
-    Deno.exit = originalExit;
+    process.exit = originalExit;
   }
 });
 
-Deno.test("ShutdownHandler - prevents duplicate shutdown", async () => {
+test("ShutdownHandler - prevents duplicate shutdown", async () => {
   const handler = new ShutdownHandler();
   const mockContext = {
     config: {},
@@ -161,11 +163,11 @@ Deno.test("ShutdownHandler - prevents duplicate shutdown", async () => {
 
   handler.setContext(mockContext);
 
-  const originalExit = Deno.exit;
+  const originalExit = process.exit;
   let exitCount = 0;
-  Deno.exit = ((_code: number) => {
+  process.exit = ((_code: number) => {
     exitCount++;
-  }) as typeof Deno.exit;
+  }) as typeof process.exit;
 
   try {
     // Start first shutdown
@@ -177,17 +179,17 @@ Deno.test("ShutdownHandler - prevents duplicate shutdown", async () => {
     // Should only exit once
     assertEquals(exitCount, 1);
   } finally {
-    Deno.exit = originalExit;
+    process.exit = originalExit;
   }
 });
 
 // HealthCheckServer tests
-Deno.test("HealthCheckServer - can be instantiated", () => {
+test("HealthCheckServer - can be instantiated", () => {
   const server = new HealthCheckServer(8081);
   assertExists(server);
 });
 
-Deno.test("HealthCheckServer - can set context", () => {
+test("HealthCheckServer - can set context", () => {
   const server = new HealthCheckServer(8082);
   const mockContext = {
     config: {},
@@ -204,7 +206,7 @@ Deno.test("HealthCheckServer - can set context", () => {
   assertExists(server);
 });
 
-Deno.test("HealthCheckServer - start and stop", async () => {
+test("HealthCheckServer - start and stop", async () => {
   const server = new HealthCheckServer(8083);
 
   // Start server
@@ -217,7 +219,7 @@ Deno.test("HealthCheckServer - start and stop", async () => {
   await server.stop();
 });
 
-Deno.test("HealthCheckServer - handles /health endpoint", async () => {
+test("HealthCheckServer - handles /health endpoint", async () => {
   const server = new HealthCheckServer(8084);
   const mockContext = {
     config: {},
@@ -252,7 +254,7 @@ Deno.test("HealthCheckServer - handles /health endpoint", async () => {
   }
 });
 
-Deno.test("HealthCheckServer - handles /healthz endpoint", async () => {
+test("HealthCheckServer - handles /healthz endpoint", async () => {
   const server = new HealthCheckServer(8085);
   server.start();
 
@@ -267,7 +269,7 @@ Deno.test("HealthCheckServer - handles /healthz endpoint", async () => {
   }
 });
 
-Deno.test("HealthCheckServer - handles /ready endpoint without context", async () => {
+test("HealthCheckServer - handles /ready endpoint without context", async () => {
   const server = new HealthCheckServer(8086);
   server.start();
 
@@ -282,46 +284,43 @@ Deno.test("HealthCheckServer - handles /ready endpoint without context", async (
   }
 });
 
-Deno.test(
-  "HealthCheckServer - handles /ready endpoint with connected platforms",
-  async () => {
-    const server = new HealthCheckServer(8087);
-    const mockContext = {
-      config: {
-        agent: { skillsDir: "/nonexistent-skills-dir" },
-        workspace: { repoPath: "/tmp" },
-      },
-      agentCore: {
-        getSkillRegistry: () => ({
-          getAvailableSkills: () => [],
-        }),
-      },
-      platformRegistry: {
-        getAllAdapters: () => [],
-        getStatus: () => new Map(),
-        isAllConnected: () => true,
-      },
-    } as unknown as AppContext;
+test("HealthCheckServer - handles /ready endpoint with connected platforms", async () => {
+  const server = new HealthCheckServer(8087);
+  const mockContext = {
+    config: {
+      agent: { skillsDir: "/nonexistent-skills-dir" },
+      workspace: { repoPath: "/tmp" },
+    },
+    agentCore: {
+      getSkillRegistry: () => ({
+        getAvailableSkills: () => [],
+      }),
+    },
+    platformRegistry: {
+      getAllAdapters: () => [],
+      getStatus: () => new Map(),
+      isAllConnected: () => true,
+    },
+  } as unknown as AppContext;
 
-    server.setContext(mockContext);
-    server.start();
+  server.setContext(mockContext);
+  server.start();
 
-    try {
-      const response = await fetch("http://localhost:8087/ready");
+  try {
+    const response = await fetch("http://localhost:8087/ready");
 
-      const data = await response.json();
-      assertEquals(data.platforms, true);
-      assertEquals(typeof data.skillReadiness, "object");
-      assertEquals(typeof data.skillReadiness.allReady, "boolean");
-      // Overall ready depends on both platforms AND skill readiness (binary availability)
-      assertEquals(data.ready, data.platforms && data.skillReadiness.allReady);
-    } finally {
-      await server.stop();
-    }
-  },
-);
+    const data = await response.json();
+    assertEquals(data.platforms, true);
+    assertEquals(typeof data.skillReadiness, "object");
+    assertEquals(typeof data.skillReadiness.allReady, "boolean");
+    // Overall ready depends on both platforms AND skill readiness (binary availability)
+    assertEquals(data.ready, data.platforms && data.skillReadiness.allReady);
+  } finally {
+    await server.stop();
+  }
+});
 
-Deno.test("HealthCheckServer - handles /readyz endpoint", async () => {
+test("HealthCheckServer - handles /readyz endpoint", async () => {
   const server = new HealthCheckServer(8088);
   const mockContext = {
     config: {
@@ -354,7 +353,7 @@ Deno.test("HealthCheckServer - handles /readyz endpoint", async () => {
   }
 });
 
-Deno.test("HealthCheckServer - returns 404 for unknown paths", async () => {
+test("HealthCheckServer - returns 404 for unknown paths", async () => {
   const server = new HealthCheckServer(8089);
   server.start();
 
@@ -367,7 +366,7 @@ Deno.test("HealthCheckServer - returns 404 for unknown paths", async () => {
   }
 });
 
-Deno.test("HealthCheckServer - health status reflects platform state", async () => {
+test("HealthCheckServer - health status reflects platform state", async () => {
   const server = new HealthCheckServer(8090);
   const mockContext = {
     config: {},
@@ -411,7 +410,7 @@ Deno.test("HealthCheckServer - health status reflects platform state", async () 
   }
 });
 
-Deno.test("HealthCheckServer - health status shows unhealthy for errors", async () => {
+test("HealthCheckServer - health status shows unhealthy for errors", async () => {
   const server = new HealthCheckServer(8091);
   const mockContext = {
     config: {},
@@ -449,47 +448,110 @@ Deno.test("HealthCheckServer - health status shows unhealthy for errors", async 
 });
 
 // Logger tests
-Deno.test("configureLogger - sets log level from config", () => {
+test("configureLogger - sets log level from config", () => {
   configureLogger({ level: "DEBUG" });
   const logger = createLogger("test");
   assertExists(logger);
 });
 
-Deno.test("configureLogger - uses default level", () => {
+test("configureLogger - uses default level", () => {
   configureLogger({});
   const logger = createLogger("test");
   assertExists(logger);
 });
 
-Deno.test("configureLogger - handles format parameter", () => {
+test("configureLogger - handles format parameter", () => {
   configureLogger({ level: "INFO", format: "json" });
   const logger = createLogger("test");
   assertExists(logger);
 });
 
-Deno.test("configureLogger - handles invalid log level", () => {
+test("configureLogger - handles invalid log level", () => {
   configureLogger({ level: "INVALID" });
   const logger = createLogger("test");
   assertExists(logger);
 });
 
-Deno.test("createLogger - creates logger with default config", () => {
+test("createLogger - creates logger with default config", () => {
   const logger = createLogger("test-module");
   assertExists(logger);
 });
 
-Deno.test("createLogger - uses environment variable", () => {
-  const originalEnv = Deno.env.get("LOG_LEVEL");
+test("createLogger - uses environment variable", () => {
+  const originalEnv = process.env["LOG_LEVEL"];
 
   try {
-    Deno.env.set("LOG_LEVEL", "WARN");
+    process.env["LOG_LEVEL"] = "WARN";
     const logger = createLogger("test-env");
     assertExists(logger);
   } finally {
-    if (originalEnv) {
-      Deno.env.set("LOG_LEVEL", originalEnv);
+    if (originalEnv !== undefined) {
+      process.env["LOG_LEVEL"] = originalEnv;
     } else {
-      Deno.env.delete("LOG_LEVEL");
+      delete process.env["LOG_LEVEL"];
     }
   }
+});
+
+// parseCliArgs tests - the argument behavior kept from @std/flags
+test("parseCliArgs - defaults for no arguments", () => {
+  assertEquals(parseCliArgs([]), {
+    config: undefined,
+    help: false,
+    yolo: false,
+    dryRun: false,
+  });
+});
+
+test("parseCliArgs - accepts the long config option", () => {
+  assertEquals(parseCliArgs(["--config", "./my-config.yaml"]).config, "./my-config.yaml");
+  assertEquals(parseCliArgs(["--config=./my-config.yaml"]).config, "./my-config.yaml");
+});
+
+test("parseCliArgs - accepts the short config alias", () => {
+  assertEquals(parseCliArgs(["-c", "./my-config.yaml"]).config, "./my-config.yaml");
+  assertEquals(parseCliArgs(["-c=./my-config.yaml"]).config, "./my-config.yaml");
+  assertEquals(parseCliArgs(["-c="]).config, undefined);
+});
+
+test("parseCliArgs - bare config option keeps its empty-string value", () => {
+  assertEquals(parseCliArgs(["--config"]).config, "");
+  assertEquals(parseCliArgs(["-c"]).config, "");
+});
+
+test("parseCliArgs - config option never consumes the next flag", () => {
+  const args = parseCliArgs(["--config", "--yolo"]);
+  assertEquals(args.config, "");
+  assertEquals(args.yolo, true);
+});
+
+test("parseCliArgs - help flag", () => {
+  assertEquals(parseCliArgs(["--help"]).help, true);
+  assertEquals(parseCliArgs(["-h"]).help, true);
+  assertEquals(parseCliArgs(["--help=false"]).help, false);
+  assertEquals(parseCliArgs(["--help", "false"]).help, false);
+});
+
+test("parseCliArgs - boolean flags", () => {
+  assertEquals(parseCliArgs(["--yolo"]).yolo, true);
+  assertEquals(parseCliArgs(["--yolo=true"]).yolo, true);
+  assertEquals(parseCliArgs(["--yolo=false"]).yolo, false);
+  assertEquals(parseCliArgs(["--yolo", "false"]).yolo, false);
+  assertEquals(parseCliArgs(["--dry-run"]).dryRun, true);
+  assertEquals(parseCliArgs(["--dry-run=false"]).dryRun, false);
+});
+
+test("parseCliArgs - unknown flags and positionals are tolerated", () => {
+  assertEquals(parseCliArgs(["--unknown", "positional", "--dry-run"]), {
+    config: undefined,
+    help: false,
+    yolo: false,
+    dryRun: true,
+  });
+});
+
+test("parseCliArgs - arguments after -- are positionals", () => {
+  const args = parseCliArgs(["--yolo", "--", "--dry-run"]);
+  assertEquals(args.yolo, true);
+  assertEquals(args.dryRun, false);
 });

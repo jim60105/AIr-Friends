@@ -51,6 +51,16 @@ const { values } = parseArgs({
 
 `strict: false` keeps `@std/flags`' acceptance of unknown flags. The returned object keeps the same four fields and defaults. Help text: `bun run start [-- options]` and `bun run start -- --config ./my-config.yaml --yolo`. The version log line becomes `logger.info("Bun version", { version: Bun.version })`.
 
+Argument compatibility: `parseArgs` differs from the previous parser for a bare `--config` (it
+returns `true`, where the old parser returned `""`) and for explicit boolean values (`--yolo=false`
+arrives as the string `"false"`, and a separate `--yolo false` leaves `"false"` positional). The
+entry point therefore exports `parseCliArgs(argv)` and normalizes argv before parsing: a bare
+`--config`/`-c`, or one followed by a `-`-prefixed token, becomes `--config=` (the old empty-string
+value); `-c=<path>` becomes `--config=<path>` (and `-c=` leaves the option unset, as before); a
+boolean flag followed by `true`/`false` becomes its `--flag=value` form; and only
+`undefined`, `false` and `"false"` read as false. This keeps the shipped `start:config` script and
+every explicit flag value working, and gives the argument-behavior tests a direct seam.
+
 ### D4. Tests
 
 - `tests/main.test.ts`: replace `Deno.exit` stubs with `process.exit` stubs (assign and restore `process.exit`), keeping test names.
