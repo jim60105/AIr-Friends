@@ -112,6 +112,40 @@ Read each call site's option object and map it to the row with the same flags; a
 
 The test spawns a child that exits mid-write. Spawn it with `spawnSync(process.execPath, ["run", "--no-env-file", <child script>, ...args])`, and convert the child's `Deno.exit` to `process.exit`. Keep the exit codes.
 
+### D4. Observed mappings added at apply time
+
+The D2 table does not spell out every option combination these files use. These are
+the mappings applied, each one preserving the Deno semantics exactly:
+
+| Deno | Bun |
+| --- | --- |
+| `await Deno.open(p, { create: true, write: true })` on a fresh temp path (no `truncate` flag) | `await fsp.open(p, "w")` |
+| `await Deno.writeFile(P, D, { create: true, mode })` | `await fsp.writeFile(P, D, { mode })` (`Deno.writeFile` already truncates; `create: true` is its default) |
+| A byte array read by `fsp.readFile` and returned through a `Uint8Array` contract | `new Uint8Array(await fsp.readFile(P))` — Node returns a `Buffer`, whose runtime type is observable (JSON, deep equality) |
+| `assertRejects(fn, Deno.errors.NotFound)` | `const error = await assertRejects(fn); assertEquals(isNotFoundError(error), true);` |
+
+`FileHandle.write()` can complete partially, so the write-all loop and its
+zero-progress guard are retained instead of replacing the loop with a single
+`await handle.write(bytes)` as D2's one-line row suggests.
+
+The crash child keeps the inline `-e` form already used by the other converted test
+children (`spawnSync(process.execPath, ["--no-env-file", "-e", code], { cwd,
+encoding: "utf8" })`) rather than a separate child script file: the child code
+imports the module under test by a path relative to the repository root, so a
+script outside the repository would need a rewritten import path. `--no-env-file`
+keeps the child from loading dotenv files the original Deno evaluation never read.
+
+## Design deviations (apply time)
+
+Every edit below is outside D1 and was either pre-authorized by the standing
+instructions or explicitly authorized by the supervisor.
+
+| File | Change | Owner / authority |
+| --- | --- | --- |
+| `tests/helpers/email-imap-service.ts` | `getOrCreateFixtureCert` writes the key and certificate to two files under one `mkdtemp` directory (`-keyout`, `-out`) instead of `-keyout /dev/stdout`, reads both back and removes the directory in `finally`. Bun gives every child a socketpair for stdio, and opening `/dev/stdout` on a socket fails with ENXIO; Deno used pipes, which is why the Deno baseline passed. `GeneratedTlsCert` parsing and output are unchanged. | Supervisor-authorized permanent fix; the owning change `convert-utils-platforms-and-test-support-to-bun` is already archived, so no later step owns this file. |
+| `src/acp/agent-factory.ts` | Swallowed-Deno class: the mechanical `Deno.*` → `node:*` sites the scoped tests reach in the email-intent profile path — `lstatSync`, `realPathSync`, `readDirSync`, `mkdirSync`, `chmodSync`, `writeTextFileSync`, `readTextFileSync`, `readLinkSync`, `symlinkSync`, `renameSync`, `Deno.env.get`, `Deno.pid`, `Deno.FileInfo` (→ `Stats`) and the `isSymlink`/`isDirectory` methods. The env/stat/readDir sites were already converted by the previous change. | `convert-acp-client-and-factory-to-bun` |
+| `src/core/agent-process-pool.ts` | Swallowed-Deno class: `ensureSharedDirs`' two `Deno.mkdir` calls and `clearActivePointer`'s `Deno.readTextFile`. Without them the pool catches `ReferenceError: Deno is not defined` and reports a failed session, turning the receipt assertions into a non-deferrable failure. | `port-process-lifecycle-and-pool-to-bun` |
+
 ## Risks / Trade-offs
 
 - [A converted test now fails for a reason other than a deferred symbol] → Fix the conversion, not the assertion. If the failure is a real Bun behavior difference, stop and report it with the failing test name; do not add an exception for a failing test.
