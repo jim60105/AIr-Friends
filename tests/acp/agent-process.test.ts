@@ -201,6 +201,13 @@ describe.skipIf(!DUMB_INIT_AVAILABLE)("agent process boundary", () => {
     let childPid: number | undefined;
     try {
       childPid = await within(waitForPidFile(readyPath), 30_000, "the fixture readiness report");
+      // Record the signals the connector really sends, still forwarding them.
+      const sent: { signal: string; at: number }[] = [];
+      const forwardKill = handle.kill.bind(handle);
+      handle.kill = (signal) => {
+        sent.push({ signal, at: performance.now() });
+        forwardKill(signal);
+      };
       connector["process"] = handle;
 
       const started = performance.now();
@@ -210,6 +217,15 @@ describe.skipIf(!DUMB_INIT_AVAILABLE)("agent process boundary", () => {
       const exit = await within(handle.exited, 30_000, "the escalated exit");
       assert(elapsedMs >= 1900, `SIGKILL came after only ${elapsedMs.toFixed(0)} ms`);
       assert(elapsedMs <= 3000, `SIGKILL came after ${elapsedMs.toFixed(0)} ms, past the grace`);
+      assertEquals(
+        sent.map((entry) => entry.signal),
+        ["SIGTERM", "SIGKILL"],
+        "the connector must send SIGTERM first and SIGKILL only on escalation",
+      );
+      assert(
+        sent[1].at - sent[0].at >= 1900,
+        `SIGKILL followed SIGTERM after only ${(sent[1].at - sent[0].at).toFixed(0)} ms`,
+      );
       assertEquals(exit, { code: null, signal: "SIGKILL", success: false });
     } finally {
       // The wrapper-only SIGKILL reparents the SIGTERM-ignoring child.

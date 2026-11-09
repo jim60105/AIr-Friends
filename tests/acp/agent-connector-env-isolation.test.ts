@@ -189,6 +189,7 @@ test("F1 - OpenCode production env reaches the child exactly", async () => {
   const parentOverrides: Record<string, string> = {
     DISCORD_TOKEN: "discord-parent-secret",
     SKILL_API_SECRET: "skill-api-parent-secret",
+    DENO_DIR: "/tmp/parent-deno-dir",
     OPENCODE_API_KEY: "parent-opencode-key",
     OPENROUTER_API_KEY: "parent-openrouter-key",
     GEMINI_API_KEY: "parent-gemini-key",
@@ -232,6 +233,7 @@ test("F1 - OMP production env reaches the child exactly", async () => {
   const parentOverrides: Record<string, string> = {
     DISCORD_TOKEN: "discord-parent-secret",
     SKILL_API_SECRET: "skill-api-parent-secret",
+    DENO_DIR: "/tmp/parent-deno-dir",
     GEMINI_API_KEY: "parent-gemini-key",
     OPENROUTER_API_KEY: "parent-openrouter-key",
     LANG: process.env["LANG"] ?? "C.UTF-8",
