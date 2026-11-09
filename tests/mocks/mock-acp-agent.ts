@@ -86,7 +86,7 @@
 //                                  — the write-authorization decision under
 //                                  test is the client-side gate, never
 //                                  simulated enforcement here), then spawns the
-//                                  REAL skill script(s) via `deno run`, AWAITING
+//                                  REAL skill script(s) via `bun run`, AWAITING
 //                                  each exit (event-signaled, no polling), then
 //                                  emits a `mock_skill_call_done` session/update
 //                                  notification (with every exit code) before

@@ -124,6 +124,10 @@ Scope deviations (supervisor-authorized at apply time):
   `ConfigError` because the swallowed `ReferenceError` from `Deno.statSync` reports every real root
   as absent, so parity cannot treat it as deferred. Every other `Deno.*` call in that file
   (`statSync`/`realPathSync` in `defaultObserveDirectory`, `cwd`) stays untouched for the owner.
+  Hand-off requirement for `convert-core-sessions-and-workspaces-to-bun`: that change must
+  convert `Deno.statSync`/`Deno.realPathSync`/`Deno.cwd` in this file and add at least one
+  assertion that the DEFAULT observation records a real identity, because the remaining
+  `try`/`catch` still swallows a Bun `ReferenceError` and silently drops identity.
 - `tests/utils/omp-packaging.test.ts` is absent from the D1 list, but proposal "What Changes",
   design D4 and task 2.5 name its conversion, so it is converted here.
 

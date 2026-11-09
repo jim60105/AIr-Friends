@@ -3,7 +3,7 @@
  * (`verify-omp-confined-native-runtime`).
  *
  * The probe must observe the PRODUCTION FACTORY and the NATIVE START in one
- * interval. The factory runs in the Deno process (it is not a subprocess), so
+ * interval. The factory runs in the daemon process (it is not a subprocess), so
  * wrapping only the spawned command would leave factory filesystem operations unobserved.
  * This driver performs the shipped `createAgentConfig` construction AND the
  * whole real `AgentConnector` lifecycle inside one child process, which the

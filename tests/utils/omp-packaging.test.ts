@@ -186,6 +186,18 @@ async function podman(
     cwd: repoRoot,
     stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  if (childStdout === null || childStderr === null) {
+    throw new Error("podman stdio was not piped");
+  }
+  childStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+  childStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+  // Podman may exit before consuming stdin (bad args, build failure); that
+  // must surface as the captured exit code, never an unhandled EPIPE.
+  child.stdin?.on("error", () => {});
   // A kill deadline, not a duration guess: `podman build`/`run` have no
   // deterministic time control and an unresponsive container must not hang the
   // suite forever. The awaited condition is still the child's own exit.
@@ -196,13 +208,9 @@ async function podman(
       // Already exited: nothing to kill.
     }
   }, options.timeoutMs ?? 30 * 60_000);
-  const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
-  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
   try {
     if (options.stdin !== undefined) {
-      child.stdin.end(options.stdin);
+      child.stdin?.end(options.stdin);
     }
     const exited = Promise.withResolvers<number>();
     child.on("error", exited.reject);
@@ -223,8 +231,13 @@ function havePodman(): boolean {
   return probe.error === undefined && probe.status === 0;
 }
 
+/** A Node binary is available (the generated bundle's passive-loader host). */
+function nodeAvailable(): boolean {
+  return spawnSync("node", ["--version"], { stdio: "ignore" }).error === undefined;
+}
+
 // Opt-in (`OMP_PACKAGING_BUILD=1`) AND a usable podman, both required.
-const RUN_IMAGE_SCENARIO = process.env["OMP_PACKAGING_BUILD"] === "1" && await havePodman();
+const RUN_IMAGE_SCENARIO = process.env["OMP_PACKAGING_BUILD"] === "1" && havePodman();
 
 /** The JSON-RPC `initialize` result the pinned ACP server returns, if any. */
 function acpInitializeResult(stdout: string): Record<string, unknown> | null {
@@ -458,7 +471,7 @@ function buildBundle(target: string): void {
   const output = spawnSync(
     `${repoRoot}/scripts/omp/bundle-omp-extension.sh`,
     [repoRoot, target],
-    { encoding: "utf8" },
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   assertEquals(output.status, 0, output.stderr);
 }
@@ -466,7 +479,7 @@ function buildBundle(target: string): void {
 test("extension bundle - replay produces the single generated native-loadable entry", async () => {
   const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
-    await buildBundle(`${target}/extension`);
+    buildBundle(`${target}/extension`);
     const files = (await listFiles(`${target}/extension`)).map((f) =>
       f.slice(`${target}/extension/`.length)
     ).sort();
@@ -495,7 +508,7 @@ test("extension bundle - replay produces the single generated native-loadable en
 test("extension bundle - the extension closure is fully inlined (zero externals)", async () => {
   const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
-    await buildBundle(`${target}/extension`);
+    buildBundle(`${target}/extension`);
     const bundle = await fsp.readFile(`${target}/extension/index.js`, "utf8");
     // The capability-admission closure imports nothing external: no jsr:/npm:/
     // https edge, no import-map alias, no unapproved bare package, no
@@ -602,17 +615,26 @@ test("extension bundle - load parity: generated entry and dev source load identi
   // module-load bootstrap, discovery guard or host-facade edge: the dev
   // canonical source and the generated bundle evaluate to the SAME default
   // registration callback, without ever executing `omp`.
+  // The dev source is TypeScript, so this host needs Node's type stripping
+  // (>=22.7 with --experimental-strip-types, >=23.6 by default; the image pins
+  // Node 24). Without a node binary the scenario SKIP-PASSES like the
+  // standalone loader test below; leaving it unguarded would fail on
+  // environment, not on the artifact.
+  if (!nodeAvailable()) {
+    console.warn("SKIP: no node binary — load parity is user-owned");
+    return;
+  }
   const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
-    await buildBundle(`${target}/extension`);
+    buildBundle(`${target}/extension`);
     const dev = spawnSync("node", [
       "--eval",
       `const r = await import("${repoRoot}/src/acp/omp/extension/index.ts").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
-    ], { cwd: repoRoot, encoding: "utf8" });
+    ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     const bundled = spawnSync("node", [
       "--eval",
       `const r = await import("${target}/extension/index.js").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
-    ], { cwd: repoRoot, encoding: "utf8" });
+    ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     assertEquals(dev.status, 0, dev.stderr);
     assertEquals(bundled.status, 0, bundled.stderr);
     const devText = dev.stdout.trim();
@@ -634,8 +656,7 @@ test("extension bundle - loads standalone under node with NO Deno import map", a
   // without the pinned host's resolution rules. Node availability is
   // environment-dependent; the test SKIP-PASSES with a notice when no node
   // binary exists (the image build never runs the unit suite).
-  const haveNode = spawnSync("node", ["--version"], { stdio: "ignore" }).error === undefined;
-  if (!haveNode) {
+  if (!nodeAvailable()) {
     console.warn("SKIP: no node binary — native-loader smoke is user-owned");
     return;
   }
@@ -645,7 +666,7 @@ test("extension bundle - loads standalone under node with NO Deno import map", a
     // The generated bundle is COPIED into the fixture tree and loaded there:
     // no node_modules, no import map, no Deno — resolution has nowhere to go
     // but the bundle's own inlined closure.
-    await buildBundle(`${target}/extension`);
+    buildBundle(`${target}/extension`);
     await fsp.mkdir(`${fixture}/ext`, { recursive: true });
     await fsp.copyFile(`${target}/extension/index.js`, `${fixture}/ext/index.js`);
     await fsp.writeFile(

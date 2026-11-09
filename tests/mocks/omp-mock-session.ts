@@ -14,7 +14,7 @@
  *   identified as mock evidence by this builder's own shape and by the owning
  *   suites' scenario names.
  * - Nothing here demonstrates native OMP binary behavior: catalogs are
- *   synthetic shapes, subprocess spawns are `deno run` mocks only, and the
+ *   synthetic shapes, subprocess spawns are `bun run` mocks only, and the
  *   real production defaults (factory launch posture, real pool, real
  *   connector) are consumed unchanged wherever the flow touches them.
  *
