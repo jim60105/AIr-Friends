@@ -18,7 +18,7 @@
 // resolved skill root to the agent, described in its own section at the end of
 // the file.
 
-import { dirname, isAbsolute, join, resolve } from "@std/path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import {
   jsonInsertMember,
@@ -30,6 +30,8 @@ import {
   type JsonSourceObject,
   parseJsonSource,
 } from "./json-source.ts";
+import fs from "node:fs";
+import { isNotFoundError } from "./fs-compat.ts";
 
 /**
  * Reserved direct-child name of a workspace `tmp/` directory that holds the
@@ -74,7 +76,7 @@ export function opencodeToolOutputDir(xdgDataHome: string): string {
 // other consumer) is written into the deployed OpenCode global configuration:
 // the skill discovery path list, and one `external_directory` allowance under
 // that root alone. Nothing else in that document changes — every other
-// setting, including the `deno run *` / `*.ts*` routing that sends script
+// setting, including the `bun *` / `*.ts*` routing that sends script
 // executions to the ACP approval gate, keeps its bytes exactly.
 //
 // The section below is the PURE document half plus the one filesystem step.
@@ -111,7 +113,7 @@ export interface OpencodeSkillDiscoveryOptions {
 export function opencodeDaemonHome(
   options: OpencodeSkillDiscoveryOptions = {},
 ): string | undefined {
-  const env = options.env ?? ((name: string) => Deno.env.get(name));
+  const env = options.env ?? ((name: string) => process.env[name]);
   const home = options.home ?? env("HOME");
   if (home === undefined || home === "" || !isAbsolute(home)) return undefined;
   return resolve(home);
@@ -209,7 +211,7 @@ export function assertOpencodeSkillRootIsDeclarable(root: string, home?: string)
 function physicalPath(path: string | undefined): string | undefined {
   if (path === undefined) return undefined;
   try {
-    return Deno.realPathSync(path);
+    return fs.realpathSync(path);
   } catch {
     return undefined;
   }
@@ -649,7 +651,7 @@ function withExternalDirectoryAllowance(
  * Splice the declaration into an existing document: the discovery path list
  * becomes exactly the resolved root, and the allowance under that root is
  * ensured. Both steps are source-preserving text splices, so every other byte
- * of the document — the `deno run *` / `*.ts*` routing to the approval gate,
+ * of the document — the `bun *` / `*.ts*` routing to the approval gate,
  * the remaining allowances and every unrelated setting — is copied verbatim.
  */
 export function applyOpencodeSkillDiscoveryDeclaration(
@@ -693,21 +695,21 @@ export interface OpencodeSkillDiscoveryResult {
  */
 function writeOpencodeDocument(path: string, content: string): void {
   const directory = dirname(path);
-  Deno.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(directory, { recursive: true });
   let mode = 0o644;
   try {
-    const info = Deno.lstatSync(path);
-    if (info.isSymlink || !info.isFile) {
+    const info = fs.lstatSync(path);
+    if (info.isSymbolicLink() || !info.isFile()) {
       throw new Error("the existing target is a symbolic link or not a regular file");
     }
-    // A platform that reports no mode keeps the created-file default.
-    if (info.mode !== null) mode = info.mode & 0o777;
+    // Node always reports the mode, so an existing document keeps its own.
+    mode = info.mode & 0o777;
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    if (!(isNotFoundError(error))) throw error;
   }
   // `mode` applies only when the document is created (and is subject to the
   // process umask); an existing document keeps its own mode in place.
-  Deno.writeTextFileSync(path, content, { mode });
+  fs.writeFileSync(path, content, { mode });
 }
 
 /**
@@ -764,9 +766,9 @@ export function ensureOpencodeSkillDiscoveryDeclaration(
   const readFile = options.readFile ??
     ((target: string) => {
       try {
-        return Deno.readTextFileSync(target);
+        return fs.readFileSync(target, "utf8");
       } catch (error) {
-        if (error instanceof Deno.errors.NotFound) return undefined;
+        if (isNotFoundError(error)) return undefined;
         throw error;
       }
     });

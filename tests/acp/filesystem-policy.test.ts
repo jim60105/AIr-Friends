@@ -16,6 +16,7 @@ import type {
 import type { FilesystemAccessFailureReason } from "../../src/acp/filesystem-access.ts";
 import type { SessionGateContext } from "../../src/acp/client.ts";
 import type { ClientConfig } from "../../src/acp/types.ts";
+import { test } from "bun:test";
 
 const mockRoots: CanonicalSessionRoots = {
   acpSessionId: "acp-1",
@@ -66,7 +67,7 @@ function createMockTarget(
   };
 }
 
-Deno.test("Filesystem Policy: Failure mapping completeness and correctness", () => {
+test("Filesystem Policy: Failure mapping completeness and correctness", () => {
   // All RootPathFailureReason keys must map correctly
   const rootReasons: RootPathFailureReason[] = [
     "invalid_context",
@@ -142,7 +143,7 @@ Deno.test("Filesystem Policy: Failure mapping completeness and correctness", () 
   assertEquals(mapAccessFailureToDenial("parent_missing", true), "rejected_filesystem_access");
 });
 
-Deno.test("Filesystem Policy: every role combination selects one carried role without widening", () => {
+test("Filesystem Policy: every role combination selects one carried role without widening", () => {
   const roles = [
     "workspace",
     "staging",
@@ -229,7 +230,7 @@ Deno.test("Filesystem Policy: every role combination selects one carried role wi
   }
 });
 
-Deno.test("Filesystem Policy: buildSessionFilesystemContext", () => {
+test("Filesystem Policy: buildSessionFilesystemContext", () => {
   const clientConfig: ClientConfig = {
     workingDir: "/ws",
     platform: "discord",
@@ -269,7 +270,7 @@ Deno.test("Filesystem Policy: buildSessionFilesystemContext", () => {
   }
 });
 
-Deno.test("Filesystem Policy: authorizeFilesystemRead", () => {
+test("Filesystem Policy: authorizeFilesystemRead", () => {
   // 1. Trusted skills allows any extension
   const skillTarget = createMockTarget(["trusted-skills"], "/skills/send-reply/SKILL.md");
   const readSkill = authorizeFilesystemRead({ roots: mockRoots, target: skillTarget });
@@ -298,7 +299,7 @@ Deno.test("Filesystem Policy: authorizeFilesystemRead", () => {
   }
 });
 
-Deno.test("Filesystem Policy: authorizeFilesystemWrite in restricted mode", () => {
+test("Filesystem Policy: authorizeFilesystemWrite in restricted mode", () => {
   // 1. Staging write -> allowed for any extension
   const stagingTarget = createMockTarget(["staging"], "/ws/tmp/skill-1/data.bin");
   const stagingRes = authorizeFilesystemWrite({
@@ -374,7 +375,7 @@ Deno.test("Filesystem Policy: authorizeFilesystemWrite in restricted mode", () =
   }
 });
 
-Deno.test("Filesystem Policy: authorizeFilesystemWrite in YOLO mode", () => {
+test("Filesystem Policy: authorizeFilesystemWrite in YOLO mode", () => {
   // 1. Workspace write with any extension -> allowed
   const wsTarget = createMockTarget(["workspace"], "/ws/script.py");
   const wsRes = authorizeFilesystemWrite({

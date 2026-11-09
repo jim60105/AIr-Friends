@@ -1,7 +1,7 @@
 // tests/platforms/email/attachment-preparation.test.ts
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import { EmailMessageStore } from "../../../src/platforms/email/message-store.ts";
 import {
   createEmailAttachmentPreparation,
@@ -15,6 +15,10 @@ import type {
   PlatformMessage,
 } from "../../../src/types/events.ts";
 import type { WorkspaceInfo } from "../../../src/types/workspace.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const OWNER_1 = "e_" + "1".repeat(64);
 const OWNER_2 = "e_" + "2".repeat(64);
@@ -27,10 +31,10 @@ interface Fixture {
 }
 
 async function withFixture(fn: (fixture: Fixture) => Promise<void> | void): Promise<void> {
-  const root = await Deno.makeTempDir({ prefix: "attachment-preparation-" });
+  const root = await makeTempDir({ prefix: "attachment-preparation-" });
   const workspacesRoot = resolve(root, "workspaces");
   const workspacePath = resolve(workspacesRoot, "email", OWNER_1);
-  await Deno.mkdir(workspacePath, { recursive: true });
+  await fsp.mkdir(workspacePath, { recursive: true });
   const store = new EmailMessageStore({ workspacesRoot });
   const workspace: WorkspaceInfo = {
     key: `email/${OWNER_1}`,
@@ -39,7 +43,7 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void> | void): Prom
     tmpPath: resolve(workspacePath, "tmp"),
     isDm: true,
   };
-  await Deno.mkdir(workspace.tmpPath, { recursive: true });
+  await fsp.mkdir(workspace.tmpPath, { recursive: true });
   try {
     await fn({
       store,
@@ -49,7 +53,7 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void> | void): Prom
     });
   } finally {
     store.close();
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 }
 
@@ -87,7 +91,7 @@ function localAttachment(message: PlatformMessage): LocalEmailAttachment {
   return attachment as LocalEmailAttachment;
 }
 
-Deno.test("attachment preparation - stages message bytes into the calling session without mutating input", async () => {
+test("attachment preparation - stages message bytes into the calling session without mutating input", async () => {
   await withFixture(async ({ store, workspace, stagingDir }) => {
     const bytes = new TextEncoder().encode("private attachment bytes");
     const message = await archivedMessage(store, OWNER_1, {
@@ -111,13 +115,13 @@ Deno.test("attachment preparation - stages message bytes into the calling sessio
 
     assert(preparedAttachment.sessionPath !== undefined);
     assert(preparedAttachment.sessionPath!.startsWith(`${stagingDir}/attachments/`));
-    assertEquals(await Deno.readFile(preparedAttachment.sessionPath!), bytes);
+    assertEquals(new Uint8Array(await fsp.readFile(preparedAttachment.sessionPath!)), bytes);
     assertEquals(originalAttachment.sessionPath, undefined);
     assertEquals(message.attachments![0], originalAttachment);
   });
 });
 
-Deno.test("attachment preparation - two sessions get independent copies of the same source", async () => {
+test("attachment preparation - two sessions get independent copies of the same source", async () => {
   await withFixture(async ({ store, workspace }) => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const message = await archivedMessage(store, OWNER_1, {
@@ -128,8 +132,8 @@ Deno.test("attachment preparation - two sessions get independent copies of the s
     const preparation = createEmailAttachmentPreparation(store);
     const sessionA = resolve(workspace.tmpPath, "session-a");
     const sessionB = resolve(workspace.tmpPath, "session-b");
-    await Deno.mkdir(sessionA, { recursive: true });
-    await Deno.mkdir(sessionB, { recursive: true });
+    await fsp.mkdir(sessionA, { recursive: true });
+    await fsp.mkdir(sessionB, { recursive: true });
 
     const [preparedA] = await preparation.prepareMessages(
       { sessionOwner: OWNER_1, trustedRoot: workspace.path, stagingDir: sessionA },
@@ -145,12 +149,12 @@ Deno.test("attachment preparation - two sessions get independent copies of the s
     assert(pathA.startsWith(`${sessionA}/`));
     assert(pathB.startsWith(`${sessionB}/`));
     assertEquals(pathA === pathB, false);
-    assertEquals(await Deno.readFile(pathA), bytes);
-    assertEquals(await Deno.readFile(pathB), bytes);
+    assertEquals(new Uint8Array(await fsp.readFile(pathA)), bytes);
+    assertEquals(new Uint8Array(await fsp.readFile(pathB)), bytes);
   });
 });
 
-Deno.test("attachment preparation - a stale incoming sessionPath is ignored and left untouched", async () => {
+test("attachment preparation - a stale incoming sessionPath is ignored and left untouched", async () => {
   await withFixture(async ({ store, workspace, stagingDir }) => {
     const message = await archivedMessage(store, OWNER_1, {
       filename: "notes.txt",
@@ -181,7 +185,7 @@ Deno.test("attachment preparation - a stale incoming sessionPath is ignored and 
   });
 });
 
-Deno.test("attachment preparation - duplicate references in one batch are staged once", async () => {
+test("attachment preparation - duplicate references in one batch are staged once", async () => {
   await withFixture(async ({ store, workspace, stagingDir }) => {
     const message = await archivedMessage(store, OWNER_1, {
       filename: "dedup.bin",
@@ -210,7 +214,7 @@ Deno.test("attachment preparation - duplicate references in one batch are staged
   });
 });
 
-Deno.test("attachment preparation - another owner's reference fails explicitly", async () => {
+test("attachment preparation - another owner's reference fails explicitly", async () => {
   await withFixture(async ({ store, workspace, stagingDir }) => {
     const message = await archivedMessage(store, OWNER_1, {
       filename: "foreign.pdf",
@@ -230,7 +234,7 @@ Deno.test("attachment preparation - another owner's reference fails explicitly",
   });
 });
 
-Deno.test("attachment preparation - a missing archived attachment fails explicitly", async () => {
+test("attachment preparation - a missing archived attachment fails explicitly", async () => {
   await withFixture(async ({ store, workspace, stagingDir }) => {
     const message = await archivedMessage(store, OWNER_1, {
       filename: "present.txt",
@@ -257,7 +261,7 @@ Deno.test("attachment preparation - a missing archived attachment fails explicit
   });
 });
 
-Deno.test("attachment preparation - scope uses the canonical session dir and the Skill-API-disabled fallback", async () => {
+test("attachment preparation - scope uses the canonical session dir and the Skill-API-disabled fallback", async () => {
   await withFixture(({ workspace }) => {
     const enabled = emailAttachmentScope({
       workspace,
@@ -277,7 +281,7 @@ Deno.test("attachment preparation - scope uses the canonical session dir and the
   });
 });
 
-Deno.test("attachment preparation - a workspace owned by another user is refused", () => {
+test("attachment preparation - a workspace owned by another user is refused", () => {
   const workspace: WorkspaceInfo = {
     key: `email/${OWNER_1}`,
     components: { platform: "email", userId: OWNER_1 },
@@ -298,7 +302,7 @@ Deno.test("attachment preparation - a workspace owned by another user is refused
   }
 });
 
-Deno.test("attachment preparation - cleanup removes only session copies and preserves archive bytes", async () => {
+test("attachment preparation - cleanup removes only session copies and preserves archive bytes", async () => {
   await withFixture(async ({ store, workspace, stagingDir }) => {
     const bytes = new TextEncoder().encode("durable archive bytes");
     const message = await archivedMessage(store, OWNER_1, {
@@ -314,9 +318,10 @@ Deno.test("attachment preparation - cleanup removes only session copies and pres
     );
     const stagedPath = (prepared.attachments![0] as LocalEmailAttachment).sessionPath!;
 
-    await Deno.remove(stagingDir, { recursive: true });
+    await fsp.rm(stagingDir, { recursive: true });
 
-    await assertRejects(() => Deno.stat(stagedPath), Deno.errors.NotFound);
+    const removedStagedPath = await assertRejects(() => fsp.stat(stagedPath));
+    assertEquals(isNotFoundError(removedStagedPath), true);
     const archived = await store.attachment(
       OWNER_1,
       source.recordId,
@@ -332,7 +337,7 @@ Deno.test("attachment preparation - cleanup removes only session copies and pres
   });
 });
 
-Deno.test("attachment preparation - concurrent owner scopes cannot read each other's archive", async () => {
+test("attachment preparation - concurrent owner scopes cannot read each other's archive", async () => {
   await withFixture(async ({ store, workspace }) => {
     const bytes = new TextEncoder().encode("owner one only");
     const message = await archivedMessage(store, OWNER_1, {
@@ -349,7 +354,7 @@ Deno.test("attachment preparation - concurrent owner scopes cannot read each oth
       tmpPath: resolve(workspace.path, "..", OWNER_2, "tmp"),
       isDm: true,
     };
-    await Deno.mkdir(ownerTwoWorkspace.tmpPath, { recursive: true });
+    await fsp.mkdir(ownerTwoWorkspace.tmpPath, { recursive: true });
 
     const ownerOneScope = emailAttachmentScope({
       workspace,
@@ -361,8 +366,8 @@ Deno.test("attachment preparation - concurrent owner scopes cannot read each oth
       sessionOwner: OWNER_2,
       skillSessionId: "session-owner-two",
     });
-    await Deno.mkdir(ownerOneScope.stagingDir, { recursive: true });
-    await Deno.mkdir(ownerTwoScope.stagingDir, { recursive: true });
+    await fsp.mkdir(ownerOneScope.stagingDir, { recursive: true });
+    await fsp.mkdir(ownerTwoScope.stagingDir, { recursive: true });
 
     // The two preparations genuinely overlap; owner two's scope sees a
     // reference owned by owner one and must fail instead of reading it.
@@ -379,9 +384,9 @@ Deno.test("attachment preparation - concurrent owner scopes cannot read each oth
     if (allowed.status !== "fulfilled") throw new Error("unreachable");
     const preparedPath = (allowed.value[0].attachments![0] as LocalEmailAttachment).sessionPath!;
     assert(preparedPath.startsWith(`${ownerOneScope.stagingDir}/attachments/`));
-    assertEquals(await Deno.readFile(preparedPath), bytes);
+    assertEquals(new Uint8Array(await fsp.readFile(preparedPath)), bytes);
     // Owner two's boundary gained no copy of owner one's bytes.
-    assertEquals([...Deno.readDirSync(ownerTwoScope.stagingDir)], []);
+    assertEquals([...fs.readdirSync(ownerTwoScope.stagingDir, { withFileTypes: true })], []);
 
     // The scope helper itself refuses a workspace owned by the other user.
     await assertRejects(() =>

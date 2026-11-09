@@ -1,6 +1,37 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { GitBackupService } from "@core/git-backup-service.ts";
 import type { GitBackupConfig } from "../../src/types/config.ts";
+import { spawnSync } from "node:child_process";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+
+interface CommandResult {
+  code: number;
+  success: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run one command synchronously, keeping `Deno.Command.output()`'s result shape. */
+function runCommand(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env?: Record<string, string> } = {},
+): CommandResult {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env ? { ...process.env, ...options.env } : process.env,
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  return {
+    code: result.status ?? -1,
+    success: result.status === 0,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
 
 function createConfig(overrides?: Partial<GitBackupConfig>): GitBackupConfig {
   return {
@@ -24,33 +55,23 @@ async function withTempGitEnv(
   fn: (dataDir: string, bareDir: string) => Promise<void>,
   options?: TempGitEnvOptions,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   const dataDir = `${tempDir}/data`;
   const bareDir = `${tempDir}/bare.git`;
 
-  await Deno.mkdir(dataDir, { recursive: true });
+  await fsp.mkdir(dataDir, { recursive: true });
 
   // Create a bare repo to act as remote
-  const initBare = new Deno.Command("git", {
-    args: ["init", "--bare", bareDir],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  await initBare.output();
+  runCommand("git", ["init", "--bare", bareDir]);
 
   if (options?.createInitialCommit !== false) {
     // Create initial commit in bare repo via a temp clone
     const cloneDir = `${tempDir}/clone-init`;
-    await Deno.mkdir(cloneDir, { recursive: true });
-    const clone = new Deno.Command("git", {
-      args: ["clone", bareDir, cloneDir],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    await clone.output();
+    await fsp.mkdir(cloneDir, { recursive: true });
+    runCommand("git", ["clone", bareDir, cloneDir]);
 
     // Create initial commit so master branch exists
-    await Deno.writeTextFile(`${cloneDir}/.gitkeep`, "");
+    await fsp.writeFile(`${cloneDir}/.gitkeep`, "");
     for (
       const cmd of [
         ["git", "-C", cloneDir, "config", "user.name", "Init"],
@@ -61,29 +82,24 @@ async function withTempGitEnv(
         ["git", "-C", cloneDir, "push", "-u", "origin", "master"],
       ]
     ) {
-      const proc = new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      });
-      await proc.output();
+      runCommand(cmd[0], cmd.slice(1));
     }
   }
 
   if (options?.preCreateFiles) {
     for (const [name, content] of Object.entries(options.preCreateFiles)) {
-      await Deno.writeTextFile(`${dataDir}/${name}`, content);
+      await fsp.writeFile(`${dataDir}/${name}`, content);
     }
   }
 
   try {
     await fn(dataDir, bareDir);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("GitBackupService - initialize creates .git and no .gitignore", async () => {
+test("GitBackupService - initialize creates .git and no .gitignore", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -91,12 +107,12 @@ Deno.test("GitBackupService - initialize creates .git and no .gitignore", async 
     );
     await service.initialize();
 
-    const gitStat = await Deno.stat(`${dataDir}/.git`);
-    assertEquals(gitStat.isDirectory, true);
+    const gitStat = await fsp.stat(`${dataDir}/.git`);
+    assertEquals(gitStat.isDirectory(), true);
 
     let gitignoreExists = false;
     try {
-      await Deno.stat(`${dataDir}/.gitignore`);
+      await fsp.stat(`${dataDir}/.gitignore`);
       gitignoreExists = true;
     } catch {
       gitignoreExists = false;
@@ -105,7 +121,7 @@ Deno.test("GitBackupService - initialize creates .git and no .gitignore", async 
   });
 });
 
-Deno.test("GitBackupService - initialize sets remote origin", async () => {
+test("GitBackupService - initialize sets remote origin", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -113,19 +129,13 @@ Deno.test("GitBackupService - initialize sets remote origin", async () => {
     );
     await service.initialize();
 
-    const proc = new Deno.Command("git", {
-      args: ["remote", "get-url", "origin"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await proc.output();
-    const url = new TextDecoder().decode(stdout).trim();
+    const { stdout } = runCommand("git", ["remote", "get-url", "origin"], { cwd: dataDir });
+    const url = stdout.trim();
     assertEquals(url, bareDir);
   });
 });
 
-Deno.test("GitBackupService - initialize skips if already initialized", async () => {
+test("GitBackupService - initialize skips if already initialized", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -135,12 +145,12 @@ Deno.test("GitBackupService - initialize skips if already initialized", async ()
     // Second call should not throw
     await service.initialize();
 
-    const gitStat = await Deno.stat(`${dataDir}/.git`);
-    assertEquals(gitStat.isDirectory, true);
+    const gitStat = await fsp.stat(`${dataDir}/.git`);
+    assertEquals(gitStat.isDirectory(), true);
   });
 });
 
-Deno.test("GitBackupService - performBackup commits and pushes when changes exist", async () => {
+test("GitBackupService - performBackup commits and pushes when changes exist", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -149,25 +159,19 @@ Deno.test("GitBackupService - performBackup commits and pushes when changes exis
     await service.initialize();
 
     // Create a file to trigger a change
-    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+    await fsp.writeFile(`${dataDir}/test.txt`, "hello");
 
     const result = await service.performBackup();
     assertEquals(result, true);
 
     // Verify the commit exists in the bare repo
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline", "master"],
-      cwd: bareDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await logProc.output();
-    const log = new TextDecoder().decode(stdout);
+    const { stdout } = runCommand("git", ["log", "--oneline", "master"], { cwd: bareDir });
+    const log = stdout;
     assertEquals(log.includes("backup:"), true);
   });
 });
 
-Deno.test("GitBackupService - performBackup skips when no changes", async () => {
+test("GitBackupService - performBackup skips when no changes", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -176,7 +180,7 @@ Deno.test("GitBackupService - performBackup skips when no changes", async () => 
     await service.initialize();
 
     // First backup with a change
-    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+    await fsp.writeFile(`${dataDir}/test.txt`, "hello");
     await service.performBackup();
 
     // Second backup with no changes
@@ -185,7 +189,7 @@ Deno.test("GitBackupService - performBackup skips when no changes", async () => 
   });
 });
 
-Deno.test("GitBackupService - performBackup returns false on push failure", async () => {
+test("GitBackupService - performBackup returns false on push failure", async () => {
   await withTempGitEnv(async (dataDir, _bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: "/nonexistent/repo.git" }),
@@ -194,13 +198,13 @@ Deno.test("GitBackupService - performBackup returns false on push failure", asyn
     // Initialize with the non-existent remote (will fail fetch but still init)
     await service.initialize();
 
-    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+    await fsp.writeFile(`${dataDir}/test.txt`, "hello");
     const result = await service.performBackup();
     assertEquals(result, false);
   });
 });
 
-Deno.test("GitBackupService - initialize updates remote URL if changed", async () => {
+test("GitBackupService - initialize updates remote URL if changed", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     // First init with original URL
     const service1 = new GitBackupService(
@@ -211,12 +215,7 @@ Deno.test("GitBackupService - initialize updates remote URL if changed", async (
 
     // Create a new service with different URL (simulate config change)
     const newBareDir = `${dataDir}/../new-bare.git`;
-    const initBare = new Deno.Command("git", {
-      args: ["init", "--bare", newBareDir],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    await initBare.output();
+    runCommand("git", ["init", "--bare", newBareDir]);
 
     // Need a fresh service instance (initialized = false)
     const service2 = new GitBackupService(
@@ -225,19 +224,13 @@ Deno.test("GitBackupService - initialize updates remote URL if changed", async (
     );
     await service2.initialize();
 
-    const proc = new Deno.Command("git", {
-      args: ["remote", "get-url", "origin"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await proc.output();
-    const url = new TextDecoder().decode(stdout).trim();
+    const { stdout } = runCommand("git", ["remote", "get-url", "origin"], { cwd: dataDir });
+    const url = stdout.trim();
     assertEquals(url, newBareDir);
   });
 });
 
-Deno.test("GitBackupService - cleans stale lock files on initialize", async () => {
+test("GitBackupService - cleans stale lock files on initialize", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     // First, initialize normally to create .git directory
     const service1 = new GitBackupService(
@@ -247,7 +240,7 @@ Deno.test("GitBackupService - cleans stale lock files on initialize", async () =
     await service1.initialize();
 
     // Create a stale lock file
-    await Deno.writeTextFile(`${dataDir}/.git/index.lock`, "stale");
+    await fsp.writeFile(`${dataDir}/.git/index.lock`, "stale");
 
     // Re-initialize (fresh instance)
     const service2 = new GitBackupService(
@@ -259,7 +252,7 @@ Deno.test("GitBackupService - cleans stale lock files on initialize", async () =
     // Lock file should be removed
     let lockExists = false;
     try {
-      await Deno.stat(`${dataDir}/.git/index.lock`);
+      await fsp.stat(`${dataDir}/.git/index.lock`);
       lockExists = true;
     } catch {
       lockExists = false;
@@ -268,7 +261,7 @@ Deno.test("GitBackupService - cleans stale lock files on initialize", async () =
   });
 });
 
-Deno.test("GitBackupService - initialize sets safe.directory config", async () => {
+test("GitBackupService - initialize sets safe.directory config", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -277,13 +270,13 @@ Deno.test("GitBackupService - initialize sets safe.directory config", async () =
     await service.initialize();
 
     // Check if safe.directory is set globally
-    const proc = new Deno.Command("git", {
-      args: ["config", "--global", "--get-all", "safe.directory"],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout, success } = await proc.output();
-    const safeDirs = new TextDecoder().decode(stdout).trim().split("\n");
+    const { stdout, success } = runCommand("git", [
+      "config",
+      "--global",
+      "--get-all",
+      "safe.directory",
+    ]);
+    const safeDirs = stdout.trim().split("\n");
 
     // Verify that our dataDir is in the safe.directory list
     assertEquals(success, true);
@@ -291,58 +284,43 @@ Deno.test("GitBackupService - initialize sets safe.directory config", async () =
   });
 });
 
-Deno.test("GitBackupService - converts relative path to absolute for safe.directory", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("GitBackupService - converts relative path to absolute for safe.directory", async () => {
+  const tempDir = await makeTempDir();
   const actualDataDir = `${tempDir}/data`;
   const gitConfigPath = `${tempDir}/gitconfig`;
 
   try {
     // Create bare repo
     const bareDir = `${tempDir}/bare.git`;
-    await new Deno.Command("git", {
-      args: ["init", "--bare", bareDir],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
+    runCommand("git", ["init", "--bare", bareDir]);
 
     // The contract needs "./data" resolved against a foreign cwd. Do it in a
-    // CHILD process: Deno.chdir() here would mutate the cwd of the whole
+    // CHILD process: changing the cwd here would mutate the cwd of the whole
     // (single-process, --parallel) test run and race other files' relative
     // path resolution (CI run 35964700812: 13 ENOENT prompt-render failures).
     // GIT_CONFIG_GLOBAL keeps the safe.directory write/read hermetic.
     const helperPath = new URL("git-backup-relative-cwd.ts", import.meta.url).pathname;
-    const child = new Deno.Command(Deno.execPath(), {
-      args: [
-        "run",
-        "--allow-run",
-        "--allow-read",
-        "--allow-write",
-        "--allow-env",
-        "--no-lock",
-        helperPath,
-        bareDir,
-      ],
+    const childResult = runCommand(process.execPath, [
+      "run",
+      "--no-env-file",
+      helperPath,
+      bareDir,
+    ], {
       cwd: tempDir,
       env: { GIT_CONFIG_GLOBAL: gitConfigPath },
-      stdout: "piped",
-      stderr: "piped",
     });
-    const childResult = await child.output();
-    assertEquals(
-      childResult.success,
-      true,
-      `helper failed: ${new TextDecoder().decode(childResult.stderr)}`,
-    );
+    if (childResult.code !== 0) {
+      assertEquals(childResult.code, 0, `helper failed: ${childResult.stderr}`);
+    }
 
     // Check if safe.directory is set with absolute path
-    const proc = new Deno.Command("git", {
-      args: ["config", "--global", "--get-all", "safe.directory"],
-      stdout: "piped",
-      stderr: "piped",
-      env: { GIT_CONFIG_GLOBAL: gitConfigPath },
-    });
-    const { stdout, success } = await proc.output();
-    const safeDirs = new TextDecoder().decode(stdout).trim().split("\n");
+    const { stdout, success } = runCommand("git", [
+      "config",
+      "--global",
+      "--get-all",
+      "safe.directory",
+    ], { env: { GIT_CONFIG_GLOBAL: gitConfigPath } });
+    const safeDirs = stdout.trim().split("\n");
 
     // Verify that the absolute path (not relative) is in the safe.directory list
     assertEquals(success, true);
@@ -357,11 +335,11 @@ Deno.test("GitBackupService - converts relative path to absolute for safe.direct
       "Relative path should not be in safe.directory list",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("GitBackupService - runGit returns errorOutput on failure", async () => {
+test("GitBackupService - runGit returns errorOutput on failure", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -378,18 +356,18 @@ Deno.test("GitBackupService - runGit returns errorOutput on failure", async () =
       dataDir,
     );
     // Re-init with bad remote
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     (service2 as any).initialized = true;
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     (service2 as any).dataDir = dataDir;
 
-    await Deno.writeTextFile(`${dataDir}/errortest.txt`, "trigger change");
+    await fsp.writeFile(`${dataDir}/errortest.txt`, "trigger change");
     const result = await service2.performBackup();
     assertEquals(result, false);
   });
 });
 
-Deno.test("GitBackupService - initialize clones from remote when data dir is empty", async () => {
+test("GitBackupService - initialize clones from remote when data dir is empty", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -398,23 +376,17 @@ Deno.test("GitBackupService - initialize clones from remote when data dir is emp
     await service.initialize();
 
     // Verify .git exists (from clone)
-    const gitStat = await Deno.stat(`${dataDir}/.git`);
-    assertEquals(gitStat.isDirectory, true);
+    const gitStat = await fsp.stat(`${dataDir}/.git`);
+    assertEquals(gitStat.isDirectory(), true);
 
     // Verify we have the remote commit history (the "init" commit from bare repo)
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await logProc.output();
-    const log = new TextDecoder().decode(stdout);
+    const { stdout } = runCommand("git", ["log", "--oneline"], { cwd: dataDir });
+    const log = stdout;
     assertEquals(log.includes("init"), true);
   });
 });
 
-Deno.test("GitBackupService - initialize falls back to init when clone fails", async () => {
+test("GitBackupService - initialize falls back to init when clone fails", async () => {
   await withTempGitEnv(async (dataDir, _bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: "/nonexistent/invalid/repo.git" }),
@@ -423,22 +395,16 @@ Deno.test("GitBackupService - initialize falls back to init when clone fails", a
     await service.initialize();
 
     // .git should still exist (created via initFromExisting fallback)
-    const gitStat = await Deno.stat(`${dataDir}/.git`);
-    assertEquals(gitStat.isDirectory, true);
+    const gitStat = await fsp.stat(`${dataDir}/.git`);
+    assertEquals(gitStat.isDirectory(), true);
 
     // Fallback initialized an empty repo — no files to commit, so no initial commit
-    const revProc = new Deno.Command("git", {
-      args: ["rev-parse", "--verify", "HEAD"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code } = await revProc.output();
+    const { code } = runCommand("git", ["rev-parse", "--verify", "HEAD"], { cwd: dataDir });
     assertEquals(code, 128);
   });
 });
 
-Deno.test("GitBackupService - initialize clones empty remote with nothing to commit", async () => {
+test("GitBackupService - initialize clones empty remote with nothing to commit", async () => {
   // Use createInitialCommit: false to simulate an empty remote repo
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
@@ -448,22 +414,16 @@ Deno.test("GitBackupService - initialize clones empty remote with nothing to com
     await service.initialize();
 
     // Verify .git exists
-    const gitStat = await Deno.stat(`${dataDir}/.git`);
-    assertEquals(gitStat.isDirectory, true);
+    const gitStat = await fsp.stat(`${dataDir}/.git`);
+    assertEquals(gitStat.isDirectory(), true);
 
     // Empty remote and empty data dir — no commit created
-    const revProc = new Deno.Command("git", {
-      args: ["rev-parse", "--verify", "HEAD"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code } = await revProc.output();
+    const { code } = runCommand("git", ["rev-parse", "--verify", "HEAD"], { cwd: dataDir });
     assertEquals(code, 128);
   }, { createInitialCommit: false });
 });
 
-Deno.test("GitBackupService - initialize inits and commits existing files when not a git repo", async () => {
+test("GitBackupService - initialize inits and commits existing files when not a git repo", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -472,33 +432,21 @@ Deno.test("GitBackupService - initialize inits and commits existing files when n
     await service.initialize();
 
     // Should have .git
-    const gitStat = await Deno.stat(`${dataDir}/.git`);
-    assertEquals(gitStat.isDirectory, true);
+    const gitStat = await fsp.stat(`${dataDir}/.git`);
+    assertEquals(gitStat.isDirectory(), true);
 
     // Should have an initial commit containing the pre-created file
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await logProc.output();
-    const log = new TextDecoder().decode(stdout);
+    const { stdout } = runCommand("git", ["log", "--oneline"], { cwd: dataDir });
+    const log = stdout;
     assertEquals(log.includes("initial:"), true);
 
     // Verify the file is tracked
-    const showProc = new Deno.Command("git", {
-      args: ["show", "HEAD:existing.txt"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout: showOut } = await showProc.output();
-    assertEquals(new TextDecoder().decode(showOut), "existing content");
+    const { stdout: showOut } = runCommand("git", ["show", "HEAD:existing.txt"], { cwd: dataDir });
+    assertEquals(showOut, "existing content");
   }, { preCreateFiles: { "existing.txt": "existing content" } });
 });
 
-Deno.test("GitBackupService - initialize commits uncommitted changes in existing git repo", async () => {
+test("GitBackupService - initialize commits uncommitted changes in existing git repo", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     // First, initialize normally
     const service1 = new GitBackupService(
@@ -508,7 +456,7 @@ Deno.test("GitBackupService - initialize commits uncommitted changes in existing
     await service1.initialize();
 
     // Create a new file (uncommitted change)
-    await Deno.writeTextFile(`${dataDir}/new-file.txt`, "new content");
+    await fsp.writeFile(`${dataDir}/new-file.txt`, "new content");
 
     // Re-initialize with a fresh instance (Case C)
     const service2 = new GitBackupService(
@@ -518,30 +466,20 @@ Deno.test("GitBackupService - initialize commits uncommitted changes in existing
     await service2.initialize();
 
     // Should have a backup commit for the uncommitted changes
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await logProc.output();
-    const log = new TextDecoder().decode(stdout);
+    const { stdout } = runCommand("git", ["log", "--oneline"], { cwd: dataDir });
+    const log = stdout;
     assertEquals(log.includes("backup:"), true);
 
     // Verify the new file is in the backup commit
-    const showProc = new Deno.Command("git", {
-      args: ["show", "HEAD:new-file.txt"],
+    const { stdout: showOut, code } = runCommand("git", ["show", "HEAD:new-file.txt"], {
       cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
     });
-    const { stdout: showOut, code } = await showProc.output();
     assertEquals(code, 0);
-    assertEquals(new TextDecoder().decode(showOut), "new content");
+    assertEquals(showOut, "new content");
   });
 });
 
-Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-forward", async () => {
+test("GitBackupService - initialize pushes to fallback branch on non-fast-forward", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     // First, initialize and create a commit
     const service1 = new GitBackupService(
@@ -550,13 +488,13 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
     );
     await service1.initialize();
 
-    await Deno.writeTextFile(`${dataDir}/file1.txt`, "local content");
+    await fsp.writeFile(`${dataDir}/file1.txt`, "local content");
     await service1.performBackup();
 
     // Create a divergent commit in the bare repo via a separate clone
-    const tempDir = await Deno.makeTempDir();
+    const tempDir = await makeTempDir();
     const conflictCloneDir = `${tempDir}/conflict-clone`;
-    await Deno.mkdir(conflictCloneDir, { recursive: true });
+    await fsp.mkdir(conflictCloneDir, { recursive: true });
 
     for (
       const cmd of [
@@ -565,13 +503,9 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
         ["git", "-C", conflictCloneDir, "config", "user.email", "conflict@test.com"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+      runCommand(cmd[0], cmd.slice(1));
     }
-    await Deno.writeTextFile(`${conflictCloneDir}/file1.txt`, "remote conflict content");
+    await fsp.writeFile(`${conflictCloneDir}/file1.txt`, "remote conflict content");
     for (
       const cmd of [
         ["git", "-C", conflictCloneDir, "add", "-A"],
@@ -579,32 +513,25 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
         ["git", "-C", conflictCloneDir, "push", "origin", "master"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+      runCommand(cmd[0], cmd.slice(1));
     }
 
     // Now amend the local commit to create a true divergence
-    await Deno.writeTextFile(`${dataDir}/file1.txt`, "amended local content");
+    await fsp.writeFile(`${dataDir}/file1.txt`, "amended local content");
     for (
       const cmd of [
         ["git", "-C", dataDir, "add", "-A"],
         ["git", "-C", dataDir, "commit", "--amend", "--no-edit"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
+      runCommand(cmd[0], cmd.slice(1), {
         env: {
           GIT_AUTHOR_NAME: "Test",
           GIT_AUTHOR_EMAIL: "test@test.com",
           GIT_COMMITTER_NAME: "Test",
           GIT_COMMITTER_EMAIL: "test@test.com",
         },
-      }).output();
+      });
     }
 
     // Re-initialize with a fresh instance — push should fail, rebase should conflict, fallback branch created
@@ -615,31 +542,21 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
     await service2.initialize();
 
     // Check that a backup-* branch exists in the bare repo
-    const branchProc = new Deno.Command("git", {
-      args: ["branch"],
-      cwd: bareDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout } = await branchProc.output();
-    const branches = new TextDecoder().decode(stdout);
+    const { stdout } = runCommand("git", ["branch"], { cwd: bareDir });
+    const branches = stdout;
     assertEquals(branches.includes("backup-"), true);
 
     // Verify we are back on main locally
-    const currentBranch = new Deno.Command("git", {
-      args: ["branch", "--show-current"],
+    const { stdout: branchOut } = runCommand("git", ["branch", "--show-current"], {
       cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
     });
-    const { stdout: branchOut } = await currentBranch.output();
-    assertEquals(new TextDecoder().decode(branchOut).trim(), "master");
+    assertEquals(branchOut.trim(), "master");
 
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   });
 });
 
-Deno.test("GitBackupService - performBackup handles submodule modified content correctly", async () => {
+test("GitBackupService - performBackup handles submodule modified content correctly", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -649,40 +566,28 @@ Deno.test("GitBackupService - performBackup handles submodule modified content c
 
     // Create a nested git repo (simulating agent-created repo in workspace)
     const nestedDir = `${dataDir}/workspaces/user1/cloned-repo`;
-    await Deno.mkdir(nestedDir, { recursive: true });
-    await new Deno.Command("git", {
-      args: ["init", nestedDir],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
+    await fsp.mkdir(nestedDir, { recursive: true });
+    runCommand("git", ["init", nestedDir]);
     for (
       const cmd of [
         ["git", "-C", nestedDir, "config", "user.name", "Nested"],
         ["git", "-C", nestedDir, "config", "user.email", "nested@test.com"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+      runCommand(cmd[0], cmd.slice(1));
     }
-    await Deno.writeTextFile(`${nestedDir}/file.txt`, "nested content");
+    await fsp.writeFile(`${nestedDir}/file.txt`, "nested content");
     for (
       const cmd of [
         ["git", "-C", nestedDir, "add", "-A"],
         ["git", "-C", nestedDir, "commit", "-m", "nested init"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+      runCommand(cmd[0], cmd.slice(1));
     }
 
     // Modify a file in the nested repo (creating "modified content" state)
-    await Deno.writeTextFile(`${nestedDir}/file.txt`, "modified nested content");
+    await fsp.writeFile(`${nestedDir}/file.txt`, "modified nested content");
 
     // performBackup should succeed (not fail with "no changes added to commit")
     const result = await service.performBackup();
@@ -690,7 +595,7 @@ Deno.test("GitBackupService - performBackup handles submodule modified content c
   });
 });
 
-Deno.test("GitBackupService - performBackup skips commit when only submodule changes exist", async () => {
+test("GitBackupService - performBackup skips commit when only submodule changes exist", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -700,43 +605,31 @@ Deno.test("GitBackupService - performBackup skips commit when only submodule cha
 
     // Create a nested git repo
     const nestedDir = `${dataDir}/workspaces/user1/nested-repo`;
-    await Deno.mkdir(nestedDir, { recursive: true });
-    await new Deno.Command("git", {
-      args: ["init", nestedDir],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
+    await fsp.mkdir(nestedDir, { recursive: true });
+    runCommand("git", ["init", nestedDir]);
     for (
       const cmd of [
         ["git", "-C", nestedDir, "config", "user.name", "Nested"],
         ["git", "-C", nestedDir, "config", "user.email", "nested@test.com"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+      runCommand(cmd[0], cmd.slice(1));
     }
-    await Deno.writeTextFile(`${nestedDir}/file.txt`, "content");
+    await fsp.writeFile(`${nestedDir}/file.txt`, "content");
     for (
       const cmd of [
         ["git", "-C", nestedDir, "add", "-A"],
         ["git", "-C", nestedDir, "commit", "-m", "init"],
       ]
     ) {
-      await new Deno.Command(cmd[0], {
-        args: cmd.slice(1),
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+      runCommand(cmd[0], cmd.slice(1));
     }
 
     // First backup to commit the nested repo directory structure
     await service.performBackup();
 
     // Modify a file inside the nested repo only
-    await Deno.writeTextFile(`${nestedDir}/file.txt`, "modified");
+    await fsp.writeFile(`${nestedDir}/file.txt`, "modified");
 
     // Second backup — only submodule has "modified content", no real staged changes
     const result = await service.performBackup();
@@ -746,7 +639,7 @@ Deno.test("GitBackupService - performBackup skips commit when only submodule cha
 
 // ============ Configurable Auth Tests (Issue #248) ============
 
-Deno.test("getAuthenticatedUrl - uses authUser and authPassword from config", () => {
+test("getAuthenticatedUrl - uses authUser and authPassword from config", () => {
   const config = createConfig({
     remoteUrl: "https://github.com/user/repo.git",
     authUser: "custom-user",
@@ -757,7 +650,7 @@ Deno.test("getAuthenticatedUrl - uses authUser and authPassword from config", ()
   assertEquals(url, "https://custom-user:custom-password@github.com/user/repo.git");
 });
 
-Deno.test("getAuthenticatedUrl - authUser falls back to authorEmail", () => {
+test("getAuthenticatedUrl - authUser falls back to authorEmail", () => {
   const config = createConfig({
     remoteUrl: "https://github.com/user/repo.git",
     authPassword: "my-token",
@@ -768,22 +661,22 @@ Deno.test("getAuthenticatedUrl - authUser falls back to authorEmail", () => {
   assertStringIncludes(url, "bot%40example.com:my-token@");
 });
 
-Deno.test("getAuthenticatedUrl - authUser falls back to x-access-token when no authorEmail", () => {
+test("getAuthenticatedUrl - authUser falls back to x-access-token when no authorEmail", () => {
   const config = createConfig({
     remoteUrl: "https://github.com/user/repo.git",
     authPassword: "my-token",
   });
   // Set authorEmail to undefined to trigger x-access-token fallback
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (config as any).authorEmail = undefined;
   const service = new GitBackupService(config, "/tmp/data");
   const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
   assertStringIncludes(url, "x-access-token:my-token@");
 });
 
-Deno.test("getAuthenticatedUrl - returns raw URL when no password available", () => {
-  const originalToken = Deno.env.get("GITHUB_TOKEN");
-  Deno.env.delete("GITHUB_TOKEN");
+test("getAuthenticatedUrl - returns raw URL when no password available", () => {
+  const originalToken = process.env["GITHUB_TOKEN"];
+  delete process.env["GITHUB_TOKEN"];
 
   try {
     const config = createConfig({
@@ -794,13 +687,13 @@ Deno.test("getAuthenticatedUrl - returns raw URL when no password available", ()
     const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
     assertEquals(url, "https://github.com/user/repo.git");
   } finally {
-    if (originalToken) Deno.env.set("GITHUB_TOKEN", originalToken);
+    if (originalToken) process.env["GITHUB_TOKEN"] = originalToken;
   }
 });
 
-Deno.test("getAuthenticatedUrl - falls back to GITHUB_TOKEN env when authPassword not set", () => {
-  const originalToken = Deno.env.get("GITHUB_TOKEN");
-  Deno.env.set("GITHUB_TOKEN", "env-github-token");
+test("getAuthenticatedUrl - falls back to GITHUB_TOKEN env when authPassword not set", () => {
+  const originalToken = process.env["GITHUB_TOKEN"];
+  process.env["GITHUB_TOKEN"] = "env-github-token";
 
   try {
     const config = createConfig({
@@ -812,9 +705,9 @@ Deno.test("getAuthenticatedUrl - falls back to GITHUB_TOKEN env when authPasswor
     assertStringIncludes(url, "env-github-token@");
   } finally {
     if (originalToken) {
-      Deno.env.set("GITHUB_TOKEN", originalToken);
+      process.env["GITHUB_TOKEN"] = originalToken;
     } else {
-      Deno.env.delete("GITHUB_TOKEN");
+      delete process.env["GITHUB_TOKEN"];
     }
   }
 });
@@ -836,7 +729,7 @@ function captureConsoleErrors(): { errors: string[]; restore: () => void } {
   };
 }
 
-Deno.test("GitBackupService - staged-changes probe (exit 1) does not log an error", async () => {
+test("GitBackupService - staged-changes probe (exit 1) does not log an error", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -845,7 +738,7 @@ Deno.test("GitBackupService - staged-changes probe (exit 1) does not log an erro
     await service.initialize();
 
     // Create a change so `git diff --cached --quiet` exits 1 (the NORMAL backup path)
-    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+    await fsp.writeFile(`${dataDir}/test.txt`, "hello");
 
     const { errors, restore } = captureConsoleErrors();
     try {
@@ -862,7 +755,7 @@ Deno.test("GitBackupService - staged-changes probe (exit 1) does not log an erro
   });
 });
 
-Deno.test("GitBackupService - empty-remote init (rev-parse HEAD exit 128) does not log an error", async () => {
+test("GitBackupService - empty-remote init (rev-parse HEAD exit 128) does not log an error", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -876,13 +769,7 @@ Deno.test("GitBackupService - empty-remote init (rev-parse HEAD exit 128) does n
     }
 
     // Verify no commit was created (empty remote + empty data dir)
-    const revProc = new Deno.Command("git", {
-      args: ["rev-parse", "--verify", "HEAD"],
-      cwd: dataDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code } = await revProc.output();
+    const { code } = runCommand("git", ["rev-parse", "--verify", "HEAD"], { cwd: dataDir });
     assertEquals(code, 128);
 
     assertEquals(
@@ -893,7 +780,7 @@ Deno.test("GitBackupService - empty-remote init (rev-parse HEAD exit 128) does n
   }, { createInitialCommit: false });
 });
 
-Deno.test("GitBackupService - unexpected git failure still logs an error", async () => {
+test("GitBackupService - unexpected git failure still logs an error", async () => {
   await withTempGitEnv(async (dataDir, _bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: "/nonexistent/repo.git" }),
@@ -901,7 +788,7 @@ Deno.test("GitBackupService - unexpected git failure still logs an error", async
     );
     await service.initialize();
 
-    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+    await fsp.writeFile(`${dataDir}/test.txt`, "hello");
 
     const { errors, restore } = captureConsoleErrors();
     try {
@@ -919,11 +806,11 @@ Deno.test("GitBackupService - unexpected git failure still logs an error", async
   });
 });
 
-Deno.test("GitBackupService - leaves operator .gitignore untouched - Case B (init from existing)", async () => {
+test("GitBackupService - leaves operator .gitignore untouched - Case B (init from existing)", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const customGitignore = "# Operator rules\n*.png\n*.jpg\nchannel-tmp/\n";
-    await Deno.writeTextFile(`${dataDir}/.gitignore`, customGitignore);
-    await Deno.writeTextFile(`${dataDir}/note.txt`, "hello");
+    await fsp.writeFile(`${dataDir}/.gitignore`, customGitignore);
+    await fsp.writeFile(`${dataDir}/note.txt`, "hello");
 
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -932,12 +819,12 @@ Deno.test("GitBackupService - leaves operator .gitignore untouched - Case B (ini
     await service.initialize();
     await service.performBackup();
 
-    const content = await Deno.readTextFile(`${dataDir}/.gitignore`);
+    const content = await fsp.readFile(`${dataDir}/.gitignore`, "utf8");
     assertEquals(content, customGitignore);
   });
 });
 
-Deno.test("GitBackupService - leaves operator .gitignore untouched - Case C (sync existing git repo)", async () => {
+test("GitBackupService - leaves operator .gitignore untouched - Case C (sync existing git repo)", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service1 = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -946,7 +833,7 @@ Deno.test("GitBackupService - leaves operator .gitignore untouched - Case C (syn
     await service1.initialize();
 
     const customGitignore = "# Custom operator rules\n*.log\ncustom-cache/\n";
-    await Deno.writeTextFile(`${dataDir}/.gitignore`, customGitignore);
+    await fsp.writeFile(`${dataDir}/.gitignore`, customGitignore);
 
     const service2 = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -955,7 +842,7 @@ Deno.test("GitBackupService - leaves operator .gitignore untouched - Case C (syn
     await service2.initialize();
     await service2.performBackup();
 
-    const content = await Deno.readTextFile(`${dataDir}/.gitignore`);
+    const content = await fsp.readFile(`${dataDir}/.gitignore`, "utf8");
     assertEquals(content, customGitignore);
   });
 });
@@ -1002,32 +889,26 @@ const EMAIL_DURABLE_FILES: Record<string, string> = {
 async function writeEmailDurableFiles(dataDir: string): Promise<void> {
   for (const [rel, content] of Object.entries(EMAIL_DURABLE_FILES)) {
     const full = `${dataDir}/${rel}`;
-    await Deno.mkdir(full.slice(0, full.lastIndexOf("/")), { recursive: true });
-    await Deno.writeTextFile(full, content);
+    await fsp.mkdir(full.slice(0, full.lastIndexOf("/")), { recursive: true });
+    await fsp.writeFile(full, content);
   }
 }
 
 /** Run one git command in `cwd`, failing loudly with git's own stderr. */
-async function gitText(cwd: string, args: string[]): Promise<string> {
-  const command = new Deno.Command("git", {
-    args,
+function gitText(cwd: string, args: string[]): string {
+  const { code, stdout, stderr } = runCommand("git", args, {
     cwd,
-    stdout: "piped",
-    stderr: "piped",
     env: { GIT_TERMINAL_PROMPT: "0" },
   });
-  const { code, stdout, stderr } = await command.output();
   if (code !== 0) {
-    throw new Error(
-      `git ${args.join(" ")} failed (${code}): ${new TextDecoder().decode(stderr)}`,
-    );
+    throw new Error(`git ${args.join(" ")} failed (${code}): ${stderr}`);
   }
-  return new TextDecoder().decode(stdout);
+  return stdout;
 }
 
 /** Every path in the committed tree of `HEAD`, excluding the root tree itself. */
-async function committedPaths(dataDir: string): Promise<string[]> {
-  const output = await gitText(dataDir, ["ls-tree", "-r", "--name-only", "-z", "HEAD"]);
+function committedPaths(dataDir: string): string[] {
+  const output = gitText(dataDir, ["ls-tree", "-r", "--name-only", "-z", "HEAD"]);
   return output.split("\0").filter((path) => path.length > 0);
 }
 
@@ -1051,30 +932,30 @@ function captureAllConsole(): { lines: string[]; restore: () => void } {
   };
 }
 
-Deno.test("GitBackupService - email state, signed sent history and archive bytes are all backed up", async () => {
+test("GitBackupService - email state, signed sent history and archive bytes are all backed up", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     // An existing backup repository configured with the host's normalizing line-ending
     // policy: the SERVICE must still store the private bytes verbatim, because restored
     // `.eml` evidence is verified against its recorded SHA-256 digest.
-    await gitText(dataDir, ["init", "-b", "master"]);
-    await gitText(dataDir, ["config", "core.autocrlf", "input"]);
+    gitText(dataDir, ["init", "-b", "master"]);
+    gitText(dataDir, ["config", "core.autocrlf", "input"]);
     await writeEmailDurableFiles(dataDir);
     // A reserved native-cache payload stays out of the index; email data is not affected.
     const reserved =
       "omp-pools/email:hidden/omp-agent/restricted/xdg-data/omp/natives/18.6.1/x.node";
-    await Deno.mkdir(`${dataDir}/${reserved.slice(0, reserved.lastIndexOf("/"))}`, {
+    await fsp.mkdir(`${dataDir}/${reserved.slice(0, reserved.lastIndexOf("/"))}`, {
       recursive: true,
     });
-    await Deno.writeTextFile(`${dataDir}/${reserved}`, "native payload");
+    await fsp.writeFile(`${dataDir}/${reserved}`, "native payload");
 
     const service = new GitBackupService(createConfig({ remoteUrl: bareDir }), dataDir);
     await service.initialize();
 
-    const committed = await committedPaths(dataDir);
+    const committed = committedPaths(dataDir);
     for (const [rel, content] of Object.entries(EMAIL_DURABLE_FILES)) {
       assertEquals(committed.includes(rel), true, `${rel} must be committed to the backup`);
       assertEquals(
-        await gitText(dataDir, ["show", `HEAD:${rel}`]),
+        gitText(dataDir, ["show", `HEAD:${rel}`]),
         content,
         `${rel} must be backed up byte-identically`,
       );
@@ -1086,11 +967,11 @@ Deno.test("GitBackupService - email state, signed sent history and archive bytes
     );
     // The service pins byte preservation per invocation; the operator's repository
     // configuration is left exactly as it was.
-    assertEquals(await gitText(dataDir, ["config", "--get", "core.autocrlf"]), "input\n");
+    assertEquals(gitText(dataDir, ["config", "--get", "core.autocrlf"]), "input\n");
   });
 });
 
-Deno.test("GitBackupService - backup logging never discloses the configured credential", async () => {
+test("GitBackupService - backup logging never discloses the configured credential", async () => {
   await withTempGitEnv(async (dataDir, _bareDir) => {
     await writeEmailDurableFiles(dataDir);
     const service = new GitBackupService(
@@ -1126,7 +1007,7 @@ Deno.test("GitBackupService - backup logging never discloses the configured cred
       `expected a redacted git invocation, got: ${output}`,
     );
     // Email data was still committed locally despite the unreachable remote.
-    const committed = await committedPaths(dataDir);
+    const committed = committedPaths(dataDir);
     for (const rel of Object.keys(EMAIL_DURABLE_FILES)) {
       assertEquals(committed.includes(rel), true, `${rel} must be committed locally`);
     }

@@ -23,8 +23,8 @@
  *   TypeBox schema describes only its own two tools.
  * - Prerequisites are EXACT. With `OMP_NATIVE_ACCEPTANCE=1` (the documented
  *   acceptance mode) every unavailable prerequisite is a FAILED test naming the
- *   precise reason; without it the native legs stay UNEXERCISED (Deno reports the
- *   test as ignored) rather than claiming native success.
+ *   precise reason; without it the native legs stay UNEXERCISED (the runner
+ *   reports the test as skipped) rather than claiming native success.
  * - The ACP filesystem-callback scenarios run through the repository's documented
  *   `ClientConfig.nativeCalls` test seam (`tests/acp/filesystem-test-calls.ts`,
  *   the same seam the OMP lifecycle and skill-handoff integration suites use).
@@ -60,11 +60,18 @@
  *   operation, the selected permission, and filesystem/delivery outcomes.
  * - The launch environment is process-global (`HOME` is read by the factory), so
  *   the fixture boundary restores the parent environment in `finally`.
+ * - Deno's `sanitizeOps`/`sanitizeResources` options have no Bun equivalent, so
+ *   every test measures this process's own descriptor table and descendant tree
+ *   instead (`tests/helpers/leak-check.ts`) once its teardown has finished.
  */
 
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
-import { copy } from "@std/fs/copy";
-import { dirname, join, resolve } from "@std/path";
+import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import type { Server } from "bun";
 import { createAgentConfig } from "@acp/agent-factory.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -86,6 +93,8 @@ import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
 import type { ChatbotClient } from "@acp/client.ts";
 import type { AgentConfig, AgentConnectorOptions, PermissionRejection } from "@acp/types.ts";
 import type { Config } from "../../../src/types/config.ts";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
+import { assertNoLeak, snapshot, teardownWithLeakCheck } from "../../helpers/leak-check.ts";
 
 // ---------------------------------------------------------------------------
 // Pinned prerequisites and authored-asset inventory
@@ -199,7 +208,7 @@ const UNAVAILABLE_DISPATCH_PATTERN = new RegExp(
 );
 
 /** Acceptance mode: every unavailable prerequisite becomes a named failure. */
-const ACCEPTANCE_MODE = Deno.env.get("OMP_NATIVE_ACCEPTANCE") === "1";
+const ACCEPTANCE_MODE = process.env["OMP_NATIVE_ACCEPTANCE"] === "1";
 
 /** The fixture's own tool/marker/load-mode contract (one source of truth). */
 const FIXTURE_TOOLS = {
@@ -248,39 +257,26 @@ interface SyncProbe {
   readonly stderr: string;
 }
 
-/** Synchronous file existence probe. */
-function existsSync(path: string): boolean {
-  try {
-    Deno.statSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Run a short synchronous probe without a shell. */
 function runSyncProbe(command: string, args: readonly string[]): SyncProbe {
-  try {
-    const output = new Deno.Command(command, {
-      args: [...args],
-      stdout: "piped",
-      stderr: "piped",
-    }).outputSync();
-    const decoder = new TextDecoder();
-    return {
-      ran: true,
-      success: output.success,
-      stdout: decoder.decode(output.stdout),
-      stderr: decoder.decode(output.stderr),
-    };
-  } catch (error) {
+  // A missing binary is a spawn error (`result.error`), reported as "did not
+  // run" exactly like Deno's rejected `outputSync()`; a nonzero exit is a
+  // successful invocation whose result is unsuccessful.
+  const output = spawnSync(command, [...args], { encoding: "utf8" });
+  if (output.error !== undefined) {
     return {
       ran: false,
       success: false,
       stdout: "",
-      stderr: error instanceof Error ? error.message : String(error),
+      stderr: output.error.message,
     };
   }
+  return {
+    ran: true,
+    success: output.status === 0,
+    stdout: output.stdout ?? "",
+    stderr: output.stderr ?? "",
+  };
 }
 
 /** The detected `omp --version` output, exactly as the installed binary prints it. */
@@ -303,15 +299,15 @@ const DETECTED_OMP_VERSION: string | null = (() => {
 const PINNED_BINARY_READY = DETECTED_OMP_VERSION === PINNED_OMP_VERSION;
 
 /** The real connector wraps every launch in `dumb-init`; without it nothing spawns. */
-const DUMB_INIT_READY = (Deno.env.get("PATH") ?? "")
+const DUMB_INIT_READY = (process.env["PATH"] ?? "")
   .split(":")
-  .some((entry) => entry.length > 0 && existsSync(join(entry, "dumb-init")));
+  .some((entry) => entry.length > 0 && fs.existsSync(join(entry, "dumb-init")));
 
 /** The shipped restricted capability bundle the production factory requires. */
 const TRUSTED_EXTENSION_PATH = resolve(resolveOmpExtensionPath());
 
 /** Whether that bundle exists (the factory preflight fails closed without it). */
-const TRUSTED_EXTENSION_READY = existsSync(TRUSTED_EXTENSION_PATH);
+const TRUSTED_EXTENSION_READY = fs.existsSync(TRUSTED_EXTENSION_PATH);
 
 /** One bind/release observation of the fixed loopback port. */
 interface LoopbackPortObservation {
@@ -323,18 +319,23 @@ interface LoopbackPortObservation {
  * Probe the fixed port by really binding and releasing it. An occupied port is an
  * EXPLICIT prerequisite failure, never a silently skipped or claimed pass.
  */
-function observeLoopbackPort(): LoopbackPortObservation {
+async function observeLoopbackPort(): Promise<LoopbackPortObservation> {
+  let probe: Server<undefined>;
   try {
-    const listener = Deno.listen({ hostname: LOOPBACK_HOST, port: LOOPBACK_PORT });
-    listener.close();
-    return { free: true };
+    probe = Bun.serve({
+      hostname: LOOPBACK_HOST,
+      port: LOOPBACK_PORT,
+      fetch: () => new Response("ok"),
+    });
   } catch (error) {
     return { free: false, reason: error instanceof Error ? error.message : String(error) };
   }
+  await probe.stop(true);
+  return { free: true };
 }
 
 /** The load-time port observation reused by the `ignore` predicate. */
-const LOOPBACK_PORT_OBSERVATION = observeLoopbackPort();
+const LOOPBACK_PORT_OBSERVATION = await observeLoopbackPort();
 
 /**
  * The exact pinned executable must be present and must report the pin. Every
@@ -372,7 +373,7 @@ function assertNativePrerequisites(): void {
   assert(
     TRUSTED_EXTENSION_READY,
     `native prerequisite failed: the generated trusted extension bundle is missing at ` +
-      `"${TRUSTED_EXTENSION_PATH}" — build it with \`deno task bundle:omp-extension\``,
+      `"${TRUSTED_EXTENSION_PATH}" — build it with \`bun run bundle:omp-extension\``,
   );
 }
 
@@ -571,12 +572,9 @@ function startScriptedProvider(
     ]);
   };
 
-  let server: Deno.HttpServer;
+  let server: Server<undefined>;
   try {
-    server = Deno.serve(
-      { hostname: LOOPBACK_HOST, port: LOOPBACK_PORT, onListen: () => {} },
-      handler,
-    );
+    server = Bun.serve({ hostname: LOOPBACK_HOST, port: LOOPBACK_PORT, fetch: handler });
   } catch (error) {
     throw new Error(
       `native prerequisite failed: the loopback provider could not bind ` +
@@ -603,7 +601,7 @@ function startScriptedProvider(
     toolResultForStep: (index) => toolResultForCallId(callIdForStep(index)),
     errors: () => [...errors],
     close: async () => {
-      await server.shutdown();
+      await server.stop(true);
     },
   };
 }
@@ -643,11 +641,11 @@ async function provisionNativeCache(cacheBase: string): Promise<OmpNativeCacheSe
   const cache = ompNativeCacheDescriptor(cacheBase, platform, "development");
   const { exact } = ompNativeCacheExpectedAddons(platform);
   const names = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
-  await Deno.mkdir(cache.versionDir, { recursive: true });
+  await fsp.mkdir(cache.versionDir, { recursive: true });
   for (const name of names) {
-    await Deno.writeTextFile(join(cache.versionDir, name), "fixture-native-payload");
+    await fsp.writeFile(join(cache.versionDir, name), "fixture-native-payload");
   }
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -723,48 +721,48 @@ const STAGING_PAYLOAD_RELATIVE = join("tmp", SKILL_SESSION_ID, "payload.md");
  * `finally`.
  */
 async function withNativeFixture(run: (fixture: NativeFixture) => Promise<void>): Promise<void> {
-  const root = await Deno.makeTempDir({ prefix: "air-omp-native-runtime-tools-" });
+  const root = await makeTempDir({ prefix: "air-omp-native-runtime-tools-" });
   // Outside `root` on purpose: neither the workspace, the staging directory, the
   // shared agent workspace nor the trusted skills root authorizes this path.
-  const externalRoot = await Deno.makeTempDir({ prefix: "air-omp-external-read-" });
+  const externalRoot = await makeTempDir({ prefix: "air-omp-external-read-" });
   const externalFile = join(externalRoot, "external.md");
   // The prepared native payload also lives OUTSIDE `root`, where the deployment's own cache
   // location guard requires it (a canonical cache inside the data root is refused).
-  const cacheBase = await Deno.makeTempDir({ prefix: "air-omp-native-cache-" });
-  const previousHome = Deno.env.get("HOME");
+  const cacheBase = await makeTempDir({ prefix: "air-omp-native-cache-" });
+  const previousHome = process.env["HOME"];
   try {
     const home = join(root, "home");
     const skillsRoot = join(home, ".agents", "skills");
-    await Deno.mkdir(join(home, ".omp", "agent"), { recursive: true });
+    await fsp.mkdir(join(home, ".omp", "agent"), { recursive: true });
 
     // Authored bytes are installed FIRST: the observation interval starts only
     // after this provisioning, so every later access is a production/native
     // access rather than a setup write.
-    await copy(FIXTURE_MODELS_PATH, join(home, HOME_MODELS_RELATIVE));
-    await copy(TRACKED_SKILLS_DIR, skillsRoot);
-    await Deno.writeTextFile(externalFile, EXTERNAL_FILE_CONTENT);
+    await fsp.cp(FIXTURE_MODELS_PATH, join(home, HOME_MODELS_RELATIVE));
+    await fsp.cp(TRACKED_SKILLS_DIR, skillsRoot, { recursive: true });
+    await fsp.writeFile(externalFile, EXTERNAL_FILE_CONTENT);
     assertEquals(
-      (await Deno.stat(externalFile)).isFile,
+      (await fsp.stat(externalFile)).isFile(),
       true,
       "the external sentinel file is provisioned and OS-readable before the leg starts",
     );
 
     for (const mode of NATIVE_MODES) {
       const paths = legPathsFor(root, mode);
-      await Deno.mkdir(paths.staging, { recursive: true });
-      await Deno.writeTextFile(paths.fixtureFile, FIXTURE_MD_CONTENT);
-      await Deno.writeTextFile(paths.editTarget, EDIT_TARGET_CONTENT);
+      await fsp.mkdir(paths.staging, { recursive: true });
+      await fsp.writeFile(paths.fixtureFile, FIXTURE_MD_CONTENT);
+      await fsp.writeFile(paths.editTarget, EDIT_TARGET_CONTENT);
     }
 
-    Deno.env.set("HOME", home);
+    process.env["HOME"] = home;
     const nativeCache = await provisionNativeCache(cacheBase);
     await run({ root, home, skillsRoot, externalFile, nativeCache });
   } finally {
-    if (previousHome === undefined) Deno.env.delete("HOME");
-    else Deno.env.set("HOME", previousHome);
-    await Deno.remove(root, { recursive: true }).catch(() => {});
-    await Deno.remove(externalRoot, { recursive: true }).catch(() => {});
-    await Deno.remove(cacheBase, { recursive: true }).catch(() => {});
+    if (previousHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = previousHome;
+    await fsp.rm(root, { recursive: true }).catch(() => {});
+    await fsp.rm(externalRoot, { recursive: true }).catch(() => {});
+    await fsp.rm(cacheBase, { recursive: true }).catch(() => {});
   }
 }
 
@@ -1351,7 +1349,7 @@ function assertLegCompletion(evidence: NativeLegEvidence): void {
 
 /** Whether a marker path exists on disk right now. */
 async function markerExists(path: string): Promise<boolean> {
-  return await Deno.lstat(path).then(() => true, () => false);
+  return await fsp.lstat(path).then(() => true, () => false);
 }
 
 /** The restricted leg: blocked vs allowed outcomes, with unchanged files on denial. */
@@ -1455,7 +1453,7 @@ async function assertRestrictedLeg(
   );
 
   // ── Ordinary hashline edit: the allowed file's first line changes ────────
-  const edited = (await Deno.readTextFile(paths.editTarget)).split("\n");
+  const edited = (await fsp.readFile(paths.editTarget, "utf8")).split("\n");
   assertEquals(edited[0], EDITED_FIRST_LINE, `${evidence.label}: the ordinary hashline PUT landed`);
   assertEquals(
     edited.length,
@@ -1493,7 +1491,7 @@ async function assertRestrictedLeg(
     }`,
   );
   assertEquals(
-    (await Deno.readTextFile(paths.editTarget)).split("\n")[0],
+    (await fsp.readFile(paths.editTarget, "utf8")).split("\n")[0],
     EDITED_FIRST_LINE,
     `${evidence.label}: the denied destructive REM left the file unchanged`,
   );
@@ -1510,7 +1508,7 @@ async function assertRestrictedLeg(
 
   // ── Writes: the ACP callback authorizes staging and denies elsewhere ─────
   assertEquals(
-    await Deno.readTextFile(paths.payload),
+    await fsp.readFile(paths.payload, "utf8"),
     WRITE_CONTENT,
     `${evidence.label}: the authorized staging write landed on disk`,
   );
@@ -1619,7 +1617,7 @@ async function assertYoloLeg(evidence: NativeLegEvidence, paths: LegPaths): Prom
     `${evidence.label}: the essential fixture tool really executed (marker present)`,
   );
   assertStringIncludes(
-    await Deno.readTextFile(paths.directMarker),
+    await fsp.readFile(paths.directMarker, "utf8"),
     FIXTURE_TOOLS.direct.name,
     `${evidence.label}: the direct marker names its executing tool`,
   );
@@ -1635,7 +1633,7 @@ async function assertYoloLeg(evidence: NativeLegEvidence, paths: LegPaths): Prom
     `${evidence.label}: the mounted fixture device really executed (marker present)`,
   );
   assertStringIncludes(
-    await Deno.readTextFile(paths.mountedMarker),
+    await fsp.readFile(paths.mountedMarker, "utf8"),
     FIXTURE_TOOLS.mounted.name,
     `${evidence.label}: the mounted marker names its executing tool`,
   );
@@ -1649,12 +1647,12 @@ async function assertYoloLeg(evidence: NativeLegEvidence, paths: LegPaths): Prom
   // Ordinary operations stay permissive in YOLO.
   assertToolResultIncludes(evidence, 3, FIXTURE_MD_MARKER, "bash ran under native YOLO policy");
   assertEquals(
-    (await Deno.readTextFile(paths.editTarget)).split("\n")[0],
+    (await fsp.readFile(paths.editTarget, "utf8")).split("\n")[0],
     EDITED_FIRST_LINE,
     `${evidence.label}: the ordinary hashline edit landed`,
   );
   assertEquals(
-    await Deno.readTextFile(paths.payload),
+    await fsp.readFile(paths.payload, "utf8"),
     WRITE_CONTENT,
     `${evidence.label}: the ordinary write landed`,
   );
@@ -1700,16 +1698,17 @@ interface NativePrerequisiteReport {
   readonly trustedExtensionReady: boolean;
 }
 
-Deno.test({
-  name: `native runtime prerequisites are observed: pinned omp ${PINNED_OMP_VERSION}, dumb-init, ` +
+test(
+  `native runtime prerequisites are observed: pinned omp ${PINNED_OMP_VERSION}, dumb-init, ` +
     `loopback ${LOOPBACK_HOST}:${LOOPBACK_PORT}, trusted extension bundle`,
-  fn: () => {
+  async () => {
+    const before = await snapshot();
     const report: NativePrerequisiteReport = {
       pinnedVersion: PINNED_OMP_VERSION,
       detectedVersion: DETECTED_OMP_VERSION,
       pinnedBinaryReady: PINNED_BINARY_READY,
       dumbInitReady: DUMB_INIT_READY,
-      loopbackPortFree: observeLoopbackPort().free,
+      loopbackPortFree: (await observeLoopbackPort()).free,
       trustedExtensionPath: TRUSTED_EXTENSION_PATH,
       trustedExtensionReady: TRUSTED_EXTENSION_READY,
     };
@@ -1721,7 +1720,7 @@ Deno.test({
     );
     assertEquals(
       report.loopbackPortFree,
-      observeLoopbackPort().free,
+      (await observeLoopbackPort()).free,
       "the port observation is a real bind/release probe",
     );
     assert(
@@ -1730,11 +1729,12 @@ Deno.test({
     );
     assertEquals(
       report.trustedExtensionReady,
-      existsSync(report.trustedExtensionPath),
+      fs.existsSync(report.trustedExtensionPath),
       "bundle readiness follows the artifact's existence",
     );
+    await assertNoLeak(before);
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // Test 2 — the fixture's own exposure/dispatch contract (no native binary)
@@ -1767,10 +1767,11 @@ interface FixtureModule {
   readonly parityMarkerPath: (cwd: string, marker: string) => string;
 }
 
-Deno.test({
-  name: "unknown-tools fixture: a native default factory registers both exposure modes and its " +
+test(
+  "unknown-tools fixture: a native default factory registers both exposure modes and its " +
     "execute really writes its marker (no native binary involved)",
-  fn: async () => {
+  async () => {
+    const before = await snapshot();
     // The fixture is a native `--trusted-extension` module, so it is loaded here
     // through the module-loading boundary itself (a runtime-selected path) rather
     // than a TS re-export; the cast names the interface the suite drives.
@@ -1824,7 +1825,7 @@ Deno.test({
 
     // Dispatch control: each tool's own execute really writes its distinct marker
     // under the session working directory's tmp/.
-    const cwd = await Deno.makeTempDir({ prefix: "parity-fixture-exec-" });
+    const cwd = await makeTempDir({ prefix: "parity-fixture-exec-" });
     try {
       for (const contract of [FIXTURE_TOOLS.direct, FIXTURE_TOOLS.mounted]) {
         const tool = byName.get(contract.name);
@@ -1837,9 +1838,9 @@ Deno.test({
           { cwd },
         );
         const markerPath = fixture.parityMarkerPath(cwd, contract.marker);
-        assert(existsSync(markerPath), `${contract.name}: execute wrote its marker`);
+        assert(fs.existsSync(markerPath), `${contract.name}: execute wrote its marker`);
         assertStringIncludes(
-          await Deno.readTextFile(markerPath),
+          await fsp.readFile(markerPath, "utf8"),
           contract.name,
           `${contract.name}: the marker names the executing tool`,
         );
@@ -1855,41 +1856,47 @@ Deno.test({
         "the two markers are distinct, so each route's side effect is attributable",
       );
     } finally {
-      await Deno.remove(cwd, { recursive: true }).catch(() => {});
+      await teardownWithLeakCheck(before, async () => {
+        await fsp.rm(cwd, { recursive: true }).catch(() => {});
+      });
     }
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // Test 3 — the real native legs
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name: `native OMP ${PINNED_OMP_VERSION} tool dispatch against the loopback scripted provider: ` +
-    `restricted block/allow outcomes and native-YOLO exposure control ` +
-    `(detected omp: ${DETECTED_OMP_VERSION ?? "none"})`,
+test.skipIf(
   // Acceptance mode makes the prerequisites REQUIRED (the body fails loudly);
   // otherwise an unavailable runtime leaves this evidence UNEXERCISED.
-  ignore: !ACCEPTANCE_MODE &&
+  !ACCEPTANCE_MODE &&
     !(PINNED_BINARY_READY && DUMB_INIT_READY && LOOPBACK_PORT_OBSERVATION.free &&
       TRUSTED_EXTENSION_READY),
-  fn: async () => {
-    assertNativePrerequisites();
+)(
+  `native OMP ${PINNED_OMP_VERSION} tool dispatch against the loopback scripted provider: ` +
+    `restricted block/allow outcomes and native-YOLO exposure control ` +
+    `(detected omp: ${DETECTED_OMP_VERSION ?? "none"})`,
+  async () => {
+    const before = await snapshot();
+    try {
+      assertNativePrerequisites();
 
-    await withNativeFixture(async (fixture) => {
-      const restricted = await runNativeLeg(fixture, "restricted");
-      assertLegCompletion(restricted);
-      await assertRestrictedLeg(
-        restricted,
-        legPathsFor(fixture.root, "restricted"),
-        fixture.externalFile,
-      );
+      await withNativeFixture(async (fixture) => {
+        const restricted = await runNativeLeg(fixture, "restricted");
+        assertLegCompletion(restricted);
+        await assertRestrictedLeg(
+          restricted,
+          legPathsFor(fixture.root, "restricted"),
+          fixture.externalFile,
+        );
 
-      const yolo = await runNativeLeg(fixture, "native-yolo");
-      assertLegCompletion(yolo);
-      await assertYoloLeg(yolo, legPathsFor(fixture.root, "native-yolo"));
-    });
+        const yolo = await runNativeLeg(fixture, "native-yolo");
+        assertLegCompletion(yolo);
+        await assertYoloLeg(yolo, legPathsFor(fixture.root, "native-yolo"));
+      });
+    } finally {
+      await assertNoLeak(before);
+    }
   },
-  sanitizeOps: false,
-  sanitizeResources: false,
-});
+);

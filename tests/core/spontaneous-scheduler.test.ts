@@ -3,6 +3,7 @@
 import { assertEquals } from "@std/assert";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import type { Config } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 function createConfig(overrides?: {
   discordEnabled?: boolean;
@@ -49,7 +50,7 @@ function createConfig(overrides?: {
   };
 }
 
-Deno.test("SpontaneousScheduler - only schedules for enabled platforms", () => {
+test("SpontaneousScheduler - only schedules for enabled platforms", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -67,7 +68,7 @@ Deno.test("SpontaneousScheduler - only schedules for enabled platforms", () => {
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - does not schedule when platform disabled", () => {
+test("SpontaneousScheduler - does not schedule when platform disabled", () => {
   const config = createConfig({
     discordEnabled: false,
     discordSpontaneous: true,
@@ -82,7 +83,7 @@ Deno.test("SpontaneousScheduler - does not schedule when platform disabled", () 
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - invokes callback on timer trigger", async () => {
+test("SpontaneousScheduler - invokes callback on timer trigger", async () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -106,7 +107,7 @@ Deno.test("SpontaneousScheduler - invokes callback on timer trigger", async () =
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - schedules next execution even on callback failure", async () => {
+test("SpontaneousScheduler - schedules next execution even on callback failure", async () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -132,7 +133,7 @@ Deno.test("SpontaneousScheduler - schedules next execution even on callback fail
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - stop() clears all timers", () => {
+test("SpontaneousScheduler - stop() clears all timers", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -148,7 +149,7 @@ Deno.test("SpontaneousScheduler - stop() clears all timers", () => {
   assertEquals(Object.keys(scheduler.getStatus()).length, 0);
 });
 
-Deno.test("SpontaneousScheduler - start() is idempotent", () => {
+test("SpontaneousScheduler - start() is idempotent", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -164,7 +165,7 @@ Deno.test("SpontaneousScheduler - start() is idempotent", () => {
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - getStatus() returns correct state", () => {
+test("SpontaneousScheduler - getStatus() returns correct state", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -181,7 +182,7 @@ Deno.test("SpontaneousScheduler - getStatus() returns correct state", () => {
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - schedules both platforms independently", () => {
+test("SpontaneousScheduler - schedules both platforms independently", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -199,7 +200,7 @@ Deno.test("SpontaneousScheduler - schedules both platforms independently", () =>
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - lastExecutedAt is set after callback runs", async () => {
+test("SpontaneousScheduler - lastExecutedAt is set after callback runs", async () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -222,7 +223,7 @@ Deno.test("SpontaneousScheduler - lastExecutedAt is set after callback runs", as
 
 // === State Restoration Tests ===
 
-Deno.test("SpontaneousScheduler - uses restored schedule time within valid range", () => {
+test("SpontaneousScheduler - uses restored schedule time within valid range", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -241,7 +242,7 @@ Deno.test("SpontaneousScheduler - uses restored schedule time within valid range
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - executes immediately when restored time is past", async () => {
+test("SpontaneousScheduler - executes immediately when restored time is past", async () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -264,7 +265,7 @@ Deno.test("SpontaneousScheduler - executes immediately when restored time is pas
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - reschedules when restored time exceeds max range", () => {
+test("SpontaneousScheduler - reschedules when restored time exceeds max range", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -285,7 +286,7 @@ Deno.test("SpontaneousScheduler - reschedules when restored time exceeds max ran
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - works normally without restored state", () => {
+test("SpontaneousScheduler - works normally without restored state", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -302,7 +303,7 @@ Deno.test("SpontaneousScheduler - works normally without restored state", () => 
   scheduler.stop();
 });
 
-Deno.test("SpontaneousScheduler - persists next time via stateStore in scheduleNext", () => {
+test("SpontaneousScheduler - persists next time via stateStore in scheduleNext", () => {
   const config = createConfig({
     discordEnabled: true,
     discordSpontaneous: true,
@@ -320,6 +321,7 @@ Deno.test("SpontaneousScheduler - persists next time via stateStore in scheduleN
   };
   scheduler.setStateStore(mockStore as never);
 
+  // oxlint-disable-next-line no-unused-vars
   let callCount = 0;
   scheduler.setCallback(() => {
     callCount++;

@@ -9,6 +9,9 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { Platform } from "../../../src/types/events.ts";
 import type { MemoryEntry, MemoryLogEvent, MemoryPatch } from "../../../src/types/memory.ts";
 import type { WorkspaceInfo } from "../../../src/types/workspace.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir, removePath } from "../../../src/utils/fs-compat.ts";
 
 const TS = "2026-09-25T00:00:00.000Z";
 
@@ -45,7 +48,8 @@ async function writeMemoryLog(
   append = false,
 ): Promise<void> {
   const body = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
-  await Deno.writeTextFile(path, body, { append });
+  if (append) await fsp.appendFile(path, body);
+  else await fsp.writeFile(path, body);
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -66,7 +70,7 @@ interface CacheContext {
 }
 
 async function withCache(fn: (context: CacheContext) => Promise<void>): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -93,11 +97,11 @@ async function withCache(fn: (context: CacheContext) => Promise<void>): Promise<
       reads: () => reads,
     });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("MemorySnapshotCache - indexes the memories of an existing file", async () => {
+test("MemorySnapshotCache - indexes the memories of an existing file", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a", content: "keyboard" })]);
 
@@ -108,13 +112,13 @@ Deno.test("MemorySnapshotCache - indexes the memories of an existing file", asyn
   });
 });
 
-Deno.test("MemorySnapshotCache - a file that does not exist yields no documents", async () => {
+test("MemorySnapshotCache - a file that does not exist yields no documents", async () => {
   await withCache(async ({ cache, path, load }) => {
     assertEquals(await cache.getDocuments(path, load), []);
   });
 });
 
-Deno.test("MemorySnapshotCache - an appended memory is visible to the next read", async () => {
+test("MemorySnapshotCache - an appended memory is visible to the next read", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
     assertEquals((await cache.getDocuments(path, load)).length, 1);
@@ -127,7 +131,7 @@ Deno.test("MemorySnapshotCache - an appended memory is visible to the next read"
   });
 });
 
-Deno.test("MemorySnapshotCache - a disabling patch is resolved on the next read", async () => {
+test("MemorySnapshotCache - a disabling patch is resolved on the next read", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
     assertEquals((await cache.getDocuments(path, load))[0].memory.enabled, true);
@@ -140,7 +144,7 @@ Deno.test("MemorySnapshotCache - a disabling patch is resolved on the next read"
   });
 });
 
-Deno.test("MemorySnapshotCache - an unchanged file is not read again", async () => {
+test("MemorySnapshotCache - an unchanged file is not read again", async () => {
   await withCache(async ({ cache, path, load, reads }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
 
@@ -152,7 +156,7 @@ Deno.test("MemorySnapshotCache - an unchanged file is not read again", async () 
   });
 });
 
-Deno.test("MemorySnapshotCache - a file that appears is indexed", async () => {
+test("MemorySnapshotCache - a file that appears is indexed", async () => {
   await withCache(async ({ cache, path, load }) => {
     assertEquals(await cache.getDocuments(path, load), []);
 
@@ -164,18 +168,18 @@ Deno.test("MemorySnapshotCache - a file that appears is indexed", async () => {
   });
 });
 
-Deno.test("MemorySnapshotCache - a file that disappears yields no documents again", async () => {
+test("MemorySnapshotCache - a file that disappears yields no documents again", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
     assertEquals((await cache.getDocuments(path, load)).length, 1);
 
-    await Deno.remove(path);
+    await removePath(path);
 
     assertEquals(await cache.getDocuments(path, load), []);
   });
 });
 
-Deno.test("MemorySnapshotCache - concurrent reads share one rebuild", async () => {
+test("MemorySnapshotCache - concurrent reads share one rebuild", async () => {
   await withCache(async ({ cache, path, load, reads }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
 
@@ -190,7 +194,7 @@ Deno.test("MemorySnapshotCache - concurrent reads share one rebuild", async () =
   });
 });
 
-Deno.test("MemorySnapshotCache - a read that starts after a write never joins an earlier rebuild", async () => {
+test("MemorySnapshotCache - a read that starts after a write never joins an earlier rebuild", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
     const gate = deferred();
@@ -221,7 +225,7 @@ Deno.test("MemorySnapshotCache - a read that starts after a write never joins an
   });
 });
 
-Deno.test("MemorySnapshotCache - a failed rebuild is not cached", async () => {
+test("MemorySnapshotCache - a failed rebuild is not cached", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
     let attempts = 0;
@@ -240,7 +244,7 @@ Deno.test("MemorySnapshotCache - a failed rebuild is not cached", async () => {
   });
 });
 
-Deno.test("MemorySnapshotCache - a stat failure other than a missing file propagates", async () => {
+test("MemorySnapshotCache - a stat failure other than a missing file propagates", async () => {
   await withCache(async ({ cache, path, load }) => {
     await writeMemoryLog(path, [memoryEvent({ id: "a" })]);
 
@@ -256,16 +260,16 @@ Deno.test("MemorySnapshotCache - a stat failure other than a missing file propag
 async function withNoteWorkspace(
   fn: (context: { root: string; tempDir: string; cache: MemorySnapshotCache }) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const root = `${tempDir}/agent-workspace`;
-    await Deno.mkdir(`${root}/notes`, { recursive: true });
-    await Deno.mkdir(`${root}/journal`, { recursive: true });
-    await Deno.writeTextFile(`${root}/README.md`, "# Agent Workspace\n");
-    await Deno.writeTextFile(`${root}/notes/_index.md`, "# Notes Index\n");
+    await fsp.mkdir(`${root}/notes`, { recursive: true });
+    await fsp.mkdir(`${root}/journal`, { recursive: true });
+    await fsp.writeFile(`${root}/README.md`, "# Agent Workspace\n");
+    await fsp.writeFile(`${root}/notes/_index.md`, "# Notes Index\n");
     await fn({ root, tempDir, cache: new MemorySnapshotCache(new MemoryTokenizer()) });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
@@ -273,12 +277,12 @@ function notePaths(notes: Array<{ path: string }>): string[] {
   return notes.map((note) => note.path);
 }
 
-Deno.test("MemorySnapshotCache - walks every .md file except the index and root README", async () => {
+test("MemorySnapshotCache - walks every .md file except the index and root README", async () => {
   await withNoteWorkspace(async ({ root, cache }) => {
-    await Deno.writeTextFile(`${root}/notes/topic.md`, "# Topic\n\nkeyboard\n");
-    await Deno.writeTextFile(`${root}/notes/README.md`, "# Nested Readme\n\nkeyboard\n");
-    await Deno.writeTextFile(`${root}/journal/2026-09-20.md`, "# Journal\n\nkeyboard\n");
-    await Deno.writeTextFile(`${root}/notes/ignored.txt`, "keyboard\n");
+    await fsp.writeFile(`${root}/notes/topic.md`, "# Topic\n\nkeyboard\n");
+    await fsp.writeFile(`${root}/notes/README.md`, "# Nested Readme\n\nkeyboard\n");
+    await fsp.writeFile(`${root}/journal/2026-09-20.md`, "# Journal\n\nkeyboard\n");
+    await fsp.writeFile(`${root}/notes/ignored.txt`, "keyboard\n");
 
     const notes = await cache.getNotes(root);
 
@@ -293,14 +297,14 @@ Deno.test("MemorySnapshotCache - walks every .md file except the index and root 
   });
 });
 
-Deno.test("MemorySnapshotCache - a symlinked file or directory is never read", async () => {
+test("MemorySnapshotCache - a symlinked file or directory is never read", async () => {
   await withNoteWorkspace(async ({ root, tempDir, cache }) => {
-    await Deno.writeTextFile(`${tempDir}/memory.private.jsonl`, "leaked keyboard secret\n");
-    await Deno.mkdir(`${tempDir}/outside`);
-    await Deno.writeTextFile(`${tempDir}/outside/linked.md`, "leaked keyboard secret\n");
-    await Deno.symlink(`${tempDir}/memory.private.jsonl`, `${root}/notes/leak.md`);
-    await Deno.symlink(`${tempDir}/outside`, `${root}/notes/linked-dir`);
-    await Deno.writeTextFile(`${root}/notes/real.md`, "# Real\n\nkeyboard\n");
+    await fsp.writeFile(`${tempDir}/memory.private.jsonl`, "leaked keyboard secret\n");
+    await fsp.mkdir(`${tempDir}/outside`);
+    await fsp.writeFile(`${tempDir}/outside/linked.md`, "leaked keyboard secret\n");
+    await fsp.symlink(`${tempDir}/memory.private.jsonl`, `${root}/notes/leak.md`);
+    await fsp.symlink(`${tempDir}/outside`, `${root}/notes/linked-dir`);
+    await fsp.writeFile(`${root}/notes/real.md`, "# Real\n\nkeyboard\n");
 
     const notes = await cache.getNotes(root);
 
@@ -313,10 +317,10 @@ Deno.test("MemorySnapshotCache - a symlinked file or directory is never read", a
   });
 });
 
-Deno.test("MemorySnapshotCache - an unchanged note is reused and an edited one is re-chunked", async () => {
+test("MemorySnapshotCache - an unchanged note is reused and an edited one is re-chunked", async () => {
   await withNoteWorkspace(async ({ root, cache }) => {
     const path = `${root}/notes/topic.md`;
-    await Deno.writeTextFile(path, "# Topic\n\nfirst body\n");
+    await fsp.writeFile(path, "# Topic\n\nfirst body\n");
 
     const first = await cache.getNotes(root);
     const second = await cache.getNotes(root);
@@ -324,41 +328,41 @@ Deno.test("MemorySnapshotCache - an unchanged note is reused and an edited one i
     assertStrictEquals(first[0], second[0]);
     assertEquals(first[0].chunks[0].text, "# Topic\n\nfirst body");
 
-    await Deno.writeTextFile(path, "# Topic\n\nsecond body\n");
+    await fsp.writeFile(path, "# Topic\n\nsecond body\n");
 
     const third = await cache.getNotes(root);
     assertEquals(third[0].chunks[0].text, "# Topic\n\nsecond body");
   });
 });
 
-Deno.test("MemorySnapshotCache - a missing workspace yields no notes", async () => {
+test("MemorySnapshotCache - a missing workspace yields no notes", async () => {
   await withNoteWorkspace(async ({ tempDir, cache }) => {
     assertEquals(await cache.getNotes(`${tempDir}/absent`), []);
   });
 });
 
-Deno.test("MemorySnapshotCache - an unreadable note is skipped, not thrown", async () => {
+test("MemorySnapshotCache - an unreadable note is skipped, not thrown", async () => {
   await withNoteWorkspace(async ({ root, cache }) => {
     const path = `${root}/notes/topic.md`;
-    await Deno.writeTextFile(path, "# Topic\n\nkeyboard\n");
+    await fsp.writeFile(path, "# Topic\n\nkeyboard\n");
     assertEquals((await cache.getNotes(root)).length, 1);
 
     // The path is now a directory, so its content can no longer be read.
-    await Deno.remove(path);
-    await Deno.mkdir(path);
+    await removePath(path);
+    await fsp.mkdir(path);
 
     assertEquals(await cache.getNotes(root), []);
   });
 });
 
-Deno.test("MemorySnapshotCache - a hard-linked note is not read", async () => {
+test("MemorySnapshotCache - a hard-linked note is not read", async () => {
   await withNoteWorkspace(async ({ root, tempDir, cache }) => {
     // A hard link is not a symbolic link: `isSymlink` and `realPath` both accept
     // it, so the link count is what keeps another file's content out.
     const privatePath = `${tempDir}/memory.private.jsonl`;
-    await Deno.writeTextFile(privatePath, "leaked keyboard secret\n");
-    await Deno.link(privatePath, `${root}/notes/leak.md`);
-    await Deno.writeTextFile(`${root}/notes/real.md`, "# Real\n\nkeyboard\n");
+    await fsp.writeFile(privatePath, "leaked keyboard secret\n");
+    await fsp.link(privatePath, `${root}/notes/leak.md`);
+    await fsp.writeFile(`${root}/notes/real.md`, "# Real\n\nkeyboard\n");
 
     const notes = await cache.getNotes(root);
 
@@ -366,11 +370,11 @@ Deno.test("MemorySnapshotCache - a hard-linked note is not read", async () => {
   });
 });
 
-Deno.test("MemorySnapshotCache - a symlinked workspace root is walked at its given path", async () => {
+test("MemorySnapshotCache - a symlinked workspace root is walked at its given path", async () => {
   await withNoteWorkspace(async ({ root, tempDir, cache }) => {
-    await Deno.writeTextFile(`${root}/notes/topic.md`, "# Topic\n\nkeyboard\n");
+    await fsp.writeFile(`${root}/notes/topic.md`, "# Topic\n\nkeyboard\n");
     const link = `${tempDir}/linked-workspace`;
-    await Deno.symlink(root, link);
+    await fsp.symlink(root, link);
 
     const notes = await cache.getNotes(link);
 

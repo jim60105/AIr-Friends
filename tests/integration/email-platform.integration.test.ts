@@ -16,7 +16,7 @@
 // protocol fixtures. No ACP/model decision, provider, production credential or mailbox is used.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { AgentCore } from "@core/agent-core.ts";
 import type { ChannelConfig, Config, EmailConfig } from "../../src/types/config.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
@@ -30,6 +30,9 @@ import {
 } from "../../src/platforms/email/activation.ts";
 import { EmailImapTestService } from "../helpers/email-imap-service.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const BOT = "bot@integration.example";
 const AUTHSERV = "mx.integration.example";
@@ -147,18 +150,18 @@ async function withFixtures(
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "email-platform-integration-" });
+  const dir = await makeTempDir({ prefix: "email-platform-integration-" });
   try {
     _resetSharedRegistryForTesting();
-    await Deno.mkdir(join(dir, "prompts"), { recursive: true });
-    await Deno.writeTextFile(
+    await fsp.mkdir(join(dir, "prompts"), { recursive: true });
+    await fsp.writeFile(
       join(dir, "prompts", "system_reply.md"),
       "You are a helper.\nSkill root: {{ skillsDir }}\n{{ userContextMessage }}",
     );
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
+    await fsp.rm(dir, { recursive: true }).catch(() => {});
   }
 }
 
@@ -181,7 +184,7 @@ function forwardGrant(workId: string, sessionId: string, sourceRecordId: string)
   });
 }
 
-Deno.test("integration - whole path submits each authorized mail exactly once", async () => {
+test("integration - whole path submits each authorized mail exactly once", async () => {
   await withTempDir(async (base) => {
     await withFixtures(
       { tlsMode: "tls", username: BOT, password: SMTP_PASSWORD },
@@ -356,7 +359,7 @@ Deno.test("integration - whole path submits each authorized mail exactly once", 
   });
 });
 
-Deno.test("integration - an UNKNOWN submission is preserved and never resent", async () => {
+test("integration - an UNKNOWN submission is preserved and never resent", async () => {
   await withTempDir(async (base) => {
     await withFixtures(
       // Consume the DATA payload, then close without a final acknowledgement: unknown outcome.

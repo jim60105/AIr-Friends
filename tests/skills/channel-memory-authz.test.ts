@@ -8,6 +8,9 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const mockAdapter = { platform: "discord" } as unknown as PlatformAdapter;
 
@@ -19,7 +22,7 @@ async function withHandler(
     baseContext: Omit<SkillContext, "canWriteChannelMemory">,
   ) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -32,7 +35,7 @@ async function withHandler(
       tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
       isDm: false,
     };
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
 
     const baseContext: Omit<SkillContext, "canWriteChannelMemory"> = {
       workspace,
@@ -44,11 +47,11 @@ async function withHandler(
 
     await fn(handler, store, manager, baseContext);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("F15 - channel write is rejected when session is not authorized", async () => {
+test("F15 - channel write is rejected when session is not authorized", async () => {
   await withHandler(async (handler, store, manager, baseContext) => {
     const result = await handler.handleMemorySave(
       { content: "planted", scope: "channel" },
@@ -63,7 +66,7 @@ Deno.test("F15 - channel write is rejected when session is not authorized", asyn
   });
 });
 
-Deno.test("F15 - authorized channel write records author and is not pinned core", async () => {
+test("F15 - authorized channel write records author and is not pinned core", async () => {
   await withHandler(async (handler, store, manager, baseContext) => {
     const result = await handler.handleMemorySave(
       { content: "shared note", scope: "channel", tier: "core", importance: "high" },

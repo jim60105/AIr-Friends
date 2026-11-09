@@ -16,7 +16,7 @@
 // real-socket SMTP exchange lives in tests/skills/email-compose-smoke.test.ts.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { EMAIL_COMPOSE_ACTION_SLOT, EmailComposeHandler } from "../../src/skills/email-handler.ts";
 import { emailComposeAuditParams } from "../../src/skills/email-handler.ts";
 import type { EmailComposeMailService } from "../../src/skills/email-handler.ts";
@@ -58,6 +58,10 @@ import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { SessionAuditWriter } from "../../src/core/audit-logger.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { metricsRegistry } from "../../src/utils/metrics.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const SELF_ADDRESS = "user@example.org";
 const OWNER = normalizeEmailMailbox(SELF_ADDRESS).userId;
@@ -146,9 +150,9 @@ function stage(
   files: Record<string, string> = {},
 ): string {
   const stagingDir = join(workspacePath, "tmp", SESSION_ID);
-  Deno.mkdirSync(stagingDir, { recursive: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
-    Deno.writeTextFileSync(join(stagingDir, name), content);
+    fs.writeFileSync(join(stagingDir, name), content);
   }
   return stagingDir;
 }
@@ -156,11 +160,11 @@ function stage(
 async function withWorkspace(
   body: (workspacePath: string, stagingDir: string) => Promise<void> | void,
 ): Promise<void> {
-  const workspacePath = await Deno.makeTempDir();
+  const workspacePath = await makeTempDir();
   try {
     await body(workspacePath, stage(workspacePath));
   } finally {
-    await Deno.remove(workspacePath, { recursive: true });
+    await fsp.rm(workspacePath, { recursive: true });
   }
 }
 
@@ -178,7 +182,7 @@ function request(overrides: Record<string, unknown> = {}): Record<string, unknow
 // Group A: handler authorization, request shape and attachment containment
 // ---------------------------------------------------------------------------
 
-Deno.test("compose - a granted third-party destination is sent once through the service", async () => {
+test("compose - a granted third-party destination is sent once through the service", async () => {
   await withWorkspace(async (workspacePath) => {
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService });
@@ -211,7 +215,7 @@ Deno.test("compose - a granted third-party destination is sent once through the 
   });
 });
 
-Deno.test("compose - the session's own sender is the reply target and needs no grant", async () => {
+test("compose - the session's own sender is the reply target and needs no grant", async () => {
   await withWorkspace(async (workspacePath) => {
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService });
@@ -231,7 +235,7 @@ Deno.test("compose - the session's own sender is the reply target and needs no g
   });
 });
 
-Deno.test("compose - a third-party destination without a grant is refused before any file read", async () => {
+test("compose - a third-party destination without a grant is refused before any file read", async () => {
   await withWorkspace(async (workspacePath) => {
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService });
@@ -255,7 +259,7 @@ Deno.test("compose - a third-party destination without a grant is refused before
   });
 });
 
-Deno.test("compose - grant binding is enforced for action, session, owner, work item and destination", async () => {
+test("compose - grant binding is enforced for action, session, owner, work item and destination", async () => {
   await withWorkspace(async (workspacePath) => {
     const cases: Array<
       { label: string; grant: DestinationGrant; request?: Record<string, unknown> }
@@ -291,7 +295,7 @@ Deno.test("compose - grant binding is enforced for action, session, owner, work 
   });
 });
 
-Deno.test("compose - an unknown grant id never falls back to the reply-target path", async () => {
+test("compose - an unknown grant id never falls back to the reply-target path", async () => {
   await withWorkspace(async (workspacePath) => {
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService });
@@ -312,7 +316,7 @@ Deno.test("compose - an unknown grant id never falls back to the reply-target pa
   });
 });
 
-Deno.test("compose - unsupported request keys (Cc/Bcc/headers) and malformed fields are refused", async () => {
+test("compose - unsupported request keys (Cc/Bcc/headers) and malformed fields are refused", async () => {
   await withWorkspace(async (workspacePath) => {
     const rejected: Array<{ label: string; request: unknown }> = [
       { label: "Cc", request: request({ cc: "cc@example.org" }) },
@@ -352,7 +356,7 @@ Deno.test("compose - unsupported request keys (Cc/Bcc/headers) and malformed fie
   });
 });
 
-Deno.test("compose - a multiline body with $ and Unicode reaches the draft verbatim", async () => {
+test("compose - a multiline body with $ and Unicode reaches the draft verbatim", async () => {
   await withWorkspace(async (workspacePath) => {
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService });
@@ -371,14 +375,14 @@ Deno.test("compose - a multiline body with $ and Unicode reaches the draft verba
   });
 });
 
-Deno.test("compose - attachments must stay inside the session staging directory", async () => {
-  const workspacePath = await Deno.makeTempDir();
+test("compose - attachments must stay inside the session staging directory", async () => {
+  const workspacePath = await makeTempDir();
   try {
     const stagingDir = stage(workspacePath, { "report.txt": "attachment-bytes" });
     // A workspace file OUTSIDE the staging directory (e.g. a memory file) plus a symlink that
     // escapes the staging directory.
-    Deno.writeTextFileSync(join(workspacePath, "memory.private.jsonl"), "private memory");
-    Deno.symlinkSync("/etc/hostname", join(stagingDir, "escape.txt"));
+    fs.writeFileSync(join(workspacePath, "memory.private.jsonl"), "private memory");
+    fs.symlinkSync("/etc/hostname", join(stagingDir, "escape.txt"));
 
     const cases: Array<{ label: string; path: string }> = [
       { label: "workspace memory file", path: join(workspacePath, "memory.private.jsonl") },
@@ -438,11 +442,11 @@ Deno.test("compose - attachments must stay inside the session staging directory"
     assertEquals(attachment?.contentType, "text/plain");
     assertEquals(new TextDecoder().decode(attachment?.content), "attachment-bytes");
   } finally {
-    await Deno.remove(workspacePath, { recursive: true });
+    await fsp.rm(workspacePath, { recursive: true });
   }
 });
 
-Deno.test("compose - only an authenticated user-triggered email session may compose", async () => {
+test("compose - only an authenticated user-triggered email session may compose", async () => {
   await withWorkspace(async (workspacePath) => {
     const cases: Array<{ label: string; context: Partial<SkillContext> }> = [
       {
@@ -481,7 +485,7 @@ Deno.test("compose - only an authenticated user-triggered email session may comp
   });
 });
 
-Deno.test("compose - an unwired service and a non-submitted outcome fail closed", async () => {
+test("compose - an unwired service and a non-submitted outcome fail closed", async () => {
   await withWorkspace(async (workspacePath) => {
     const context = emailContext(workspacePath, { emailDestinationGrants: [composeGrant()] });
 
@@ -516,7 +520,7 @@ Deno.test("compose - an unwired service and a non-submitted outcome fail closed"
   });
 });
 
-Deno.test("compose - the audit projection never records recipient, subject or body", async () => {
+test("compose - the audit projection never records recipient, subject or body", async () => {
   const subjectSentinel = "SENTINEL-SUBJECT-3f9a";
   const bodySentinel = "SENTINEL-BODY-3f9a";
   const projected = await emailComposeAuditParams({
@@ -667,12 +671,12 @@ function buildMailHarness(base: string): MailHarness {
   return { service, smtp, imap, channels };
 }
 
-Deno.test("compose - the durable service submits the granted message and reuses its operation", async () => {
-  const base = await Deno.makeTempDir();
+test("compose - the durable service submits the granted message and reuses its operation", async () => {
+  const base = await makeTempDir();
   try {
     const stagingDir = stage(base, { "report.txt": "attachment-bytes" });
     // Private workspace material the compose must never pick up on its own.
-    Deno.writeTextFileSync(join(base, "memory.private.jsonl"), "MEMORY-SENTINEL-4f2c");
+    fs.writeFileSync(join(base, "memory.private.jsonl"), "MEMORY-SENTINEL-4f2c");
     const { service, smtp, imap, channels } = buildMailHarness(base);
     const handler = new EmailComposeHandler({ mailService: service });
     const context = emailContext(base, { emailDestinationGrants: [composeGrant()] });
@@ -718,12 +722,12 @@ Deno.test("compose - the durable service submits the granted message and reuses 
     assert(!selfRaw.includes("MEMORY-SENTINEL-4f2c"), "no memory is attached automatically");
     assert(!selfRaw.includes("Content-Disposition: attachment"));
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("compose - distinct grants are distinct operations while one self-compose is one operation", async () => {
-  const base = await Deno.makeTempDir();
+test("compose - distinct grants are distinct operations while one self-compose is one operation", async () => {
+  const base = await makeTempDir();
   try {
     const { service, smtp } = buildMailHarness(base);
     const handler = new EmailComposeHandler({ mailService: service });
@@ -755,12 +759,12 @@ Deno.test("compose - distinct grants are distinct operations while one self-comp
     assertEquals(selfSecond.emailSubmission?.reused, true);
     assertEquals(smtp.submissions.length, 3);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("compose - a rejected SMTP submission surfaces the failure and never claims delivery", async () => {
-  const base = await Deno.makeTempDir();
+test("compose - a rejected SMTP submission surfaces the failure and never claims delivery", async () => {
+  const base = await makeTempDir();
   try {
     const { service, smtp } = buildMailHarness(base);
     smtp.mode = "failed";
@@ -777,7 +781,7 @@ Deno.test("compose - a rejected SMTP submission surfaces the failure and never c
     assertStringIncludes(result.error ?? "", "nothing was delivered");
     assertEquals(smtp.submissions.length, 1);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
@@ -807,15 +811,15 @@ interface EndpointHarness {
   registry: SessionRegistry;
   sessionId: string;
   auditPath: string;
+  port: number;
 }
 
 async function withEndpoint(
-  port: number,
   mailService: EmailComposeMailService,
   options: { grants?: readonly DestinationGrant[]; fenced?: boolean; audit?: boolean },
   body: (harness: EndpointHarness) => Promise<void>,
 ): Promise<void> {
-  const base = await Deno.makeTempDir();
+  const base = await makeTempDir();
   const registry = new SessionRegistry();
   const workspaceManager = new WorkspaceManager({ repoPath: base, workspacesDir: "workspaces" });
   const memoryStore = new MemoryStore(workspaceManager, {});
@@ -854,16 +858,16 @@ async function withEndpoint(
   const server = new SkillAPIServer(
     registry,
     skillRegistry,
-    { port, host: "127.0.0.1" },
+    { port: 0, host: "127.0.0.1" },
     TEST_SKILL_SECRET,
   );
-  server.start();
+  const port = server.start();
   try {
-    await body({ server, registry, sessionId, auditPath });
+    await body({ server, registry, sessionId, auditPath, port });
   } finally {
     await server.stop();
     registry.stop();
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 }
 
@@ -900,10 +904,9 @@ async function skillApiMetricValue(skill: string, status: string): Promise<numbe
   return match?.value ?? 0;
 }
 
-Deno.test("endpoint - send-email requires the session JWT, honors the fence and reports the submission", async () => {
-  const port = 34901;
+test("endpoint - send-email requires the session JWT, honors the fence and reports the submission", async () => {
   const mailService = new RecordingMailService();
-  await withEndpoint(port, mailService, {}, async ({ registry, sessionId, auditPath }) => {
+  await withEndpoint(mailService, {}, async ({ registry, sessionId, auditPath, port }) => {
     const ok = await postCompose(port, registry, sessionId, {
       grantId: "grant-1",
       request: request(),
@@ -918,7 +921,7 @@ Deno.test("endpoint - send-email requires the session JWT, honors the fence and 
     // The writer was constructed with the fixture's own session id (the registry assigns its own
     // id at registration, and the host names the audit file).
     const auditFile = join(auditPath, "email", OWNER, `${SESSION_ID}.jsonl`);
-    const audit = Deno.readTextFileSync(auditFile);
+    const audit = fs.readFileSync(auditFile, "utf8");
     assertStringIncludes(audit, "send-email");
     assert(!audit.includes(RECIPIENT), "the audit log must not record the destination address");
     assert(!audit.includes("Project update"), "the audit log must not record the subject");
@@ -944,14 +947,12 @@ Deno.test("endpoint - send-email requires the session JWT, honors the fence and 
   });
 });
 
-Deno.test("endpoint - a recovery-fenced session cannot compose", async () => {
-  const port = 34902;
+test("endpoint - a recovery-fenced session cannot compose", async () => {
   const mailService = new RecordingMailService();
   await withEndpoint(
-    port,
     mailService,
     { fenced: true },
-    async ({ registry, sessionId }) => {
+    async ({ registry, sessionId, port }) => {
       const response = await postCompose(port, registry, sessionId, {
         grantId: "grant-1",
         request: request(),
@@ -962,10 +963,9 @@ Deno.test("endpoint - a recovery-fenced session cannot compose", async () => {
   );
 });
 
-Deno.test("endpoint - the in-flight lease is held for the whole durable submission", async () => {
-  const port = 34903;
+test("endpoint - the in-flight lease is held for the whole durable submission", async () => {
   const mailService = new DeferredMailService();
-  await withEndpoint(port, mailService, {}, async ({ registry, sessionId }) => {
+  await withEndpoint(mailService, {}, async ({ registry, sessionId, port }) => {
     const pending = postCompose(port, registry, sessionId, {
       grantId: "grant-1",
       request: request(),
@@ -984,8 +984,7 @@ Deno.test("endpoint - the in-flight lease is held for the whole durable submissi
   });
 });
 
-Deno.test("endpoint - an unknown outcome is reported once and is not cached for a blind retry", async () => {
-  const port = 34904;
+test("endpoint - an unknown outcome is reported once and is not cached for a blind retry", async () => {
   const mailService = new RecordingMailService();
   mailService.outcome = {
     operationId: `op_${"c".repeat(24)}`,
@@ -993,7 +992,7 @@ Deno.test("endpoint - an unknown outcome is reported once and is not cached for 
     reused: false,
     safeCode: "CONNECTION_LOST",
   };
-  await withEndpoint(port, mailService, {}, async ({ registry, sessionId }) => {
+  await withEndpoint(mailService, {}, async ({ registry, sessionId, port }) => {
     const first = await postCompose(port, registry, sessionId, {
       grantId: "grant-1",
       request: request(),

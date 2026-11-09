@@ -9,11 +9,19 @@
 // The agent process is mocked: instead of spawning a real `opencode acp`
 // subprocess, the tests spawn `tests/mocks/mock-acp-agent.ts` — a scripted
 // ACP agent that speaks JSON-RPC over stdio and drives the bot's Skill API.
-// No model tokens are spent. Tests are skipped when the `dumb-init` or
-// `deno` binaries are not installed locally (the container bundles both).
+// No model tokens are spent. Tests are skipped when the `dumb-init` binary is
+// not installed locally (the container bundles it); the mock agent runs on
+// this test process's own Bun executable.
+//
+// Deno's `sanitizeExit`/`sanitizeOps`/`sanitizeResources` have no Bun
+// equivalent, so every test measures this process's own descriptor table and
+// descendant tree instead (`tests/helpers/leak-check.ts`) and asserts both are
+// back at the pre-test values once its teardown has finished.
 
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 import { AgentProcessPool } from "../../src/core/agent-process-pool.ts";
 import { AgentConnector } from "../../src/acp/agent-connector.ts";
 import type { AgentConfig, AgentConnectorOptions } from "../../src/acp/types.ts";
@@ -24,6 +32,9 @@ import { SkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { createLogger } from "../../src/utils/logger.ts";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { killProcessTree, processAlive } from "../../src/utils/process-lifecycle.ts";
+import { snapshot, teardownWithLeakCheck } from "../helpers/leak-check.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, Platform } from "../../src/types/events.ts";
 import { PlatformAdapter } from "../../src/platforms/platform-adapter.ts";
@@ -116,15 +127,16 @@ const SKILL_API_PORT = 3001;
 /** Model ID passed to the (mocked) agent's session/set_model. The mock
  * accepts any model ID, so this is purely for configuration fidelity; local
  * dev can override with a local provider via INTEGRATION_TEST_MODEL. */
-const TEST_MODEL = Deno.env.get("INTEGRATION_TEST_MODEL") ?? "opencode/hy3-free";
+const TEST_MODEL = process.env["INTEGRATION_TEST_MODEL"] ?? "opencode/hy3-free";
 
-async function binaryAvailable(name: string): Promise<boolean> {
-  try {
-    const res = await new Deno.Command("which", { args: [name] }).output();
-    return res.code === 0;
-  } catch {
-    return false;
-  }
+/** The connector wraps every agent launch in `dumb-init`; without it nothing spawns. */
+const DUMB_INIT_READY = Bun.which("dumb-init") !== null;
+
+/** A bounded real delay: process death and descriptor closure are OS events. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
 }
 
 function buildTestConfig(tempDir: string, jwtDir: string): Config {
@@ -148,39 +160,19 @@ function buildTestConfig(tempDir: string, jwtDir: string): Config {
 }
 
 /**
- * Wait until the process with the given PID has fully exited (polls `kill -0`).
- * Needed because `AgentConnector.disconnect()` only waits DISCONNECT_TIMEOUT_MS
- * (2s) for the process to exit — a still-flushing opencode process can otherwise
- * race the recursive remove of the temp dir ("Directory not empty").
+ * Wait until the process with the given PID has fully exited (polls the
+ * process table through the shared liveness primitive). Needed because
+ * `AgentConnector.disconnect()` only waits DISCONNECT_TIMEOUT_MS (2s) for the
+ * process to exit — a still-flushing opencode process can otherwise race the
+ * recursive remove of the temp dir ("Directory not empty").
  */
 async function waitForProcessGone(pid: number, timeoutMs = 10_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    try {
-      await new Deno.Command("kill", { args: ["-0", String(pid)] }).output();
-      await new Promise((r) => setTimeout(r, 100));
-    } catch {
-      return true; // process no longer exists
-    }
+    if (!await processAlive(pid)) return true; // process no longer exists
+    await delay(100);
   }
   return false;
-}
-
-/** Kill an agent process tree: tool children -> opencode -> dumb-init root. */
-async function killProcessTree(rootPid: number): Promise<void> {
-  const childrenOut = await new Deno.Command("pgrep", { args: ["-P", String(rootPid)] }).output();
-  const childPids = childrenOut.stdout
-    .toString()
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((s) => parseInt(s.trim(), 10));
-  for (const cpid of childPids) {
-    // Kill the tool-call subprocesses (e.g. bash children of opencode).
-    await new Deno.Command("pkill", { args: ["-9", "-P", String(cpid)] }).output();
-    await new Deno.Command("kill", { args: ["-9", String(cpid)] }).output();
-  }
-  await new Deno.Command("kill", { args: ["-9", String(rootPid)] }).output();
 }
 
 /**
@@ -207,7 +199,7 @@ async function promptWithQuotaRetry(
       // fresh window.
       const hintMs = m ? parseFloat(m[1]) * 1000 : 5_000;
       const waitMs = Math.max(Math.min(hintMs, 120_000), 60_000);
-      await new Promise((r) => setTimeout(r, waitMs));
+      await delay(waitMs);
     }
   }
   throw new Error("unreachable");
@@ -217,13 +209,13 @@ async function promptWithQuotaRetry(
 async function removeDirWithRetry(dir: string, attempts = 6): Promise<void> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
       return;
     } catch {
       if (attempt === attempts) {
-        await Deno.remove(dir, { recursive: true });
+        await fsp.rm(dir, { recursive: true });
       } else {
-        await new Promise((r) => setTimeout(r, 500));
+        await delay(500);
       }
     }
   }
@@ -233,38 +225,32 @@ async function removeDirWithRetry(dir: string, attempts = 6): Promise<void> {
  * Swap the agent spawn (normally `opencode acp`) for the mock ACP agent so
  * integration tests run hermetically without spending model tokens. The
  * AgentConnector wraps the spawn with dumb-init, so the mock is launched as:
- *   dumb-init -- deno run --no-check --allow-env --allow-read --allow-write --allow-net <script>
+ *   dumb-init -- bun run --no-env-file <script>
  */
 function useMockAgent(agentConfig: AgentConfig): void {
-  const mockAgentScript = join(import.meta.dirname!, "../mocks/mock-acp-agent.ts");
-  agentConfig.command = "deno";
-  agentConfig.args = [
-    "run",
-    "--no-check",
-    "--allow-env",
-    "--allow-read",
-    "--allow-write",
-    "--allow-net",
-    mockAgentScript,
-  ];
+  const mockAgentScript = new URL("../mocks/mock-acp-agent.ts", import.meta.url).pathname;
+  agentConfig.command = process.execPath;
+  agentConfig.args = ["run", "--no-env-file", mockAgentScript];
 }
 
-Deno.test({
-  name: "Integration: shared process is reused across pool-key sessions (OpenCode 1.18.21)",
-  ignore: !(await binaryAvailable("dumb-init") && await binaryAvailable("deno")),
-  sanitizeExit: false,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
-    const tempDir = await Deno.makeTempDir();
+test.skipIf(!DUMB_INIT_READY)(
+  "Integration: shared process is reused across pool-key sessions (OpenCode 1.18.21)",
+  async () => {
+    const before = await snapshot();
+    const tempDir = await makeTempDir();
     const jwtDir = join(tempDir, "skill-jwt");
-    await Deno.mkdir(jwtDir, { recursive: true });
+    await fsp.mkdir(jwtDir, { recursive: true });
+    // Resources the teardown must stop even when an assertion above fails:
+    // a failing test must not leave a pool, a server or mock agents running.
+    const spawned: AgentConnector[] = [];
+    let sessionRegistry: SessionRegistry | undefined;
+    let server: SkillAPIServer | undefined;
+    let pool: AgentProcessPool | undefined;
     let pid1: number | undefined;
     let pid2: number | undefined;
-    let server: SkillAPIServer | undefined;
     try {
       const config = buildTestConfig(tempDir, jwtDir);
-      const sessionRegistry = new SessionRegistry();
+      sessionRegistry = new SessionRegistry();
       const workspaceManager = new WorkspaceManager({
         repoPath: tempDir,
         workspacesDir: "workspaces",
@@ -281,7 +267,7 @@ Deno.test({
         TEST_SKILL_SECRET,
       );
       server.start();
-      await new Promise((r) => setTimeout(r, 200));
+      await delay(200);
 
       const event = {
         platform: "discord",
@@ -321,7 +307,7 @@ Deno.test({
       agentConfig.env = {
         ...agentConfig.env,
         SKILL_API_URL: `http://127.0.0.1:${SKILL_API_PORT}`,
-        MOCK_PROMPT_DELAY_MS: Deno.env.get("INTEGRATION_TEST_MOCK_PROMPT_DELAY_MS") ?? "12000",
+        MOCK_PROMPT_DELAY_MS: process.env["INTEGRATION_TEST_MOCK_PROMPT_DELAY_MS"] ?? "12000",
       };
       useMockAgent(agentConfig);
       const clientConfig = {
@@ -335,8 +321,7 @@ Deno.test({
         xdgDataHome: agentConfig.env?.["XDG_DATA_HOME"],
       };
 
-      const spawned: AgentConnector[] = [];
-      const pool = new AgentProcessPool(
+      pool = new AgentProcessPool(
         config,
         sessionRegistry,
         TEST_SKILL_SECRET,
@@ -347,10 +332,11 @@ Deno.test({
         },
         60_000,
       );
+      const runningPool = pool;
 
       let lastPid: number | undefined;
       const runSession = async (label: string) => {
-        const result = await pool.run(
+        const result = await runningPool.run(
           {
             poolKey,
             agentType: "opencode",
@@ -393,40 +379,45 @@ Deno.test({
       // One process must serve both sessions (lazy spawn + reuse, no respawn).
       assertEquals(spawned.length, 1, "shared process must be reused, not respawned");
       assert(pid1 !== undefined && pid1 === pid2, "same process PID across sessions");
-
-      for (const connector of spawned) {
-        await connector.disconnect();
-      }
-      pool.stop();
-      sessionRegistry.stop();
-      if (server) await server.stop();
     } finally {
-      if (server) await server.stop();
-      const procPid = pid2 ?? pid1;
-      if (procPid !== undefined) {
-        // Wait for the shared process to fully exit so the dying opencode
-        // process cannot race the recursive remove of the temp dir.
-        await waitForProcessGone(procPid);
-      }
-      await removeDirWithRetry(tempDir);
+      await teardownWithLeakCheck(before, async () => {
+        for (const connector of spawned) {
+          await connector.disconnect();
+        }
+        if (pool) await pool.stop();
+        sessionRegistry?.stop();
+        if (server) await server.stop();
+        const procPid = pid2 ?? pid1;
+        if (procPid !== undefined) {
+          // Wait for the shared process to fully exit so the dying opencode
+          // process cannot race the recursive remove of the temp dir.
+          await waitForProcessGone(procPid);
+        }
+        await removeDirWithRetry(tempDir);
+      });
     }
   },
-});
+);
 
-Deno.test({
-  name: "Integration: killing the shared process mid-tool-call triggers controlled recovery",
-  ignore: !(await binaryAvailable("dumb-init") && await binaryAvailable("deno")),
-  sanitizeExit: false,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
-    const tempDir = await Deno.makeTempDir();
+test.skipIf(!DUMB_INIT_READY)(
+  "Integration: killing the shared process mid-tool-call triggers controlled recovery",
+  async () => {
+    const before = await snapshot();
+    const tempDir = await makeTempDir();
     const jwtDir = join(tempDir, "skill-jwt");
-    await Deno.mkdir(jwtDir, { recursive: true });
+    await fsp.mkdir(jwtDir, { recursive: true });
+    // Resources the teardown must stop even when an assertion above fails.
+    const spawned: AgentConnector[] = [];
+    let sessionRegistry: SessionRegistry | undefined;
+    let server: SkillAPIServer | undefined;
+    let pool: AgentProcessPool | undefined;
     let finalPid: number | undefined;
     try {
       const config = buildTestConfig(tempDir, jwtDir);
-      const sessionRegistry = new SessionRegistry();
+      sessionRegistry = new SessionRegistry();
+      // The runner closure below reads the registry, so capture the assigned
+      // instance in a const the closure can narrow.
+      const registry = sessionRegistry;
       const workspaceManager = new WorkspaceManager({
         repoPath: tempDir,
         workspacesDir: "workspaces",
@@ -436,14 +427,14 @@ Deno.test({
       const logger = createLogger("IntegrationSharedProcess");
 
       // Skill API server so the agent's skill callbacks (memory-save, send-reply) work.
-      const server = new SkillAPIServer(
+      server = new SkillAPIServer(
         sessionRegistry,
         skillRegistry,
         { port: SKILL_API_PORT, host: "127.0.0.1" },
         TEST_SKILL_SECRET,
       );
       server.start();
-      await new Promise((r) => setTimeout(r, 200));
+      await delay(200);
 
       const event = {
         platform: "discord",
@@ -483,7 +474,7 @@ Deno.test({
       agentConfig.env = {
         ...agentConfig.env,
         SKILL_API_URL: `http://127.0.0.1:${SKILL_API_PORT}`,
-        MOCK_PROMPT_DELAY_MS: Deno.env.get("INTEGRATION_TEST_MOCK_PROMPT_DELAY_MS") ?? "12000",
+        MOCK_PROMPT_DELAY_MS: process.env["INTEGRATION_TEST_MOCK_PROMPT_DELAY_MS"] ?? "12000",
       };
       useMockAgent(agentConfig);
       const clientConfig = {
@@ -497,8 +488,7 @@ Deno.test({
         xdgDataHome: agentConfig.env?.["XDG_DATA_HOME"],
       };
 
-      const spawned: AgentConnector[] = [];
-      const pool = new AgentProcessPool(
+      pool = new AgentProcessPool(
         config,
         sessionRegistry,
         TEST_SKILL_SECRET,
@@ -509,11 +499,12 @@ Deno.test({
         },
         60_000,
       );
+      const runningPool = pool;
 
       let killedPid: number | undefined;
       let acpSessionIdRef: string | undefined;
 
-      const runPromise = pool.run(
+      const runPromise = runningPool.run(
         {
           poolKey,
           agentType: "opencode",
@@ -574,7 +565,7 @@ Deno.test({
               workspace.key,
               "discord/456",
             );
-            const fileSent = sessionRegistry.hasFileSent(sessionId);
+            const fileSent = registry.hasFileSent(sessionId);
             if (!replySent && !reactionSent && !fileSent) {
               const response = await promptWithQuotaRetry(connector, acpSessionId, prompt);
               assertEquals(response.stopReason, "end_turn");
@@ -587,7 +578,7 @@ Deno.test({
       // Wait for the shared process to spawn.
       const spawnDeadline = Date.now() + 30_000;
       while (killedPid === undefined && Date.now() < spawnDeadline) {
-        await new Promise((r) => setTimeout(r, 500));
+        await delay(500);
       }
       assert(killedPid !== undefined, "shared process must have spawned");
       const originalPid = killedPid;
@@ -596,11 +587,11 @@ Deno.test({
       // the prompt open for MOCK_PROMPT_DELAY_MS, default 12s; the kill lands 2s
       // into that window), then the pool respawn + session/load path runs.
       const mockDelayMs = parseInt(
-        Deno.env.get("INTEGRATION_TEST_MOCK_PROMPT_DELAY_MS") ?? "12000",
+        process.env["INTEGRATION_TEST_MOCK_PROMPT_DELAY_MS"] ?? "12000",
         10,
       );
-      await new Promise((r) => setTimeout(r, Math.max(1000, mockDelayMs - 2000)));
-      await killProcessTree(originalPid);
+      await delay(Math.max(1000, mockDelayMs - 2000));
+      await killProcessTree(originalPid, "SIGKILL");
 
       const result = await runPromise;
       assertEquals(
@@ -628,22 +619,23 @@ Deno.test({
         "exactly one reply sent",
       );
       const memoryFile = join(workspace.path, "memory.public.jsonl");
-      const lines = (await Deno.readTextFile(memoryFile)).trim().split("\n").filter(Boolean);
+      const lines = (await fsp.readFile(memoryFile, "utf8")).trim().split("\n").filter(Boolean);
       assertEquals(lines.length, 1, "exactly one memory event (no duplicates)");
-
-      for (const connector of spawned) {
-        await connector.disconnect();
-      }
-      await server.stop();
-      pool.stop();
-      sessionRegistry.stop();
     } finally {
-      if (finalPid !== undefined) {
-        // Wait for the respawned process to fully exit so a still-flushing
-        // opencode process cannot race the recursive remove of the temp dir.
-        await waitForProcessGone(finalPid);
-      }
-      await removeDirWithRetry(tempDir);
+      await teardownWithLeakCheck(before, async () => {
+        for (const connector of spawned) {
+          await connector.disconnect();
+        }
+        if (pool) await pool.stop();
+        sessionRegistry?.stop();
+        if (server) await server.stop();
+        if (finalPid !== undefined) {
+          // Wait for the respawned process to fully exit so a still-flushing
+          // opencode process cannot race the recursive remove of the temp dir.
+          await waitForProcessGone(finalPid);
+        }
+        await removeDirWithRetry(tempDir);
+      });
     }
   },
-});
+);

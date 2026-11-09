@@ -12,7 +12,7 @@
 // repeated accepted request, APPEND failure, and accept-then-persist-failure.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { EmailConfig } from "../../../src/types/config.ts";
 import { normalizeEmailMailbox } from "../../../src/platforms/email/email-identity.ts";
 import {
@@ -60,6 +60,9 @@ import {
   outboundEvidenceMetaRef,
   outboundEvidenceRef,
 } from "../../../src/platforms/email/mail-service.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const OWNER = "e_" + "ab".repeat(32);
 const OTHER_OWNER = "e_" + "cd".repeat(32);
@@ -321,7 +324,7 @@ async function journalTransitions(emailRoot: string): Promise<string[]> {
 
 async function readMeta(emailRoot: string, operationId: string): Promise<OutboundEvidenceMeta> {
   return JSON.parse(
-    await Deno.readTextFile(join(emailRoot, outboundEvidenceMetaRef(operationId))),
+    await fsp.readFile(join(emailRoot, outboundEvidenceMetaRef(operationId)), "utf8"),
   ) as OutboundEvidenceMeta;
 }
 
@@ -332,15 +335,14 @@ async function writeEvidence(
   emlBytes: Uint8Array,
   meta: OutboundEvidenceMeta,
 ): Promise<void> {
-  await Deno.mkdir(join(emailRoot, "outbound"), { recursive: true, mode: 0o700 });
-  await Deno.writeFile(join(emailRoot, outboundEvidenceRef(operationId)), emlBytes, {
-    create: true,
+  await fsp.mkdir(join(emailRoot, "outbound"), { recursive: true, mode: 0o700 });
+  await fsp.writeFile(join(emailRoot, outboundEvidenceRef(operationId)), emlBytes, {
     mode: 0o600,
   });
-  await Deno.writeFile(
+  await fsp.writeFile(
     join(emailRoot, outboundEvidenceMetaRef(operationId)),
     new TextEncoder().encode(JSON.stringify(meta, null, 2) + "\n"),
-    { create: true, mode: 0o600 },
+    { mode: 0o600 },
   );
 }
 
@@ -349,21 +351,21 @@ function countOf(haystack: string, needle: string): number {
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "mail-service-test-" });
+  const dir = await makeTempDir({ prefix: "mail-service-test-" });
   try {
     _resetSharedRegistryForTesting();
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
   }
 }
 
-Deno.test("MailService - accepted message is submitted once with history and sent copy", async () => {
+test("MailService - accepted message is submitted once with history and sent copy", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     const outcome = await h.service.send(draft("work-happy"));
@@ -381,7 +383,9 @@ Deno.test("MailService - accepted message is submitted once with history and sen
     assertEquals(h.imap.appended.length, 1);
     const wireBytes = h.smtp.submissions[0].emlBytes;
     const operationId = computeOperationId(OWNER, { workId: "work-happy", actionSlot: "reply" });
-    const evidenceBytes = await Deno.readFile(join(h.emailRoot, outboundEvidenceRef(operationId)));
+    const evidenceBytes = new Uint8Array(
+      await fsp.readFile(join(h.emailRoot, outboundEvidenceRef(operationId))),
+    );
     assertEquals(evidenceBytes, wireBytes);
     assertEquals(h.imap.appended[0], wireBytes);
     assertEquals(h.smtp.submissions[0].envelope.from, BOT);
@@ -418,7 +422,7 @@ Deno.test("MailService - accepted message is submitted once with history and sen
   });
 });
 
-Deno.test("MailService - definite failure records failed, leaves no history and no copy", async () => {
+test("MailService - definite failure records failed, leaves no history and no copy", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     h.smtp.mode = "failed";
@@ -439,7 +443,7 @@ Deno.test("MailService - definite failure records failed, leaves no history and 
   });
 });
 
-Deno.test("MailService - unknown outcome is persisted for manual review without history", async () => {
+test("MailService - unknown outcome is persisted for manual review without history", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     h.smtp.mode = "unknown";
@@ -455,14 +459,14 @@ Deno.test("MailService - unknown outcome is persisted for manual review without 
     const operationId = computeOperationId(OWNER, { workId: "work-unknown", actionSlot: "reply" });
     assertEquals(outcome.operationId, operationId);
     assert(
-      (await Deno.readFile(join(h.emailRoot, outboundEvidenceRef(operationId)))).byteLength > 0,
+      (await fsp.readFile(join(h.emailRoot, outboundEvidenceRef(operationId)))).byteLength > 0,
     );
     assertEquals(await h.service.send(draft("work-unknown")).then((o) => o.reused), true);
     assertEquals(h.smtp.submissions.length, 1);
   });
 });
 
-Deno.test("MailService - repeated accepted request returns the recorded result with zero SMTP", async () => {
+test("MailService - repeated accepted request returns the recorded result with zero SMTP", async () => {
   await withTempDir(async (base) => {
     const first = buildHarness({ base });
     const sent = await first.service.send(draft("work-repeat"));
@@ -508,7 +512,7 @@ Deno.test("MailService - repeated accepted request returns the recorded result w
   });
 });
 
-Deno.test("MailService - accepted but unrecorded outcome is unknown and never replayed", async () => {
+test("MailService - accepted but unrecorded outcome is unknown and never replayed", async () => {
   await withTempDir(async (base) => {
     const store = new OutcomeFailingStore(join(base, "email"));
     const h = buildHarness({ base, store });
@@ -550,7 +554,7 @@ Deno.test("MailService - accepted but unrecorded outcome is unknown and never re
   });
 });
 
-Deno.test("MailService - crash during SMTP becomes unknown and is never automatically resubmitted", async () => {
+test("MailService - crash during SMTP becomes unknown and is never automatically resubmitted", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     h.smtp.mode = "hang";
@@ -583,7 +587,7 @@ Deno.test("MailService - crash during SMTP becomes unknown and is never automati
   });
 });
 
-Deno.test("MailService - prepared operation resumes with persisted bytes and envelope", async () => {
+test("MailService - prepared operation resumes with persisted bytes and envelope", async () => {
   await withTempDir(async (base) => {
     // Crash before SMTP: evidence was published and the journal reserved, then nothing.
     const first = buildHarness({ base });
@@ -644,7 +648,7 @@ Deno.test("MailService - prepared operation resumes with persisted bytes and env
   });
 });
 
-Deno.test("MailService - incomplete or tampered prepared evidence blocks submission", async () => {
+test("MailService - incomplete or tampered prepared evidence blocks submission", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     const key: EmailOperationKey = { workId: "work-evidence", actionSlot: "reply" };
@@ -665,11 +669,11 @@ Deno.test("MailService - incomplete or tampered prepared evidence blocks submiss
     assertEquals(h.imap.appended.length, 0);
 
     // The bytes are published, but the metadata sidecar is missing.
-    await Deno.mkdir(join(h.emailRoot, "outbound"), { recursive: true, mode: 0o700 });
-    await Deno.writeFile(
+    await fsp.mkdir(join(h.emailRoot, "outbound"), { recursive: true, mode: 0o700 });
+    await fsp.writeFile(
       join(h.emailRoot, outboundEvidenceRef(operationId)),
       constructed.emlBytes,
-      { create: true, mode: 0o600 },
+      { mode: 0o600 },
     );
     await assertRejects(
       () => h.service.send(draft("work-evidence")),
@@ -680,7 +684,7 @@ Deno.test("MailService - incomplete or tampered prepared evidence blocks submiss
   });
 });
 
-Deno.test("MailService - tampered evidence digest is rejected before SMTP", async () => {
+test("MailService - tampered evidence digest is rejected before SMTP", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     const key: EmailOperationKey = { workId: "work-digest", actionSlot: "reply" };
@@ -709,7 +713,7 @@ Deno.test("MailService - tampered evidence digest is rejected before SMTP", asyn
     // Tamper with the reserved evidence after publication.
     const tampered = new Uint8Array(constructed.emlBytes);
     tampered[tampered.length - 1] = 0x21;
-    await Deno.writeFile(join(h.emailRoot, outboundEvidenceRef(operationId)), tampered);
+    await fsp.writeFile(join(h.emailRoot, outboundEvidenceRef(operationId)), tampered);
 
     await assertRejects(
       () => h.service.send(draft("work-digest")),
@@ -729,7 +733,7 @@ Deno.test("MailService - tampered evidence digest is rejected before SMTP", asyn
   });
 });
 
-Deno.test("MailService - revoked allowlist is refused before SMTP and reserves nothing", async () => {
+test("MailService - revoked allowlist is refused before SMTP and reserves nothing", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base, channels: [] });
     await assertRejects(
@@ -753,7 +757,7 @@ Deno.test("MailService - revoked allowlist is refused before SMTP and reserves n
   });
 });
 
-Deno.test("MailService - oversized message is refused before SMTP and reserves nothing", async () => {
+test("MailService - oversized message is refused before SMTP and reserves nothing", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base, maxMessageBytes: 64 });
     await assertRejects(
@@ -766,7 +770,7 @@ Deno.test("MailService - oversized message is refused before SMTP and reserves n
   });
 });
 
-Deno.test("MailService - APPEND failure preserves acceptance, history and never resubmits", async () => {
+test("MailService - APPEND failure preserves acceptance, history and never resubmits", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     h.imap.failAppend = true;
@@ -810,7 +814,7 @@ Deno.test("MailService - APPEND failure preserves acceptance, history and never 
   });
 });
 
-Deno.test("MailService - history failure keeps acceptance and is repaired from stored evidence", async () => {
+test("MailService - history failure keeps acceptance and is repaired from stored evidence", async () => {
   await withTempDir(async (base) => {
     const messageStore = new HistoryFailingStore({ workspacesRoot: join(base, "workspaces") });
     const h = buildHarness({ base, messageStore });
@@ -845,7 +849,7 @@ Deno.test("MailService - history failure keeps acceptance and is repaired from s
   });
 });
 
-Deno.test("MailService - concurrent duplicate requests make exactly one SMTP transaction", async () => {
+test("MailService - concurrent duplicate requests make exactly one SMTP transaction", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     const [first, second] = await Promise.all([
@@ -860,7 +864,7 @@ Deno.test("MailService - concurrent duplicate requests make exactly one SMTP tra
   });
 });
 
-Deno.test("MailService - sent copies serialize on the shared IMAP connection", async () => {
+test("MailService - sent copies serialize on the shared IMAP connection", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     h.imap.failAppend = true;
@@ -882,7 +886,7 @@ Deno.test("MailService - sent copies serialize on the shared IMAP connection", a
   });
 });
 
-Deno.test("MailService - transport throw is unknown, invalid drafts are refused locally", async () => {
+test("MailService - transport throw is unknown, invalid drafts are refused locally", async () => {
   await withTempDir(async (base) => {
     const throwing = buildHarness({ base: join(base, "throw") });
     throwing.smtp.mode = "throw";
@@ -908,7 +912,7 @@ Deno.test("MailService - transport throw is unknown, invalid drafts are refused 
   });
 });
 
-Deno.test("MailService - recovery fails closed when another instance already recovered", async () => {
+test("MailService - recovery fails closed when another instance already recovered", async () => {
   await withTempDir(async (base) => {
     const h = buildHarness({ base });
     const outcome = await h.service.send(draft("work-second-instance"));
@@ -934,13 +938,13 @@ Deno.test("MailService - recovery fails closed when another instance already rec
   });
 });
 
-Deno.test("MailService - evidence reference helpers describe the durable layout", () => {
+test("MailService - evidence reference helpers describe the durable layout", () => {
   const operationId = computeOperationId(OWNER, { workId: "work-refs", actionSlot: "reply" });
   assertEquals(outboundEvidenceRef(operationId), `outbound/${operationId}.eml`);
   assertEquals(outboundEvidenceMetaRef(operationId), `outbound/${operationId}.meta.json`);
 });
 
-Deno.test("MailService - recovery and copy repair refuse accepted evidence that no longer matches", async () => {
+test("MailService - recovery and copy repair refuse accepted evidence that no longer matches", async () => {
   await withTempDir(async (base) => {
     const messageStore = new HistoryFailingStore({ workspacesRoot: join(base, "workspaces") });
     const h = buildHarness({ base, messageStore });
@@ -952,9 +956,9 @@ Deno.test("MailService - recovery and copy repair refuse accepted evidence that 
 
     // The accepted bytes are replaced after acceptance.
     const evidencePath = join(h.emailRoot, outboundEvidenceRef(outcome.operationId));
-    const tampered = await Deno.readFile(evidencePath);
+    const tampered = await fsp.readFile(evidencePath);
     tampered[tampered.length - 1] = 0x21;
-    await Deno.writeFile(evidencePath, tampered);
+    await fsp.writeFile(evidencePath, tampered);
 
     // History reconstruction blocks on the mismatched digest and writes no record.
     const recovery = await h.service.recover();
@@ -984,7 +988,7 @@ Deno.test("MailService - recovery and copy repair refuse accepted evidence that 
   });
 });
 
-Deno.test("MailService - instances sharing a state root never replace accepted evidence", async () => {
+test("MailService - instances sharing a state root never replace accepted evidence", async () => {
   await withTempDir(async (base) => {
     const first = buildHarness({ base });
     // A second instance on the same state root, different clock and sender. Both race the same
@@ -1019,7 +1023,7 @@ Deno.test("MailService - instances sharing a state root never replace accepted e
     // that were actually accepted — never the losing draft's content.
     assertEquals(first.smtp.submissions.length, 1);
     assertEquals(
-      await Deno.readFile(join(first.emailRoot, outboundEvidenceRef(operationId))),
+      new Uint8Array(await fsp.readFile(join(first.emailRoot, outboundEvidenceRef(operationId)))),
       first.smtp.submissions[0].emlBytes,
     );
     assertEquals(first.imap.appended[0], first.smtp.submissions[0].emlBytes);

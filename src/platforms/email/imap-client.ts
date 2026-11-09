@@ -15,6 +15,7 @@
 // - Ignores \Seen flag during incremental UID discovery.
 
 import { ImapFlow } from "imapflow";
+import { isIP } from "node:net";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
 import { createLogger } from "@utils/logger.ts";
 import type { EmailImapConfig } from "../../types/config.ts";
@@ -251,6 +252,12 @@ export class EmailImapClient implements ImapTransport {
       rejectUnauthorized: true,
       minVersion: "TLSv1.2",
     };
+    // ImapFlow sets `servername: false` for an IP-literal host so Node verifies
+    // the IP SAN of that host. Bun's TLS implementation rejects a boolean
+    // servername, so leave it unset for an IP (the same host fallback) and pass
+    // the host name for a DNS name.
+    const hostName = String(this.config.host);
+    tlsOptions.servername = isIP(hostName) === 0 ? hostName : undefined;
     if (this.tlsCa) {
       tlsOptions.ca = this.tlsCa;
     }
@@ -758,6 +765,8 @@ export class EmailImapClient implements ImapTransport {
       code.includes("TLS") ||
       msg.includes("STARTTLS") ||
       msg.includes("certificate") ||
+      // Bun's TLS reports an unusable CA with this exact message and no code.
+      msg.includes("Invalid CA") ||
       msg.includes("self signed") ||
       msg.includes("unable to verify")
     ) {

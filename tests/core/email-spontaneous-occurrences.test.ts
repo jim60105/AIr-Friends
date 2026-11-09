@@ -9,7 +9,7 @@
 // uncertain operation evidence forbids re-firing a restored occurrence.
 
 import { assert, assertEquals, assertNotEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import type { SpontaneousPostCallback } from "@core/spontaneous-scheduler.ts";
 import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
@@ -26,6 +26,9 @@ import {
   SubmissionStore,
 } from "../../src/platforms/email/submission-store.ts";
 import type { Config } from "../../src/types/config.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const OWNER = "e_owner0123456789abcdef";
 const THREAD_ONE = "mail:e_owner0123456789abcdef:11111111-1111-1111-1111-111111111111";
@@ -45,18 +48,18 @@ interface Snapshot {
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "email-spontaneous-" });
+  const dir = await makeTempDir({ prefix: "email-spontaneous-" });
   try {
     await fn(dir);
   } finally {
     // A test may have fenced the root read-only; restore permissions before cleanup.
     try {
-      await Deno.chmod(dir, 0o700);
+      await fsp.chmod(dir, 0o700);
     } catch {
       // already writable or gone
     }
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
@@ -138,7 +141,9 @@ function createCallback(handler?: (occurrence?: SpontaneousOccurrence) => void):
 }
 
 async function readSnapshot(root: string): Promise<Snapshot> {
-  return JSON.parse(await Deno.readTextFile(join(root, SPONTANEOUS_SNAPSHOT_FILENAME))) as Snapshot;
+  return JSON.parse(
+    await fsp.readFile(join(root, SPONTANEOUS_SNAPSHOT_FILENAME), "utf8"),
+  ) as Snapshot;
 }
 
 async function waitFor(
@@ -201,7 +206,7 @@ class UnserializableDate extends Date {
   }
 }
 
-Deno.test("email spontaneous - occurrence is durably persisted before any timer is armed", async () => {
+test("email spontaneous - occurrence is durably persisted before any timer is armed", async () => {
   await withTempDir(async (dir) => {
     const store = new GatedScheduleStore({ emailRoot: dir });
     const scheduler = new SpontaneousScheduler(
@@ -216,10 +221,10 @@ Deno.test("email spontaneous - occurrence is durably persisted before any timer 
     await observationWindow(30);
     assertEquals(scheduler.getStatus().email?.nextScheduledAt ?? null, null);
     assertEquals(occurrences.length, 0);
-    await assertRejects(
-      () => Deno.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
-      Deno.errors.NotFound,
+    const missingSnapshot = await assertRejects(
+      () => fsp.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
     );
+    assertEquals(isNotFoundError(missingSnapshot), true);
 
     store.openGate();
     await scheduler.whenReady();
@@ -238,7 +243,7 @@ Deno.test("email spontaneous - occurrence is durably persisted before any timer 
   });
 });
 
-Deno.test("email spontaneous - a failed persistence arms no timer and writes no snapshot", async () => {
+test("email spontaneous - a failed persistence arms no timer and writes no snapshot", async () => {
   await withTempDir(async (dir) => {
     const scheduler = new SpontaneousScheduler(
       makeConfig({
@@ -258,15 +263,15 @@ Deno.test("email spontaneous - a failed persistence arms no timer and writes no 
 
     assertEquals(scheduler.getStatus().email?.nextScheduledAt ?? null, null);
     assertEquals(occurrences.length, 0);
-    await assertRejects(
-      () => Deno.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
-      Deno.errors.NotFound,
+    const missingSnapshot = await assertRejects(
+      () => fsp.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
     );
+    assertEquals(isNotFoundError(missingSnapshot), true);
     scheduler.stop();
   });
 });
 
-Deno.test("email spontaneous - overdue restore keeps occurrence identity and due time", async () => {
+test("email spontaneous - overdue restore keeps occurrence identity and due time", async () => {
   await withTempDir(async (dir) => {
     const seeding = new EmailSpontaneousStore({ emailRoot: dir });
     const dueAt = new Date(Date.now() - 60000);
@@ -305,7 +310,7 @@ Deno.test("email spontaneous - overdue restore keeps occurrence identity and due
   });
 });
 
-Deno.test("email spontaneous - restored selected occurrence keeps its bound target", async () => {
+test("email spontaneous - restored selected occurrence keeps its bound target", async () => {
   await withTempDir(async (dir) => {
     const seeding = new EmailSpontaneousStore({ emailRoot: dir });
     const seeded = await seeding.schedule(new Date(Date.now() - 60000));
@@ -343,7 +348,7 @@ Deno.test("email spontaneous - restored selected occurrence keeps its bound targ
   });
 });
 
-Deno.test("email spontaneous - selection and dispatch claim are durable and cannot be replaced", async () => {
+test("email spontaneous - selection and dispatch claim are durable and cannot be replaced", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const scheduled = await store.schedule(new Date(Date.now() + 3600000));
@@ -381,7 +386,7 @@ Deno.test("email spontaneous - selection and dispatch claim are durable and cann
   });
 });
 
-Deno.test("email spontaneous - finishing replaces the occurrence and installs a distinct successor atomically", async () => {
+test("email spontaneous - finishing replaces the occurrence and installs a distinct successor atomically", async () => {
   await withTempDir(async (dir) => {
     // A bound occurrence with no recorded operation is resolved by its dispatch outcome.
     const store = new EmailSpontaneousStore({
@@ -409,7 +414,7 @@ Deno.test("email spontaneous - finishing replaces the occurrence and installs a 
 
     // One document, one write: no temporary sibling survives the replacement.
     const entries: string[] = [];
-    for await (const entry of Deno.readDir(dir)) {
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
       entries.push(entry.name);
     }
     assertEquals(entries.sort(), [SPONTANEOUS_SNAPSHOT_FILENAME]);
@@ -427,14 +432,14 @@ Deno.test("email spontaneous - finishing replaces the occurrence and installs a 
     assertEquals(nextSnapshot.previous?.occurrenceId, second.occurrenceId);
     assertEquals(nextSnapshot.previous?.status, "completed");
     const entriesAfter: string[] = [];
-    for await (const entry of Deno.readDir(dir)) {
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
       entriesAfter.push(entry.name);
     }
     assertEquals(entriesAfter.sort(), [SPONTANEOUS_SNAPSHOT_FILENAME]);
   });
 });
 
-Deno.test("email spontaneous - unavailable outcome without accepted evidence stays review-required", async () => {
+test("email spontaneous - unavailable outcome without accepted evidence stays review-required", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() + 1000));
@@ -453,7 +458,7 @@ Deno.test("email spontaneous - unavailable outcome without accepted evidence sta
   });
 });
 
-Deno.test("email spontaneous - accepted SMTP evidence forbids re-firing a restored occurrence", async () => {
+test("email spontaneous - accepted SMTP evidence forbids re-firing a restored occurrence", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() - 60000));
@@ -504,7 +509,7 @@ Deno.test("email spontaneous - accepted SMTP evidence forbids re-firing a restor
   });
 });
 
-Deno.test("email spontaneous - recovered submitting evidence forbids re-firing a restored occurrence", async () => {
+test("email spontaneous - recovered submitting evidence forbids re-firing a restored occurrence", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() - 60000));
@@ -555,7 +560,7 @@ Deno.test("email spontaneous - recovered submitting evidence forbids re-firing a
   });
 });
 
-Deno.test("email spontaneous - successor persistence failure fences the lane and stops automatic work", async () => {
+test("email spontaneous - successor persistence failure fences the lane and stops automatic work", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() + 3600000));
@@ -610,10 +615,10 @@ Deno.test("email spontaneous - successor persistence failure fences the lane and
   });
 });
 
-Deno.test("email spontaneous - corrupt snapshot blocks the lane without repair", async () => {
+test("email spontaneous - corrupt snapshot blocks the lane without repair", async () => {
   await withTempDir(async (dir) => {
     const corrupt = '{"v":1,"occurrence":{"occurrenceId":"broken"';
-    await Deno.writeTextFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), corrupt);
+    await fsp.writeFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), corrupt);
 
     const scheduler = new SpontaneousScheduler(
       makeConfig({
@@ -633,12 +638,12 @@ Deno.test("email spontaneous - corrupt snapshot blocks the lane without repair",
 
     assertEquals(scheduler.getStatus().email?.nextScheduledAt ?? null, null);
     assertEquals(occurrences.length, 0);
-    assertEquals(await Deno.readTextFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)), corrupt);
+    assertEquals(await fsp.readFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), "utf8"), corrupt);
     scheduler.stop();
   });
 });
 
-Deno.test("email spontaneous - an unavailable dispatch is recorded as review-required, never completed", async () => {
+test("email spontaneous - an unavailable dispatch is recorded as review-required, never completed", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() - 1000));
@@ -673,7 +678,7 @@ Deno.test("email spontaneous - an unavailable dispatch is recorded as review-req
   });
 });
 
-Deno.test("email spontaneous - non-email platforms keep best-effort scheduling", async () => {
+test("email spontaneous - non-email platforms keep best-effort scheduling", async () => {
   await withTempDir(async (dir) => {
     const scheduler = new SpontaneousScheduler(
       makeConfig({
@@ -701,19 +706,19 @@ Deno.test("email spontaneous - non-email platforms keep best-effort scheduling",
     assertEquals(status.discord.nextScheduledAt?.toISOString(), restoredNextAt.toISOString());
     await observationWindow(30);
     const persisted = JSON.parse(
-      await Deno.readTextFile(join(dir, "scheduler-state.json")),
+      await fsp.readFile(join(dir, "scheduler-state.json"), "utf8"),
     ) as Record<string, string>;
     assertEquals(persisted["spontaneous:discord"], restoredNextAt.toISOString());
-    await assertRejects(
-      () => Deno.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
-      Deno.errors.NotFound,
+    const missingSnapshot = await assertRejects(
+      () => fsp.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
     );
+    assertEquals(isNotFoundError(missingSnapshot), true);
     assertEquals(occurrences.length, 0);
     scheduler.stop();
   });
 });
 
-Deno.test("email spontaneous - occurrence lane stays inert while the email platform is disabled", async () => {
+test("email spontaneous - occurrence lane stays inert while the email platform is disabled", async () => {
   await withTempDir(async (dir) => {
     const scheduler = new SpontaneousScheduler(
       makeConfig({ emailEnabled: false, emailSpontaneous: true }),
@@ -728,15 +733,15 @@ Deno.test("email spontaneous - occurrence lane stays inert while the email platf
 
     assertEquals(Object.keys(scheduler.getStatus()).length, 0);
     assertEquals(occurrences.length, 0);
-    await assertRejects(
-      () => Deno.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
-      Deno.errors.NotFound,
+    const missingSnapshot = await assertRejects(
+      () => fsp.lstat(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)),
     );
+    assertEquals(isNotFoundError(missingSnapshot), true);
     scheduler.stop();
   });
 });
 
-Deno.test("email spontaneous - diagnostic codes remain safe and typed", async () => {
+test("email spontaneous - diagnostic codes remain safe and typed", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const error = await assertRejects(
@@ -749,10 +754,10 @@ Deno.test("email spontaneous - diagnostic codes remain safe and typed", async ()
   });
 });
 
-Deno.test("email spontaneous - an incomplete snapshot envelope blocks the lane and is preserved", async () => {
+test("email spontaneous - an incomplete snapshot envelope blocks the lane and is preserved", async () => {
   await withTempDir(async (dir) => {
     const incomplete = `{"v":1}`;
-    await Deno.writeTextFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), incomplete);
+    await fsp.writeFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), incomplete);
 
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const failure = await assertRejects(
@@ -783,15 +788,15 @@ Deno.test("email spontaneous - an incomplete snapshot envelope blocks the lane a
 
     assertEquals(scheduler.getStatus().email?.nextScheduledAt ?? null, null);
     assertEquals(occurrences.length, 0);
-    assertEquals(await Deno.readTextFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME)), incomplete);
+    assertEquals(await fsp.readFile(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME), "utf8"), incomplete);
     scheduler.stop();
   });
 });
 
-Deno.test("email spontaneous - an unreadable snapshot fences the lane instead of allocating a successor", async () => {
+test("email spontaneous - an unreadable snapshot fences the lane instead of allocating a successor", async () => {
   await withTempDir(async (dir) => {
     // A snapshot path that cannot be read as a file is an integrity failure, not an empty lane.
-    await Deno.mkdir(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME));
+    await fsp.mkdir(join(dir, SPONTANEOUS_SNAPSHOT_FILENAME));
 
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     await assertRejects(() => store.restore(), EmailSpontaneousStoreError, "Failed to read");
@@ -824,7 +829,7 @@ Deno.test("email spontaneous - an unreadable snapshot fences the lane instead of
   });
 });
 
-Deno.test("email spontaneous - an interrupted occurrence without recorded evidence resumes identically", async () => {
+test("email spontaneous - an interrupted occurrence without recorded evidence resumes identically", async () => {
   await withTempDir(async (dir) => {
     const dueAt = new Date(Date.now() - 60000);
     const seeding = new EmailSpontaneousStore({ emailRoot: dir });
@@ -861,7 +866,7 @@ Deno.test("email spontaneous - an interrupted occurrence without recorded eviden
   });
 });
 
-Deno.test("email spontaneous - a prepared attempt is unresolved and resumes the same occurrence", async () => {
+test("email spontaneous - a prepared attempt is unresolved and resumes the same occurrence", async () => {
   await withTempDir(async (dir) => {
     const seeding = new EmailSpontaneousStore({ emailRoot: dir });
     const seeded = await seeding.schedule(new Date(Date.now() - 60000));
@@ -902,7 +907,7 @@ Deno.test("email spontaneous - a prepared attempt is unresolved and resumes the 
   });
 });
 
-Deno.test("email spontaneous - a real dispatch binds the target durably before it runs", async () => {
+test("email spontaneous - a real dispatch binds the target durably before it runs", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() - 1000));
@@ -949,7 +954,7 @@ Deno.test("email spontaneous - a real dispatch binds the target durably before i
   });
 });
 
-Deno.test("email spontaneous - a scheduler restart never dispatches one occurrence twice", async () => {
+test("email spontaneous - a scheduler restart never dispatches one occurrence twice", async () => {
   await withTempDir(async (dir) => {
     const store = new EmailSpontaneousStore({ emailRoot: dir });
     const occurrence = await store.schedule(new Date(Date.now() - 1000));

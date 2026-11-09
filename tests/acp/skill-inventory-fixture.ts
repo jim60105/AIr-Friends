@@ -6,10 +6,12 @@
 
 import { buildSkillAutoApproveList, type SkillAutoApproveList } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
+import fs from "node:fs";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** Inventory over a fresh, empty (but canonical) temp root: no grants. */
 export function emptySkillList(): SkillAutoApproveList {
-  const root = Deno.makeTempDirSync({ prefix: "air-empty-skills-" });
+  const root = makeTempDirSync({ prefix: "air-empty-skills-" });
   return buildSkillAutoApproveList({
     rootObservation: observeTrustedSkillsRoot("opencode", root),
   });
@@ -25,15 +27,15 @@ export function skillInventoryAt(
   scriptSkills: string[] = [],
   commandSkills: string[] = [],
 ): SkillAutoApproveList {
-  const canonical = Deno.realPathSync(root);
+  const canonical = fs.realpathSync(root);
   for (const name of scriptSkills) {
-    Deno.mkdirSync(`${canonical}/${name}/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${canonical}/${name}/SKILL.md`, `# ${name}`);
-    Deno.writeTextFileSync(`${canonical}/${name}/scripts/${name}.ts`, "// real");
+    fs.mkdirSync(`${canonical}/${name}/scripts`, { recursive: true });
+    fs.writeFileSync(`${canonical}/${name}/SKILL.md`, `# ${name}`);
+    fs.writeFileSync(`${canonical}/${name}/scripts/${name}.ts`, "// real");
   }
   for (const name of commandSkills) {
-    Deno.mkdirSync(`${canonical}/${name}`, { recursive: true });
-    Deno.writeTextFileSync(`${canonical}/${name}/SKILL.md`, `# ${name}`);
+    fs.mkdirSync(`${canonical}/${name}`, { recursive: true });
+    fs.writeFileSync(`${canonical}/${name}/SKILL.md`, `# ${name}`);
   }
   return buildSkillAutoApproveList({
     rootObservation: observeTrustedSkillsRoot("opencode", canonical),

@@ -12,6 +12,9 @@ import {
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { getDefaultAgentType } from "@acp/agent-factory.ts";
 import type { Config } from "../../src/types/config.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // A logger that captures warn/info entries for assertion.
 // Captures the message TEMPLATE plus context (same convention as
@@ -33,20 +36,20 @@ function createCapturingLogger() {
   return { entries, logger };
 }
 
-Deno.test("parseOmpSemver - parses plain semver", () => {
+test("parseOmpSemver - parses plain semver", () => {
   assertEquals(parseOmpSemver("18.6.1"), { major: 18, minor: 6, patch: 1 });
 });
 
-Deno.test("parseOmpSemver - parses version embedded in text", () => {
+test("parseOmpSemver - parses version embedded in text", () => {
   assertEquals(parseOmpSemver("omp v18.6.1"), { major: 18, minor: 6, patch: 1 });
 });
 
-Deno.test("parseOmpSemver - returns null for unparseable strings", () => {
+test("parseOmpSemver - returns null for unparseable strings", () => {
   assertEquals(parseOmpSemver("not-a-version"), null);
   assertEquals(parseOmpSemver(""), null);
 });
 
-Deno.test("isOmpAtLeastVersion - compares semver correctly", () => {
+test("isOmpAtLeastVersion - compares semver correctly", () => {
   assertEquals(isOmpAtLeastVersion("18.6.1", "18.6.1"), true);
   assertEquals(isOmpAtLeastVersion("18.6.2", "18.6.1"), true);
   assertEquals(isOmpAtLeastVersion("18.7.0", "18.6.1"), true);
@@ -57,7 +60,7 @@ Deno.test("isOmpAtLeastVersion - compares semver correctly", () => {
   assertEquals(isOmpAtLeastVersion("18.6.1", "garbage"), false);
 });
 
-Deno.test("verifyOmpVersion - INFO with OK marker when version equals the pin", async () => {
+test("verifyOmpVersion - INFO with OK marker when version equals the pin", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOmpVersion({
     minVersion: "18.6.1",
@@ -70,7 +73,7 @@ Deno.test("verifyOmpVersion - INFO with OK marker when version equals the pin", 
   assertStringIncludes(entries[0].message, "OMP version check: OK");
 });
 
-Deno.test("verifyOmpVersion - INFO when version above minimum", async () => {
+test("verifyOmpVersion - INFO when version above minimum", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOmpVersion({
     minVersion: "18.6.1",
@@ -81,7 +84,7 @@ Deno.test("verifyOmpVersion - INFO when version above minimum", async () => {
   assertEquals(entries[0].level, "info");
 });
 
-Deno.test("verifyOmpVersion - WARN with BELOW_MINIMUM marker when below minimum", async () => {
+test("verifyOmpVersion - WARN with BELOW_MINIMUM marker when below minimum", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOmpVersion({
     minVersion: "18.6.1",
@@ -94,7 +97,7 @@ Deno.test("verifyOmpVersion - WARN with BELOW_MINIMUM marker when below minimum"
   assertStringIncludes(entries[0].message, "OMP version check: BELOW_MINIMUM");
 });
 
-Deno.test("verifyOmpVersion - WARN with UNKNOWN marker when detection fails", async () => {
+test("verifyOmpVersion - WARN with UNKNOWN marker when detection fails", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOmpVersion({
     minVersion: "18.6.1",
@@ -107,7 +110,7 @@ Deno.test("verifyOmpVersion - WARN with UNKNOWN marker when detection fails", as
   assertStringIncludes(entries[0].message, "OMP version check: UNKNOWN");
 });
 
-Deno.test("verifyOmpVersion - UNKNOWN when detector throws (never blocks startup)", async () => {
+test("verifyOmpVersion - UNKNOWN when detector throws (never blocks startup)", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOmpVersion({
     minVersion: "18.6.1",
@@ -118,33 +121,33 @@ Deno.test("verifyOmpVersion - UNKNOWN when detector throws (never blocks startup
   assertEquals(entries[0].level, "warn");
 });
 
-Deno.test("getMinimumOmpVersion - defaults to the pinned known-good minimum", () => {
-  const original = Deno.env.get("AGENT_OMP_MIN_VERSION");
+test("getMinimumOmpVersion - defaults to the pinned known-good minimum", () => {
+  const original = process.env["AGENT_OMP_MIN_VERSION"];
   try {
-    Deno.env.delete("AGENT_OMP_MIN_VERSION");
+    delete process.env["AGENT_OMP_MIN_VERSION"];
     assertEquals(getMinimumOmpVersion(), "18.6.1");
   } finally {
-    if (original !== undefined) Deno.env.set("AGENT_OMP_MIN_VERSION", original);
+    if (original !== undefined) process.env["AGENT_OMP_MIN_VERSION"] = original;
   }
 });
 
-Deno.test("getMinimumOmpVersion - honors env override; blank ignored", () => {
-  const original = Deno.env.get("AGENT_OMP_MIN_VERSION");
+test("getMinimumOmpVersion - honors env override; blank ignored", () => {
+  const original = process.env["AGENT_OMP_MIN_VERSION"];
   try {
-    Deno.env.set("AGENT_OMP_MIN_VERSION", "18.7.0");
+    process.env["AGENT_OMP_MIN_VERSION"] = "18.7.0";
     assertEquals(getMinimumOmpVersion(), "18.7.0");
-    Deno.env.set("AGENT_OMP_MIN_VERSION", "   ");
+    process.env["AGENT_OMP_MIN_VERSION"] = "   ";
     assertEquals(getMinimumOmpVersion(), "18.6.1", "blank override ignored");
   } finally {
     if (original !== undefined) {
-      Deno.env.set("AGENT_OMP_MIN_VERSION", original);
+      process.env["AGENT_OMP_MIN_VERSION"] = original;
     } else {
-      Deno.env.delete("AGENT_OMP_MIN_VERSION");
+      delete process.env["AGENT_OMP_MIN_VERSION"];
     }
   }
 });
 
-Deno.test("detectOmpVersion - returns null when binary missing (non-fatal)", async () => {
+test("detectOmpVersion - returns null when binary missing (non-fatal)", async () => {
   // Spawn a binary name that cannot exist. NEVER override the global PATH here:
   // tests run with `--parallel` and Deno.env is process-global, so mutating PATH
   // would break sibling test files (e.g. git-backup-service spawning `git`).
@@ -152,41 +155,41 @@ Deno.test("detectOmpVersion - returns null when binary missing (non-fatal)", asy
   assertEquals(detected, null);
 });
 
-Deno.test("detectOmpVersion - parses a fake binary's version output", async () => {
-  const dir = await Deno.makeTempDir({ prefix: "omp-version-fake-" });
+test("detectOmpVersion - parses a fake binary's version output", async () => {
+  const dir = await makeTempDir({ prefix: "omp-version-fake-" });
   const script = `${dir}/omp-fake`;
-  await Deno.writeTextFile(script, "#!/bin/sh\necho 'omp v18.6.1'\n");
-  await Deno.chmod(script, 0o755);
+  await fsp.writeFile(script, "#!/bin/sh\necho 'omp v18.6.1'\n");
+  await fsp.chmod(script, 0o755);
   try {
     const detected = await detectOmpVersion(5000, script);
     assertEquals(detected, "omp v18.6.1");
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
-Deno.test("detectOmpVersion - null on unparseable output", async () => {
-  const dir = await Deno.makeTempDir({ prefix: "omp-version-fake-" });
+test("detectOmpVersion - null on unparseable output", async () => {
+  const dir = await makeTempDir({ prefix: "omp-version-fake-" });
   const script = `${dir}/omp-fake`;
-  await Deno.writeTextFile(script, "#!/bin/sh\necho 'not a version'\n");
-  await Deno.chmod(script, 0o755);
+  await fsp.writeFile(script, "#!/bin/sh\necho 'not a version'\n");
+  await fsp.chmod(script, 0o755);
   try {
     const detected = await detectOmpVersion(5000, script);
     assertEquals(detected, null);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
-Deno.test("detectOmpVersion - timeout returns null without hanging (SIGKILL race)", async () => {
+test("detectOmpVersion - timeout returns null without hanging (SIGKILL race)", async () => {
   // A child that ignores signals would hang the check if the timeout were not
   // a race against the output promise; the race must resolve null on schedule.
   // `exec` so the sleep REPLACES the shell: killing the direct child closes
   // the stdout pipe (an orphaned grandchild would hold it open regardless).
-  const dir = await Deno.makeTempDir({ prefix: "omp-version-fake-" });
+  const dir = await makeTempDir({ prefix: "omp-version-fake-" });
   const script = `${dir}/omp-fake`;
-  await Deno.writeTextFile(script, "#!/bin/sh\nexec sleep 30\n");
-  await Deno.chmod(script, 0o755);
+  await fsp.writeFile(script, "#!/bin/sh\nexec sleep 30\n");
+  await fsp.chmod(script, 0o755);
   const start = Date.now();
   try {
     const detected = await detectOmpVersion(300, script);
@@ -194,7 +197,7 @@ Deno.test("detectOmpVersion - timeout returns null without hanging (SIGKILL race
     assertEquals(detected, null);
     assertEquals(elapsed < 5000, true, `timeout raced (${elapsed}ms elapsed)`);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
@@ -211,12 +214,12 @@ const minimalConfig = (defaultAgentType?: string): Config =>
     channels: [],
   }) as unknown as Config;
 
-Deno.test("shouldVerifyOmpVersion - true only for the omp agent type", () => {
+test("shouldVerifyOmpVersion - true only for the omp agent type", () => {
   assertEquals(shouldVerifyOmpVersion("omp"), true);
   assertEquals(shouldVerifyOmpVersion("opencode"), false);
 });
 
-Deno.test("bootstrap gating - OpenCode-only startup resolves no OMP check (no OMP marker emitted)", () => {
+test("bootstrap gating - OpenCode-only startup resolves no OMP check (no OMP marker emitted)", () => {
   // The bootstrap call site is `if (shouldVerifyOmpVersion(getDefaultAgentType(config)))`.
   // An OpenCode-default config must resolve the gate to false, so the bootstrap
   // path never spawns `omp --version` and never emits an OMP marker on
@@ -228,7 +231,7 @@ Deno.test("bootstrap gating - OpenCode-only startup resolves no OMP check (no OM
   // not the detector, is what keeps the marker out of OpenCode startup logs.
 });
 
-Deno.test("bootstrap gating - omp agent type resolves the check ON", () => {
+test("bootstrap gating - omp agent type resolves the check ON", () => {
   const gate = shouldVerifyOmpVersion(getDefaultAgentType(minimalConfig("omp")));
   assertEquals(gate, true);
 });

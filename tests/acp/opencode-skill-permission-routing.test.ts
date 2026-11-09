@@ -7,6 +7,8 @@
 // intentionally untouched.
 
 import { assertEquals, assertExists } from "@std/assert";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 
 interface OpenCodeConfigShape {
   readonly agent?: Record<string, { permission?: Record<string, unknown> }>;
@@ -14,10 +16,10 @@ interface OpenCodeConfigShape {
 
 async function loadConfig(): Promise<OpenCodeConfigShape> {
   const filePath = new URL("../../agent-config/opencode.json", import.meta.url).pathname;
-  return JSON.parse(await Deno.readTextFile(filePath)) as OpenCodeConfigShape;
+  return JSON.parse(await fsp.readFile(filePath, "utf8")) as OpenCodeConfigShape;
 }
 
-Deno.test("opencode restricted profile: no native skill-script execution allow survives", async () => {
+test("opencode restricted profile: no native skill-script execution allow survives", async () => {
   const config = await loadConfig();
   const bash = config.agent?.["build"]?.permission?.["bash"] as Record<string, string>;
   assertExists(bash, "build agent bash permission map must exist");
@@ -36,18 +38,20 @@ Deno.test("opencode restricted profile: no native skill-script execution allow s
   }
 });
 
-Deno.test("opencode restricted profile: script invocations route to the ACP gate via ask", async () => {
+test("opencode restricted profile: script invocations route to the ACP gate via ask", async () => {
   const config = await loadConfig();
   const bash = config.agent?.["build"]?.permission?.["bash"] as Record<string, string>;
-  // The two routing entries carry interpreter-launched (`deno run …`) and
-  // direct-script (`/custom/root/…` or relative `skills/…`) invocations into
-  // the ACP permission request regardless of the configured root.
-  assertEquals(bash["deno run *"], "ask", "interpreter-launched scripts must route to ask");
+  // The routing entries carry every `bun` spelling (`bun *`) into the ACP
+  // permission request regardless of the configured root, and deny the
+  // package runner outright (`bunx *`). Direct-script invocations
+  // (`/custom/root/…` or relative `skills/…`) match `*.ts*`.
+  assertEquals(bash["bun *"], "ask", "bun-launched scripts must route to ask");
+  assertEquals(bash["bunx *"], "deny", "the package runner must be denied without a gate request");
   assertEquals(bash["*.ts*"], "ask", "direct TypeScript invocations must route to ask");
   assertEquals(bash["*"], "deny", "the wildcard default stays deny");
 });
 
-Deno.test("opencode yolo profile remains untouched by the skill-routing rewrite", async () => {
+test("opencode yolo profile remains untouched by the skill-routing rewrite", async () => {
   const config = await loadConfig();
   const yolo = config.agent?.["yolo"]?.permission;
   assertExists(yolo);

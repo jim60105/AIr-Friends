@@ -4,6 +4,15 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { MisskeyClient } from "@platforms/misskey/misskey-client.ts";
 import { ErrorCode, PlatformError } from "../../../src/types/errors.ts";
 import { MisskeyAdapterConfig } from "@platforms/misskey/misskey-config.ts";
+import { test } from "bun:test";
+
+/**
+ * Install a test double as the global fetch. Bun's fetch type carries an extra
+ * `preconnect` hook the doubles never implement, so the cast is test-only.
+ */
+function setFetch(handler: (...args: Parameters<typeof fetch>) => Promise<Response>): void {
+  globalThis.fetch = handler as unknown as typeof fetch;
+}
 
 function createTestConfig(): MisskeyAdapterConfig {
   return {
@@ -22,9 +31,9 @@ function createClient(
 
   if (overrides?.apiRequest) {
     // Replace internal api.request with mock
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     (client as any).api = {
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       ...(client as any).api,
       request: overrides.apiRequest,
     };
@@ -33,7 +42,7 @@ function createClient(
   return client;
 }
 
-Deno.test("MisskeyClient.request - throws PlatformError on non-JSON response", async () => {
+test("MisskeyClient.request - throws PlatformError on non-JSON response", async () => {
   const syntaxError = new SyntaxError(
     "Unexpected token 'B', \"Bad Gateway\" is not valid JSON",
   );
@@ -49,7 +58,7 @@ Deno.test("MisskeyClient.request - throws PlatformError on non-JSON response", a
   assertEquals(error.isRetryable, true);
 });
 
-Deno.test("MisskeyClient.request - passes through normal API errors unchanged", async () => {
+test("MisskeyClient.request - passes through normal API errors unchanged", async () => {
   const apiError = new Error("AUTHENTICATION_FAILED");
   const client = createClient({
     apiRequest: () => Promise.reject(apiError),
@@ -62,7 +71,7 @@ Deno.test("MisskeyClient.request - passes through normal API errors unchanged", 
   );
 });
 
-Deno.test("MisskeyClient.request - does not catch non-JSON SyntaxError", async () => {
+test("MisskeyClient.request - does not catch non-JSON SyntaxError", async () => {
   const syntaxError = new SyntaxError("Unexpected identifier");
   const client = createClient({
     apiRequest: () => Promise.reject(syntaxError),
@@ -75,12 +84,13 @@ Deno.test("MisskeyClient.request - does not catch non-JSON SyntaxError", async (
   );
 });
 
-Deno.test("MisskeyClient.uploadFile - throws PlatformError on 502 response", async () => {
+test("MisskeyClient.uploadFile - throws PlatformError on 502 response", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = () =>
+  setFetch(() =>
     Promise.resolve(
       new Response("Bad Gateway", { status: 502, statusText: "Bad Gateway" }),
-    );
+    )
+  );
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -95,12 +105,13 @@ Deno.test("MisskeyClient.uploadFile - throws PlatformError on 502 response", asy
   }
 });
 
-Deno.test("MisskeyClient.uploadFile - throws PlatformError(API_ERROR) on 400 response", async () => {
+test("MisskeyClient.uploadFile - throws PlatformError(API_ERROR) on 400 response", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = () =>
+  setFetch(() =>
     Promise.resolve(
       new Response("Bad Request", { status: 400, statusText: "Bad Request" }),
-    );
+    )
+  );
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -115,15 +126,16 @@ Deno.test("MisskeyClient.uploadFile - throws PlatformError(API_ERROR) on 400 res
   }
 });
 
-Deno.test("MisskeyClient.uploadFile - reports the status and body of a JSON API error", async () => {
+test("MisskeyClient.uploadFile - reports the status and body of a JSON API error", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = () =>
+  setFetch(() =>
     Promise.resolve(
       Response.json(
         { error: { code: "RESTRICTED_BY_ROLE", message: "File type is not allowed" } },
         { status: 400 },
       ),
-    );
+    )
+  );
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -140,19 +152,19 @@ Deno.test("MisskeyClient.uploadFile - reports the status and body of a JSON API 
   }
 });
 
-Deno.test("MisskeyClient.uploadFile - sends the SDK's multipart body and returns the file id and url", async () => {
+test("MisskeyClient.uploadFile - sends the SDK's multipart body and returns the file id and url", async () => {
   const originalFetch = globalThis.fetch;
   let requestUrl: string | undefined;
   let requestInit: RequestInit | undefined;
   let requestBody: FormData | undefined;
-  globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+  setFetch((input: string | URL | Request, init?: RequestInit) => {
     requestUrl = String(input);
     requestInit = init;
     requestBody = init?.body as FormData;
     return Promise.resolve(
       Response.json({ id: "file123", url: "https://example.com/photo.png" }),
     );
-  };
+  });
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -177,8 +189,7 @@ Deno.test("MisskeyClient.uploadFile - sends the SDK's multipart body and returns
 /**
  * Compile-time guard: a misspelled request field on a real endpoint must not
  * type-check. `includeReplies` on `users/notes` is the typo this change exists
- * to prevent (`deno test` type-checks test files, `deno task check` does not
- * read them).
+ * to prevent (`tsc --noEmit` type-checks test files; the test runner does not).
  */
 const requestWithMisspelledUsersNotesField: (client: MisskeyClient) => Promise<unknown> = (
   client,
@@ -187,7 +198,7 @@ const requestWithMisspelledUsersNotesField: (client: MisskeyClient) => Promise<u
   return client.request("users/notes", { userId: "user1", includeReplies: false });
 };
 
-Deno.test("MisskeyClient.request - rejects an unknown request field at compile time", () => {
+test("MisskeyClient.request - rejects an unknown request field at compile time", () => {
   // The fixture above is never called; referencing it keeps it in the module
   // (and therefore type-checked) instead of leaving it commented out.
   assertEquals(typeof requestWithMisspelledUsersNotesField, "function");
@@ -207,17 +218,17 @@ function sharedApiOf(client: MisskeyClient): ClientInternals {
   return client as unknown as ClientInternals;
 }
 
-Deno.test("MisskeyClient.request - a signaled call applies the signal to the transport fetch", async () => {
+test("MisskeyClient.request - a signaled call applies the signal to the transport fetch", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
   let seenSignal: AbortSignal | null | undefined;
   let seenBody: string | undefined;
 
-  globalThis.fetch = (_input: string | URL | Request, init?: RequestInit) => {
+  setFetch((_input: string | URL | Request, init?: RequestInit) => {
     seenSignal = init?.signal;
     seenBody = typeof init?.body === "string" ? init.body : undefined;
     return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
-  };
+  });
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -235,11 +246,11 @@ Deno.test("MisskeyClient.request - a signaled call applies the signal to the tra
   }
 });
 
-Deno.test("MisskeyClient.request - aborting the signal cancels the pending response body read", async () => {
+test("MisskeyClient.request - aborting the signal cancels the pending response body read", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
 
-  globalThis.fetch = (_input: string | URL | Request, init?: RequestInit) => {
+  setFetch((_input: string | URL | Request, init?: RequestInit) => {
     const json = Promise.withResolvers<unknown>();
     init?.signal?.addEventListener(
       "abort",
@@ -248,7 +259,7 @@ Deno.test("MisskeyClient.request - aborting the signal cancels the pending respo
     // Headers have arrived and the SDK is still reading the body: only `status`
     // and `json()` are part of the transport contract the SDK reads.
     return Promise.resolve({ status: 200, json: () => json.promise } as unknown as Response);
-  };
+  });
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -261,14 +272,14 @@ Deno.test("MisskeyClient.request - aborting the signal cancels the pending respo
   }
 });
 
-Deno.test("MisskeyClient.request - a signaled call leaves the shared SDK client untouched", async () => {
+test("MisskeyClient.request - a signaled call leaves the shared SDK client untouched", async () => {
   const originalFetch = globalThis.fetch;
   let transports = 0;
 
-  globalThis.fetch = () => {
+  setFetch(() => {
     transports++;
     return Promise.resolve(Response.json({ id: "note1" }));
-  };
+  });
 
   try {
     const client = new MisskeyClient(createTestConfig());
@@ -296,6 +307,6 @@ const requestWithSignalParameter: (client: MisskeyClient) => Promise<unknown> = 
   return client.request("notes/show", { noteId: "n1", signal: new AbortController().signal });
 };
 
-Deno.test("MisskeyClient.request - rejects a signal inside the endpoint parameters at compile time", () => {
+test("MisskeyClient.request - rejects a signal inside the endpoint parameters at compile time", () => {
   assertEquals(typeof requestWithSignalParameter, "function");
 });

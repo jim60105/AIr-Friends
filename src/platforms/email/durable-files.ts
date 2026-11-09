@@ -6,9 +6,14 @@
 // strict directory/file fsync ordering, path confinement, private permissions,
 // and safe diagnostic codes (never leaking private line contents).
 
-import { isAbsolute, normalize, relative, resolve } from "@std/path";
+import { isAbsolute, normalize, relative, resolve } from "node:path";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
 import { createLogger } from "@utils/logger.ts";
+import fsp from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { isNotFoundError, removePath } from "../../utils/fs-compat.ts";
+import { runtimeOs } from "../../utils/runtime-platform.ts";
 
 const logger = createLogger("EmailDurableFiles");
 
@@ -182,20 +187,20 @@ export async function canonicalizeRoot(rootPath: string): Promise<string> {
   const uncreatedSuffix: string[] = [];
   while (true) {
     try {
-      const stat = await Deno.lstat(curr);
-      if (stat.isSymlink) {
+      const stat = await fsp.lstat(curr);
+      if (stat.isSymbolicLink()) {
         throw new DurableFileError(
           DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
           "State root or ancestor is an unauthorized symlink",
         );
       }
-      const real = await Deno.realPath(curr);
+      const real = await fsp.realpath(curr);
       if (uncreatedSuffix.length === 0) {
         return real;
       }
       return resolve(real, ...uncreatedSuffix.reverse());
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         const parent = resolve(curr, "..");
         if (parent === curr) {
           // Reached filesystem root
@@ -248,11 +253,11 @@ export async function assertStagingRootBoundary(
     );
   }
 
-  let rootStat: Deno.FileInfo;
+  let rootStat: Stats;
   try {
-    rootStat = await Deno.lstat(resolvedRoot);
+    rootStat = await fsp.lstat(resolvedRoot);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
+    if (isNotFoundError(error)) {
       throw new DurableFileError(
         DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
         "Trusted workspace boundary does not exist",
@@ -263,13 +268,13 @@ export async function assertStagingRootBoundary(
       "Failed to inspect the trusted workspace boundary",
     );
   }
-  if (rootStat.isSymlink) {
+  if (rootStat.isSymbolicLink()) {
     throw new DurableFileError(
       DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
       "Trusted workspace boundary is an unauthorized symlink",
     );
   }
-  if (!rootStat.isDirectory) {
+  if (!rootStat.isDirectory()) {
     throw new DurableFileError(
       DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
       "Trusted workspace boundary is not a directory",
@@ -279,23 +284,23 @@ export async function assertStagingRootBoundary(
   let current = resolvedRoot;
   for (const part of stagingRel.split("/").filter(Boolean)) {
     current = resolve(current, part);
-    let stat: Deno.FileInfo;
+    let stat: Stats;
     try {
-      stat = await Deno.lstat(current);
+      stat = await fsp.lstat(current);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) break;
+      if (isNotFoundError(error)) break;
       throw new DurableFileError(
         DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
         "Failed to inspect the staging path hierarchy",
       );
     }
-    if (stat.isSymlink) {
+    if (stat.isSymbolicLink()) {
       throw new DurableFileError(
         DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
         "Staging path component is an unauthorized symlink",
       );
     }
-    if (!stat.isDirectory) {
+    if (!stat.isDirectory()) {
       throw new DurableFileError(
         DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
         "Staging path component is not a directory",
@@ -304,8 +309,8 @@ export async function assertStagingRootBoundary(
   }
 
   try {
-    const realStaging = await Deno.realPath(resolvedStaging);
-    const realRoot = await Deno.realPath(resolvedRoot);
+    const realStaging = await fsp.realpath(resolvedStaging);
+    const realRoot = await fsp.realpath(resolvedRoot);
     const realRel = relative(realRoot, realStaging);
     if (realRel.startsWith("..") || isAbsolute(realRel)) {
       throw new DurableFileError(
@@ -314,7 +319,7 @@ export async function assertStagingRootBoundary(
       );
     }
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return;
+    if (isNotFoundError(error)) return;
     throw error;
   }
 }
@@ -360,27 +365,27 @@ export async function assertSafePath(
   for (let i = 0; i < parts.length; i++) {
     current = resolve(current, parts[i]);
     try {
-      const stat = await Deno.lstat(current);
-      if (stat.isSymlink) {
+      const stat = await fsp.lstat(current);
+      if (stat.isSymbolicLink()) {
         throw new DurableFileError(
           DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
           "Symlink encountered along path or at target; symlink escapes are prohibited",
         );
       }
-      if (i < parts.length - 1 && !stat.isDirectory) {
+      if (i < parts.length - 1 && !stat.isDirectory()) {
         throw new DurableFileError(
           DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
           "Intermediate path component is not a directory",
         );
       }
-      if (i === parts.length - 1 && !stat.isFile && !stat.isDirectory) {
+      if (i === parts.length - 1 && !stat.isFile() && !stat.isDirectory()) {
         throw new DurableFileError(
           DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
           "Target path is not a regular file",
         );
       }
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         // Path component does not exist yet; remaining path components also do not exist
         break;
       }
@@ -417,27 +422,27 @@ export async function ensureDurableDir(
     const parentDir = rootCursor;
     rootCursor = resolve(rootCursor, rootParts[i]);
     try {
-      const stat = await Deno.lstat(rootCursor);
-      if (stat.isSymlink) {
+      const stat = await fsp.lstat(rootCursor);
+      if (stat.isSymbolicLink()) {
         throw new DurableFileError(
           DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
           "Directory ancestor is a symlink",
         );
       }
-      if (!stat.isDirectory) {
+      if (!stat.isDirectory()) {
         throw new DurableFileError(
           DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
           "Path ancestor exists but is not a directory",
         );
       }
-      if (rootCursor === canonicalRoot && Deno.build.os !== "windows") {
-        await Deno.chmod(rootCursor, 0o700);
+      if (rootCursor === canonicalRoot && runtimeOs() !== "windows") {
+        await fsp.chmod(rootCursor, 0o700);
       }
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        await Deno.mkdir(rootCursor, { mode: 0o700 });
-        if (Deno.build.os !== "windows") {
-          await Deno.chmod(rootCursor, 0o700);
+      if (isNotFoundError(error)) {
+        await fsp.mkdir(rootCursor, { mode: 0o700 });
+        if (runtimeOs() !== "windows") {
+          await fsp.chmod(rootCursor, 0o700);
         }
         if (parentDir) {
           await syncDirectory(parentDir);
@@ -452,27 +457,27 @@ export async function ensureDurableDir(
     const parent = current;
     current = resolve(current, part);
     try {
-      const stat = await Deno.lstat(current);
-      if (stat.isSymlink) {
+      const stat = await fsp.lstat(current);
+      if (stat.isSymbolicLink()) {
         throw new DurableFileError(
           DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
           "Directory component is a symlink",
         );
       }
-      if (!stat.isDirectory) {
+      if (!stat.isDirectory()) {
         throw new DurableFileError(
           DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
           "Path component is not a directory",
         );
       }
-      if (Deno.build.os !== "windows") {
-        await Deno.chmod(current, 0o700);
+      if (runtimeOs() !== "windows") {
+        await fsp.chmod(current, 0o700);
       }
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        await Deno.mkdir(current, { mode: 0o700 });
-        if (Deno.build.os !== "windows") {
-          await Deno.chmod(current, 0o700);
+      if (isNotFoundError(error)) {
+        await fsp.mkdir(current, { mode: 0o700 });
+        if (runtimeOs() !== "windows") {
+          await fsp.chmod(current, 0o700);
         }
         await syncDirectory(parent);
       } else {
@@ -486,15 +491,15 @@ export async function ensureDurableDir(
  * Fsyncs a directory to persist directory entries.
  */
 export async function syncDirectory(dirPath: string): Promise<void> {
-  if (Deno.build.os === "windows") {
+  if (runtimeOs() === "windows") {
     throw new DurableFileError(
       DurableDiagnosticCode.UNSUPPORTED_DURABILITY,
       "Directory fsync durability is not supported on Windows",
     );
   }
-  let dirFile: Deno.FsFile | null = null;
+  let dirFile: FileHandle | null = null;
   try {
-    dirFile = await Deno.open(dirPath, { read: true });
+    dirFile = await fsp.open(dirPath, "r");
     await dirFile.sync();
   } catch (err) {
     logger.debug("Directory sync threw error", {
@@ -506,24 +511,24 @@ export async function syncDirectory(dirPath: string): Promise<void> {
       "Failed to sync directory to persistent storage",
     );
   } finally {
-    dirFile?.close();
+    await dirFile?.close();
   }
 }
 
 /**
  * Helper to write a buffer completely, looping until all bytes are accepted.
  */
-async function writeAllBytes(file: Deno.FsFile, bytes: Uint8Array): Promise<void> {
+async function writeAllBytes(file: FileHandle, bytes: Uint8Array): Promise<void> {
   let offset = 0;
   while (offset < bytes.length) {
-    const written = await file.write(bytes.subarray(offset));
-    if (written === 0) {
+    const { bytesWritten } = await file.write(bytes.subarray(offset));
+    if (bytesWritten === 0) {
       throw new DurableFileError(
         DurableDiagnosticCode.WRITE_FAILED,
         "Zero bytes written during writeAll operation",
       );
     }
-    offset += written;
+    offset += bytesWritten;
   }
 }
 
@@ -540,14 +545,14 @@ export async function readJournalInternal<T>(
 
   let fileBytes: Uint8Array;
   try {
-    const stat = await Deno.lstat(filePath);
-    if (stat.isSymlink) {
+    const stat = await fsp.lstat(filePath);
+    if (stat.isSymbolicLink()) {
       throw new DurableFileError(
         DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
         "Target journal is a symlink",
       );
     }
-    if (!stat.isFile) {
+    if (!stat.isFile()) {
       throw new DurableFileError(
         DurableDiagnosticCode.PATH_TRAVERSAL_DETECTED,
         "Target journal is not a regular file",
@@ -559,9 +564,9 @@ export async function readJournalInternal<T>(
         "Journal file size exceeds configured maximum limit",
       );
     }
-    fileBytes = await Deno.readFile(filePath);
+    fileBytes = await fsp.readFile(filePath);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
+    if (isNotFoundError(error)) {
       if (options?.allowMissing === false) {
         throw new DurableFileError(
           DurableDiagnosticCode.JOURNAL_NOT_FOUND,
@@ -833,6 +838,7 @@ export async function appendDurable<T>(
     if (dataJson === undefined || dataJson === "undefined") {
       throw new Error("Cannot serialize undefined record");
     }
+    // oxlint-disable-next-line no-unused-vars
   } catch (_err) {
     throw new DurableFileError(
       DurableDiagnosticCode.WRITE_FAILED,
@@ -891,8 +897,9 @@ export async function appendDurable<T>(
     // Check total resulting journal size
     let currentSize = 0;
     try {
-      const stat = await Deno.lstat(filePath);
+      const stat = await fsp.lstat(filePath);
       currentSize = stat.size;
+      // oxlint-disable-next-line no-unused-vars
     } catch (_err) {
       // File does not exist yet
     }
@@ -904,17 +911,12 @@ export async function appendDurable<T>(
       );
     }
 
-    let file: Deno.FsFile | null = null;
+    let file: FileHandle | null = null;
     try {
-      file = await Deno.open(filePath, {
-        create: true,
-        append: true,
-        write: true,
-        mode: 0o600,
-      });
+      file = await fsp.open(filePath, "a", 0o600);
 
-      if (Deno.build.os !== "windows") {
-        await Deno.chmod(filePath, 0o600);
+      if (runtimeOs() !== "windows") {
+        await fsp.chmod(filePath, 0o600);
       }
 
       await writeAllBytes(file, lineBytes);
@@ -926,7 +928,7 @@ export async function appendDurable<T>(
         "Failed to write and sync durable journal record",
       );
     } finally {
-      file?.close();
+      await file?.close();
     }
 
     // Sync containing directory to ensure directory entry durability
@@ -962,6 +964,7 @@ export async function replaceSnapshot<T>(
       throw new Error("Cannot serialize undefined snapshot");
     }
     jsonString = rawJson + "\n";
+    // oxlint-disable-next-line no-unused-vars
   } catch (_err) {
     throw new DurableFileError(
       DurableDiagnosticCode.WRITE_FAILED,
@@ -982,57 +985,54 @@ export async function replaceSnapshot<T>(
     const basename = idx >= 0 ? filePath.slice(idx + 1) : filePath;
     const tmpPath = resolve(parentDir, `.${basename}.tmp-${crypto.randomUUID()}`);
 
-    let tmpFile: Deno.FsFile | null = null;
+    let tmpFile: FileHandle | null = null;
     try {
-      tmpFile = await Deno.open(tmpPath, {
-        createNew: true,
-        write: true,
-        mode: 0o600,
-      });
+      tmpFile = await fsp.open(tmpPath, "wx", 0o600);
 
-      if (Deno.build.os !== "windows") {
-        await Deno.chmod(tmpPath, 0o600);
+      if (runtimeOs() !== "windows") {
+        await fsp.chmod(tmpPath, 0o600);
       }
 
       await writeAllBytes(tmpFile, encodedBytes);
       await tmpFile.sync();
     } catch (err) {
       if (tmpFile) {
-        tmpFile.close();
+        await tmpFile.close();
         tmpFile = null;
       }
-      await Deno.remove(tmpPath).catch(() => {});
+      await removePath(tmpPath).catch(() => {});
       if (err instanceof DurableFileError) throw err;
       throw new DurableFileError(
         DurableDiagnosticCode.WRITE_FAILED,
         "Failed to write and sync snapshot temporary file",
       );
     } finally {
-      tmpFile?.close();
+      await tmpFile?.close();
     }
 
     // Verify destination target is not a symlink before renaming
     try {
-      const targetStat = await Deno.lstat(filePath);
-      if (targetStat.isSymlink) {
-        await Deno.remove(tmpPath).catch(() => {});
+      const targetStat = await fsp.lstat(filePath);
+      if (targetStat.isSymbolicLink()) {
+        await removePath(tmpPath).catch(() => {});
         throw new DurableFileError(
           DurableDiagnosticCode.SYMLINK_NOT_PERMITTED,
           "Refusing to replace symlink target with snapshot",
         );
       }
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        await Deno.remove(tmpPath).catch(() => {});
+      if (!isNotFoundError(error)) {
+        await removePath(tmpPath).catch(() => {});
         throw error;
       }
     }
 
     // Atomic rename
     try {
-      await Deno.rename(tmpPath, filePath);
+      await fsp.rename(tmpPath, filePath);
+      // oxlint-disable-next-line no-unused-vars
     } catch (_err) {
-      await Deno.remove(tmpPath).catch(() => {});
+      await removePath(tmpPath).catch(() => {});
       throw new DurableFileError(
         DurableDiagnosticCode.WRITE_FAILED,
         "Failed to atomically rename snapshot temporary file",

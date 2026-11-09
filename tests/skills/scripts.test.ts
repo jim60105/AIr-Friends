@@ -1,7 +1,7 @@
 // Subprocess integration tests for skill scripts (payload-file contract).
 //
 // The scripts are executed DIRECTLY via their shebang
-// (`#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read`) with a
+// (`#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml`) with a
 // staged payload and a mock `--api-url` HTTP server, asserting that:
 //   - `$`/newline/empty content reaches the API verbatim
 //   - legacy flags (both forms) exit non-zero with SKILL_LEGACY_FLAG guidance
@@ -10,7 +10,11 @@
 //     SKILL_PAYLOAD_OUT_OF_BOUNDS
 
 import { assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname ?? ".", "..", "..");
 
@@ -22,23 +26,29 @@ interface MockApi {
 
 function startMockApi(): MockApi {
   const requests: MockApi["requests"] = [];
-  const server = Deno.serve({ port: 0 }, async (req) => {
-    const body = await req.json() as {
-      sessionId?: string;
-      parameters?: Record<string, unknown>;
-    };
-    const skillName = req.url.split("/api/skill/")[1] ?? "unknown";
-    requests.push({
-      skillName,
-      sessionId: body.sessionId ?? "",
-      parameters: body.parameters ?? {},
-    });
-    return Response.json({ success: true, data: {} });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const body = await req.json() as {
+        sessionId?: string;
+        parameters?: Record<string, unknown>;
+      };
+      const skillName = req.url.split("/api/skill/")[1] ?? "unknown";
+      requests.push({
+        skillName,
+        sessionId: body.sessionId ?? "",
+        parameters: body.parameters ?? {},
+      });
+      return Response.json({ success: true, data: {} });
+    },
   });
   return {
-    url: `http://127.0.0.1:${server.addr.port}`,
+    url: `http://127.0.0.1:${server.port}`,
     requests,
-    close: () => server.shutdown(),
+    close: async () => {
+      await server.stop(true);
+    },
   };
 }
 
@@ -53,7 +63,7 @@ async function runScript(
   args: string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
-  runViaDeno = false,
+  runViaBun = false,
 ): Promise<RunResult> {
   const scriptPath = join(REPO_ROOT, scriptRelPath);
   // Pin the staging base (TMPDIR) to this test's own {cwd}/tmp so concurrent
@@ -61,34 +71,44 @@ async function runScript(
   // resolution here (matches the per-session-mode TMPDIR the agent sets).
   // SKILL_JWT_DIR must be absent: with it set, a leaked pointer from another
   // concurrent test file would hijack the JWT presentation path in client.ts.
-  const env = Deno.env.toObject();
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
   env["TMPDIR"] = join(cwd, "tmp");
   delete env["SKILL_JWT_DIR"];
   for (const [k, v] of Object.entries(envOverrides)) {
     env[k] = v;
   }
-  // Some skill scripts lack the executable bit in git (the container fixes it
-  // via `--chmod=775` on COPY); run those via `deno run` with the same
-  // permission set their shebang requests.
-  const output = runViaDeno
-    ? await new Deno.Command(Deno.execPath(), {
-      args: [
-        "run",
-        "--allow-net",
-        "--allow-env",
-        "--allow-read",
-        "--allow-write",
-        scriptPath,
-        ...args,
-      ],
-      cwd,
-      env,
-    }).output()
-    : await new Deno.Command(scriptPath, { args, cwd, env }).output();
+  // Some skill scripts lack the executable bit in git (the container image
+  // fixes it via `--chmod=775` on COPY); run those through the same literal
+  // `bun run` command their shebang names.
+  const command = runViaBun ? process.execPath : scriptPath;
+  const commandArgs = runViaBun
+    ? [
+      "run",
+      "--no-env-file",
+      "--no-install",
+      "--config=/opt/air/skill-bunfig.toml",
+      scriptPath,
+      ...args,
+    ]
+    : args;
+  const child = Bun.spawn([command, ...commandArgs], {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
   return {
-    code: output.code,
-    stdout: new TextDecoder().decode(output.stdout),
-    stderr: new TextDecoder().decode(output.stderr),
+    code,
+    stdout,
+    stderr,
   };
 }
 
@@ -105,20 +125,20 @@ function parseStderrJson(stderr: string): Record<string, unknown> {
 }
 
 function setupWorkspace(): string {
-  const ws = Deno.makeTempDirSync();
-  Deno.mkdirSync(join(ws, "tmp", "sess_own"), { recursive: true });
-  Deno.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
+  const ws = makeTempDirSync();
+  fs.mkdirSync(join(ws, "tmp", "sess_own"), { recursive: true });
+  fs.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
   return ws;
 }
 
 const SEND_REPLY = "skills/send-reply/scripts/send-reply.ts";
 
-Deno.test("scripts - send-reply delivers staged payload verbatim ($, newlines)", async () => {
+test("scripts - send-reply delivers staged payload verbatim ($, newlines)", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const payload = join(ws, "tmp", "sess_own", "reply.md");
-    Deno.writeTextFileSync(payload, "定價 $0.435 / $HOME\nline2");
+    fs.writeFileSync(payload, "定價 $0.435 / $HOME\nline2");
 
     const result = await runScript(
       SEND_REPLY,
@@ -134,23 +154,23 @@ Deno.test("scripts - send-reply delivers staged payload verbatim ($, newlines)",
     // Payload file deleted after successful read.
     let exists = true;
     try {
-      Deno.statSync(payload);
+      fs.statSync(payload);
     } catch {
       exists = false;
     }
     assertEquals(exists, false);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-reply delivers empty payload verbatim", async () => {
+test("scripts - send-reply delivers empty payload verbatim", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const payload = join(ws, "tmp", "sess_own", "reply.md");
-    Deno.writeTextFileSync(payload, "");
+    fs.writeFileSync(payload, "");
 
     const result = await runScript(
       SEND_REPLY,
@@ -162,25 +182,25 @@ Deno.test("scripts - send-reply delivers empty payload verbatim", async () => {
     assertEquals(api.requests[0].parameters.message, "");
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - shared mode: identity-only skill (react-message) fails with structured SKILL_SESSION_UNRESOLVED on malformed pointer", async () => {
+test("scripts - shared mode: identity-only skill (react-message) fails with structured SKILL_SESSION_UNRESOLVED on malformed pointer", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
-  const jwtDir = Deno.makeTempDirSync();
+  const jwtDir = makeTempDirSync();
   try {
     // Malformed pointer: sessionId is a number — must fail the schema check
     // instead of resolving a wrong identity or throwing an obscure TypeError.
-    await Deno.writeTextFile(join(jwtDir, "active.json"), JSON.stringify({ sessionId: 42 }));
+    await fsp.writeFile(join(jwtDir, "active.json"), JSON.stringify({ sessionId: 42 }));
 
     const result = await runScript(
       "skills/react-message/scripts/react-message.ts",
       ["--session-id", "sess_A", "--api-url", api.url, "--emoji", "👍"],
       ws,
       { SKILL_SHARED_PROCESS: "1", SKILL_JWT_DIR: jwtDir },
-      true, // react-message.ts is not executable in git; run via deno run
+      true, // react-message.ts is not executable in git; run via the literal bun run form
     );
 
     assertEquals(result.code !== 0, true);
@@ -191,26 +211,26 @@ Deno.test("scripts - shared mode: identity-only skill (react-message) fails with
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    await Deno.remove(jwtDir, { recursive: true });
-    Deno.removeSync(ws, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - shared mode: API body sessionId is the pointer owner, not the --session-id arg", async () => {
+test("scripts - shared mode: API body sessionId is the pointer owner, not the --session-id arg", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
-  const jwtDir = Deno.makeTempDirSync();
+  const jwtDir = makeTempDirSync();
   try {
     // Pool state: the current-session pointer names sess_B (its own staging
     // root), while the agent's CLI argument says sess_A (e.g. a stale value).
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       join(jwtDir, "active.json"),
       JSON.stringify({ sessionId: "sess_B", staging: join(ws, "tmp") }),
     );
-    await Deno.writeTextFile(join(jwtDir, "sess_B.jwt"), "test-jwt\n");
-    Deno.mkdirSync(join(ws, "tmp", "sess_B"), { recursive: true });
+    await fsp.writeFile(join(jwtDir, "sess_B.jwt"), "test-jwt\n");
+    fs.mkdirSync(join(ws, "tmp", "sess_B"), { recursive: true });
     const payload = join(ws, "tmp", "sess_B", "reply.md");
-    Deno.writeTextFileSync(payload, "shared-mode reply");
+    fs.writeFileSync(payload, "shared-mode reply");
 
     const result = await runScript(
       SEND_REPLY,
@@ -227,17 +247,17 @@ Deno.test("scripts - shared mode: API body sessionId is the pointer owner, not t
     assertEquals(api.requests[0].parameters.message, "shared-mode reply");
   } finally {
     await api.close();
-    await Deno.remove(jwtDir, { recursive: true });
-    Deno.removeSync(ws, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - memory-save delivers staged content verbatim", async () => {
+test("scripts - memory-save delivers staged content verbatim", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const payload = join(ws, "tmp", "sess_own", "content.md");
-    Deno.writeTextFileSync(payload, "prefers $HOME coffee\nand $0.435 pricing");
+    fs.writeFileSync(payload, "prefers $HOME coffee\nand $0.435 pricing");
 
     const result = await runScript(
       "skills/memory-save/scripts/memory-save.ts",
@@ -250,11 +270,11 @@ Deno.test("scripts - memory-save delivers staged content verbatim", async () => 
     assertEquals(api.requests[0].parameters.content, "prefers $HOME coffee\nand $0.435 pricing");
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-file multi-file flag reaches API as array, caption optional", async () => {
+test("scripts - send-file multi-file flag reaches API as array, caption optional", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -292,7 +312,7 @@ Deno.test("scripts - send-file multi-file flag reaches API as array, caption opt
 
     // With caption via payload file alongside multi-file.
     const captionPayload = join(ws, "tmp", "sess_own", "caption.md");
-    Deno.writeTextFileSync(captionPayload, "chart $0.435 caption");
+    fs.writeFileSync(captionPayload, "chart $0.435 caption");
     const withCaption = await runScript(
       "skills/send-file/scripts/send-file.ts",
       [
@@ -314,11 +334,11 @@ Deno.test("scripts - send-file multi-file flag reaches API as array, caption opt
     assertEquals(api.requests[2].parameters.caption, "chart $0.435 caption");
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-file missing --file-paths rejected, API never hit", async () => {
+test("scripts - send-file missing --file-paths rejected, API never hit", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -333,11 +353,11 @@ Deno.test("scripts - send-file missing --file-paths rejected, API never hit", as
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - singular --file-path rejected with SKILL_SINGLE_FILE_FLAG in both forms, API never hit", async () => {
+test("scripts - singular --file-path rejected with SKILL_SINGLE_FILE_FLAG in both forms, API never hit", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -364,11 +384,11 @@ Deno.test("scripts - singular --file-path rejected with SKILL_SINGLE_FILE_FLAG i
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - mixed singular and plural file flags rejected, API never hit", async () => {
+test("scripts - mixed singular and plural file flags rejected, API never hit", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -392,15 +412,15 @@ Deno.test("scripts - mixed singular and plural file flags rejected, API never hi
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-file out-of-bounds caption payload still rejected", async () => {
+test("scripts - send-file out-of-bounds caption payload still rejected", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
-    Deno.writeTextFileSync(join(ws, "memory.private.jsonl"), "{}");
+    fs.writeFileSync(join(ws, "memory.private.jsonl"), "{}");
 
     const result = await runScript(
       "skills/send-file/scripts/send-file.ts",
@@ -422,11 +442,11 @@ Deno.test("scripts - send-file out-of-bounds caption payload still rejected", as
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - legacy --message flag rejected in both forms, API never hit", async () => {
+test("scripts - legacy --message flag rejected in both forms, API never hit", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -458,17 +478,17 @@ Deno.test("scripts - legacy --message flag rejected in both forms, API never hit
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - payload outside session staging dir rejected (workspace root / sibling / symlink)", async () => {
+test("scripts - payload outside session staging dir rejected (workspace root / sibling / symlink)", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
-    Deno.writeTextFileSync(join(ws, "memory.private.jsonl"), "{}");
-    Deno.writeTextFileSync(join(ws, "tmp", "sess_other", "reply.md"), "other session");
-    Deno.symlinkSync("/etc/passwd", join(ws, "tmp", "sess_own", "leak.md"));
+    fs.writeFileSync(join(ws, "memory.private.jsonl"), "{}");
+    fs.writeFileSync(join(ws, "tmp", "sess_other", "reply.md"), "other session");
+    fs.symlinkSync("/etc/passwd", join(ws, "tmp", "sess_own", "leak.md"));
 
     const payloads = [
       join(ws, "memory.private.jsonl"),
@@ -490,11 +510,11 @@ Deno.test("scripts - payload outside session staging dir rejected (workspace roo
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - missing payload file rejected with SKILL_PAYLOAD_NOT_FOUND guidance", async () => {
+test("scripts - missing payload file rejected with SKILL_PAYLOAD_NOT_FOUND guidance", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -518,11 +538,11 @@ Deno.test("scripts - missing payload file rejected with SKILL_PAYLOAD_NOT_FOUND 
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - missing required payload flag rejected with SKILL_MISSING_PAYLOAD guidance", async () => {
+test("scripts - missing required payload flag rejected with SKILL_MISSING_PAYLOAD guidance", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -539,7 +559,7 @@ Deno.test("scripts - missing required payload flag rejected with SKILL_MISSING_P
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
@@ -562,19 +582,19 @@ function composeRequestFile(): string {
 
 function fileExists(path: string): boolean {
   try {
-    Deno.statSync(path);
+    fs.statSync(path);
     return true;
   } catch {
     return false;
   }
 }
 
-Deno.test("scripts - send-email delivers the staged request verbatim with its grant id", async () => {
+test("scripts - send-email delivers the staged request verbatim with its grant id", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const payload = join(ws, "tmp", "sess_own", "compose.json");
-    Deno.writeTextFileSync(payload, composeRequestFile());
+    fs.writeFileSync(payload, composeRequestFile());
 
     const result = await runScript(
       SEND_EMAIL,
@@ -601,11 +621,11 @@ Deno.test("scripts - send-email delivers the staged request verbatim with its gr
     assertEquals(fileExists(payload), false, "the consumed request file is removed");
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-email refuses recipient/subject/body on the command line", async () => {
+test("scripts - send-email refuses recipient/subject/body on the command line", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -620,7 +640,7 @@ Deno.test("scripts - send-email refuses recipient/subject/body on the command li
     ];
 
     for (const freeTextFlag of cases) {
-      Deno.writeTextFileSync(payload, composeRequestFile());
+      fs.writeFileSync(payload, composeRequestFile());
       const result = await runScript(
         SEND_EMAIL,
         [
@@ -649,16 +669,16 @@ Deno.test("scripts - send-email refuses recipient/subject/body on the command li
     }
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-email refuses a request file outside the session staging dir", async () => {
+test("scripts - send-email refuses a request file outside the session staging dir", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const outside = join(ws, "compose.json");
-    Deno.writeTextFileSync(outside, composeRequestFile());
+    fs.writeFileSync(outside, composeRequestFile());
 
     const result = await runScript(
       SEND_EMAIL,
@@ -672,17 +692,17 @@ Deno.test("scripts - send-email refuses a request file outside the session stagi
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-email refuses a request file that is not one JSON object", async () => {
+test("scripts - send-email refuses a request file that is not one JSON object", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const payload = join(ws, "tmp", "sess_own", "compose.json");
     for (const text of ["not json at all", "[1,2,3]", '"a string"', "42"]) {
-      Deno.writeTextFileSync(payload, text);
+      fs.writeFileSync(payload, text);
       const result = await runScript(
         SEND_EMAIL,
         ["--session-id", "sess_own", "--api-url", api.url, "--request-file", payload],
@@ -698,25 +718,25 @@ Deno.test("scripts - send-email refuses a request file that is not one JSON obje
     }
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-email binds the payload boundary to the owning session", async () => {
+test("scripts - send-email binds the payload boundary to the owning session", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
-  const jwtDir = Deno.makeTempDirSync();
+  const jwtDir = makeTempDirSync();
   try {
     // Shared mode: the pointer names sess_B while the CLI literal says sess_A (a stale value).
     // The compose script must refuse instead of reading — and deleting — sess_B's request.
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       join(jwtDir, "active.json"),
       JSON.stringify({ sessionId: "sess_own", staging: join(ws, "tmp") }),
     );
-    await Deno.writeTextFile(join(jwtDir, "sess_own.jwt"), "test-jwt\n");
-    Deno.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
+    await fsp.writeFile(join(jwtDir, "sess_own.jwt"), "test-jwt\n");
+    fs.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
     const sibling = join(ws, "tmp", "sess_other", "compose.json");
-    Deno.writeTextFileSync(sibling, composeRequestFile());
+    fs.writeFileSync(sibling, composeRequestFile());
 
     const shared = await runScript(
       SEND_EMAIL,
@@ -740,12 +760,12 @@ Deno.test("scripts - send-email binds the payload boundary to the owning session
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    await Deno.remove(jwtDir, { recursive: true });
-    Deno.removeSync(ws, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-email without a request file names the flag it needs", async () => {
+test("scripts - send-email without a request file names the flag it needs", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -764,7 +784,7 @@ Deno.test("scripts - send-email without a request file names the flag it needs",
     assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
@@ -786,12 +806,12 @@ function forwardRequestFile(): string {
   });
 }
 
-Deno.test("scripts - send-email passes a forward request through verbatim with its grant id", async () => {
+test("scripts - send-email passes a forward request through verbatim with its grant id", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
     const payload = join(ws, "tmp", "sess_own", "compose.json");
-    Deno.writeTextFileSync(payload, forwardRequestFile());
+    fs.writeFileSync(payload, forwardRequestFile());
 
     const result = await runScript(
       SEND_EMAIL,
@@ -817,11 +837,11 @@ Deno.test("scripts - send-email passes a forward request through verbatim with i
     assertEquals(fileExists(payload), false, "the consumed request file is removed");
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("scripts - send-email refuses an unsupported or source-less forward request locally", async () => {
+test("scripts - send-email refuses an unsupported or source-less forward request locally", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
@@ -850,7 +870,7 @@ Deno.test("scripts - send-email refuses an unsupported or source-less forward re
     ];
 
     for (const testCase of cases) {
-      Deno.writeTextFileSync(payload, JSON.stringify(testCase.request));
+      fs.writeFileSync(payload, JSON.stringify(testCase.request));
       const result = await runScript(
         SEND_EMAIL,
         [
@@ -875,6 +895,6 @@ Deno.test("scripts - send-email refuses an unsupported or source-less forward re
     }
   } finally {
     await api.close();
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });

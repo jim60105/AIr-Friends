@@ -40,7 +40,7 @@
 // orchestrator spawn path.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { ConnectionState } from "../../../src/types/platform.ts";
@@ -69,21 +69,26 @@ import type { Config } from "../../../src/types/config.ts";
 import { createSkillJwt } from "@utils/skill-jwt.ts";
 import { mockOmpNativeCache, useMockOmpAgent } from "../../mocks/omp-mock-session.ts";
 import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
+import { LITERAL_BUN_RUN } from "@acp/skill-inventory.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
+
+/** The one literal prefix the gate accepts before a script spelling. */
+const BUN_RUN = LITERAL_BUN_RUN.join(" ");
 
 // ---------------------------------------------------------------------------
-// Subprocess-tier guard (row-21/23 precedent): dumb-init + deno only. No live
+// Subprocess-tier guard (row-21/23 precedent): dumb-init + bun only. No live
 // agent/provider/platform/container/bwrap is ever invoked by this file.
 // ---------------------------------------------------------------------------
 
-async function binaryAvailable(name: string): Promise<boolean> {
-  try {
-    const res = await new Deno.Command("which", { args: [name] }).output();
-    return res.code === 0;
-  } catch {
-    return false;
-  }
+function binaryAvailable(name: string): boolean {
+  const res = spawnSync("which", [name]);
+  return res.status === 0;
 }
-const CAN_RUN_SUBPROCESS = await binaryAvailable("dumb-init") && await binaryAvailable("deno");
+const CAN_RUN_SUBPROCESS = binaryAvailable("dumb-init") && binaryAvailable("bun");
 
 const TEST_SKILL_SECRET = "0123456789abcdef0123456789abcdef01"; // 36 bytes (>= 32)
 
@@ -199,7 +204,7 @@ class LedgerAdapter extends PlatformAdapter {
 // ---------------------------------------------------------------------------
 // Ephemeral Skill API server (never the fixed 3001 of existing suites).
 // SkillAPIServer does not expose its bound port, so the harness PRE-PROBES a
-// free ephemeral loopback port (bind port 0 with Deno.serve, read the port,
+// free ephemeral loopback port (bind port 0 with Bun.serve, read the port,
 // shut down immediately) and hands that port to the server. This is a
 // harness-side technique, NOT a production seam (task 1.3: NO-SEAM decision —
 // the ephemeral port reaches mock and skill scripts through the existing
@@ -207,14 +212,14 @@ class LedgerAdapter extends PlatformAdapter {
 // ---------------------------------------------------------------------------
 
 async function probeEphemeralPort(): Promise<number> {
-  const probe = Deno.serve({ port: 0, hostname: "127.0.0.1" }, () => new Response("probe"));
-  // deno-lint-ignore no-explicit-any
-  const port = (probe as any).addr.port as number;
-  await probe.shutdown();
+  const probe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("probe") });
+  const port = probe.port;
+  if (port === undefined) throw new Error("the probe server did not bind a TCP port");
+  await probe.stop(true);
   return port;
 }
 
-// No readiness sleep exists: `Deno.serve` binds its port synchronously by the
+// No readiness sleep exists: `Bun.serve` binds its port synchronously by the
 // time `SkillAPIServer.start()` returns (the harness's own port probe above
 // already relies on that contract), so ONE awaited fetch either gets an HTTP
 // answer (any status, even 404, proves the handler loop is live) or the
@@ -335,7 +340,7 @@ function applySkillMock(params: {
   useMockOmpAgent(params.agentConfig, {
     stateDir: params.stateDir,
     recordRpcFile: params.rpcFile, // every session/prompt recorded: retry auditable
-    allowRun: true, // scripted skill spawn needs `deno run` of the child script
+    allowRun: true, // scripted skill spawn needs `bun run` of the child script
   });
   params.agentConfig.env ??= {};
   Object.assign(params.agentConfig.env, {
@@ -512,39 +517,39 @@ async function createHarness(params: {
   installExternalSkill?: boolean;
 }): Promise<Harness> {
   const shared = params.shape === "pooled";
-  const tempDir = await Deno.makeTempDir({ prefix: `omp-handoff-${params.name}-` });
+  const tempDir = await makeTempDir({ prefix: `omp-handoff-${params.name}-` });
   const jwtDir = join(tempDir, "skill-jwt");
-  Deno.mkdirSync(jwtDir, { mode: 0o700 });
+  fs.mkdirSync(jwtDir, { mode: 0o700 });
   const stateDir = join(tempDir, "mock-state");
-  Deno.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(stateDir, { recursive: true });
   let skillsRoot: string | null = null;
   if (params.installExternalSkill) {
     const skillDirectory = join(tempDir, "skills", "external-skill");
     const scriptsDirectory = join(skillDirectory, "scripts");
-    Deno.mkdirSync(scriptsDirectory, { recursive: true });
-    Deno.writeTextFileSync(join(skillDirectory, "SKILL.md"), "# external-skill\n");
-    Deno.writeTextFileSync(
+    fs.mkdirSync(scriptsDirectory, { recursive: true });
+    fs.writeFileSync(join(skillDirectory, "SKILL.md"), "# external-skill\n");
+    fs.writeFileSync(
       join(scriptsDirectory, "external-skill.ts"),
-      "#!/usr/bin/env deno\n",
+      "#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml\n",
     );
     for (const directory of [join(tempDir, "skills"), skillDirectory, scriptsDirectory]) {
-      Deno.chmodSync(directory, 0o775);
+      fs.chmodSync(directory, 0o775);
     }
     for (
       const file of [join(skillDirectory, "SKILL.md"), join(scriptsDirectory, "external-skill.ts")]
     ) {
-      Deno.chmodSync(file, 0o664);
+      fs.chmodSync(file, 0o664);
     }
-    skillsRoot = Deno.realPathSync(join(tempDir, "skills"));
+    skillsRoot = fs.realpathSync(join(tempDir, "skills"));
   }
   const promptsDir = join(tempDir, "prompts");
-  Deno.mkdirSync(promptsDir, { recursive: true });
+  fs.mkdirSync(promptsDir, { recursive: true });
   // Harness templates render the literal pair the shipped system_reply.md
   // renders (Session Information section): literal `{{ sessionId }}` + the
   // absolute `{{ tmpDir }}` staging dir — the payload-file contract — plus the
   // literal trusted skill-script root every classified render must carry
   // (`render-delivered-skill-root-contract`).
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     join(promptsDir, "system_reply.md"),
     "Reply as the mock assistant.\n" +
       "Use `--session-id {{ sessionId }}` when calling skills.\n" +
@@ -553,7 +558,7 @@ async function createHarness(params: {
       "{{- /if }}\n" +
       "Skill root: {{ skillsDir }}\n",
   );
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     join(promptsDir, "system_summary.md"),
     "Summarize this conversation.\nSkill root: {{ skillsDir }}",
   );
@@ -615,15 +620,15 @@ async function createHarness(params: {
   // per-invocation overrides). Pooled shape: pointer is the sole identity
   // source, NO SESSION_ID anywhere.
   const skillBaseEnv: Record<string, string> = {
-    PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin",
-    HOME: Deno.env.get("HOME") ?? "/tmp",
+    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+    HOME: process.env["HOME"] ?? "/tmp",
     SKILL_API_URL: `http://127.0.0.1:${port}`,
     SKILL_JWT_DIR: jwtDir,
   };
   if (shared) skillBaseEnv.SKILL_SHARED_PROCESS = "1";
   const forgeableSkillEnvFile = join(stateDir, "skill-env-forgeable.json");
-  Deno.writeTextFileSync(skillEnvFile, JSON.stringify(skillBaseEnv));
-  Deno.writeTextFileSync(forgeableSkillEnvFile, JSON.stringify(skillBaseEnv));
+  fs.writeFileSync(skillEnvFile, JSON.stringify(skillBaseEnv));
+  fs.writeFileSync(forgeableSkillEnvFile, JSON.stringify(skillBaseEnv));
 
   const server = new SkillAPIServer(
     sessionRegistry,
@@ -709,7 +714,7 @@ async function createHarness(params: {
 
 /** Script the mock's per-prompt behavior; consumed one step per session/prompt. */
 function scriptSteps(h: Harness, steps: SkillCallStep[]): void {
-  Deno.writeTextFileSync(h.callsFile, JSON.stringify(steps));
+  fs.writeFileSync(h.callsFile, JSON.stringify(steps));
 }
 
 async function teardownHarness(h: Harness): Promise<void> {
@@ -724,7 +729,7 @@ async function teardownHarness(h: Harness): Promise<void> {
   await h.server.stop();
   h.sessionRegistry.stop();
   try {
-    await Deno.remove(h.tempDir, { recursive: true });
+    await fsp.rm(h.tempDir, { recursive: true });
   } catch {
     // Temp-dir cleanup is best effort (a still-flushing mock child can race
     // the recursive remove; the OS reclaims the dir otherwise).
@@ -741,7 +746,7 @@ interface RpcEntry {
 
 function readRpcEntries(h: Harness): RpcEntry[] {
   try {
-    return Deno.readTextFileSync(h.rpcFile)
+    return fs.readFileSync(h.rpcFile, "utf8")
       .split("\n")
       .filter((line) => line.trim() !== "")
       .map((line) => JSON.parse(line) as RpcEntry);
@@ -763,7 +768,7 @@ interface SkillRecord {
 
 function readSkillRecords(h: Harness): SkillRecord[] {
   try {
-    return Deno.readTextFileSync(h.skillRecordFile)
+    return fs.readFileSync(h.skillRecordFile, "utf8")
       .split("\n")
       .filter((line) => line.trim() !== "")
       .map((line) => JSON.parse(line) as SkillRecord);
@@ -834,7 +839,7 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     );
     const instructionPath = join(skillsRoot, "send-reply", "SKILL.md");
     const instructionReadCopy = join(h.stateDir, `skill-instruction-read-${shape}.md`);
-    const instructionBytes = Deno.readTextFileSync(instructionPath);
+    const instructionBytes = fs.readFileSync(instructionPath, "utf8");
     const stagedPayloadCopy = join(h.stateDir, `staged-payload-${shape}.md`);
     // One step, NO fixture pre-staging: the payload is created ONLY by the
     // ACP `fs/write_text_file` request below — the session staging directory
@@ -950,7 +955,7 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     // the deployment-resolved root, and the root observation the connector
     // composed into its config is that same resolved root + identity.
     assertEquals(
-      Deno.readTextFileSync(instructionReadCopy),
+      fs.readFileSync(instructionReadCopy, "utf8"),
       instructionBytes,
       "client-returned instruction content equals the file under the resolved root",
     );
@@ -970,7 +975,7 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     // re-reading the requested staging path AFTER the client's write settled
     // "ok", so it exists only if the REAL client actually created it.
     assertEquals(
-      Deno.readTextFileSync(stagedPayloadCopy),
+      fs.readFileSync(stagedPayloadCopy, "utf8"),
       replyContent,
       "client-written staging payload equals the delivered reply content",
     );
@@ -1102,7 +1107,7 @@ async function runFileOnly(): Promise<void> {
     // quota is per-session — so 429 + edit-reject happen on the FIRST
     // session's turn via a second invocation inside the same step, keeping
     // everything inside one message (the registry state stays observable).
-    Deno.mkdirSync(join(h.workspacePath, "exports"), { recursive: true });
+    fs.mkdirSync(join(h.workspacePath, "exports"), { recursive: true });
     // One step, three invocations, all inside the FIRST turn:
     //   1. send-file (relative path) — accepted by the REAL workspace-
     //      containment + quota gates, delivered through the recording adapter
@@ -1338,7 +1343,7 @@ async function runAuthFailureComposition(shape: "per-spawn" | "pooled"): Promise
       jti: h.sessionRegistry.get(foreignId)!.callerToken,
     });
     const forgedCredFile = join(h.stateDir, "forged-credential.jwt");
-    Deno.writeTextFileSync(forgedCredFile, foreignJwt);
+    fs.writeFileSync(forgedCredFile, foreignJwt);
 
     // Step 1 (first prompt): the swap helper overwrites the SUBJECT's
     // credential file with the forged token (identity resolved from
@@ -1455,7 +1460,7 @@ async function runHonestPostureDenial(): Promise<void> {
       jti: "forged-jti-not-a-caller-token",
     });
     const forgedCredFile = join(h.stateDir, "wrong-secret.jwt");
-    Deno.writeTextFileSync(forgedCredFile, forgedJwt);
+    fs.writeFileSync(forgedCredFile, forgedJwt);
 
     const helperPath = new URL("./skill-credential-swap.ts", import.meta.url).pathname;
     scriptSteps(h, [
@@ -1553,8 +1558,8 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
     const siblingStagingDir = join(h.workspacePath, "tmp", "sibling-session");
     const siblingStagingWrite = join(siblingStagingDir, "reply.md");
     const siblingAfterCopy = join(h.stateDir, "sibling-payload-after.md");
-    Deno.mkdirSync(siblingStagingDir, { recursive: true });
-    Deno.writeTextFileSync(siblingStagingWrite, "sibling payload untouched");
+    fs.mkdirSync(siblingStagingDir, { recursive: true });
+    fs.writeFileSync(siblingStagingWrite, "sibling payload untouched");
     scriptSteps(h, [
       {
         acpRequests: [
@@ -1639,7 +1644,7 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
     ]);
     let escaped = true;
     try {
-      await Deno.stat(join(h.workspacePath, "escape.md"));
+      await fsp.stat(join(h.workspacePath, "escape.md"));
     } catch {
       escaped = false;
     }
@@ -1647,7 +1652,7 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
     // The sibling's staged payload is byte-identical: the refusal was a
     // refusal, never a silent overwrite of another session's staging file.
     assertEquals(
-      Deno.readTextFileSync(siblingAfterCopy),
+      fs.readFileSync(siblingAfterCopy, "utf8"),
       "sibling payload untouched",
       "a sibling session's staging payload is never written by this session",
     );
@@ -1831,7 +1836,7 @@ async function runSharedRootUsability(agentType: "omp" | "opencode"): Promise<vo
             toolCallId: "shared-root-enumerated",
             title: "Execute shell command",
             kind: "execute",
-            rawInput: { commands: [`deno run ${entrypoint} --session-id @SESSION_ID`] },
+            rawInput: { commands: [`${BUN_RUN} ${entrypoint} --session-id @SESSION_ID`] },
           },
           options,
         },
@@ -1848,7 +1853,7 @@ async function runSharedRootUsability(agentType: "omp" | "opencode"): Promise<vo
             title: "Execute shell command",
             kind: "execute",
             rawInput: {
-              commands: [`deno run ${skillsRoot}-evil/external-skill/scripts/external-skill.ts`],
+              commands: [`${BUN_RUN} ${skillsRoot}-evil/external-skill/scripts/external-skill.ts`],
             },
           },
           options,
@@ -1949,11 +1954,7 @@ const scenarios: Array<{ name: string; fn: () => Promise<void> }> = [
 ];
 
 for (const scenario of scenarios) {
-  Deno.test({
-    name: `omp-skill-handoff - ${scenario.name}`,
-    ignore: !CAN_RUN_SUBPROCESS,
-    async fn() {
-      await scenario.fn();
-    },
+  test.skipIf(!CAN_RUN_SUBPROCESS)(`omp-skill-handoff - ${scenario.name}`, async () => {
+    await scenario.fn();
   });
 }

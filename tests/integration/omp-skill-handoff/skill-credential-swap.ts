@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 // Test fixture helper (NOT production code): the 3.5 auth-failure scenario
 // spawns this as the FIRST invocation of its scripted step, mid-run, so the
 // SUBJECT session's credential file is poisoned with a validly-signed token
@@ -20,16 +20,17 @@
 // Input: FORGED_CRED_FILE env var — path of the file whose content replaces
 // {SKILL_JWT_DIR}/{subject}.jwt. Prints the resolved subject id.
 
-const jwtDir = Deno.env.get("SKILL_JWT_DIR");
-const forgedFile = Deno.env.get("FORGED_CRED_FILE");
+import fs from "node:fs";
+const jwtDir = process.env["SKILL_JWT_DIR"];
+const forgedFile = process.env["FORGED_CRED_FILE"];
 if (!jwtDir || !forgedFile) {
   console.error("skill-credential-swap: SKILL_JWT_DIR and FORGED_CRED_FILE are required");
-  Deno.exit(2);
+  process.exit(2);
 }
 
 let subjectId: string | undefined;
 try {
-  const pointer = JSON.parse(Deno.readTextFileSync(`${jwtDir}/active.json`)) as {
+  const pointer = JSON.parse(fs.readFileSync(`${jwtDir}/active.json`, "utf8")) as {
     sessionId?: unknown;
   };
   if (typeof pointer.sessionId === "string" && pointer.sessionId.length > 0) {
@@ -40,8 +41,8 @@ try {
 }
 if (!subjectId) {
   const ids: string[] = [];
-  for (const entry of Deno.readDirSync(jwtDir)) {
-    if (entry.isFile && entry.name.endsWith(".jwt")) ids.push(entry.name.slice(0, -4));
+  for (const entry of fs.readdirSync(jwtDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".jwt")) ids.push(entry.name.slice(0, -4));
   }
   if (ids.length === 1) subjectId = ids[0];
 }
@@ -49,8 +50,8 @@ if (!subjectId) {
   console.error(
     "skill-credential-swap: subject session id unresolvable (no pointer, no unique jwt)",
   );
-  Deno.exit(2);
+  process.exit(2);
 }
 
-Deno.writeTextFileSync(`${jwtDir}/${subjectId}.jwt`, Deno.readTextFileSync(forgedFile));
+fs.writeFileSync(`${jwtDir}/${subjectId}.jwt`, fs.readFileSync(forgedFile, "utf8"));
 console.log(subjectId);

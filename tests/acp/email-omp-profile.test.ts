@@ -17,8 +17,8 @@
 // module's own published manifest contract, so no extraction ever runs.
 
 import { assert, assertEquals, assertMatch, assertThrows } from "@std/assert";
-import { fromFileUrl, join, resolve } from "@std/path";
-import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
+import { join, resolve } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createAgentConfig,
   createEmailIntentAgentConfig,
@@ -53,6 +53,11 @@ import {
 } from "@utils/omp-paths.ts";
 import type { AgentConfig } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { fileURLToPath as fromFileUrl } from "node:url";
 
 // ---------------------------------------------------------------------------
 // Fixtures and helpers
@@ -98,7 +103,7 @@ function approvalMap(document: YamlObject): YamlObject {
 /** The REAL authored settings document, with an optional edit applied. */
 function settingsDocument(edit: (document: YamlObject) => void = () => {}): string {
   const document = requireObject(
-    parseYaml(Deno.readTextFileSync(SHIPPED_SETTINGS_PATH)),
+    parseYaml(fs.readFileSync(SHIPPED_SETTINGS_PATH, "utf8")),
     "the authored deny-all OMP settings document",
   );
   edit(document);
@@ -142,15 +147,17 @@ interface NativeCacheFixture {
 function provisionNativeCache(base: string): NativeCacheFixture {
   const platform = ompNativeCachePlatform();
   const cache = ompNativeCacheDescriptor(base, platform, "development");
-  Deno.mkdirSync(cache.versionDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(cache.versionDir, { recursive: true, mode: 0o700 });
   const expected = ompNativeCacheExpectedAddons(platform);
-  const names = [...expected.exact, `pi_natives.fixture.linux-${Deno.build.arch}.node`];
+  // The platform identity is spelled `linux-arm64`; use it verbatim so the
+  // arm64 pattern requirement is satisfied without a real binary.
+  const names = [...expected.exact, `pi_natives.fixture.${platform}.node`];
   const files = names.map((name) => {
     const bytes = `fixture addon ${name}`;
-    Deno.writeTextFileSync(join(cache.versionDir, name), bytes);
+    fs.writeFileSync(join(cache.versionDir, name), bytes);
     return { name, size: bytes.length };
   });
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -184,12 +191,12 @@ async function withWorkspace(
   run: (ctx: Workspace) => void | Promise<void>,
   fixture: { settings?: string; models?: string } = {},
 ): Promise<void> {
-  const root = await Deno.makeTempDir({ prefix: "email-intent-omp-profile-" });
+  const root = await makeTempDir({ prefix: "email-intent-omp-profile-" });
   try {
     const settingsPath = join(root, "email-intent.yml");
     const modelsPath = join(root, "models.yml");
-    Deno.writeTextFileSync(settingsPath, fixture.settings ?? settingsDocument());
-    Deno.writeTextFileSync(
+    fs.writeFileSync(settingsPath, fixture.settings ?? settingsDocument());
+    fs.writeFileSync(
       modelsPath,
       fixture.models ?? modelsDocument({ openrouter: OPENROUTER_ENTRY }),
     );
@@ -203,7 +210,7 @@ async function withWorkspace(
       readPaths: [],
     });
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 }
 
@@ -220,7 +227,7 @@ function seams(ctx: Workspace, env = profileEnv()): EmailIntentProfileOptions {
     ompNativeCache: ctx.nativeCache.selection,
     readFile: (path) => {
       ctx.readPaths.push(path);
-      return Deno.readTextFileSync(path);
+      return fs.readFileSync(path, "utf8");
     },
     exists: (path) =>
       path === EMAIL_INTENT_OMP_IMAGE_CONFIG_PATH ? false : path === ctx.settingsPath ||
@@ -303,7 +310,7 @@ function privateModelsPath(ctx: Workspace): string {
 /** Synchronous existence probe. */
 function existsSync(path: string): boolean {
   try {
-    Deno.lstatSync(path);
+    fs.lstatSync(path);
     return true;
   } catch {
     return false;
@@ -338,7 +345,7 @@ let siblingCounter = 0;
 function writeSibling(ctx: Workspace, providers: YamlObject): string {
   siblingCounter += 1;
   const path = join(ctx.root, `models-sibling-${siblingCounter}.yml`);
-  Deno.writeTextFileSync(path, modelsDocument(providers));
+  fs.writeFileSync(path, modelsDocument(providers));
   return path;
 }
 
@@ -346,7 +353,7 @@ function writeSibling(ctx: Workspace, providers: YamlObject): string {
 // Launch shape
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - launches the authored deny-all document with its private roots", async () => {
+test("profile - launches the authored deny-all document with its private roots", async () => {
   await withWorkspace((ctx) => {
     const config = launch(ctx);
     const home = resolve(ctx.home);
@@ -403,14 +410,14 @@ Deno.test("profile - launches the authored deny-all document with its private ro
     // The private roots and the native layout really exist, and the reserved
     // loader entry points at the ONE prepared shared payload.
     for (const path of [home, ompIntentNativeDataDir(home)]) {
-      assert(Deno.statSync(path).isDirectory, `${path} must exist`);
+      assert(fs.statSync(path).isDirectory(), `${path} must exist`);
     }
-    assert(Deno.statSync(privateModelsPath(ctx)).isFile, "the model copy must exist");
+    assert(fs.statSync(privateModelsPath(ctx)).isFile(), "the model copy must exist");
     assertEquals(
-      Deno.readLinkSync(ompIntentNativesLinkPath(home)),
+      fs.readlinkSync(ompIntentNativesLinkPath(home)),
       ctx.nativeCache.cache.payloadDir,
     );
-    assertEquals(Deno.statSync(ompIntentNativesLinkPath(home)).isDirectory, true);
+    assertEquals(fs.statSync(ompIntentNativesLinkPath(home)).isDirectory(), true);
 
     // Mount METADATA for a confinement builder: the private roots are the only
     // writable paths, the authored document and the bundle are read-only inputs
@@ -424,7 +431,7 @@ Deno.test("profile - launches the authored deny-all document with its private ro
   });
 });
 
-Deno.test("profile - ordinary OMP launches stay byte-compatible", async () => {
+test("profile - ordinary OMP launches stay byte-compatible", async () => {
   await withWorkspace((ctx) => {
     const appConfig = createTestConfig();
     appConfig.agent.ompNativeCache = ctx.nativeCache.selection;
@@ -442,9 +449,9 @@ Deno.test("profile - ordinary OMP launches stay byte-compatible", async () => {
 // Authored deny-all document
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - the shipped document denies every contracted surface exactly", () => {
+test("profile - the shipped document denies every contracted surface exactly", () => {
   const document = requireObject(
-    parseYaml(Deno.readTextFileSync(SHIPPED_SETTINGS_PATH)),
+    parseYaml(fs.readFileSync(SHIPPED_SETTINGS_PATH, "utf8")),
     "the shipped settings document",
   );
   const approval = approvalMap(document);
@@ -468,7 +475,7 @@ Deno.test("profile - the shipped document denies every contracted surface exactl
   );
 });
 
-Deno.test("profile - a document that weakens any surface never launches", async () => {
+test("profile - a document that weakens any surface never launches", async () => {
   const cases: readonly (readonly [string, (document: YamlObject) => void, RegExp])[] = [
     [
       "a renamed denial",
@@ -541,7 +548,7 @@ Deno.test("profile - a document that weakens any surface never launches", async 
   }
 });
 
-Deno.test("profile - an unreadable, malformed or foreign document refuses", async () => {
+test("profile - an unreadable, malformed or foreign document refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () => launch(ctx, { authoredConfigPath: join(ctx.root, "absent.yml") }),
@@ -562,7 +569,7 @@ Deno.test("profile - an unreadable, malformed or foreign document refuses", asyn
 /** Write one YAML document that is not a mapping and return its path. */
 function writeScalar(ctx: Workspace): string {
   const path = join(ctx.root, "scalar.yml");
-  Deno.writeTextFileSync(path, stringifyYaml("tools"));
+  fs.writeFileSync(path, stringifyYaml("tools"));
   return path;
 }
 
@@ -570,7 +577,7 @@ function writeScalar(ctx: Workspace): string {
 // Provider-only provisioning
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - provisions exactly the selected provider and its credential", async () => {
+test("profile - provisions exactly the selected provider and its credential", async () => {
   await withWorkspace((ctx) => {
     const env = childEnv(launch(ctx));
 
@@ -584,7 +591,7 @@ Deno.test("profile - provisions exactly the selected provider and its credential
   });
 });
 
-Deno.test("profile - a required credential the environment lacks refuses", async () => {
+test("profile - a required credential the environment lacks refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () => launch(ctx, { env: profileEnv({ OPENROUTER_API_KEY: "" }) }),
@@ -593,7 +600,7 @@ Deno.test("profile - a required credential the environment lacks refuses", async
   });
 });
 
-Deno.test("profile - an undeclared or unprovisionable provider refuses", async () => {
+test("profile - an undeclared or unprovisionable provider refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () => launchAtFreshRoots(ctx, {}, { providerID: "not-declared", modelID: "m" }),
@@ -638,7 +645,7 @@ Deno.test("profile - an undeclared or unprovisionable provider refuses", async (
   });
 });
 
-Deno.test("profile - a credential-free provider launches with no credential", async () => {
+test("profile - a credential-free provider launches with no credential", async () => {
   await withWorkspace((ctx) => {
     const config = launch(
       ctx,
@@ -661,7 +668,7 @@ Deno.test("profile - a credential-free provider launches with no credential", as
   });
 });
 
-Deno.test("profile - the deployed native model file wins over the development tree", async () => {
+test("profile - the deployed native model file wins over the development tree", async () => {
   await withWorkspace((ctx) => {
     const deployed = ompHomeModelsPath(DAEMON_HOME);
     const bytes = modelsDocument({ gemini: { headers: { "X-Title": "AIr-Friends" } } });
@@ -669,14 +676,14 @@ Deno.test("profile - the deployed native model file wins over the development tr
       ctx,
       {
         catalogPath: undefined,
-        readFile: (path) => path === deployed ? bytes : Deno.readTextFileSync(path),
+        readFile: (path) => path === deployed ? bytes : fs.readFileSync(path, "utf8"),
         exists: (path) =>
           path === deployed || path === ctx.settingsPath || path === DEVELOPMENT_BUNDLE_PATH,
       },
       { providerID: "gemini", modelID: "gemini-2.5-pro" },
     );
 
-    assertEquals(Deno.readTextFileSync(privateModelsPath(ctx)), bytes);
+    assertEquals(fs.readFileSync(privateModelsPath(ctx), "utf8"), bytes);
     assertEquals(childEnv(config)["GEMINI_API_KEY"], "key-gemini");
   });
 });
@@ -685,22 +692,22 @@ Deno.test("profile - the deployed native model file wins over the development tr
 // Private roots and the model copy
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - copies only the authored model bytes into the private HOME", async () => {
+test("profile - copies only the authored model bytes into the private HOME", async () => {
   await withWorkspace((ctx) => {
-    const authored = Deno.readTextFileSync(ctx.modelsPath);
+    const authored = fs.readFileSync(ctx.modelsPath, "utf8");
     launch(ctx);
 
-    assertEquals(Deno.readTextFileSync(privateModelsPath(ctx)), authored);
+    assertEquals(fs.readFileSync(privateModelsPath(ctx), "utf8"), authored);
     assertEquals(
-      Deno.statSync(privateModelsPath(ctx)).mode! & 0o777,
+      fs.statSync(privateModelsPath(ctx)).mode! & 0o777,
       0o600,
       "the private model copy is not group/world readable",
     );
-    assertEquals(Deno.readTextFileSync(ctx.modelsPath), authored, "the source is read only");
+    assertEquals(fs.readFileSync(ctx.modelsPath, "utf8"), authored, "the source is read only");
   });
 });
 
-Deno.test("profile - provisions no native state beyond the model copy and the payload link", async () => {
+test("profile - provisions no native state beyond the model copy and the payload link", async () => {
   await withWorkspace((ctx) => {
     launch(ctx);
     const home = resolve(ctx.home);
@@ -721,12 +728,12 @@ Deno.test("profile - provisions no native state beyond the model copy and the pa
     ) {
       assert(!existsSync(join(home, forbidden)), `${forbidden} must not be provisioned`);
     }
-    assertEquals(Deno.statSync(join(home, ".omp", "agent")).mode! & 0o777, 0o700);
-    assertEquals(Deno.statSync(ompIntentNativeDataDir(home)).mode! & 0o777, 0o700);
+    assertEquals(fs.statSync(join(home, ".omp", "agent")).mode! & 0o777, 0o700);
+    assertEquals(fs.statSync(ompIntentNativeDataDir(home)).mode! & 0o777, 0o700);
   });
 });
 
-Deno.test("profile - a root spelling that is not an absolute private path refuses", async () => {
+test("profile - a root spelling that is not an absolute private path refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(() => launchWithRoots(ctx, "relative-home", ctx.cwd), /absolute path/);
     assertRefused(() => launchWithRoots(ctx, ctx.home, "relative-cwd"), /absolute path/);
@@ -734,10 +741,10 @@ Deno.test("profile - a root spelling that is not an absolute private path refuse
   });
 });
 
-Deno.test("profile - a root inside a repository ancestry refuses", async () => {
+test("profile - a root inside a repository ancestry refuses", async () => {
   await withWorkspace((ctx) => {
     const inside = join(ctx.root, "repo");
-    Deno.mkdirSync(join(inside, ".git"), { recursive: true });
+    fs.mkdirSync(join(inside, ".git"), { recursive: true });
     assertRefused(
       () => launchWithRoots(ctx, join(inside, "home"), join(inside, "cwd")),
       /repository ancestry/,
@@ -745,7 +752,7 @@ Deno.test("profile - a root inside a repository ancestry refuses", async () => {
   });
 });
 
-Deno.test("profile - a root overlapping the daemon home refuses", async () => {
+test("profile - a root overlapping the daemon home refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () => launchWithRoots(ctx, `${DAEMON_HOME}/fake-home`, `${DAEMON_HOME}/cwd`),
@@ -754,19 +761,19 @@ Deno.test("profile - a root overlapping the daemon home refuses", async () => {
   });
 });
 
-Deno.test("profile - a symlinked or occupied root refuses", async () => {
+test("profile - a symlinked or occupied root refuses", async () => {
   await withWorkspace((ctx) => {
     const target = join(ctx.root, "target-home");
     const linked = join(ctx.root, "linked-home");
-    Deno.mkdirSync(target);
-    Deno.symlinkSync(target, linked);
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, linked);
     assertRefused(
       () => launchWithRoots(ctx, linked, join(ctx.root, "linked-cwd")),
       /symlink/,
     );
 
-    Deno.mkdirSync(ctx.home, { recursive: true });
-    Deno.writeTextFileSync(join(ctx.home, "auth.json"), "{}");
+    fs.mkdirSync(ctx.home, { recursive: true });
+    fs.writeFileSync(join(ctx.home, "auth.json"), "{}");
     assertRefused(() => launch(ctx), /is not fresh/);
   });
 });
@@ -775,7 +782,7 @@ Deno.test("profile - a symlinked or occupied root refuses", async () => {
 // Native runtime payload
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - a missing, foreign or incomplete payload refuses before launch", async () => {
+test("profile - a missing, foreign or incomplete payload refuses before launch", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () => launchAtFreshRoots(ctx, { ompNativeCache: { installRoot: join(ctx.root, "absent") } }),
@@ -791,7 +798,7 @@ Deno.test("profile - a missing, foreign or incomplete payload refuses before lau
 
     // A payload prepared by the OTHER pinned executable identity.
     const foreign = provisionNativeCache(join(ctx.root, "foreign-cache"));
-    Deno.writeTextFileSync(
+    fs.writeFileSync(
       foreign.cache.manifestPath,
       serializeOmpNativeCacheManifest({
         version: OMP_NATIVE_CACHE_VERSION,
@@ -807,7 +814,7 @@ Deno.test("profile - a missing, foreign or incomplete payload refuses before lau
 
     // An incomplete payload: the manifest advertises a file that is absent.
     const incomplete = provisionNativeCache(join(ctx.root, "incomplete-cache"));
-    Deno.writeTextFileSync(
+    fs.writeFileSync(
       incomplete.cache.manifestPath,
       serializeOmpNativeCacheManifest({
         version: OMP_NATIVE_CACHE_VERSION,
@@ -833,7 +840,7 @@ Deno.test("profile - a missing, foreign or incomplete payload refuses before lau
   });
 });
 
-Deno.test("profile - a payload inside a forbidden root refuses", async () => {
+test("profile - a payload inside a forbidden root refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () =>
@@ -845,18 +852,18 @@ Deno.test("profile - a payload inside a forbidden root refuses", async () => {
   });
 });
 
-Deno.test("profile - a pre-populated private root never adopts foreign state", async () => {
+test("profile - a pre-populated private root never adopts foreign state", async () => {
   await withWorkspace((ctx) => {
     const home = resolve(ctx.home);
     // A reserved `natives` entry left behind by anything else is never adopted,
     // followed or migrated: the private native root must be fresh.
-    Deno.mkdirSync(ompIntentNativeDataDir(home), { recursive: true });
-    Deno.symlinkSync(ctx.root, ompIntentNativesLinkPath(home));
+    fs.mkdirSync(ompIntentNativeDataDir(home), { recursive: true });
+    fs.symlinkSync(ctx.root, ompIntentNativesLinkPath(home));
     assertRefused(() => launch(ctx), /is not fresh/);
 
     // The same holds for a real directory at the reserved entry.
     const second = join(ctx.root, "occupied-home");
-    Deno.mkdirSync(join(ompIntentNativeDataDir(resolve(second)), "natives"), { recursive: true });
+    fs.mkdirSync(join(ompIntentNativeDataDir(resolve(second)), "natives"), { recursive: true });
     assertRefused(
       () => launchWithRoots(ctx, second, join(ctx.root, "occupied-cwd")),
       /is not fresh/,
@@ -864,7 +871,7 @@ Deno.test("profile - a pre-populated private root never adopts foreign state", a
   });
 });
 
-Deno.test("profile - a missing generated extension bundle refuses with the build remedy", async () => {
+test("profile - a missing generated extension bundle refuses with the build remedy", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () =>
@@ -876,7 +883,7 @@ Deno.test("profile - a missing generated extension bundle refuses with the build
   });
 });
 
-Deno.test("profile - an unsupported backend refuses", async () => {
+test("profile - an unsupported backend refuses", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () =>
@@ -895,7 +902,7 @@ Deno.test("profile - an unsupported backend refuses", async () => {
 // Source-path resolution
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - falls back to the development-tree documents outside an image", async () => {
+test("profile - falls back to the development-tree documents outside an image", async () => {
   await withWorkspace((ctx) => {
     const config = launch(ctx, {
       authoredConfigPath: undefined,
@@ -903,12 +910,12 @@ Deno.test("profile - falls back to the development-tree documents outside an ima
       readFile: (path) => {
         ctx.readPaths.push(path);
         if (path === resolve(EMAIL_INTENT_OMP_CONFIG_PATH)) {
-          return Deno.readTextFileSync(SHIPPED_SETTINGS_PATH);
+          return fs.readFileSync(SHIPPED_SETTINGS_PATH, "utf8");
         }
         if (path === resolve(EMAIL_INTENT_OMP_MODELS_PATH)) {
-          return Deno.readTextFileSync(SHIPPED_MODELS_PATH);
+          return fs.readFileSync(SHIPPED_MODELS_PATH, "utf8");
         }
-        return Deno.readTextFileSync(path);
+        return fs.readFileSync(path, "utf8");
       },
       exists: (path) =>
         path === resolve(EMAIL_INTENT_OMP_CONFIG_PATH) ||
@@ -922,8 +929,8 @@ Deno.test("profile - falls back to the development-tree documents outside an ima
     ]);
     assertEquals(argumentValue(config.args, "--config"), resolve(EMAIL_INTENT_OMP_CONFIG_PATH));
     assertEquals(
-      Deno.readTextFileSync(privateModelsPath(ctx)),
-      Deno.readTextFileSync(SHIPPED_MODELS_PATH),
+      fs.readFileSync(privateModelsPath(ctx), "utf8"),
+      fs.readFileSync(SHIPPED_MODELS_PATH, "utf8"),
     );
     assertEquals(childEnv(config)["OPENROUTER_API_KEY"], "key-openrouter");
   });

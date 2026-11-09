@@ -14,8 +14,64 @@
 import { createLogger } from "@utils/logger.ts";
 import type { ExternalSkillConfig } from "../types/config.ts";
 import { collidesWithBundledContent, isValidSkillNameComponent } from "@core/bundled-skills.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { isNotFoundError, makeTempDir } from "../utils/fs-compat.ts";
 
 const logger = createLogger("SkillInstaller");
+
+/** Output ceiling for one installer run; the CLI prints a short progress log at most. */
+const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`. A supplied
+ * `env` REPLACES the parent environment (`clearEnv: true` in the Deno call); without one the
+ * child inherits it. An absent binary rejects like the original throw, and a signal-terminated
+ * child reports `-1` rather than reading as success.
+ */
+function runCommand(
+  command: string,
+  args: string[],
+  env?: Record<string, string>,
+): Promise<{ code: number; success: boolean; stdout: Uint8Array; stderr: Uint8Array }> {
+  const pending = Promise.withResolvers<{
+    code: number;
+    success: boolean;
+    stdout: Uint8Array;
+    stderr: Uint8Array;
+  }>();
+  execFile(command, args, {
+    ...(env ? { env } : {}),
+    encoding: "buffer",
+    maxBuffer: MAX_COMMAND_OUTPUT_BYTES,
+  }, (error, stdout, stderr) => {
+    if (error === null) {
+      pending.resolve({
+        code: 0,
+        success: true,
+        stdout: new Uint8Array(stdout),
+        stderr: new Uint8Array(stderr),
+      });
+      return;
+    }
+    if (typeof error.code === "string") {
+      pending.reject(error);
+      return;
+    }
+    pending.resolve({
+      code: typeof error.code === "number" ? error.code : -1,
+      success: false,
+      stdout: new Uint8Array(
+        typeof error.stdout === "string" ? Buffer.from(error.stdout) : error.stdout ?? stdout,
+      ),
+      stderr: new Uint8Array(
+        typeof error.stderr === "string" ? Buffer.from(error.stderr) : error.stderr ?? stderr,
+      ),
+    });
+  });
+  return pending.promise;
+}
 
 /**
  * Build the `npx --yes --package=skills skills add` command for a single external
@@ -56,13 +112,7 @@ export interface SkillInstallExecutor {
 
 const defaultExecutor: SkillInstallExecutor = {
   async run(cmd, args, options) {
-    const command = new Deno.Command(cmd, {
-      args,
-      stdout: "piped",
-      stderr: "piped",
-      ...(options?.env ? { env: options.env, clearEnv: true } : {}),
-    });
-    return await command.output();
+    return await runCommand(cmd, args, options?.env);
   },
 };
 
@@ -77,20 +127,20 @@ class SkillPublicationError extends Error {}
  * install posture materializes exactly that).
  */
 function copyValidatedTree(source: string, target: string): void {
-  const stat = Deno.lstatSync(source);
-  if (stat.isSymlink) {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) {
     throw new SkillPublicationError(
       `Materialized entry "${source}" is a symlink — publication refused`,
     );
   }
-  if (stat.isDirectory) {
-    Deno.mkdirSync(target, { recursive: true });
-    for (const entry of Deno.readDirSync(source)) {
+  if (stat.isDirectory()) {
+    fs.mkdirSync(target, { recursive: true });
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
       copyValidatedTree(`${source}/${entry.name}`, `${target}/${entry.name}`);
     }
     return;
   }
-  Deno.copyFileSync(source, target);
+  fs.copyFileSync(source, target);
 }
 
 /**
@@ -104,12 +154,12 @@ function copyValidatedTree(source: string, target: string): void {
  * nothing on the route was rewritten.
  */
 function assertStagingChainLinkFree(stagingHome: string, skill: string): void {
-  const canonicalHome = Deno.realPathSync(stagingHome);
+  const canonicalHome = fs.realpathSync(stagingHome);
   const stagingSkillDir = `${stagingHome}/.agents/skills/${skill}`;
   const expected = `${canonicalHome}/.agents/skills/${skill}`;
   let canonical: string;
   try {
-    canonical = Deno.realPathSync(stagingSkillDir);
+    canonical = fs.realpathSync(stagingSkillDir);
   } catch (error) {
     throw new SkillPublicationError(
       `Materialized skill path "${stagingSkillDir}" could not be observed (${
@@ -132,14 +182,14 @@ function assertStagingChainLinkFree(stagingHome: string, skill: string): void {
  * previously installed entry.
  */
 function validateMaterializedTree(source: string): void {
-  const stat = Deno.lstatSync(source);
-  if (stat.isSymlink) {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) {
     throw new SkillPublicationError(
       `Materialized entry "${source}" is a symlink — publication refused`,
     );
   }
-  if (stat.isDirectory) {
-    for (const entry of Deno.readDirSync(source)) {
+  if (stat.isDirectory()) {
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
       validateMaterializedTree(`${source}/${entry.name}`);
     }
   }
@@ -180,14 +230,14 @@ function publishSkillDirectory(
   // B5: the whole private staging chain down to the requested directory must
   // be link-free BEFORE anything is observed through it.
   assertStagingChainLinkFree(stagingHome, skill);
-  const canonicalStaging = `${Deno.realPathSync(stagingHome)}/.agents/skills/${skill}`;
-  const sourceStat = Deno.lstatSync(canonicalStaging);
-  if (!sourceStat.isDirectory) {
+  const canonicalStaging = `${fs.realpathSync(stagingHome)}/.agents/skills/${skill}`;
+  const sourceStat = fs.lstatSync(canonicalStaging);
+  if (!sourceStat.isDirectory()) {
     throw new SkillPublicationError(
       `Materialized skill "${skill}" at "${canonicalStaging}" is not a directory — refused`,
     );
   }
-  const canonicalDestination = Deno.realPathSync(destination);
+  const canonicalDestination = fs.realpathSync(destination);
   // Publishing a source that physically resolves INTO the destination tree
   // would be a self-publication loop — refused.
   if (
@@ -200,19 +250,19 @@ function publishSkillDirectory(
   }
   const target = `${canonicalDestination}/${skill}`;
   try {
-    const targetStat = Deno.lstatSync(target);
-    if (targetStat.isSymlink) {
+    const targetStat = fs.lstatSync(target);
+    if (targetStat.isSymbolicLink()) {
       throw new SkillPublicationError(
         `Destination entry "${target}" is a symlink — refusing to publish through it`,
       );
     }
-    if (!targetStat.isDirectory) {
+    if (!targetStat.isDirectory()) {
       throw new SkillPublicationError(
         `Destination entry "${target}" is not a directory — refusing to overwrite it`,
       );
     }
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
+    if (!(isNotFoundError(error))) {
       if (error instanceof SkillPublicationError) throw error;
       // Unreadable destination observation: refuse rather than overwrite blind.
       throw new SkillPublicationError(
@@ -231,22 +281,22 @@ function publishSkillDirectory(
   const backup = `${target}.air-refresh-${crypto.randomUUID()}`;
   let hadPrevious = false;
   try {
-    Deno.renameSync(target, backup);
+    fs.renameSync(target, backup);
     hadPrevious = true;
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    if (!(isNotFoundError(error))) throw error;
   }
   try {
     copyValidatedTree(canonicalStaging, target);
   } catch (error) {
     try {
-      Deno.removeSync(target, { recursive: true });
+      fs.rmSync(target, { recursive: true });
     } catch {
       // Best-effort removal of the partial output; the restore below still runs.
     }
     if (hadPrevious) {
       try {
-        Deno.renameSync(backup, target);
+        fs.renameSync(backup, target);
       } catch {
         logger.error(`Failed to restore previous external skill entry at "${target}"`, {});
       }
@@ -255,7 +305,7 @@ function publishSkillDirectory(
   }
   if (hadPrevious) {
     try {
-      Deno.removeSync(backup, { recursive: true });
+      fs.rmSync(backup, { recursive: true });
     } catch {
       // Best-effort: a leftover backup is outside the published entry.
     }
@@ -308,10 +358,10 @@ export async function installExternalSkills(
 
       // PRIVATE staging HOME: the CLI writes its `-g` universal target under
       // `${HOME}/.agents/skills`, so HOME points into a throwaway directory.
-      stagingHome = await Deno.makeTempDir({ prefix: "air-skill-stage-" });
+      stagingHome = await makeTempDir({ prefix: "air-skill-stage-" });
       const { cmd, args } = buildSkillInstallCommand(skill);
       const { code, stdout, stderr } = await executor.run(cmd, args, {
-        env: { HOME: stagingHome, PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin" },
+        env: { HOME: stagingHome, PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
       });
       const stdoutText = new TextDecoder().decode(stdout);
       const stderrText = new TextDecoder().decode(stderr);
@@ -328,13 +378,13 @@ export async function installExternalSkills(
 
       const stagingSkillDir = `${stagingHome}/.agents/skills/${skill.skill}`;
       try {
-        Deno.statSync(stagingSkillDir);
+        fs.statSync(stagingSkillDir);
       } catch {
         throw new SkillPublicationError(
           `installer produced no materialized directory for "${skill.skill}" under the private HOME`,
         );
       }
-      await Deno.mkdir(destination, { recursive: true });
+      await fsp.mkdir(destination, { recursive: true });
       publishSkillDirectory(stagingHome, destination, skill.skill);
       logger.info("Published skill {skill} from {repo} to {destination}", {
         skill: skill.skill,
@@ -351,7 +401,7 @@ export async function installExternalSkills(
     } finally {
       if (stagingHome) {
         try {
-          await Deno.remove(stagingHome, { recursive: true });
+          await fsp.rm(stagingHome, { recursive: true });
         } catch {
           // Best-effort staging cleanup; the daemon never trusts leftovers.
         }

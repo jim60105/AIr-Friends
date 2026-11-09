@@ -1,6 +1,6 @@
 // src/core/reminder-store.ts
 
-import { join } from "@std/path";
+import { join } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type {
@@ -13,6 +13,8 @@ import type { EmailOperationKey } from "@platforms/email/submission-store.ts";
 import { spontaneousOperationKey } from "@platforms/email/spontaneous-store.ts";
 import { emailResponseSlots } from "./email-response-accounting.ts";
 import type { Platform } from "../types/events.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 const logger = createLogger("ReminderStore");
 
@@ -110,7 +112,7 @@ export class ReminderStore {
   async addReminder(workspace: WorkspaceInfo, reminder: ReminderEntry): Promise<void> {
     const filePath = this.getFilePath(workspace);
     const line = JSON.stringify(reminder) + "\n";
-    await Deno.writeTextFile(filePath, line, { append: true });
+    await fsp.appendFile(filePath, line);
     logger.info("Reminder {reminderId} added for user {userId}", {
       reminderId: reminder.id,
       userId: reminder.userId,
@@ -130,7 +132,7 @@ export class ReminderStore {
     };
     const filePath = this.getFilePath(workspace);
     const line = JSON.stringify(patch) + "\n";
-    await Deno.writeTextFile(filePath, line, { append: true });
+    await fsp.appendFile(filePath, line);
     logger.info("Reminder {reminderId} cancelled", { reminderId });
   }
 
@@ -143,9 +145,9 @@ export class ReminderStore {
 
     let content: string;
     try {
-      content = await Deno.readTextFile(filePath);
+      content = await fsp.readFile(filePath, "utf8");
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         return [];
       }
       throw error;

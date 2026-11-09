@@ -89,13 +89,14 @@
           "make *": "deny",
           "strace *": "deny",
           "mkdir *": "deny",
-          "deno run *": "ask",
+          "bunx *": "deny",
+          "bun *": "ask",
           "*.ts*": "ask"
         },
         "external_directory": {
           "*": "deny",
           "~/.agents/skills/**": "allow",
-          "/home/deno/.agents/skills/**": "allow",
+          "/home/air/.agents/skills/**": "allow",
           "/app/data/agent-workspace/**": "allow",
           "/app/data/workspaces/*/tmp/**": "allow"
         }

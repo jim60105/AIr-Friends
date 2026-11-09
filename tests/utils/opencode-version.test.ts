@@ -9,6 +9,7 @@ import {
   verifyOpenCodeVersion,
 } from "@utils/opencode-version.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
+import { test } from "bun:test";
 
 // A logger that captures warn/info entries for assertion.
 // Captures the message TEMPLATE plus context (same convention as client.test.ts);
@@ -29,20 +30,20 @@ function createCapturingLogger() {
   return { entries, logger };
 }
 
-Deno.test("parseSemver - parses plain semver", () => {
+test("parseSemver - parses plain semver", () => {
   assertEquals(parseSemver("1.17.13"), { major: 1, minor: 17, patch: 13 });
 });
 
-Deno.test("parseSemver - parses version embedded in text", () => {
+test("parseSemver - parses version embedded in text", () => {
   assertEquals(parseSemver("opencode v1.17.13"), { major: 1, minor: 17, patch: 13 });
 });
 
-Deno.test("parseSemver - returns null for unparseable strings", () => {
+test("parseSemver - returns null for unparseable strings", () => {
   assertEquals(parseSemver("not-a-version"), null);
   assertEquals(parseSemver(""), null);
 });
 
-Deno.test("isAtLeastVersion - compares semver correctly", () => {
+test("isAtLeastVersion - compares semver correctly", () => {
   assertEquals(isAtLeastVersion("1.17.13", "1.17.13"), true);
   assertEquals(isAtLeastVersion("1.17.14", "1.17.13"), true);
   assertEquals(isAtLeastVersion("1.18.0", "1.17.13"), true);
@@ -53,7 +54,7 @@ Deno.test("isAtLeastVersion - compares semver correctly", () => {
   assertEquals(isAtLeastVersion("1.17.13", "garbage"), false);
 });
 
-Deno.test("verifyOpenCodeVersion - INFO with OK marker when version at minimum", async () => {
+test("verifyOpenCodeVersion - INFO with OK marker when version at minimum", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOpenCodeVersion({
     minVersion: "1.17.13",
@@ -67,7 +68,7 @@ Deno.test("verifyOpenCodeVersion - INFO with OK marker when version at minimum",
   assertEquals(entries[0].context?.version, "1.17.13");
 });
 
-Deno.test("verifyOpenCodeVersion - INFO when version above minimum", async () => {
+test("verifyOpenCodeVersion - INFO when version above minimum", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOpenCodeVersion({
     minVersion: "1.17.13",
@@ -79,7 +80,7 @@ Deno.test("verifyOpenCodeVersion - INFO when version above minimum", async () =>
   assertEquals(entries[0].level, "info");
 });
 
-Deno.test("verifyOpenCodeVersion - WARN with BELOW_MINIMUM marker when below minimum", async () => {
+test("verifyOpenCodeVersion - WARN with BELOW_MINIMUM marker when below minimum", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOpenCodeVersion({
     minVersion: "1.17.13",
@@ -94,7 +95,7 @@ Deno.test("verifyOpenCodeVersion - WARN with BELOW_MINIMUM marker when below min
   assertEquals(entries[0].context?.minVersion, "1.17.13");
 });
 
-Deno.test("verifyOpenCodeVersion - WARN with UNKNOWN marker when detection fails", async () => {
+test("verifyOpenCodeVersion - WARN with UNKNOWN marker when detection fails", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOpenCodeVersion({
     minVersion: "1.17.13",
@@ -107,7 +108,7 @@ Deno.test("verifyOpenCodeVersion - WARN with UNKNOWN marker when detection fails
   assertStringIncludes(entries[0].message, "OpenCode version check: UNKNOWN");
 });
 
-Deno.test("verifyOpenCodeVersion - UNKNOWN when detector throws (never blocks startup)", async () => {
+test("verifyOpenCodeVersion - UNKNOWN when detector throws (never blocks startup)", async () => {
   const { entries, logger } = createCapturingLogger();
   const result = await verifyOpenCodeVersion({
     minVersion: "1.17.13",
@@ -119,33 +120,33 @@ Deno.test("verifyOpenCodeVersion - UNKNOWN when detector throws (never blocks st
   assertStringIncludes(entries[0].message, "UNKNOWN");
 });
 
-Deno.test("getMinimumOpenCodeVersion - defaults to known-good minimum", () => {
-  const original = Deno.env.get("AGENT_OPENCODE_MIN_VERSION");
+test("getMinimumOpenCodeVersion - defaults to known-good minimum", () => {
+  const original = process.env["AGENT_OPENCODE_MIN_VERSION"];
   try {
-    Deno.env.delete("AGENT_OPENCODE_MIN_VERSION");
+    delete process.env["AGENT_OPENCODE_MIN_VERSION"];
     assertEquals(getMinimumOpenCodeVersion(), "1.17.13");
   } finally {
-    if (original !== undefined) Deno.env.set("AGENT_OPENCODE_MIN_VERSION", original);
+    if (original !== undefined) process.env["AGENT_OPENCODE_MIN_VERSION"] = original;
   }
 });
 
-Deno.test("getMinimumOpenCodeVersion - honors env override", () => {
-  const original = Deno.env.get("AGENT_OPENCODE_MIN_VERSION");
+test("getMinimumOpenCodeVersion - honors env override", () => {
+  const original = process.env["AGENT_OPENCODE_MIN_VERSION"];
   try {
-    Deno.env.set("AGENT_OPENCODE_MIN_VERSION", "1.18.0");
+    process.env["AGENT_OPENCODE_MIN_VERSION"] = "1.18.0";
     assertEquals(getMinimumOpenCodeVersion(), "1.18.0");
-    Deno.env.set("AGENT_OPENCODE_MIN_VERSION", "   ");
+    process.env["AGENT_OPENCODE_MIN_VERSION"] = "   ";
     assertEquals(getMinimumOpenCodeVersion(), "1.17.13", "blank override ignored");
   } finally {
     if (original !== undefined) {
-      Deno.env.set("AGENT_OPENCODE_MIN_VERSION", original);
+      process.env["AGENT_OPENCODE_MIN_VERSION"] = original;
     } else {
-      Deno.env.delete("AGENT_OPENCODE_MIN_VERSION");
+      delete process.env["AGENT_OPENCODE_MIN_VERSION"];
     }
   }
 });
 
-Deno.test("detectOpenCodeVersion - returns null when binary missing (non-fatal)", async () => {
+test("detectOpenCodeVersion - returns null when binary missing (non-fatal)", async () => {
   // Spawn a binary name that cannot exist. NEVER override the global PATH here:
   // tests run with `--parallel` and Deno.env is process-global, so mutating PATH
   // would break sibling test files (e.g. git-backup-service spawning `git`).

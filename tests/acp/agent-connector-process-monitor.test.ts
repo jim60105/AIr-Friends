@@ -1,10 +1,24 @@
 // tests/acp/agent-connector-process-monitor.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 
+import {
+  type AgentProcessExit,
+  type AgentProcessHandle,
+  createAgentProcess,
+} from "../../src/acp/agent-process.ts";
+import {
+  killProcessTree,
+  listDescendantPids,
+  processAlive,
+} from "../../src/utils/process-lifecycle.ts";
+import fsp from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 /**
  * Test suite for AgentConnector process exit monitoring and intentionalShutdown flag.
@@ -61,7 +75,7 @@ function createConnector(
 
 // A1. monitorProcessExit tests
 
-Deno.test("monitorProcessExit - no ERROR when process === null (already disconnected)", async () => {
+test("monitorProcessExit - no ERROR when process === null (already disconnected)", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -74,13 +88,13 @@ Deno.test("monitorProcessExit - no ERROR when process === null (already disconne
   assertEquals(errorLogs.length, 0);
 });
 
-Deno.test("monitorProcessExit - logs ERROR when process exits and intentionalShutdown is false", async () => {
+test("monitorProcessExit - logs ERROR when process exits and intentionalShutdown is false", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   // Create a mock process that resolves immediately (simulating unexpected exit)
   const mockStatus = Promise.resolve({ code: 1, signal: null, success: false });
-  connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
   connector["intentionalShutdown"] = false;
 
   connector["monitorProcessExit"](logger);
@@ -92,12 +106,12 @@ Deno.test("monitorProcessExit - logs ERROR when process exits and intentionalShu
   assertEquals(errorLogs[0].message, "Agent process exited unexpectedly");
 });
 
-Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown is true", async () => {
+test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown is true", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
-  connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
   connector["intentionalShutdown"] = true;
 
   connector["monitorProcessExit"](logger);
@@ -112,12 +126,12 @@ Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown 
   assertEquals(debugLogs[0].message, "Agent process exited after intentional shutdown");
 });
 
-Deno.test("monitorProcessExit - catch branch silently ignores process.status errors", async () => {
+test("monitorProcessExit - catch branch silently ignores process.status errors", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   const mockStatus = Promise.reject(new Error("process already killed"));
-  connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
 
   connector["monitorProcessExit"](logger);
 
@@ -130,7 +144,7 @@ Deno.test("monitorProcessExit - catch branch silently ignores process.status err
 
 // A3. isProcessAlive tests
 
-Deno.test("isProcessAlive - returns false when process is null", async () => {
+test("isProcessAlive - returns false when process is null", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -138,43 +152,33 @@ Deno.test("isProcessAlive - returns false when process is null", async () => {
   assertEquals(alive, false);
 });
 
-Deno.test({
-  name: "isProcessAlive - returns false when process has exited",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const { logger } = createCapturingLogger();
-    const connector = createConnector(logger);
+test("isProcessAlive - returns false when process has exited", async () => {
+  const { logger } = createCapturingLogger();
+  const connector = createConnector(logger);
 
-    // Process that already resolved (exited)
-    const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
-    connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  // Process that already resolved (exited)
+  const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
 
-    const alive = await connector["isProcessAlive"]();
-    assertEquals(alive, false);
-  },
+  const alive = await connector["isProcessAlive"]();
+  assertEquals(alive, false);
 });
 
-Deno.test({
-  name: "isProcessAlive - returns true when process is still running",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const { logger } = createCapturingLogger();
-    const connector = createConnector(logger);
+test("isProcessAlive - returns true when process is still running", async () => {
+  const { logger } = createCapturingLogger();
+  const connector = createConnector(logger);
 
-    // Process that never resolves (still running)
-    const mockStatus = new Promise<Deno.CommandStatus>(() => {});
-    connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  // Process that never resolves (still running)
+  const mockStatus = Promise.withResolvers<AgentProcessExit>().promise;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
 
-    const alive = await connector["isProcessAlive"]();
-    assertEquals(alive, true);
-  },
+  const alive = await connector["isProcessAlive"]();
+  assertEquals(alive, true);
 });
 
 // A4. clearIdleMonitor tests
 
-Deno.test("clearIdleMonitor - clears interval and sets to null", () => {
+test("clearIdleMonitor - clears interval and sets to null", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -185,7 +189,7 @@ Deno.test("clearIdleMonitor - clears interval and sets to null", () => {
   assertEquals(connector["currentIdleMonitorIntervalId"], null);
 });
 
-Deno.test("clearIdleMonitor - safe to call multiple times", () => {
+test("clearIdleMonitor - safe to call multiple times", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -196,7 +200,7 @@ Deno.test("clearIdleMonitor - safe to call multiple times", () => {
 
 // A8. idle timeout config getter tests
 
-Deno.test("idleTimeoutMs - uses config value when provided", () => {
+test("idleTimeoutMs - uses config value when provided", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: true,
@@ -207,14 +211,14 @@ Deno.test("idleTimeoutMs - uses config value when provided", () => {
   assertEquals(connector["idleTimeoutMs"], 60000);
 });
 
-Deno.test("idleTimeoutMs - uses default when not configured", () => {
+test("idleTimeoutMs - uses default when not configured", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["idleTimeoutMs"], 5 * 60 * 1000);
 });
 
-Deno.test("idleCheckIntervalMs - uses config value when provided", () => {
+test("idleCheckIntervalMs - uses config value when provided", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: true,
@@ -225,21 +229,21 @@ Deno.test("idleCheckIntervalMs - uses config value when provided", () => {
   assertEquals(connector["idleCheckIntervalMs"], 10000);
 });
 
-Deno.test("idleCheckIntervalMs - uses default when not configured", () => {
+test("idleCheckIntervalMs - uses default when not configured", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["idleCheckIntervalMs"], 30 * 1000);
 });
 
-Deno.test("idleTimeoutEnabled - defaults to true when not configured", () => {
+test("idleTimeoutEnabled - defaults to true when not configured", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["idleTimeoutEnabled"], true);
 });
 
-Deno.test("idleTimeoutEnabled - returns false when enabled is false", () => {
+test("idleTimeoutEnabled - returns false when enabled is false", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: false,
@@ -250,7 +254,7 @@ Deno.test("idleTimeoutEnabled - returns false when enabled is false", () => {
   assertEquals(connector["idleTimeoutEnabled"], false);
 });
 
-Deno.test("idleTimeoutEnabled - returns true when enabled is true", () => {
+test("idleTimeoutEnabled - returns true when enabled is true", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: true,
@@ -263,14 +267,14 @@ Deno.test("idleTimeoutEnabled - returns true when enabled is true", () => {
 
 // intentionalShutdown flag reset tests
 
-Deno.test("intentionalShutdown - defaults to false", () => {
+test("intentionalShutdown - defaults to false", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["intentionalShutdown"], false);
 });
 
-Deno.test("intentionalShutdown - can be set and read", () => {
+test("intentionalShutdown - can be set and read", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -280,3 +284,159 @@ Deno.test("intentionalShutdown - can be set and read", () => {
   connector["intentionalShutdown"] = false;
   assertEquals(connector["intentionalShutdown"], false);
 });
+
+// Escalated disconnect reaps the agent process tree (real descendant processes).
+
+const SIGKILL_WARNING = "Agent process did not exit within SIGTERM timeout, sending SIGKILL";
+
+/**
+ * The agent ignores SIGTERM and starts a grandchild that ignores it too, so a
+ * wrapper-only SIGKILL would leave both running (the Go record's
+ * `sigkillSurvivors`).
+ */
+const IGNORE_TERM_PARENT_FIXTURE = `
+process.on("SIGTERM", () => {});
+Bun.spawn(["sh", "-c", "trap '' TERM; sleep 600"], { stdout: "ignore", stderr: "ignore" });
+setInterval(() => {}, 1000);
+`;
+
+/** The agent exits on SIGTERM: the connector must not escalate. */
+const EXIT_ON_TERM_FIXTURE = `
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1000);
+`;
+
+/** One real agent process tree; the returned fixture dir is removed by teardown. */
+async function startFixture(
+  fixtureSource: string,
+  expectedDescendants: number,
+): Promise<{
+  connector: AgentConnector;
+  logs: LogEntry[];
+  pid: number;
+  descendants: number[];
+  fixtureDir: string;
+}> {
+  const fixtureDir = await fsp.mkdtemp(join(tmpdir(), "agent-connector-tree-"));
+  let handle: AgentProcessHandle | undefined;
+  try {
+    const fixture = join(fixtureDir, "fixture.ts");
+    await fsp.writeFile(fixture, fixtureSource);
+    const { logger, logs } = createCapturingLogger();
+    const connector = createConnector(logger);
+    handle = createAgentProcess({
+      command: process.execPath,
+      args: ["run", "--no-env-file", fixture],
+      cwd: fixtureDir,
+      env: { PATH: process.env["PATH"] ?? "" },
+    });
+    connector["process"] = handle;
+    const descendants = await waitForDescendants(handle.pid, expectedDescendants);
+    return { connector, logs, pid: handle.pid, descendants, fixtureDir };
+  } catch (error) {
+    // A readiness failure must not leak the spawned tree or the temp root.
+    if (handle !== undefined) await killProcessTree(handle.pid, "SIGKILL").catch(() => {});
+    await fsp.rm(fixtureDir, { recursive: true }).catch(() => {});
+    throw error;
+  }
+}
+
+test("Escalated Disconnect Reaps The Agent Process Tree - child ignoring SIGTERM", async () => {
+  // The wrapper's child is the agent fixture; beneath it is the SIGTERM-
+  // ignoring `sh -c` command (`sleep` may replace the shell via exec).
+  const fixture = await startFixture(IGNORE_TERM_PARENT_FIXTURE, 2);
+  try {
+    // Wrapper -> agent fixture -> sh -> sleep: all but the wrapper ignore
+    // SIGTERM, so only the escalated SIGKILL can reap them.
+    await fixture.connector.disconnect();
+
+    await waitForGone([fixture.pid, ...fixture.descendants], 1_000);
+    assertEquals(await processAlive(fixture.pid), false);
+    for (const pid of fixture.descendants) {
+      assertEquals(await processAlive(pid), false, `descendant ${pid} survived the escalation`);
+    }
+    assert(
+      fixture.logs.some((entry) => entry.level === "warn" && entry.message === SIGKILL_WARNING),
+      "the 2-second grace period must have expired before escalation",
+    );
+  } finally {
+    await killProcessTree(fixture.pid, "SIGKILL").catch(() => {});
+    // The wrapper may already be gone; the recorded descendants must still die.
+    for (const pid of fixture.descendants) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    await fsp.rm(fixture.fixtureDir, { recursive: true }).catch(() => {});
+  }
+});
+
+test("Escalated Disconnect Reaps The Agent Process Tree - graceful exit is not escalated", async () => {
+  const fixture = await startFixture(EXIT_ON_TERM_FIXTURE, 1);
+  try {
+    await fixture.connector.disconnect();
+
+    assertEquals(await processAlive(fixture.pid), false);
+    assertEquals(
+      fixture.logs.some((entry) => entry.level === "warn" && entry.message === SIGKILL_WARNING),
+      false,
+      "a SIGTERM exit inside the grace period must never escalate",
+    );
+    for (const pid of fixture.descendants) {
+      assertEquals(await processAlive(pid), false, `descendant ${pid} must exit with the agent`);
+    }
+  } finally {
+    await killProcessTree(fixture.pid, "SIGKILL").catch(() => {});
+    // The wrapper may already be gone; the recorded descendants must still die.
+    for (const pid of fixture.descendants) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    await fsp.rm(fixture.fixtureDir, { recursive: true }).catch(() => {});
+  }
+});
+
+/**
+ * Real delay: a spawned kernel process's arrival and death are OS events, not
+ * timers under test control, so these barriers poll the kernel within a bounded
+ * deadline (the sanctioned exception; no guessed single sleep).
+ */
+async function waitForDescendants(pid: number, expected: number): Promise<number[]> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const descendants = await listDescendantPids(pid);
+    if (descendants.ok && descendants.pids.length >= expected) return descendants.pids;
+    await delay(10);
+  }
+  throw new Error(`wrapper ${pid} never reached ${expected} descendants`);
+}
+
+/** Bounded wait until every PID is gone; throws naming the survivors. */
+async function waitForGone(pids: number[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const alive: number[] = [];
+    for (const pid of pids) {
+      if (await processAlive(pid)) alive.push(pid);
+    }
+    if (alive.length === 0) return;
+    await delay(20);
+  }
+  const survivors: number[] = [];
+  for (const pid of pids) {
+    if (await processAlive(pid)) survivors.push(pid);
+  }
+  throw new Error(`processes still alive after teardown: ${survivors.join(", ")}`);
+}
+
+/** A small real delay for bounded kernel polling. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}

@@ -11,23 +11,27 @@
 
 import { assert, assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
 import { globSync } from "node:fs";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { DiscordAdapter } from "@platforms/discord/discord-adapter.ts";
 import { MisskeyAdapter } from "@platforms/misskey/misskey-adapter.ts";
 import type { PlatformEmoji } from "../../src/types/platform.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const TOKENS = ["$TMPDIR", "$SESSION_ID", "${TMPDIR}", "${SESSION_ID}"] as const;
 
-Deno.test("skill docs gate - every SKILL.md is free of $TMPDIR/$SESSION_ID token instructions", () => {
+test("skill docs gate - every SKILL.md is free of $TMPDIR/$SESSION_ID token instructions", () => {
   const docs = globSync("skills/*/SKILL.md").sort();
   // Guard the sweep's enumeration: the change swept every published skill.
   assert(docs.length >= 14, `expected all bundled skills documented, found ${docs.length}`);
   const offenders: string[] = [];
   for (const doc of docs) {
-    const text = Deno.readTextFileSync(doc);
+    const text = fs.readFileSync(doc, "utf8");
     for (const token of TOKENS) {
       if (text.includes(token)) offenders.push(`${doc}: ${token}`);
     }
@@ -35,12 +39,12 @@ Deno.test("skill docs gate - every SKILL.md is free of $TMPDIR/$SESSION_ID token
   assertEquals(offenders, [], `SKILL.md token instructions: ${offenders.join(", ")}`);
 });
 
-Deno.test("skill docs gate - script examples carry no token-form staging strings", () => {
+test("skill docs gate - script examples carry no token-form staging strings", () => {
   const scripts = globSync("skills/*/scripts/*.ts").sort();
   assert(scripts.length >= 7, `expected swept skill scripts, found ${scripts.length}`);
   const offenders: string[] = [];
   for (const script of scripts) {
-    const text = Deno.readTextFileSync(script);
+    const text = fs.readFileSync(script, "utf8");
     for (const token of ["$TMPDIR/$SESSION_ID", '--session-id "$SESSION_ID"']) {
       if (text.includes(token)) offenders.push(`${script}: ${token}`);
     }
@@ -146,22 +150,22 @@ async function misskeyEmojiFixture(): Promise<{
 async function withEmojiAssembler(
   fn: (assembler: ContextAssembler) => Promise<void> | void,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const assembler = new ContextAssembler(new MemoryStore(manager, {}), {
       recentMessageLimit: 20,
       tokenLimit: 20000,
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills")),
+      skillsDir: fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills")),
     });
     await fn(assembler);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("skill docs gate - reaction recipe quotes the adapter values the emoji section renders", async () => {
+test("skill docs gate - reaction recipe quotes the adapter values the emoji section renders", async () => {
   const { adapter: discord, emojis: discordEmojis } = await discordEmojiFixture();
   try {
     const { emojis: misskeyEmojis, requestedEndpoints } = await misskeyEmojiFixture();
@@ -193,7 +197,7 @@ Deno.test("skill docs gate - reaction recipe quotes the adapter values the emoji
           `<r>wave_anim:${DISCORD_ANIMATED_EMOJI_ID}</r></e>`,
       );
 
-      const doc = Deno.readTextFileSync("skills/react-message/SKILL.md");
+      const doc = fs.readFileSync("skills/react-message/SKILL.md", "utf8");
       // Every rendered `<r>` value, and only those, are the documented `--emoji` values.
       assertStringIncludes(doc, `<r>wave:${DISCORD_EMOJI_ID}</r>`);
       assertStringIncludes(doc, "<r>:wave:</r>");
@@ -247,8 +251,8 @@ function fencedCodeLines(text: string): string[] {
   return lines;
 }
 
-Deno.test("skill docs gate - attachment recipe sends an existing nested workspace file in place", () => {
-  const doc = Deno.readTextFileSync("skills/send-file/SKILL.md");
+test("skill docs gate - attachment recipe sends an existing nested workspace file in place", () => {
+  const doc = fs.readFileSync("skills/send-file/SKILL.md", "utf8");
   const prose = doc.replace(/\s+/g, " ");
 
   // The delta's fixture mapping, including the literal session id it belongs to.
@@ -338,7 +342,7 @@ const NO_RETRY_DOCS = [
   "skills/set-reminder/SKILL.md",
 ];
 
-Deno.test("skill docs gate - no published instruction prescribes a stale cancellation tool name", () => {
+test("skill docs gate - no published instruction prescribes a stale cancellation tool name", () => {
   assert(
     PUBLISHED_DOCS.length >= 60,
     `expected all published surfaces, found ${PUBLISHED_DOCS.length}`,
@@ -346,7 +350,7 @@ Deno.test("skill docs gate - no published instruction prescribes a stale cancell
 
   const sweptWithCancellationAdvice: string[] = [];
   for (const doc of PUBLISHED_DOCS) {
-    const text = Deno.readTextFileSync(doc);
+    const text = fs.readFileSync(doc, "utf8");
     assertFalse(text.includes("stop_bash"), `${doc} still prescribes stop_bash`);
     // Cancellation advice names no tool (so no speculative alias), and no doc
     // claims that stopping a script proves nothing reached the platform.
@@ -380,16 +384,16 @@ Deno.test("skill docs gate - no published instruction prescribes a stale cancell
 
   for (const doc of NO_RETRY_DOCS) {
     assertStringIncludes(
-      Deno.readTextFileSync(doc),
+      fs.readFileSync(doc, "utf8"),
       "then do not retry; return an error message in JSON format",
     );
   }
 
   // Sending skills keep their own non-retry rules and their delivery uncertainty.
-  const sendFile = Deno.readTextFileSync("skills/send-file/SKILL.md");
+  const sendFile = fs.readFileSync("skills/send-file/SKILL.md", "utf8");
   assertStringIncludes(sendFile, "never retry that send");
   assertStringIncludes(sendFile, "may still have reached the platform");
-  const sendReply = Deno.readTextFileSync("skills/send-reply/SKILL.md");
+  const sendReply = fs.readFileSync("skills/send-reply/SKILL.md", "utf8");
   assertStringIncludes(sendReply, "may still have reached the platform");
 });
 
@@ -402,8 +406,8 @@ Deno.test("skill docs gate - no published instruction prescribes a stale cancell
 // never that a platform accepted anything.
 // ---------------------------------------------------------------------------
 
-Deno.test("skill docs gate - send-reply owns the outcome-dependent delivery recovery policy", () => {
-  const sendReply = Deno.readTextFileSync("skills/send-reply/SKILL.md");
+test("skill docs gate - send-reply owns the outcome-dependent delivery recovery policy", () => {
+  const sendReply = fs.readFileSync("skills/send-reply/SKILL.md", "utf8");
 
   // The blanket irreversible-failure warning is gone; the outcome table owns
   // the decision instead.
@@ -455,8 +459,8 @@ Deno.test("skill docs gate - send-reply owns the outcome-dependent delivery reco
   assertStringIncludes(sendReply, "internal reply flag having been rolled back");
 });
 
-Deno.test("skill docs gate - send-file owns the partial-delivery slot rule", () => {
-  const sendFile = Deno.readTextFileSync("skills/send-file/SKILL.md");
+test("skill docs gate - send-file owns the partial-delivery slot rule", () => {
+  const sendFile = fs.readFileSync("skills/send-file/SKILL.md", "utf8");
 
   // Positive delivered output is a consumed slot, not a retryable failure.
   assertStringIncludes(sendFile, "positive `filesCount`");

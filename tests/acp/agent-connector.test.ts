@@ -17,13 +17,13 @@ import type {
  * Verifies that the ACP Client properly checks Agent capabilities before using HTTP/SSE transports
  */
 
-Deno.test("AgentConnector - capabilities checking", async (t) => {
-  await t.step("should store capabilities after initialization", () => {
+describe("AgentConnector - capabilities checking", () => {
+  test("should store capabilities after initialization", () => {
     // This is tested implicitly through the other tests
     // since we need capabilities to be stored for validation to work
   });
 
-  await t.step("should detect HTTP transport support correctly", () => {
+  test("should detect HTTP transport support correctly", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: true },
     });
@@ -31,7 +31,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
     assertEquals(connector.supportsHTTPTransport(), true);
   });
 
-  await t.step("should detect HTTP transport not supported", () => {
+  test("should detect HTTP transport not supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: false },
     });
@@ -39,7 +39,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
     assertEquals(connector.supportsHTTPTransport(), false);
   });
 
-  await t.step("should detect HTTP transport not supported when missing", () => {
+  test("should detect HTTP transport not supported when missing", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: {},
     });
@@ -47,7 +47,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
     assertEquals(connector.supportsHTTPTransport(), false);
   });
 
-  await t.step("should detect SSE transport support correctly", () => {
+  test("should detect SSE transport support correctly", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { sse: true },
     });
@@ -55,7 +55,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
     assertEquals(connector.supportsSSETransport(), true);
   });
 
-  await t.step("should detect SSE transport not supported", () => {
+  test("should detect SSE transport not supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { sse: false },
     });
@@ -63,7 +63,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
     assertEquals(connector.supportsSSETransport(), false);
   });
 
-  await t.step("should detect loadSession capability", () => {
+  test("should detect loadSession capability", () => {
     const connector = createMockConnectorWithCapabilities({
       loadSession: true,
     });
@@ -72,7 +72,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
   });
 });
 
-Deno.test("reconnectAndResumeSession - post-load catalog miss rejects without unstable fallback or reasoning work", async () => {
+test("reconnectAndResumeSession - post-load catalog miss rejects without unstable fallback or reasoning work", async () => {
   const connector = createMockConnectorWithCapabilities({ loadSession: true });
   const rpcCalls: string[] = [];
 
@@ -122,7 +122,7 @@ Deno.test("reconnectAndResumeSession - post-load catalog miss rejects without un
   assertEquals(rpcCalls, ["loadSession"]);
 });
 
-Deno.test("reconnectAndResumeSession - load response without configOptions clears cache and takes unstable fallback", async () => {
+test("reconnectAndResumeSession - load response without configOptions clears cache and takes unstable fallback", async () => {
   const connector = createMockConnectorWithCapabilities({ loadSession: true });
   const rpcCalls: string[] = [];
 
@@ -152,7 +152,7 @@ Deno.test("reconnectAndResumeSession - load response without configOptions clear
   assertEquals(rpcCalls, ["loadSession", "unstable_setSessionModel:prior-model"]);
 });
 
-Deno.test("setSessionModel - response omitting configOptions clears cache (nullish-clear semantics)", async () => {
+test("setSessionModel - response omitting configOptions clears cache (nullish-clear semantics)", async () => {
   const connector = createMockConnectorWithCapabilities({});
   connector["connection"] = {
     setSessionConfigOption: () => Promise.resolve({}), // No configOptions returned
@@ -178,7 +178,7 @@ Deno.test("setSessionModel - response omitting configOptions clears cache (nulli
 
 // --- setSessionModel & reconnectAndResumeSession tests ---
 
-Deno.test("setSessionModel - stable advertised model catalog sends session/set_config_option with canonical value and refreshes cache", async () => {
+test("setSessionModel - stable advertised model catalog sends session/set_config_option with canonical value and refreshes cache", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const setCalls: { sessionId: string; configId: string; value: string }[] = [];
   let unstableCalled = false;
@@ -239,7 +239,7 @@ Deno.test("setSessionModel - stable advertised model catalog sends session/set_c
   assertEquals(cached[0].currentValue, "OpenAI/GPT-4o");
 });
 
-Deno.test("setSessionModel - stable option absence sends exact unstable request", async () => {
+test("setSessionModel - stable option absence sends exact unstable request", async () => {
   const connector = createMockConnectorWithCapabilities({});
   let setConfigCalled = false;
   const unstableCalls: { sessionId: string; modelId: string }[] = [];
@@ -277,7 +277,7 @@ Deno.test("setSessionModel - stable option absence sends exact unstable request"
   );
 });
 
-Deno.test("setSessionModel - catalog miss rejects with explicit error and zero model-setting calls", async () => {
+test("setSessionModel - catalog miss rejects with explicit error and zero model-setting calls", async () => {
   const connector = createMockConnectorWithCapabilities({});
   let setConfigCalled = false;
   let unstableCalled = false;
@@ -314,7 +314,7 @@ Deno.test("setSessionModel - catalog miss rejects with explicit error and zero m
   assertEquals(unstableCalled, false);
 });
 
-Deno.test("setSessionModel - config_option_update between sessions makes selection use refreshed catalog", async () => {
+test("setSessionModel - config_option_update between sessions makes selection use refreshed catalog", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const setCalls: { sessionId: string; configId: string; value: string }[] = [];
 
@@ -359,7 +359,7 @@ Deno.test("setSessionModel - config_option_update between sessions makes selecti
   assertEquals(setCalls[0].value, "New-Model");
 });
 
-Deno.test("setReasoningEffort - none/off cases end-to-end including applied on Off", async () => {
+test("setReasoningEffort - none/off cases end-to-end including applied on Off", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const { calls } = injectThoughtLevel(connector, [
     { value: "low", name: "Low" },
@@ -372,7 +372,7 @@ Deno.test("setReasoningEffort - none/off cases end-to-end including applied on O
   assertEquals(calls[0].value, "Off");
 });
 
-Deno.test("reconnectAndResumeSession - restores cache from load response and re-sends model/reasoning", async () => {
+test("reconnectAndResumeSession - restores cache from load response and re-sends model/reasoning", async () => {
   const connector = createMockConnectorWithCapabilities({ loadSession: true });
   const rpcOrder: string[] = [];
 
@@ -452,8 +452,8 @@ Deno.test("reconnectAndResumeSession - restores cache from load response and re-
   );
 });
 
-Deno.test("AgentConnector - MCP transport filtering", async (t) => {
-  await t.step("should allow stdio transport (always supported)", () => {
+describe("AgentConnector - MCP transport filtering", () => {
+  test("should allow stdio transport (always supported)", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: {},
     });
@@ -469,7 +469,7 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
     assertEquals(result[0], stdioServer);
   });
 
-  await t.step("should allow HTTP transport when supported", () => {
+  test("should allow HTTP transport when supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: true },
     });
@@ -486,7 +486,7 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
     assertEquals(result[0], httpServer);
   });
 
-  await t.step("should skip HTTP transport when not supported", () => {
+  test("should skip HTTP transport when not supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: false },
     });
@@ -501,7 +501,7 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
     assertEquals(result.length, 0);
   });
 
-  await t.step("should allow SSE transport when supported", () => {
+  test("should allow SSE transport when supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { sse: true },
     });
@@ -517,7 +517,7 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
     assertEquals(result[0], sseServer);
   });
 
-  await t.step("should skip SSE transport when not supported", () => {
+  test("should skip SSE transport when not supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: {},
     });
@@ -532,7 +532,7 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
     assertEquals(result.length, 0);
   });
 
-  await t.step("should filter mixed servers correctly", () => {
+  test("should filter mixed servers correctly", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: true, sse: false },
     });
@@ -554,7 +554,7 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
     assertEquals(result.length, 2);
   });
 
-  await t.step("should skip unsupported server in mixed list", () => {
+  test("should skip unsupported server in mixed list", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: true, sse: false },
     });
@@ -578,8 +578,8 @@ Deno.test("AgentConnector - MCP transport filtering", async (t) => {
   });
 });
 
-Deno.test("AgentConnector - MCP config conversion", async (t) => {
-  await t.step("should convert stdio config correctly", () => {
+describe("AgentConnector - MCP config conversion", () => {
+  test("should convert stdio config correctly", () => {
     const connector = createMockConnectorWithCapabilities({});
 
     const stdioServer: StdioMCPServerConfig = {
@@ -599,7 +599,7 @@ Deno.test("AgentConnector - MCP config conversion", async (t) => {
     });
   });
 
-  await t.step("should convert HTTP config correctly", () => {
+  test("should convert HTTP config correctly", () => {
     const connector = createMockConnectorWithCapabilities({});
 
     const httpServer: HTTPMCPServerConfig = {
@@ -625,7 +625,7 @@ Deno.test("AgentConnector - MCP config conversion", async (t) => {
     });
   });
 
-  await t.step("should handle missing optional fields", () => {
+  test("should handle missing optional fields", () => {
     const connector = createMockConnectorWithCapabilities({});
 
     const stdioServer: StdioMCPServerConfig = {
@@ -681,7 +681,7 @@ function createMockConnectorWithCapabilities(
   return connector;
 }
 
-Deno.test("AgentConnector - supportsImageContent cases", () => {
+test("AgentConnector - supportsImageContent cases", () => {
   const connectorTrue = createMockConnectorWithCapabilities({
     promptCapabilities: { image: true },
   });
@@ -697,7 +697,7 @@ Deno.test("AgentConnector - supportsImageContent cases", () => {
   assertEquals(connectorEmpty.supportsImageContent(), false);
 });
 
-Deno.test("AgentConnector - setSessionMode calls connection.setSessionMode with correct params", async () => {
+test("AgentConnector - setSessionMode calls connection.setSessionMode with correct params", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const calls: { sessionId: string; modeId: string }[] = [];
 
@@ -716,7 +716,7 @@ Deno.test("AgentConnector - setSessionMode calls connection.setSessionMode with 
   assertEquals(calls[0].modeId, "yolo");
 });
 
-Deno.test("AgentConnector - setSessionMode throws when not connected", async () => {
+test("AgentConnector - setSessionMode throws when not connected", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // connection is null by default (not connected)
 
@@ -769,21 +769,21 @@ function injectThoughtLevel(
   return { calls };
 }
 
-Deno.test("setReasoningEffort - returns skipped for default/empty", async () => {
+test("setReasoningEffort - returns skipped for default/empty", async () => {
   const connector = createMockConnectorWithCapabilities({});
   assertEquals(await connector.setReasoningEffort("s", "default"), "skipped");
   assertEquals(await connector.setReasoningEffort("s", ""), "skipped");
   assertEquals(await connector.setReasoningEffort("s", "  DEFAULT "), "skipped");
 });
 
-Deno.test("setReasoningEffort - returns unsupported when no thought_level option", async () => {
+test("setReasoningEffort - returns unsupported when no thought_level option", async () => {
   const connector = createMockConnectorWithCapabilities({});
   connector["connection"] = {} as unknown as typeof connector["connection"];
   // No config options cached.
   assertEquals(await connector.setReasoningEffort("s", "high"), "unsupported");
 });
 
-Deno.test("setReasoningEffort - applied sends value with correct configId", async () => {
+test("setReasoningEffort - applied sends value with correct configId", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const { calls } = injectThoughtLevel(connector, [
     { value: "low", name: "Low" },
@@ -797,7 +797,7 @@ Deno.test("setReasoningEffort - applied sends value with correct configId", asyn
   assertEquals(calls[0].value, "high");
 });
 
-Deno.test("setReasoningEffort - skipped_unavailable when known value not offered", async () => {
+test("setReasoningEffort - skipped_unavailable when known value not offered", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const { calls } = injectThoughtLevel(connector, [
     { value: "low", name: "Low" },
@@ -809,7 +809,7 @@ Deno.test("setReasoningEffort - skipped_unavailable when known value not offered
   assertEquals(calls.length, 0); // not sent
 });
 
-Deno.test("setReasoningEffort - passthrough token sent even if not in known set", async () => {
+test("setReasoningEffort - passthrough token sent even if not in known set", async () => {
   const connector = createMockConnectorWithCapabilities({});
   const { calls } = injectThoughtLevel(connector, [
     { value: "low", name: "Low" },
@@ -821,7 +821,7 @@ Deno.test("setReasoningEffort - passthrough token sent even if not in known set"
   assertEquals(calls[0].value, "ultra");
 });
 
-Deno.test("setReasoningEffort - extended levels applied with agent canonical casing when offered", async () => {
+test("setReasoningEffort - extended levels applied with agent canonical casing when offered", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Agent advertises distinct-cased extended levels.
   const { calls } = injectThoughtLevel(connector, [
@@ -843,7 +843,7 @@ Deno.test("setReasoningEffort - extended levels applied with agent canonical cas
   assertEquals(calls[1].value, "MAX");
 });
 
-Deno.test("setReasoningEffort - extended levels skipped_unavailable when not offered", async () => {
+test("setReasoningEffort - extended levels skipped_unavailable when not offered", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Non-empty advertised list that excludes the extended levels.
   const { calls } = injectThoughtLevel(connector, [
@@ -861,7 +861,7 @@ Deno.test("setReasoningEffort - extended levels skipped_unavailable when not off
   assertEquals(calls.length, 0); // still not sent
 });
 
-Deno.test("setReasoningEffort - extended levels sent as-is when advertised list is empty (open-ended)", async () => {
+test("setReasoningEffort - extended levels sent as-is when advertised list is empty (open-ended)", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Empty enumerated list means the option is open-ended (existing behavior for all known tokens).
   const { calls } = injectThoughtLevel(connector, []);
@@ -872,7 +872,7 @@ Deno.test("setReasoningEffort - extended levels sent as-is when advertised list 
   assertEquals(calls[0].value, "xhigh");
 });
 
-Deno.test("setReasoningEffort - skipped_unavailable warning includes model and agent type", async () => {
+test("setReasoningEffort - skipped_unavailable warning includes model and agent type", async () => {
   const warns: Record<string, unknown>[] = [];
   const connector = new AgentConnector({
     agentConfig: { command: "mock-agent", args: [], cwd: "/tmp" },
@@ -907,7 +907,7 @@ Deno.test("setReasoningEffort - skipped_unavailable warning includes model and a
   assertEquals(warns[0].agentType, "opencode");
 });
 
-Deno.test("setReasoningEffort - failed when agent rejects (error caught)", async () => {
+test("setReasoningEffort - failed when agent rejects (error caught)", async () => {
   const connector = createMockConnectorWithCapabilities({});
   injectThoughtLevel(
     connector,
@@ -919,7 +919,7 @@ Deno.test("setReasoningEffort - failed when agent rejects (error caught)", async
   assertEquals(outcome, "failed");
 });
 
-Deno.test("setReasoningEffort - refreshes cache from set_config_option response", async () => {
+test("setReasoningEffort - refreshes cache from set_config_option response", async () => {
   const connector = createMockConnectorWithCapabilities({});
   injectThoughtLevel(
     connector,
@@ -942,7 +942,7 @@ Deno.test("setReasoningEffort - refreshes cache from set_config_option response"
   assertEquals(cached[0].options.length, 1);
 });
 
-Deno.test("setReasoningEffort - re-discovers from grouped option values", async () => {
+test("setReasoningEffort - re-discovers from grouped option values", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Grouped options form: options is an array of groups, each with its own options.
   const grouped = {
@@ -967,7 +967,7 @@ Deno.test("setReasoningEffort - re-discovers from grouped option values", async 
   assertEquals(calls[0].value, "high");
 });
 
-Deno.test("AgentConnector.isReasoningEffortActive - static helper", () => {
+test("AgentConnector.isReasoningEffortActive - static helper", () => {
   assertEquals(AgentConnector.isReasoningEffortActive(undefined), false);
   assertEquals(AgentConnector.isReasoningEffortActive(""), false);
   assertEquals(AgentConnector.isReasoningEffortActive("default"), false);
@@ -975,7 +975,7 @@ Deno.test("AgentConnector.isReasoningEffortActive - static helper", () => {
   assertEquals(AgentConnector.isReasoningEffortActive("high"), true);
 });
 
-Deno.test("setReasoningEffort - matches case-insensitively and sends agent canonical casing", async () => {
+test("setReasoningEffort - matches case-insensitively and sends agent canonical casing", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Agent advertises mixed-case values.
   const { calls } = injectThoughtLevel(connector, [
@@ -990,7 +990,7 @@ Deno.test("setReasoningEffort - matches case-insensitively and sends agent canon
   assertEquals(calls[0].value, "High");
 });
 
-Deno.test("setReasoningEffort - applies after config_option_update adds thought_level later", async () => {
+test("setReasoningEffort - applies after config_option_update adds thought_level later", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Initially no thought_level option cached.
   connector["sessionConfigOptions"] =
@@ -1021,7 +1021,7 @@ Deno.test("setReasoningEffort - applies after config_option_update adds thought_
   assertEquals(calls.length, 1);
 });
 
-Deno.test("AgentConnector - cache is single-session: refresh replaces (not appends)", () => {
+test("AgentConnector - cache is single-session: refresh replaces (not appends)", () => {
   const connector = createMockConnectorWithCapabilities({});
   connector["refreshSessionConfigOptions"]("s", [
     { id: "a", category: "model", currentValue: "x", options: [{ value: "x", name: "X" }] },
@@ -1048,19 +1048,19 @@ Deno.test("AgentConnector - cache is single-session: refresh replaces (not appen
 // createSession() clears the records; prompt() (whose reset() runs at its start)
 // must NOT clear them, so the retry prompt can still read them.
 
-Deno.test("AgentConnector - createSession clears rejection records, prompt() does NOT", async () => {
+test("AgentConnector - createSession clears rejection records, prompt() does NOT", async () => {
   const connector = createMockConnectorWithCapabilities({});
-  const tempDir = Deno.makeTempDirSync();
+  const tempDir = makeTempDirSync();
   try {
     // Real ChatbotClient so the buffer semantics are the production ones.
     const client = new ChatbotClient(
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { hasSkill: () => false } as any,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as any,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { workingDir: tempDir, platform: "test", userId: "u", channelId: "c", isDM: false } as any,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       { scriptPaths: new Set(), commandPrefixes: new Set() } as any,
     );
     connector["client"] = client;
@@ -1127,7 +1127,7 @@ Deno.test("AgentConnector - createSession clears rejection records, prompt() doe
       "prompt() reset() must NOT clear rejection records",
     );
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
@@ -1143,6 +1143,9 @@ Deno.test("AgentConnector - createSession clears rejection records, prompt() doe
 
 import { GateContextRestoreError, RecoveryHookError } from "@acp/agent-connector.ts";
 import { RecoveryOwnershipError } from "@acp/recovery-ownership.ts";
+import fs from "node:fs";
+import { describe, test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 type RecoveryHarness = {
   connector: AgentConnector;
@@ -1175,16 +1178,16 @@ let ompWorkspaceFixture: string | null = null;
  * the `/a`-style variant the full-gate-context test uses). */
 function ompRecoveryWorkspace(suffix = ""): string {
   if (!ompWorkspaceFixture) {
-    const baseRoot = Deno.makeTempDirSync({ prefix: "omp-recovery-ws-" });
-    Deno.mkdirSync(`${baseRoot}/workspace/a`, { recursive: true });
-    Deno.mkdirSync(`${baseRoot}/workspace/OTHER`, { recursive: true });
+    const baseRoot = makeTempDirSync({ prefix: "omp-recovery-ws-" });
+    fs.mkdirSync(`${baseRoot}/workspace/a`, { recursive: true });
+    fs.mkdirSync(`${baseRoot}/workspace/OTHER`, { recursive: true });
     ompWorkspaceFixture = `${baseRoot}/workspace`;
   }
   return ompWorkspaceFixture + suffix;
 }
 function cleanupOmpRecoveryWorkspace(): void {
   if (ompWorkspaceFixture) {
-    Deno.removeSync(ompWorkspaceFixture, { recursive: true });
+    fs.rmSync(ompWorkspaceFixture, { recursive: true });
     ompWorkspaceFixture = null;
   }
 }
@@ -1261,7 +1264,7 @@ function createRecoveryHarness(params: {
   return { connector, interactions, gateMutations, rpc, order };
 }
 
-Deno.test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, restores, returns true", async () => {
+test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, restores, returns true", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1284,7 +1287,7 @@ Deno.test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, r
   assertEquals(h.gateMutations[0].ctx.yolo, true);
 });
 
-Deno.test("reconnectAndResumeSession - OMP recovery without any supplied context uses the cwd-only restore", async () => {
+test("reconnectAndResumeSession - OMP recovery without any supplied context uses the cwd-only restore", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1304,7 +1307,7 @@ Deno.test("reconnectAndResumeSession - OMP recovery without any supplied context
   assertEquals(h.gateMutations[0].ctx.yolo, false);
 });
 
-Deno.test("reconnectAndResumeSession - a legacy OMP ownership record is not an authorization input", async () => {
+test("reconnectAndResumeSession - a legacy OMP ownership record is not an authorization input", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_RESTRICTED_NS },
@@ -1332,7 +1335,7 @@ Deno.test("reconnectAndResumeSession - a legacy OMP ownership record is not an a
   assertEquals(h.gateMutations.length, 1);
 });
 
-Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + stable-first model + supplied reasoning", async () => {
+test("reconnectAndResumeSession - matched recovery consumes row 6: cache + stable-first model + supplied reasoning", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1399,7 +1402,7 @@ Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + 
   );
 });
 
-Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isolation with the recovery context supplied", async () => {
+test("reconnectAndResumeSession - post-load catalog miss propagates in isolation with the recovery context supplied", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1434,7 +1437,7 @@ Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isol
   assertEquals(h.gateMutations, []);
 });
 
-Deno.test("reconnectAndResumeSession - full gate context restored for the recovered id on a FRESH connector", async () => {
+test("reconnectAndResumeSession - full gate context restored for the recovered id on a FRESH connector", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1471,7 +1474,7 @@ Deno.test("reconnectAndResumeSession - full gate context restored for the recove
   );
 });
 
-Deno.test("reconnectAndResumeSession - OMP recovery with only a contradicting legacy ownership record registers cwd-only and leaves sibling contexts registered", async () => {
+test("reconnectAndResumeSession - OMP recovery with only a contradicting legacy ownership record registers cwd-only and leaves sibling contexts registered", async () => {
   const siblingCtx = { cwd: "/workspace/b", shellSessionId: "shell_b", yolo: false };
   const h = createRecoveryHarness({
     agentType: "omp",
@@ -1505,7 +1508,7 @@ Deno.test("reconnectAndResumeSession - OMP recovery with only a contradicting le
   assertEquals(h.gateMutations[0].ctx.cwd, cwd);
 });
 
-Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with the recovery cwd fails after load for that session only", async () => {
+test("reconnectAndResumeSession - supplied gate context disagreeing with the recovery cwd fails after load for that session only", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1526,7 +1529,7 @@ Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with th
   assertEquals(h.gateMutations, []);
 });
 
-Deno.test("reconnectAndResumeSession - an absent native session propagates the load error with no config tail or gate restore", async () => {
+test("reconnectAndResumeSession - an absent native session propagates the load error with no config tail or gate restore", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1566,7 +1569,7 @@ Deno.test("reconnectAndResumeSession - an absent native session propagates the l
   assertEquals(hookRan, false);
 });
 
-Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, before success", async () => {
+test("reconnectAndResumeSession - hook runs exactly once after restore, before success", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1592,7 +1595,7 @@ Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, bef
   assertEquals(mutationsAtHookTime, 1, "gate context restored strictly before the hook");
 });
 
-Deno.test("reconnectAndResumeSession - rejecting hook fails only this session as RecoveryHookError", async () => {
+test("reconnectAndResumeSession - rejecting hook fails only this session as RecoveryHookError", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1611,7 +1614,7 @@ Deno.test("reconnectAndResumeSession - rejecting hook fails only this session as
   assertEquals(h.gateMutations.length, 1);
 });
 
-Deno.test("reconnectAndResumeSession - OpenCode golden path: no options keeps the pre-change sequence", async () => {
+test("reconnectAndResumeSession - OpenCode golden path: no options keeps the pre-change sequence", async () => {
   const h = createRecoveryHarness({
     agentType: "opencode",
     env: { XDG_DATA_HOME: OC_DATA_HOME, TMPDIR: "/data/channel-tmp/discord:c1" },
@@ -1630,7 +1633,7 @@ Deno.test("reconnectAndResumeSession - OpenCode golden path: no options keeps th
   assertEquals(h.gateMutations[0].ctx.yolo, false);
 });
 
-Deno.test("reconnectAndResumeSession - OpenCode yolo-switch record + pool data root matches by construction", async () => {
+test("reconnectAndResumeSession - OpenCode yolo-switch record + pool data root matches by construction", async () => {
   const h = createRecoveryHarness({
     agentType: "opencode",
     env: { XDG_DATA_HOME: OC_DATA_HOME },
@@ -1650,7 +1653,7 @@ Deno.test("reconnectAndResumeSession - OpenCode yolo-switch record + pool data r
   assertEquals(h.gateMutations[0].ctx.shellSessionId, "shell_oc");
 });
 
-Deno.test("reconnectAndResumeSession - OpenCode recovery against a foreign data root is namespace_mismatch with zero side effects", async () => {
+test("reconnectAndResumeSession - OpenCode recovery against a foreign data root is namespace_mismatch with zero side effects", async () => {
   const h = createRecoveryHarness({ agentType: "opencode", env: { XDG_DATA_HOME: OC_DATA_HOME } });
 
   await assertRejects(
@@ -1669,7 +1672,7 @@ Deno.test("reconnectAndResumeSession - OpenCode recovery against a foreign data 
   assertEquals(h.interactions, []);
 });
 
-Deno.test("reconnectAndResumeSession - capability absence still returns false with a recovery context (never an ownership error)", async () => {
+test("reconnectAndResumeSession - capability absence still returns false with a recovery context (never an ownership error)", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1690,7 +1693,7 @@ Deno.test("reconnectAndResumeSession - capability absence still returns false wi
   assertEquals(h.gateMutations, []);
 });
 
-Deno.test("reconnectAndResumeSession - OMP order: teardown → load → model/effort → gate → hook → success", async () => {
+test("reconnectAndResumeSession - OMP order: teardown → load → model/effort → gate → hook → success", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1768,7 +1771,7 @@ Deno.test("reconnectAndResumeSession - OMP order: teardown → load → model/ef
   assertEquals(h.gateMutations[0].sessionId, "sess_order");
 });
 
-Deno.test("reconnectAndResumeSession - a failing effort RPC stays best-effort and the OMP restore tail still completes", async () => {
+test("reconnectAndResumeSession - a failing effort RPC stays best-effort and the OMP restore tail still completes", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { XDG_DATA_HOME: OMP_YOLO_NS },
@@ -1850,7 +1853,7 @@ Deno.test("reconnectAndResumeSession - a failing effort RPC stays best-effort an
 // BEFORE the subprocess exists, and a launch configuration without the
 // selected-agent skills-root observation fails connect() EXPLICITLY — the
 // connector never re-discovers a root and never spawns a child it cannot gate.
-Deno.test("connect - missing mandatory skillsRoot observation throws with ZERO processes spawned (B6)", async () => {
+test("connect - missing mandatory skillsRoot observation throws with ZERO processes spawned (B6)", async () => {
   const connector = new AgentConnector({
     agentConfig: { command: "mock-agent", args: [], cwd: "/tmp" }, // skillsRoot deliberately absent
     clientConfig: {

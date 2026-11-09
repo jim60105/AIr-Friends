@@ -3,6 +3,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { MemoryTokenizer } from "@core/memory-recall/tokenizer.ts";
 import type { SearchToken } from "@core/memory-recall/types.ts";
+import { test } from "bun:test";
 
 // Lazy: the shared instance loads the vendored dictionary at the first call.
 const tokenizer = new MemoryTokenizer();
@@ -15,7 +16,7 @@ function hasToken(tokens: SearchToken[], term: string, kind: SearchToken["kind"]
   return tokens.some((token) => token.term === term && token.kind === kind);
 }
 
-Deno.test("MemoryTokenizer - Traditional Chinese words are segmented as words", () => {
+test("MemoryTokenizer - Traditional Chinese words are segmented as words", () => {
   const tokens = tokenizer.tokenize("使用者喜歡喝無糖綠茶");
   // Pinned against the vendored dict.txt.big: jieba precise mode (HMM on).
   assertEquals(tokens, [
@@ -35,7 +36,7 @@ Deno.test("MemoryTokenizer - Traditional Chinese words are segmented as words", 
   ]);
 });
 
-Deno.test("MemoryTokenizer - mixed-script entities are preserved", () => {
+test("MemoryTokenizer - mixed-script entities are preserved", () => {
   const tokens = tokenizer.tokenize("我在 AIr-Friends 用 OpenClaw 搭配 Air75 V3");
   assertEquals(tokens, [
     { term: "我在", kind: "bigram", weight: 0.25 },
@@ -54,7 +55,7 @@ Deno.test("MemoryTokenizer - mixed-script entities are preserved", () => {
   ]);
 });
 
-Deno.test("MemoryTokenizer - bigram fallback recovers partial matches", () => {
+test("MemoryTokenizer - bigram fallback recovers partial matches", () => {
   const document = tokenizer.tokenize("記憶系統");
   const query = tokenizer.tokenize("記憶");
   assert(hasToken(document, "記憶系統", "word"));
@@ -62,7 +63,7 @@ Deno.test("MemoryTokenizer - bigram fallback recovers partial matches", () => {
   assert(hasToken(query, "記憶", "bigram"));
 });
 
-Deno.test("MemoryTokenizer - stopwords are removed", () => {
+test("MemoryTokenizer - stopwords are removed", () => {
   const tokens = tokenizer.tokenize("我的鍵盤");
   for (const token of tokens) {
     assert(token.term !== "的");
@@ -71,11 +72,11 @@ Deno.test("MemoryTokenizer - stopwords are removed", () => {
   assert(hasToken(tokens, "鍵盤", "word"));
 });
 
-Deno.test("MemoryTokenizer - a lone stopword yields no tokens", () => {
+test("MemoryTokenizer - a lone stopword yields no tokens", () => {
   assertEquals(tokenizer.tokenize("的"), []);
 });
 
-Deno.test("MemoryTokenizer - prototype-chain keys are not treated as stopwords", () => {
+test("MemoryTokenizer - prototype-chain keys are not treated as stopwords", () => {
   // `constructor` shares a name with Object.prototype.constructor; a plain
   // object stopword table would drop it via prototype lookup. It must survive.
   const tokens = tokenizer.tokenize("a constructor b");
@@ -84,7 +85,7 @@ Deno.test("MemoryTokenizer - prototype-chain keys are not treated as stopwords",
   assert(hasToken(tokens, "b", "word"));
 });
 
-Deno.test("MemoryTokenizer - run entities join with - . _ and emit parts as words", () => {
+test("MemoryTokenizer - run entities join with - . _ and emit parts as words", () => {
   const tokens = tokenizer.tokenize("v0.31.1");
   assertEquals(tokens, [
     { term: "v0.31.1", kind: "entity", weight: 1.5 },
@@ -94,7 +95,7 @@ Deno.test("MemoryTokenizer - run entities join with - . _ and emit parts as word
   ]);
 });
 
-Deno.test("MemoryTokenizer - entity parts never join into spurious pair entities", () => {
+test("MemoryTokenizer - entity parts never join into spurious pair entities", () => {
   // The parts of `v0.31.1` (v0 / 31 / 1) must not pair with a following token:
   // `1 rc7` would be a spurious 1.5-weight entity polluting retrieval.
   const tokens = tokenizer.tokenize("v0.31.1 rc7");
@@ -105,7 +106,7 @@ Deno.test("MemoryTokenizer - entity parts never join into spurious pair entities
   assert(!hasToken(tokens, "1 rc7", "entity"));
 });
 
-Deno.test("MemoryTokenizer - adjacent short tokens with a digit form one entity", () => {
+test("MemoryTokenizer - adjacent short tokens with a digit form one entity", () => {
   const tokens = tokenizer.tokenize("a7c ii");
   assertEquals(tokens, [
     { term: "a7c ii", kind: "entity", weight: 1.5 },
@@ -114,7 +115,7 @@ Deno.test("MemoryTokenizer - adjacent short tokens with a digit form one entity"
   ]);
 });
 
-Deno.test("MemoryTokenizer - CamelCase tokens are consumed as entities before pairing", () => {
+test("MemoryTokenizer - CamelCase tokens are consumed as entities before pairing", () => {
   // `OpenClaw` is a CamelCase entity itself, so it never pairs with `Air75`;
   // the plain pair `Air75 V3` still forms an entity.
   const tokens = tokenizer.tokenize("OpenClaw Air75 V3");
@@ -125,25 +126,25 @@ Deno.test("MemoryTokenizer - CamelCase tokens are consumed as entities before pa
   assert(!hasToken(tokens, "openclaw air75", "entity"));
 });
 
-Deno.test("MemoryTokenizer - long plain tokens do not pair", () => {
+test("MemoryTokenizer - long plain tokens do not pair", () => {
   const tokens = tokenizer.tokenize("configuration 2024");
   assert(!hasToken(tokens, "configuration 2024", "entity"));
   assert(hasToken(tokens, "configuration", "word"));
   assert(hasToken(tokens, "2024", "word"));
 });
 
-Deno.test("MemoryTokenizer - NFKC normalization and lowercasing", () => {
+test("MemoryTokenizer - NFKC normalization and lowercasing", () => {
   // Full-width Latin and digits fold to ASCII before extraction.
   assertEquals(terms(tokenizer.tokenize("ＡＢＣ")), ["abc"]);
   assertEquals(terms(tokenizer.tokenize("air７５ ｖ３")), ["air75 v3", "air75", "v3"]);
   assertEquals(terms(tokenizer.tokenize("ＯｐｅｎＣｌａｗ")), ["openclaw", "open", "claw"]);
 });
 
-Deno.test("MemoryTokenizer - punctuation and whitespace yield no tokens", () => {
+test("MemoryTokenizer - punctuation and whitespace yield no tokens", () => {
   assertEquals(tokenizer.tokenize(",-_ \t!?、。"), []);
 });
 
-Deno.test("MemoryTokenizer - fixed weights by kind", () => {
+test("MemoryTokenizer - fixed weights by kind", () => {
   const tokens = tokenizer.tokenize("OpenClaw 搭配");
   const entity = tokens.find((token) => token.kind === "entity")!;
   const word = tokens.find((token) => token.term === "搭配" && token.kind === "word")!;
@@ -153,19 +154,19 @@ Deno.test("MemoryTokenizer - fixed weights by kind", () => {
   assertEquals(bigram.weight, 0.25);
 });
 
-Deno.test("MemoryTokenizer - same input tokenized twice returns deep-equal arrays", () => {
+test("MemoryTokenizer - same input tokenized twice returns deep-equal arrays", () => {
   const input = "我在 AIr-Friends 用 OpenClaw 搭配 Air75 V3 我的鍵盤";
   assertEquals(tokenizer.tokenize(input), tokenizer.tokenize(input));
 });
 
-Deno.test("MemoryTokenizer - the input string is never modified", () => {
+test("MemoryTokenizer - the input string is never modified", () => {
   const input = "我在 AIr-Friends 用 OpenClaw 搭配 Air75 V3";
   const before = input;
   tokenizer.tokenize(input);
   assertEquals(input, before);
 });
 
-Deno.test("MemoryTokenizer - degrades when the segmenter fails to load", () => {
+test("MemoryTokenizer - degrades when the segmenter fails to load", () => {
   const failing = new MemoryTokenizer(() => {
     throw new Error("boom");
   });

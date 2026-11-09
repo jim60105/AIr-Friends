@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -10,17 +10,50 @@ import {
 } from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
+export interface MemorySearchArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  limit: number;
+  category?: string;
+  scope?: string;
+}
+
+export function parseMemorySearchArgs(argv: string[]): MemorySearchArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      category: { type: "string" },
+      scope: { type: "string" },
+      limit: { type: "string" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  const limit = values.limit === undefined
+    ? 10
+    : typeof values.limit === "string"
+      ? Number(values.limit) || 10
+      : 10;
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    limit,
+    category: typeof values.category === "string" ? values.category : undefined,
+    scope: typeof values.scope === "string" ? values.scope : undefined,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "category", "scope"],
-      alias: { s: "session-id", a: "api-url" },
-      default: { limit: 10 },
-    });
+    const { limit, category, scope } = parseMemorySearchArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
-
-    const query = await readPayloadArg(Deno.args, "query", {
+    const query = await readPayloadArg(argv, "query", {
       sessionId,
       alias: "q",
       fileName: "query.md",
@@ -29,26 +62,24 @@ async function main() {
         `--session-id "<session id rendered in your system prompt>" --limit 10 --query-file "<absolute staging directory rendered in your system prompt>/query.md"`,
     });
 
-    const limit = Number(args.limit) || 10;
-
     const params: Record<string, unknown> = { query, limit };
 
-    if (args.category) {
+    if (category) {
       if (
-        !["fact", "preference", "episode", "summary", "relationship"].includes(args.category)
+        !["fact", "preference", "episode", "summary", "relationship"].includes(category)
       ) {
         exitWithError(
           "Invalid category. Must be 'fact', 'preference', 'episode', 'summary', or 'relationship'",
         );
       }
-      params.category = args.category;
+      params.category = category;
     }
 
-    if (args.scope) {
-      if (!["user", "channel"].includes(args.scope)) {
+    if (scope) {
+      if (!["user", "channel"].includes(scope)) {
         exitWithError("Invalid scope. Must be 'user' or 'channel'");
       }
-      params.scope = args.scope;
+      params.scope = scope;
     }
 
     const result = await callSkillApi(apiUrl, "memory-search", sessionId, params);
@@ -56,7 +87,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -70,4 +101,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

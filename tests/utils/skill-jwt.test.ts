@@ -2,7 +2,7 @@
 // Unit tests for per-session Skill API JWT (HS256) creation and verification.
 
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
-import { isAbsolute, resolve } from "@std/path";
+import { isAbsolute, resolve } from "node:path";
 import {
   createSkillJwt,
   DEFAULT_SKILL_JWT_DIR,
@@ -10,6 +10,7 @@ import {
   resolveSkillJwtDir,
   verifySkillJwt,
 } from "../../src/utils/skill-jwt.ts";
+import { test } from "bun:test";
 
 const SECRET = "test-deployment-secret-0123456789abcdef0123456789abcdef";
 const EXPECTED = {
@@ -18,7 +19,7 @@ const EXPECTED = {
   callerToken: "caller-tok-xyz",
 };
 
-Deno.test("createSkillJwt - produces a 3-segment HS256 token with iat/exp", async () => {
+test("createSkillJwt - produces a 3-segment HS256 token with iat/exp", async () => {
   const nowSec = Math.floor(Date.now() / 1000);
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
@@ -39,7 +40,7 @@ Deno.test("createSkillJwt - produces a 3-segment HS256 token with iat/exp", asyn
   assertEquals(exp, nowSec + 30 * 60);
 });
 
-Deno.test("verifySkillJwt - valid token passes all four checks", async () => {
+test("verifySkillJwt - valid token passes all four checks", async () => {
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
     channel: EXPECTED.channelId,
@@ -49,7 +50,7 @@ Deno.test("verifySkillJwt - valid token passes all four checks", async () => {
   assertEquals(result.valid, true);
 });
 
-Deno.test("verifySkillJwt - rejects a token signed with a different secret", async () => {
+test("verifySkillJwt - rejects a token signed with a different secret", async () => {
   const jwt = await createSkillJwt("other-deployment-secret-0123456789abcdef0123456789ab", {
     sub: EXPECTED.sessionId,
     channel: EXPECTED.channelId,
@@ -62,7 +63,7 @@ Deno.test("verifySkillJwt - rejects a token signed with a different secret", asy
   }
 });
 
-Deno.test("verifySkillJwt - rejects sub mismatch", async () => {
+test("verifySkillJwt - rejects sub mismatch", async () => {
   const jwt = await createSkillJwt(SECRET, {
     sub: "sess_other",
     channel: EXPECTED.channelId,
@@ -75,7 +76,7 @@ Deno.test("verifySkillJwt - rejects sub mismatch", async () => {
   }
 });
 
-Deno.test("verifySkillJwt - rejects channel mismatch", async () => {
+test("verifySkillJwt - rejects channel mismatch", async () => {
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
     channel: "discord/ch2",
@@ -88,7 +89,7 @@ Deno.test("verifySkillJwt - rejects channel mismatch", async () => {
   }
 });
 
-Deno.test("verifySkillJwt - rejects jti mismatch", async () => {
+test("verifySkillJwt - rejects jti mismatch", async () => {
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
     channel: EXPECTED.channelId,
@@ -101,7 +102,7 @@ Deno.test("verifySkillJwt - rejects jti mismatch", async () => {
   }
 });
 
-Deno.test("verifySkillJwt - rejects expired token", async () => {
+test("verifySkillJwt - rejects expired token", async () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // Issue a token that expires in the past.
   const jwt = await createSkillJwt(SECRET, {
@@ -116,7 +117,7 @@ Deno.test("verifySkillJwt - rejects expired token", async () => {
   }
 });
 
-Deno.test("verifySkillJwt - rejects malformed token", async () => {
+test("verifySkillJwt - rejects malformed token", async () => {
   const result = await verifySkillJwt("not-a-jwt", SECRET, EXPECTED);
   assert(!result.valid);
   if (!result.valid) {
@@ -124,7 +125,7 @@ Deno.test("verifySkillJwt - rejects malformed token", async () => {
   }
 });
 
-Deno.test("verifySkillJwt - tampered signature is rejected", async () => {
+test("verifySkillJwt - tampered signature is rejected", async () => {
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
     channel: EXPECTED.channelId,
@@ -140,7 +141,7 @@ Deno.test("verifySkillJwt - tampered signature is rejected", async () => {
   }
 });
 
-Deno.test("parseJwtExp - returns exp of a valid token", async () => {
+test("parseJwtExp - returns exp of a valid token", async () => {
   const nowSec = Math.floor(Date.now() / 1000);
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
@@ -151,7 +152,7 @@ Deno.test("parseJwtExp - returns exp of a valid token", async () => {
   assertEquals(parseJwtExp("garbage"), undefined);
 });
 
-Deno.test("createSkillJwt - throws on a secret shorter than 32 bytes", async () => {
+test("createSkillJwt - throws on a secret shorter than 32 bytes", async () => {
   let threw = false;
   try {
     await createSkillJwt("short-secret", {
@@ -165,7 +166,7 @@ Deno.test("createSkillJwt - throws on a secret shorter than 32 bytes", async () 
   assert(threw, "expected createSkillJwt to reject a short secret");
 });
 
-Deno.test("verifySkillJwt - rejects verification against an empty/short secret", async () => {
+test("verifySkillJwt - rejects verification against an empty/short secret", async () => {
   const jwt = await createSkillJwt(SECRET, {
     sub: EXPECTED.sessionId,
     channel: EXPECTED.channelId,
@@ -177,7 +178,7 @@ Deno.test("verifySkillJwt - rejects verification against an empty/short secret",
   assert(!result2.valid);
 });
 
-Deno.test("verifySkillJwt - rejects a correctly-signed token without a finite exp", async () => {
+test("verifySkillJwt - rejects a correctly-signed token without a finite exp", async () => {
   // Craft header/payload with no `exp`, sign it correctly with HMAC-SHA256.
   const b64 = (data: string | Uint8Array): string => {
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
@@ -215,26 +216,26 @@ Deno.test("verifySkillJwt - rejects a correctly-signed token without a finite ex
   }
 });
 
-Deno.test("resolveSkillJwtDir - resolves the default to an absolute path", () => {
+test("resolveSkillJwtDir - resolves the default to an absolute path", () => {
   const dir = resolveSkillJwtDir();
   assertEquals(dir, resolve(DEFAULT_SKILL_JWT_DIR));
   assertEquals(isAbsolute(dir), true);
 });
 
-Deno.test("resolveSkillJwtDir - resolves a relative config value against the process cwd", () => {
+test("resolveSkillJwtDir - resolves a relative config value against the process cwd", () => {
   const dir = resolveSkillJwtDir("data/skill-jwt");
   assertEquals(dir, resolve("data/skill-jwt"));
   assertEquals(isAbsolute(dir), true);
 });
 
-Deno.test("resolveSkillJwtDir - keeps an absolute config value unchanged", () => {
+test("resolveSkillJwtDir - keeps an absolute config value unchanged", () => {
   assertEquals(resolveSkillJwtDir("/tmp/absolute-jwt-dir"), "/tmp/absolute-jwt-dir");
 });
 
-Deno.test("resolveSkillJwtDir - blank values fall back to the default, never the bot cwd", () => {
+test("resolveSkillJwtDir - blank values fall back to the default, never the bot cwd", () => {
   const expected = resolve(DEFAULT_SKILL_JWT_DIR);
   assertEquals(resolveSkillJwtDir(""), expected);
   assertEquals(resolveSkillJwtDir("   "), expected);
   // The bot process cwd must NOT be used as the JWT directory.
-  assertNotEquals(resolveSkillJwtDir(""), Deno.cwd());
+  assertNotEquals(resolveSkillJwtDir(""), process.cwd());
 });

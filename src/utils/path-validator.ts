@@ -1,7 +1,9 @@
 // src/utils/path-validator.ts
 
-import { normalize, relative, resolve } from "@std/path";
+import { normalize, relative, resolve } from "node:path";
 import { ErrorCode, WorkspaceError } from "../types/errors.ts";
+import fsp from "node:fs/promises";
+import { isAlreadyExistsError, isNotFoundError } from "./fs-compat.ts";
 
 /**
  * Validate that a path is within the allowed boundary
@@ -33,6 +35,7 @@ export function validatePathWithinBoundary(
 export function sanitizePathComponent(component: string): string {
   // Remove any path separators or traversal sequences
   return component
+    // oxlint-disable-next-line no-useless-escape
     .replace(/[\/\\]/g, "_")
     .replace(/\.\./g, "_")
     .replace(/^\.+/, "")
@@ -44,10 +47,10 @@ export function sanitizePathComponent(component: string): string {
  */
 export async function pathExists(path: string): Promise<boolean> {
   try {
-    await Deno.stat(path);
+    await fsp.stat(path);
     return true;
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
+    if (isNotFoundError(error)) {
       return false;
     }
     throw error;
@@ -59,9 +62,9 @@ export async function pathExists(path: string): Promise<boolean> {
  */
 export async function ensureDirectory(path: string): Promise<void> {
   try {
-    await Deno.mkdir(path, { recursive: true });
+    await fsp.mkdir(path, { recursive: true });
   } catch (error) {
-    if (!(error instanceof Deno.errors.AlreadyExists)) {
+    if (!(isAlreadyExistsError(error))) {
       throw error;
     }
   }

@@ -21,6 +21,9 @@ import {
   SubmissionStore,
   SubmissionStoreError,
 } from "../../../src/platforms/email/submission-store.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const OWNER = "e_" + "a".repeat(64);
 const SIGNATURE = "AIr-Friends Bot\nSecond line";
@@ -35,21 +38,21 @@ function builder(): OutgoingMimeBuilder {
 async function withIsolatedState(
   fn: (emailRoot: string, workspacesRoot: string) => Promise<void>,
 ): Promise<void> {
-  const root = await Deno.makeTempDir({ prefix: "outgoing-mime-smoke-" });
-  const workspacesRoot = await Deno.makeTempDir({ prefix: "outgoing-mime-smoke-ws-" });
+  const root = await makeTempDir({ prefix: "outgoing-mime-smoke-" });
+  const workspacesRoot = await makeTempDir({ prefix: "outgoing-mime-smoke-ws-" });
   _resetSharedRegistryForTesting();
   try {
     await fn(`${root}/email`, workspacesRoot);
   } finally {
     _resetSharedRegistryForTesting();
-    await Deno.remove(root, { recursive: true }).catch(() => {});
-    await Deno.remove(workspacesRoot, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
+    await fsp.rm(workspacesRoot, { recursive: true }).catch(() => {});
   }
 }
 
-Deno.test("Smoke: verified constructed bytes gate evidence, storage and re-parsing", async () => {
+test("Smoke: verified constructed bytes gate evidence, storage and re-parsing", async () => {
   await withIsolatedState(async (emailRoot, workspacesRoot) => {
-    await Deno.mkdir(emailRoot, { recursive: true });
+    await fsp.mkdir(emailRoot, { recursive: true });
     const externalSmtpSendCalls = 0;
 
     const originalAttachment = new Uint8Array([0xde, 0xad, 0x00, 0xbe, 0xef]);
@@ -101,14 +104,14 @@ Deno.test("Smoke: verified constructed bytes gate evidence, storage and re-parsi
     assertEquals(externalSmtpSendCalls, 0);
 
     // Evidence must exist and match the constructed digest before submission.
-    await Deno.mkdir(`${emailRoot}/sent`, { recursive: true });
-    await Deno.writeFile(`${emailRoot}/${emlRef}`, constructed.emlBytes);
+    await fsp.mkdir(`${emailRoot}/sent`, { recursive: true });
+    await fsp.writeFile(`${emailRoot}/${emlRef}`, constructed.emlBytes);
     await submissionStore2.verifySubmissionEvidence(OWNER, key);
     const submitting = await submissionStore2.markSubmitting(OWNER, key);
     assertEquals(submitting.phase, "submitting");
 
     // Corrupted evidence is refused instead of allowing an automatic send.
-    await Deno.writeFile(`${emailRoot}/${emlRef}`, new TextEncoder().encode("tampered"));
+    await fsp.writeFile(`${emailRoot}/${emlRef}`, new TextEncoder().encode("tampered"));
     const mismatch = await assertRejects(
       () => submissionStore2.verifySubmissionEvidence(OWNER, key),
       SubmissionStoreError,
@@ -117,7 +120,7 @@ Deno.test("Smoke: verified constructed bytes gate evidence, storage and re-parsi
       (mismatch as SubmissionStoreError).diagnosticCode,
       SubmissionDiagnosticCode.EVIDENCE_DIGEST_MISMATCH,
     );
-    await Deno.writeFile(`${emailRoot}/${emlRef}`, constructed.emlBytes);
+    await fsp.writeFile(`${emailRoot}/${emlRef}`, constructed.emlBytes);
     await submissionStore2.verifySubmissionEvidence(OWNER, key);
     const consumed = await submissionStore2.recordOutcome(OWNER, key, "submitted", {
       wireMessageId: constructed.messageId,

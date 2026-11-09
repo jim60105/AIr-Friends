@@ -1,8 +1,10 @@
 // tests/scripts/migrate-memory-v2.test.ts
 
 import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { exists } from "@std/fs";
+import { join } from "node:path";
+import { makeTempDir, pathExists as exists, removePath } from "../../src/utils/fs-compat.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 
 // ── migrateLine logic (extracted inline to test the transform without running the script) ──
 
@@ -41,7 +43,7 @@ function migrateLine(line: string): { output: string; migrated: boolean } {
 
 // ── Unit tests for migrateLine ──
 
-Deno.test("migrateLine - importance:high → tier:core, decay:1.0", () => {
+test("migrateLine - importance:high → tier:core, decay:1.0", () => {
   const entry = {
     type: "memory",
     id: "mem_1",
@@ -61,7 +63,7 @@ Deno.test("migrateLine - importance:high → tier:core, decay:1.0", () => {
   assertEquals(parsed.scope, "user");
 });
 
-Deno.test("migrateLine - importance:normal → tier:archive, decay:0.5", () => {
+test("migrateLine - importance:normal → tier:archive, decay:0.5", () => {
   const entry = {
     type: "memory",
     id: "mem_2",
@@ -81,7 +83,7 @@ Deno.test("migrateLine - importance:normal → tier:archive, decay:0.5", () => {
   assertEquals(parsed.scope, "user");
 });
 
-Deno.test("migrateLine - idempotency: entries with tier field are skipped", () => {
+test("migrateLine - idempotency: entries with tier field are skipped", () => {
   const entry = {
     type: "memory",
     id: "mem_3",
@@ -101,7 +103,7 @@ Deno.test("migrateLine - idempotency: entries with tier field are skipped", () =
   assertEquals(result.output, input);
 });
 
-Deno.test("migrateLine - skips patch events", () => {
+test("migrateLine - skips patch events", () => {
   const patch = { type: "patch", targetId: "mem_1", ts: "2024-01-01T00:00:00Z", enabled: false };
   const input = JSON.stringify(patch);
   const result = migrateLine(input);
@@ -109,13 +111,13 @@ Deno.test("migrateLine - skips patch events", () => {
   assertEquals(result.output, input);
 });
 
-Deno.test("migrateLine - preserves malformed lines", () => {
+test("migrateLine - preserves malformed lines", () => {
   const result = migrateLine("this is not json");
   assertEquals(result.migrated, false);
   assertEquals(result.output, "this is not json");
 });
 
-Deno.test("migrateLine - empty line returns empty", () => {
+test("migrateLine - empty line returns empty", () => {
   const result = migrateLine("  ");
   assertEquals(result.migrated, false);
   assertEquals(result.output, "");
@@ -123,125 +125,115 @@ Deno.test("migrateLine - empty line returns empty", () => {
 
 // ── File-level integration tests ──
 
-Deno.test({
-  name: "Migration - empty file is removed",
-  async fn() {
-    const tempDir = await Deno.makeTempDir({ prefix: "migrate-test-" });
-    try {
-      const filePath = join(tempDir, "memory.public.jsonl");
-      await Deno.writeTextFile(filePath, "");
+test("Migration - empty file is removed", async function () {
+  const tempDir = await makeTempDir({ prefix: "migrate-test-" });
+  try {
+    const filePath = join(tempDir, "memory.public.jsonl");
+    await fsp.writeFile(filePath, "");
 
-      assertEquals(await exists(filePath), true);
+    assertEquals(await exists(filePath), true);
 
-      // Simulate empty file check and removal (same logic as the script)
-      const content = await Deno.readTextFile(filePath);
-      if (content.trim().length === 0) {
-        await Deno.remove(filePath);
-      }
-
-      assertEquals(await exists(filePath), false);
-    } finally {
-      await Deno.remove(tempDir, { recursive: true });
+    // Simulate empty file check and removal (same logic as the script)
+    const content = await fsp.readFile(filePath, "utf8");
+    if (content.trim().length === 0) {
+      await removePath(filePath);
     }
-  },
-  sanitizeResources: false,
-  sanitizeOps: false,
+
+    assertEquals(await exists(filePath), false);
+  } finally {
+    await fsp.rm(tempDir, { recursive: true });
+  }
 });
 
-Deno.test({
-  name: "Migration - full workspace migration flow",
-  async fn() {
-    const tempDir = await Deno.makeTempDir({ prefix: "migrate-test-" });
-    try {
-      // Set up workspace structure: data/workspaces/discord/user1/
-      const wsPath = join(tempDir, "workspaces", "discord", "user1");
-      await Deno.mkdir(wsPath, { recursive: true });
+test("Migration - full workspace migration flow", async function () {
+  const tempDir = await makeTempDir({ prefix: "migrate-test-" });
+  try {
+    // Set up workspace structure: data/workspaces/discord/user1/
+    const wsPath = join(tempDir, "workspaces", "discord", "user1");
+    await fsp.mkdir(wsPath, { recursive: true });
 
-      const entries = [
-        {
-          type: "memory",
-          id: "mem_high",
-          ts: "2024-01-01T00:00:00Z",
-          enabled: true,
-          visibility: "public",
-          importance: "high",
-          content: "High importance",
-        },
-        {
-          type: "memory",
-          id: "mem_normal",
-          ts: "2024-01-01T00:00:00Z",
-          enabled: true,
-          visibility: "public",
-          importance: "normal",
-          content: "Normal importance",
-        },
-        {
-          type: "patch",
-          targetId: "mem_high",
-          ts: "2024-01-02T00:00:00Z",
-          enabled: false,
-        },
-      ];
+    const entries = [
+      {
+        type: "memory",
+        id: "mem_high",
+        ts: "2024-01-01T00:00:00Z",
+        enabled: true,
+        visibility: "public",
+        importance: "high",
+        content: "High importance",
+      },
+      {
+        type: "memory",
+        id: "mem_normal",
+        ts: "2024-01-01T00:00:00Z",
+        enabled: true,
+        visibility: "public",
+        importance: "normal",
+        content: "Normal importance",
+      },
+      {
+        type: "patch",
+        targetId: "mem_high",
+        ts: "2024-01-02T00:00:00Z",
+        enabled: false,
+      },
+    ];
 
-      const filePath = join(wsPath, "memory.public.jsonl");
-      await Deno.writeTextFile(filePath, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const filePath = join(wsPath, "memory.public.jsonl");
+    await fsp.writeFile(filePath, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
-      // Simulate full migration (migrateFile logic)
-      const content = await Deno.readTextFile(filePath);
-      const lines = content.split("\n");
-      let migrated = 0;
-      let skipped = 0;
-      const outputLines: string[] = [];
+    // Simulate full migration (migrateFile logic)
+    const content = await fsp.readFile(filePath, "utf8");
+    const lines = content.split("\n");
+    let migrated = 0;
+    let skipped = 0;
+    const outputLines: string[] = [];
 
-      for (const line of lines) {
-        if (!line.trim()) {
-          outputLines.push(line);
-          continue;
-        }
-        const result = migrateLine(line);
-        outputLines.push(result.output);
-        if (result.migrated) migrated++;
-        else skipped++;
+    for (const line of lines) {
+      if (!line.trim()) {
+        outputLines.push(line);
+        continue;
       }
-
-      await Deno.writeTextFile(filePath, outputLines.join("\n"));
-
-      // Verify migration counts
-      assertEquals(migrated, 2); // both memory entries
-      assertEquals(skipped, 1); // patch entry
-
-      // Verify migrated content
-      const migratedContent = await Deno.readTextFile(filePath);
-      const migratedLines = migratedContent.split("\n").filter((l) => l.trim());
-
-      const highEntry = JSON.parse(migratedLines[0]);
-      assertEquals(highEntry.tier, "core");
-      assertEquals(highEntry.decay, 1.0);
-
-      const normalEntry = JSON.parse(migratedLines[1]);
-      assertEquals(normalEntry.tier, "archive");
-      assertEquals(normalEntry.decay, 0.5);
-
-      // Patch line should be unchanged
-      const patchEntry = JSON.parse(migratedLines[2]);
-      assertEquals(patchEntry.type, "patch");
-      assertEquals(patchEntry.targetId, "mem_high");
-
-      // Run again to verify idempotency
-      const content2 = await Deno.readTextFile(filePath);
-      const lines2 = content2.split("\n");
-      let migrated2 = 0;
-      for (const line of lines2) {
-        if (!line.trim()) continue;
-        const result = migrateLine(line);
-        if (result.migrated) migrated2++;
-      }
-      assertEquals(migrated2, 0); // Nothing should be migrated a second time
-    } finally {
-      await Deno.remove(tempDir, { recursive: true });
+      const result = migrateLine(line);
+      outputLines.push(result.output);
+      if (result.migrated) migrated++;
+      else skipped++;
     }
-  },
-  sanitizeResources: false,
-  sanitizeOps: false,
+
+    await fsp.writeFile(filePath, outputLines.join("\n"));
+
+    // Verify migration counts
+    assertEquals(migrated, 2); // both memory entries
+    assertEquals(skipped, 1); // patch entry
+
+    // Verify migrated content
+    const migratedContent = await fsp.readFile(filePath, "utf8");
+    const migratedLines = migratedContent.split("\n").filter((l) => l.trim());
+
+    const highEntry = JSON.parse(migratedLines[0]);
+    assertEquals(highEntry.tier, "core");
+    assertEquals(highEntry.decay, 1.0);
+
+    const normalEntry = JSON.parse(migratedLines[1]);
+    assertEquals(normalEntry.tier, "archive");
+    assertEquals(normalEntry.decay, 0.5);
+
+    // Patch line should be unchanged
+    const patchEntry = JSON.parse(migratedLines[2]);
+    assertEquals(patchEntry.type, "patch");
+    assertEquals(patchEntry.targetId, "mem_high");
+
+    // Run again to verify idempotency
+    const content2 = await fsp.readFile(filePath, "utf8");
+    const lines2 = content2.split("\n");
+    let migrated2 = 0;
+    for (const line of lines2) {
+      if (!line.trim()) continue;
+      const result = migrateLine(line);
+      if (result.migrated) migrated2++;
+    }
+    assertEquals(migrated2, 0); // Nothing should be migrated a second time
+  } finally {
+    await fsp.rm(tempDir, { recursive: true });
+  }
 });

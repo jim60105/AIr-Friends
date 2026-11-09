@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
+#!/usr/bin/env -S bun run --no-env-file
 // scripts/omp/prepare-native-cache.ts
 //
 // Preparation entry for the ONE shared OMP native runtime payload
@@ -14,18 +14,20 @@
 // handshake must complete successfully.
 //
 // Usage:
-//   deno task prepare:omp-natives [--executable <path>] [--cache-root <base>]
-//                                 [--platform <linux-x64|linux-arm64>]
-//                                 [--executable-sha256 <hex>] [--timeout-ms <n>]
+//   bun run prepare:omp-natives [--executable <path>] [--cache-root <base>]
+//                               [--platform <linux-x64|linux-arm64>]
+//                               [--executable-sha256 <hex>] [--timeout-ms <n>]
 //
 // Packaging reuses this module from the `omp-unpacker` Containerfile stage after the
 // executable's checksum has been verified, passing that stage's `OMP_SHA256` explicitly so
 // the two pins cannot drift.
 //
-// No JavaScript/Bun runtime is installed: this runs under the Deno runtime the image already
-// carries, and it parses no undocumented embedded binary format.
+// This runs under the Bun runtime the image already carries, and it parses no undocumented
+// embedded binary format.
 
-import { dirname, join, resolve } from "@std/path";
+import { dirname, join, resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
 import {
   OMP_NATIVE_CACHE_EXECUTABLE_SHA256,
   OMP_NATIVE_CACHE_LOCK_NAME,
@@ -43,6 +45,10 @@ import {
   serializeOmpNativeCacheManifest,
 } from "../../src/utils/omp-native-cache.ts";
 import { detectOmpVersion, parseOmpSemver } from "../../src/utils/omp-version.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { isAlreadyExistsError, isNotFoundError } from "../../src/utils/fs-compat.ts";
 
 /** The bounded JSON-RPC `initialize` handshake request. */
 export const OMP_ACP_INITIALIZE_REQUEST = JSON.stringify({
@@ -92,11 +98,11 @@ function delay(ms: number): Promise<void> {
 /** Resolve an executable name against PATH to its absolute spelling. */
 export function resolveOnPath(
   name: string,
-  pathValue = Deno.env.get("PATH") ?? "",
+  pathValue = process.env["PATH"] ?? "",
 ): string | undefined {
   if (name.includes("/")) {
     try {
-      Deno.statSync(name);
+      fs.statSync(name);
       return resolve(name);
     } catch {
       return undefined;
@@ -106,8 +112,8 @@ export function resolveOnPath(
     if (dir === "") continue;
     const candidate = join(dir, name);
     try {
-      const info = Deno.statSync(candidate);
-      if (info.isFile) return candidate;
+      const info = fs.statSync(candidate);
+      if (info.isFile()) return candidate;
     } catch {
       // Not here — keep looking.
     }
@@ -118,7 +124,7 @@ export function resolveOnPath(
 /** SHA-256 of a file. Preparation is a deliberate, non-hot-path step, so one buffered read
  * of the pinned executable is the simplest correct implementation. */
 export async function sha256File(path: string): Promise<string> {
-  const bytes = await Deno.readFile(path);
+  const bytes = await fsp.readFile(path);
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...hash].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -183,40 +189,68 @@ export async function runAcpInitialize(options: {
   readonly xdgDataHome: string;
   readonly timeoutMs: number;
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
-  Deno.mkdirSync(options.home, { recursive: true });
-  Deno.mkdirSync(join(options.home, "tmp"), { recursive: true });
-  Deno.mkdirSync(options.cwd, { recursive: true });
-  Deno.mkdirSync(join(options.xdgDataHome, "omp"), { recursive: true });
+  fs.mkdirSync(options.home, { recursive: true });
+  fs.mkdirSync(join(options.home, "tmp"), { recursive: true });
+  fs.mkdirSync(options.cwd, { recursive: true });
+  fs.mkdirSync(join(options.xdgDataHome, "omp"), { recursive: true });
 
-  const child = new Deno.Command(options.executable, {
-    args: ["acp"],
+  // Exact environment only (the Deno port cleared the parent environment): a probe child
+  // never inherits provider credentials from the preparing process.
+  const child = spawn(options.executable, ["acp"], {
     cwd: options.cwd,
-    clearEnv: true,
     env: {
       HOME: options.home,
       XDG_DATA_HOME: options.xdgDataHome,
       TMPDIR: join(options.home, "tmp"),
-      PATH: Deno.env.get("PATH") ?? "/usr/local/bin:/usr/bin:/bin",
+      PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
     },
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 
-  const stderrTail = drainTail(child.stderr, STDERR_KEEP_BYTES);
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(`${OMP_ACP_INITIALIZE_REQUEST}\n`));
+  // `spawn` reports a missing executable through `error`, not a throw. Consume both the
+  // lifecycle and writable errors BEFORE any await so an unspawnable child cannot raise an
+  // uncaught error, and remember the failure for the bounded report below.
+  let spawnFailure: Error | null = null;
+  child.once("error", (error: Error) => {
+    spawnFailure = error;
+  });
+  child.stdin!.on("error", (error: Error) => {
+    spawnFailure = error;
+  });
 
-  const response = await readInitializeResponse(child.stdout, options.timeoutMs);
-
-  try {
-    await writer.close();
-  } catch {
-    // The child may already have exited.
+  // A failed spawn leaves `pid` unset and destroys its pipes synchronously; adapting them
+  // would surface a raw stream error. Report that as the bounded failure it is instead.
+  if (child.pid === undefined) {
+    return {
+      ok: false,
+      reason: `failed to start "${options.executable}"`,
+    };
   }
+  const stdoutStream = Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>;
+  const stderrStream = Readable.toWeb(child.stderr!) as unknown as ReadableStream<Uint8Array>;
+  const stderrTail = drainTail(stderrStream, STDERR_KEEP_BYTES);
 
+  // Await the write callback: on Bun 1.4.2 `Writable.toWeb` propagates no backpressure to a
+  // sleeping child (Go record finding 1), so the pending callback is what proves the child
+  // actually drained the request.
+  const written = Promise.withResolvers<void>();
+  child.stdin!.write(new TextEncoder().encode(`${OMP_ACP_INITIALIZE_REQUEST}\n`), () => {
+    written.resolve();
+  });
+  await written.promise;
+
+  const response = await readInitializeResponse(stdoutStream, options.timeoutMs);
+
+  const closed = Promise.withResolvers<void>();
+  child.stdin!.end(() => {
+    closed.resolve();
+  });
+  await closed.promise;
+
+  const exitCode = Promise.withResolvers<{ code: number | null }>();
+  child.once("close", (code) => exitCode.resolve({ code }));
   const exit = await Promise.race([
-    child.status,
+    exitCode.promise,
     delay(TERMINATION_GRACE_MS).then(() => null),
   ]);
   if (exit === null) {
@@ -225,7 +259,10 @@ export async function runAcpInitialize(options: {
     } catch {
       // Already gone.
     }
-    const soft = await Promise.race([child.status, delay(TERMINATION_GRACE_MS).then(() => null)]);
+    const soft = await Promise.race([
+      exitCode.promise,
+      delay(TERMINATION_GRACE_MS).then(() => null),
+    ]);
     if (soft === null) {
       try {
         child.kill("SIGKILL");
@@ -235,12 +272,16 @@ export async function runAcpInitialize(options: {
     }
   }
   const stderr = await stderrTail;
+  // The variable is assigned from `error` event callbacks, which control-flow analysis does
+  // not track; the annotation restores the real union at the report site.
+  const failure = spawnFailure as Error | null;
 
   if (response === null) {
     return {
       ok: false,
       reason: `no JSON-RPC initialize response within ${options.timeoutMs}ms` +
         (exit === null ? "" : ` (exit ${exit.code})`) +
+        (failure === null ? "" : `; spawn error: ${failure.message}`) +
         (stderr.trim() ? `; stderr: ${stderr.trim()}` : ""),
     };
   }
@@ -262,20 +303,20 @@ export function listRegularFiles(dir: string): OmpNativeCacheFileEntry[] {
   const files: OmpNativeCacheFileEntry[] = [];
   const walk = (current: string, prefix: string, depth: number): void => {
     if (depth > 8) throw new Error(`native cache payload nests too deeply at "${current}"`);
-    for (const entry of Deno.readDirSync(current)) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = join(current, entry.name);
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         walk(full, relative, depth + 1);
         continue;
       }
-      if (!entry.isFile) {
+      if (!entry.isFile()) {
         throw new Error(
           `native cache payload contains a non-regular entry "${full}" — only regular addon ` +
             "files may be published",
         );
       }
-      files.push({ name: relative, size: Deno.statSync(full).size });
+      files.push({ name: relative, size: fs.statSync(full).size });
     }
   };
   walk(dir, "", 0);
@@ -313,13 +354,13 @@ export function assertExpectedAddons(platform: OmpNativeCachePlatform, names: st
 function snapshotPayload(payloadDir: string): string {
   const lines: string[] = [];
   const walk = (current: string, prefix: string): void => {
-    const info = Deno.lstatSync(current);
-    if (!info.isDirectory) {
+    const info = fs.lstatSync(current);
+    if (!info.isDirectory()) {
       lines.push(`${prefix}\t${info.size}\t${info.mtime?.getTime() ?? 0}\t${info.ino ?? 0}`);
       return;
     }
     lines.push(`${prefix}\t(dir)`);
-    for (const entry of [...Deno.readDirSync(current)].map((e) => e.name).sort()) {
+    for (const entry of [...fs.readdirSync(current, { withFileTypes: true })].map((e) => e.name).sort()) {
       walk(join(current, entry), prefix === "" ? entry : `${prefix}/${entry}`);
     }
   };
@@ -329,13 +370,13 @@ function snapshotPayload(payloadDir: string): string {
 
 /** Recursively set directory/file modes (`0555`/`0444` when read-only). */
 function setTreeMode(dir: string, readonly: boolean): void {
-  Deno.chmodSync(dir, readonly ? 0o555 : 0o755);
-  for (const entry of Deno.readDirSync(dir)) {
+  fs.chmodSync(dir, readonly ? 0o555 : 0o755);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       setTreeMode(full, readonly);
     } else {
-      Deno.chmodSync(full, readonly ? 0o444 : 0o644);
+      fs.chmodSync(full, readonly ? 0o444 : 0o644);
     }
   }
 }
@@ -359,8 +400,8 @@ async function assertReadOnlyLoad(options: {
   try {
     const probeRoot = join(options.staging, "readonly-probe");
     const xdg = join(probeRoot, "xdg");
-    Deno.mkdirSync(join(xdg, "omp"), { recursive: true });
-    Deno.symlinkSync(options.payloadDir, join(xdg, "omp", "natives"));
+    fs.mkdirSync(join(xdg, "omp"), { recursive: true });
+    fs.symlinkSync(options.payloadDir, join(xdg, "omp", "natives"));
     const outcome = await runAcpInitialize({
       executable: options.executable,
       home: join(probeRoot, "home"),
@@ -381,7 +422,7 @@ async function assertReadOnlyLoad(options: {
           describeSnapshotDifference(before, after),
       );
     }
-    Deno.removeSync(probeRoot, { recursive: true });
+    fs.rmSync(probeRoot, { recursive: true });
   } finally {
     setTreeMode(options.payloadDir, false);
     setTreeMode(options.versionDir, false);
@@ -446,8 +487,8 @@ function reuseExisting(
   }
   for (const file of manifest.files) {
     try {
-      const info = Deno.lstatSync(join(descriptor.versionDir, file.name));
-      if (!info.isFile || info.size !== file.size) return null;
+      const info = fs.lstatSync(join(descriptor.versionDir, file.name));
+      if (!info.isFile() || info.size !== file.size) return null;
     } catch {
       return null;
     }
@@ -462,7 +503,7 @@ function reuseExisting(
 
 function readManifestSync(path: string): OmpNativeCacheManifest | null {
   try {
-    const parsed = JSON.parse(Deno.readTextFileSync(path)) as OmpNativeCacheManifest;
+    const parsed = JSON.parse(fs.readFileSync(path, "utf8")) as OmpNativeCacheManifest;
     return typeof parsed === "object" && parsed !== null && Array.isArray(parsed.files)
       ? parsed
       : null;
@@ -509,15 +550,15 @@ export async function prepareOmpNativeCache(
     );
   }
 
-  Deno.mkdirSync(base, { recursive: true });
+  fs.mkdirSync(base, { recursive: true });
   const lockDir = join(base, OMP_NATIVE_CACHE_LOCK_NAME);
   const deadline = Date.now() + (options.lockWaitMs ?? DEFAULT_LOCK_WAIT_MS);
   for (;;) {
     try {
-      Deno.mkdirSync(lockDir);
+      fs.mkdirSync(lockDir);
       break;
     } catch (error) {
-      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+      if (!(isAlreadyExistsError(error))) throw error;
       if (Date.now() >= deadline) {
         throw new Error(
           `another OMP native runtime cache preparation is already running (lock "${lockDir}"). ` +
@@ -534,21 +575,21 @@ export async function prepareOmpNativeCache(
       return { installRoot, payloadDir, manifestPath, manifest: existing, reused: true };
     }
     try {
-      Deno.lstatSync(installRoot);
+      fs.lstatSync(installRoot);
       throw new Error(
         `OMP native runtime cache destination "${installRoot}" already exists but is not a ` +
           `complete payload for ${platform} @ ${OMP_NATIVE_CACHE_VERSION}. Refusing to ` +
           "overwrite it: inspect and remove that directory by hand, then prepare again.",
       );
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      if (!(isNotFoundError(error))) throw error;
     }
 
     const staging = join(
       base,
-      `${OMP_NATIVE_CACHE_STAGING_PREFIX}${Deno.pid}-${crypto.randomUUID()}`,
+      `${OMP_NATIVE_CACHE_STAGING_PREFIX}${process.pid}-${crypto.randomUUID()}`,
     );
-    Deno.mkdirSync(staging, { recursive: true });
+    fs.mkdirSync(staging, { recursive: true });
     let published = false;
     try {
       const probe = join(staging, "probe");
@@ -565,24 +606,24 @@ export async function prepareOmpNativeCache(
       }
       const extractedNatives = join(xdg, "omp", OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME);
       const versionDir = join(extractedNatives, OMP_NATIVE_CACHE_VERSION);
-      let versionInfo: Deno.FileInfo;
+      let versionInfo: Stats;
       try {
-        versionInfo = Deno.lstatSync(versionDir);
+        versionInfo = fs.lstatSync(versionDir);
       } catch {
         throw new Error(
           `the pinned executable extracted no native payload at "${versionDir}" — a ` +
             "`--version`-only or directory-only run is not accepted",
         );
       }
-      if (!versionInfo.isDirectory) {
+      if (!versionInfo.isDirectory()) {
         throw new Error(`extracted native payload "${versionDir}" is not a directory`);
       }
       const files = listRegularFiles(versionDir);
       assertExpectedAddons(platform, files.map((file) => file.name));
 
       // Publish only the native subtree; probe databases, HOME and sessions are discarded.
-      Deno.renameSync(extractedNatives, join(staging, OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME));
-      Deno.removeSync(probe, { recursive: true });
+      fs.renameSync(extractedNatives, join(staging, OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME));
+      fs.rmSync(probe, { recursive: true });
 
       const stagedPayload = join(staging, OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME);
       const stagedVersion = join(stagedPayload, OMP_NATIVE_CACHE_VERSION);
@@ -600,18 +641,15 @@ export async function prepareOmpNativeCache(
         executableSha256: expectedSha,
         files,
       };
-      Deno.writeTextFileSync(
-        join(staging, "native-manifest.json"),
-        serializeOmpNativeCacheManifest(manifest),
-      );
+      fs.writeFileSync(join(staging, "native-manifest.json"), serializeOmpNativeCacheManifest(manifest));
 
-      Deno.renameSync(staging, installRoot);
+      fs.renameSync(staging, installRoot);
       published = true;
       return { installRoot, payloadDir, manifestPath, manifest, reused: false };
     } finally {
       if (!published) {
         try {
-          Deno.removeSync(staging, { recursive: true });
+          fs.rmSync(staging, { recursive: true });
         } catch {
           // Nothing staged, or already gone.
         }
@@ -619,7 +657,7 @@ export async function prepareOmpNativeCache(
     }
   } finally {
     try {
-      Deno.removeSync(lockDir, { recursive: true });
+      fs.rmSync(lockDir, { recursive: true });
     } catch {
       // Already released.
     }
@@ -632,7 +670,7 @@ export function defaultCacheBase(
   imageBase: string,
 ): string {
   try {
-    Deno.lstatSync(join(imageBase, platform));
+    fs.lstatSync(join(imageBase, platform));
     return imageBase;
   } catch {
     // The development base already ends in `air-friends/omp`; the resolver appends `{platform}`
@@ -680,7 +718,7 @@ function parseArgs(args: string[]): ParsedArgs {
           "usage: prepare-native-cache.ts [--executable <path>] [--cache-root <base>] " +
             "[--platform <linux-x64|linux-arm64>] [--executable-sha256 <hex>] [--timeout-ms <n>]",
         );
-        Deno.exit(0);
+        process.exit(0);
         break;
       default:
         throw new Error(`unknown argument "${arg}"`);
@@ -690,7 +728,7 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 if (import.meta.main) {
-  const args = parseArgs(Deno.args);
+  const args = parseArgs(process.argv.slice(2));
   // Default to the target this host actually runs, so an arm64 deployment prepares its own
   // identity instead of failing the x64 checksum check.
   const platform = (args.platform ?? ompNativeCachePlatform()) as OmpNativeCachePlatform;

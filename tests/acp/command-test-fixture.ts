@@ -1,5 +1,7 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { CommandGateContext } from "@acp/command-path-policy.ts";
+import fs from "node:fs";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 export interface CommandFixture {
   root: string;
@@ -18,7 +20,7 @@ export interface CommandFixture {
 
 /** Real metadata fixtures only; no agent or content execution. */
 export function createCommandFixture(): CommandFixture {
-  const root = Deno.makeTempDirSync();
+  const root = makeTempDirSync();
   const workspace = join(root, "workspaces", "123");
   const shared = join(root, "agent-workspace");
   const home = join(root, "home");
@@ -41,7 +43,7 @@ export function createCommandFixture(): CommandFixture {
       join(root, "opencode-data", "pool-other", "opencode", "tool-output"),
       join(home, ".local", "share", "opencode", "tool-output"),
     ]
-  ) Deno.mkdirSync(path, { recursive: true });
+  ) fs.mkdirSync(path, { recursive: true });
   for (
     const path of [
       join(workspace, "notes.md"),
@@ -53,7 +55,7 @@ export function createCommandFixture(): CommandFixture {
       join(root, "external.txt"),
     ]
   ) {
-    Deno.writeTextFileSync(path, "fixture");
+    fs.writeFileSync(path, "fixture");
   }
   const context: CommandGateContext = {
     acpSessionId: "acp-own",
@@ -75,6 +77,6 @@ export function createCommandFixture(): CommandFixture {
     processTmp,
     poolHome,
     context,
-    cleanup: () => Deno.removeSync(root, { recursive: true }),
+    cleanup: () => fs.rmSync(root, { recursive: true }),
   };
 }

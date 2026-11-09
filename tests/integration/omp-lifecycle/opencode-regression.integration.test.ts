@@ -19,12 +19,19 @@
 // Determinism (design D4): every subprocess assertion is driven by the
 // recorded RPC JSONL or the connector's own crash/recovery signal; the only
 // waiting is bounded polling of explicitly observable facts. Guarded on
-// dumb-init/deno like the existing integration suite; no network, real
+// dumb-init like the existing integration suite; no network, real
 // agent, official `omp` executable, container/bwrap, or provider credential
-// is used.
+// is used. The agent process is the `bun run` mock, not a `deno run` one.
+//
+// Deno's `sanitizeOps`/`sanitizeResources` options have no Bun equivalent, so
+// every test measures this process's own descriptor table and descendant tree
+// instead (`tests/helpers/leak-check.ts`) once its teardown has finished.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 import { AgentProcessPool, poolEntryKey } from "@core/agent-process-pool.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { AgentConfig, AgentConnectorOptions } from "@acp/types.ts";
@@ -42,23 +49,24 @@ import {
 } from "@acp/recovery-ownership.ts";
 import type { PoolRunOptions } from "@core/agent-process-pool.ts";
 import type { Config } from "../../../src/types/config.ts";
-import { buildOmpMockSession } from "../../mocks/omp-mock-session.ts";
+import { buildOmpMockSession, expectProcessGone } from "../../mocks/omp-mock-session.ts";
+import { isNotFoundError, makeTempDir } from "../../../src/utils/fs-compat.ts";
+import { assertNoLeak, snapshot, teardownWithLeakCheck } from "../../helpers/leak-check.ts";
 
 const logger = createLogger("OpenCodeRegressionIntegration");
 
-async function binaryAvailable(name: string): Promise<boolean> {
-  try {
-    const res = await new Deno.Command("which", { args: [name] }).output();
-    return res.code === 0;
-  } catch {
-    return false;
-  }
-}
-
-const CAN_RUN_SUBPROCESS = await binaryAvailable("dumb-init") && await binaryAvailable("deno");
+/** The connector wraps every agent launch in `dumb-init`; without it nothing spawns. */
+const DUMB_INIT_READY = Bun.which("dumb-init") !== null;
 
 const SKILL_SECRET = "0123456789abcdef0123456789abcdef01";
 const TEST_MODEL = "opencode/hy3-free";
+
+/** A bounded real delay: process death, pool drain and file reads are OS events. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
 
 interface RecordedLine {
   gen: string;
@@ -70,7 +78,7 @@ interface RecordedLine {
 
 async function readRpcLines(file: string): Promise<RecordedLine[]> {
   try {
-    const text = await Deno.readTextFile(file);
+    const text = await fsp.readFile(file, "utf8");
     return text
       .trim()
       .split("\n")
@@ -81,34 +89,32 @@ async function readRpcLines(file: string): Promise<RecordedLine[]> {
   }
 }
 
-async function waitForProcessGone(pid: number, attempts = 120): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      Deno.kill(pid, 0);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return;
-      if (error instanceof Deno.errors.PermissionDenied) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
-        continue;
-      }
-      throw error;
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+/**
+ * Bounded wait until `method` appears in the mock's RPC record. A notification
+ * (e.g. `session/cancel`) has no response to await, so its recorded line is the
+ * observable fact that the mock consumed it — waiting on it keeps the recorded
+ * sequence deterministic instead of racing the process replacement.
+ */
+async function waitForRecordedMethod(file: string, method: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if ((await readRpcLines(file)).some((line) => line.method === method)) return;
+    await delay(20);
   }
-  throw new Error(`process ${pid} still alive after ${attempts} polls`);
+  throw new Error(`RPC ${method} was never recorded in ${file}`);
 }
 
 async function removeDirWithRetry(dir: string, attempts = 6): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
       return;
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return;
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+      if (isNotFoundError(error)) return;
+      await delay(50);
     }
   }
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 }
 
 /**
@@ -121,17 +127,9 @@ async function removeDirWithRetry(dir: string, attempts = 6): Promise<void> {
  * this copy — the duplicate exists only to avoid editing the baseline owner.
  */
 function useMockAgentShippedShape(agentConfig: AgentConfig): void {
-  const mockAgentScript = join(import.meta.dirname!, "../../mocks/mock-acp-agent.ts");
-  agentConfig.command = "deno";
-  agentConfig.args = [
-    "run",
-    "--no-check",
-    "--allow-env",
-    "--allow-read",
-    "--allow-write",
-    "--allow-net",
-    mockAgentScript,
-  ];
+  const mockAgentScript = new URL("../../mocks/mock-acp-agent.ts", import.meta.url).pathname;
+  agentConfig.command = process.execPath;
+  agentConfig.args = ["run", "--no-env-file", mockAgentScript];
 }
 
 /** Per-test hermetic harness: temp repo root, registry, real pool. */
@@ -147,7 +145,7 @@ interface Harness {
 
 function buildHarness(tempDir: string): Harness {
   const jwtDir = join(tempDir, "skill-jwt");
-  Deno.mkdirSync(jwtDir, { recursive: true });
+  fs.mkdirSync(jwtDir, { recursive: true });
   const config = {
     platforms: {
       discord: { enabled: false, token: "mock" },
@@ -186,13 +184,13 @@ function buildHarness(tempDir: string): Harness {
     60_000,
   );
   const workspacePath = join(tempDir, "session-cwd");
-  Deno.mkdirSync(workspacePath, { recursive: true });
+  fs.mkdirSync(workspacePath, { recursive: true });
   // The pooled opencode spawn runs in the factory's channel-scoped roots;
   // create them so the subprocess cwd exists (the factory composes the
   // paths but does not mkdir them for opencode).
-  Deno.mkdirSync(join(tempDir, "channel-cwd", "discord:discord/opencode-51"), { recursive: true });
-  Deno.mkdirSync(join(tempDir, "channel-tmp", "discord:discord/opencode-51"), { recursive: true });
-  Deno.mkdirSync(join(tempDir, "opencode-data", "discord:discord/opencode-51"), {
+  fs.mkdirSync(join(tempDir, "channel-cwd", "discord:discord/opencode-51"), { recursive: true });
+  fs.mkdirSync(join(tempDir, "channel-tmp", "discord:discord/opencode-51"), { recursive: true });
+  fs.mkdirSync(join(tempDir, "opencode-data", "discord:discord/opencode-51"), {
     recursive: true,
   });
   return {
@@ -206,17 +204,14 @@ function buildHarness(tempDir: string): Harness {
   };
 }
 
-Deno.test({
-  name:
-    "OpenCode lifecycle 5.1: pooled mock flow keeps shipped launch values byte-identical, reuses the pool entry, records OpenCode-only RPCs, and rejects cross-namespace recovery before teardown",
-  ignore: !CAN_RUN_SUBPROCESS,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
-    const tempDir = await Deno.makeTempDir({ prefix: "omp-lifecycle-oc-" });
+test.skipIf(!DUMB_INIT_READY)(
+  "OpenCode lifecycle 5.1: pooled mock flow keeps shipped launch values byte-identical, reuses the pool entry, records OpenCode-only RPCs, and rejects cross-namespace recovery before teardown",
+  async () => {
+    const before = await snapshot();
+    const tempDir = await makeTempDir({ prefix: "omp-lifecycle-oc-" });
     const h = buildHarness(tempDir);
     const stateDir = join(tempDir, "state-51");
-    Deno.mkdirSync(stateDir, { recursive: true });
+    fs.mkdirSync(stateDir, { recursive: true });
     const rpcFile = join(stateDir, "rpc.jsonl");
     const poolKey = "discord:discord/opencode-51";
     const otherPoolKey = "discord:discord/opencode-51-peer";
@@ -257,7 +252,11 @@ Deno.test({
       // ever): the factory only forwards keys configured or set in env.
       for (const key of ["OPENCODE_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY"]) {
         if (shippedEnv[key] !== undefined) {
-          assertEquals(shippedEnv[key], Deno.env.get(key), `${key} must pass through verbatim`);
+          assertEquals(
+            shippedEnv[key],
+            process.env[key],
+            `${key} must pass through verbatim`,
+          );
         }
       }
       // The same call twice is stable (pool keys/env are pure functions of
@@ -353,6 +352,10 @@ Deno.test({
         const response = await connector.prompt(acpSessionId, "opencode regression");
         assertEquals(response.stopReason, "end_turn");
         await connector.cancel(acpSessionId);
+        // The cancel is a JSON-RPC notification (no response), so its recorded
+        // line is the observable fact that the mock consumed it: await it
+        // before the recovery respawn replaces this process.
+        await waitForRecordedMethod(rpcFile, "session/cancel");
         return acpSessionId;
       });
       assertEquals(first.cancelledByDeadline, false);
@@ -498,7 +501,10 @@ Deno.test({
 
       // ---- shipped opencode.json baseline (config data, not behavior) ----
       const opencodeJson = JSON.parse(
-        await Deno.readTextFile(new URL("../../../agent-config/opencode.json", import.meta.url)),
+        await fsp.readFile(
+          new URL("../../../agent-config/opencode.json", import.meta.url),
+          "utf8",
+        ),
       ) as {
         default_agent: string;
         agent: Record<string, { permission: Record<string, string> }>;
@@ -509,41 +515,43 @@ Deno.test({
       assertEquals(opencodeJson.agent["yolo"]?.permission?.["*"], "allow");
       assertEquals(opencodeJson.default_agent, "build");
     } finally {
-      // run() resolves before the release path clears inFlight (documented
-      // pool behavior): await the observable release condition.
-      const releaseDeadline = Date.now() + 30_000;
-      while (!h.pool.isIdle() && Date.now() < releaseDeadline) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-      }
-      // The release drain's own budgets are far below 30s: a pool that
-      // never drains is a real hang and must surface HERE, not as a leaked
-      // temp dir or a later unexplained flake.
-      assertEquals(h.pool.isIdle(), true, "release path must drain within the bounded poll");
-      for (const connector of h.spawned) {
-        try {
-          await connector.disconnect();
-        } catch {
-          // Best effort during teardown.
+      await teardownWithLeakCheck(before, async () => {
+        // run() resolves before the release path clears inFlight (documented
+        // pool behavior): await the observable release condition.
+        const releaseDeadline = Date.now() + 30_000;
+        while (!h.pool.isIdle() && Date.now() < releaseDeadline) {
+          await delay(20);
         }
-      }
-      h.pool.stop();
-      h.sessionRegistry.stop();
-      for (const pid of livePids) {
-        await waitForProcessGone(pid);
-      }
-      await removeDirWithRetry(tempDir);
+        // The release drain's own budgets are far below 30s: a pool that
+        // never drains is a real hang and must surface HERE, not as a leaked
+        // temp dir or a later unexplained flake.
+        assertEquals(h.pool.isIdle(), true, "release path must drain within the bounded poll");
+        for (const connector of h.spawned) {
+          try {
+            await connector.disconnect();
+          } catch {
+            // Best effort during teardown.
+          }
+        }
+        await h.pool.stop();
+        h.sessionRegistry.stop();
+        for (const pid of livePids) {
+          await expectProcessGone(pid, "pooled opencode process");
+        }
+        await removeDirWithRetry(tempDir);
+      });
     }
   },
-});
+);
 
 // ---------------------------------------------------------------------------
 // 5.2 — retained runtime suite guard (spec: Fail-Closed Honest Posture)
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name:
-    "runtime guard 5.2: the default builder composition carries no readiness surface anywhere on the connector",
-  fn() {
+test(
+  "runtime guard 5.2: the default builder composition carries no readiness surface anywhere on the connector",
+  async () => {
+    const before = await snapshot();
     // The default composition is fail-closed: a builder composition scripted
     // only with `initialize` introduces no readiness handshake — no readiness
     // tuple, state or channel anywhere on the composed connector.
@@ -561,7 +569,6 @@ Deno.test({
         `readiness surface leaked onto the connector: ${surface}`,
       );
     }
+    await assertNoLeak(before);
   },
-  sanitizeOps: false,
-  sanitizeResources: false,
-});
+);

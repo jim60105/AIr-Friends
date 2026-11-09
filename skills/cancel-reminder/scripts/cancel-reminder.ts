@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -9,16 +9,37 @@ import {
   SkillSessionUnresolvedError,
 } from "../../lib/client.ts";
 
+export interface CancelReminderArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  reminderId?: string;
+}
+
+export function parseCancelReminderArgs(argv: string[]): CancelReminderArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      "reminder-id": { type: "string" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    reminderId: typeof values["reminder-id"] === "string" ? values["reminder-id"] : undefined,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "reminder-id"],
-      alias: { s: "session-id", a: "api-url" },
-    });
+    const { reminderId } = parseCancelReminderArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
-
-    const reminderId = args["reminder-id"];
     if (!reminderId) {
       exitWithError("Missing required parameter: --reminder-id");
     }
@@ -30,7 +51,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     exitWithError(
@@ -40,4 +61,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

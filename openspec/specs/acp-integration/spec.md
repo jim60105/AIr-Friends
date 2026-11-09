@@ -18,7 +18,7 @@ The system SHALL manage the external OpenCode ACP agent lifecycle through the `A
 #### Scenario: Parent environment cleared on spawn
 - **GIVEN** the parent bot process holds secrets (bot tokens, provider API keys, git credentials) not present in `AgentConfig.env`
 - **WHEN** `connect()` spawns the subprocess
-- **THEN** the `Deno.Command` SHALL be configured with `clearEnv: true`
+- **THEN** the spawn boundary SHALL receive `AgentConfig.env` as the complete child environment
 - **AND** the subprocess environment SHALL contain only the variables in `AgentConfig.env`, with no inherited parent variables
 
 #### Scenario: Session creation with MCP servers
@@ -226,7 +226,7 @@ In restricted (non-YOLO) mode, the system SHALL selectively approve or deny perm
 - **THEN** it SHALL auto-approve the request
 
 #### Scenario: Skill command with legacy free-text flag rejected
-- **GIVEN** a permission request to execute a whitelisted skill command that carries a legacy free-text flag, e.g. `deno run .../send-reply.ts --session-id "$SESSION_ID" --message "定價 $0.435"` or `... --message=定價`
+- **GIVEN** a permission request to execute a whitelisted skill command that carries a legacy free-text flag, e.g. `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml .../send-reply.ts --session-id "$SESSION_ID" --message "定價 $0.435"` or `... --message=定價`
 - **WHEN** `requestPermission()` evaluates the command tokens
 - **THEN** it SHALL reject the request with a `permission_denied` audit entry
 - **AND** a command using `--message-id "msg_x"` or `--message-file "$TMPDIR/$SESSION_ID/reply.md"` SHALL NOT be rejected on these grounds
@@ -473,7 +473,7 @@ All agent subprocesses SHALL receive common environment variables regardless of 
 #### Scenario: Common env vars
 - **GIVEN** any agent type
 - **WHEN** the subprocess is spawned
-- **THEN** the environment SHALL include `TMPDIR` (set to `{workingDir}/tmp`), `AGENT_WORKSPACE` (if provided), `PATH`, `HOME`, `DENO_DIR`, `LANG`, `LC_ALL`, and `USER`
+- **THEN** the environment SHALL include `TMPDIR` (set to `{workingDir}/tmp`), `AGENT_WORKSPACE` (if provided), `PATH`, `HOME`, `LANG`, `LC_ALL`, and `USER`
 
 #### Scenario: SESSION_ID env var provided to agent (per-spawn mode)
 - **GIVEN** a per-spawn session has been created via ACP `createSession()`
@@ -489,8 +489,6 @@ All agent subprocesses SHALL receive common environment variables regardless of 
 - **GIVEN** any agent subprocess (per-spawn or shared-process)
 - **WHEN** its environment is inspected
 - **THEN** it SHALL NOT contain the deployment `SKILL_API_SECRET` or any raw per-session caller-token environment value (e.g. a legacy `SKILL_API_TOKEN`); skill scripts authenticate with the per-session JWT file addressed by `SKILL_JWT_DIR`
-
----
 
 ### Requirement: OpenCode YOLO Mode Switching
 
@@ -608,9 +606,9 @@ The `SandboxManager` SHALL mediate the agent subprocess's network egress so the 
 The validating egress proxy (`src/utils/egress-proxy.ts`) SHALL relay bytes between the agent and the upstream origin without altering or losing them, and SHALL propagate connection lifecycle events in both directions, so the mediation layer does not itself become a source of corrupted streams or zombie connections.
 
 #### Scenario: Short writes are fully flushed
-- **GIVEN** a tunneled transfer large enough that the socket `write` returns fewer bytes than requested (TCP backpressure)
+- **GIVEN** a tunneled transfer large enough that the peer socket's write buffer fills (TCP backpressure)
 - **WHEN** the proxy relays a chunk to the peer, or writes a control response / rewritten request head
-- **THEN** it SHALL loop until every byte has been written, and the payload SHALL arrive byte-exact (a dropped remainder would corrupt the tunneled TLS stream)
+- **THEN** it SHALL stop reading from the source until the peer drains, and the payload SHALL arrive byte-exact (a dropped remainder would corrupt the tunneled TLS stream)
 
 #### Scenario: Upstream close is propagated to the client
 - **GIVEN** an established CONNECT tunnel whose upstream closes an idle keep-alive connection
@@ -1319,7 +1317,7 @@ Detectable root, observed ancestor or final-object identity mismatch before the 
 
 ### Requirement: Explicit Secure ACP Filesystem Platform Policy
 
-The initially supported secure backend SHALL require Linux little-endian x86_64/aarch64, GNU glibc at an explicitly owned supported system location, Linux constrained-open and descriptor-metadata support, exact usable identities and Deno FFI permission.
+The initially supported secure backend SHALL require Linux little-endian x86_64/aarch64, GNU glibc at an explicitly owned supported system location, Linux constrained-open and descriptor-metadata support, exact usable identities and a working runtime foreign-function interface to that libc.
 
 #### Scenario: Supported local filesystem uses the actual backend
 - **GIVEN** the supported system library, native ABI and constrained-open/metadata capability are actually available
@@ -1807,7 +1805,7 @@ The combined lifecycle suite SHALL be deterministic: timer-driven paths SHALL us
 #### Scenario: Integration task stays live-acceptance-free
 - **GIVEN** the repository's integration test task executes the new suite
 - **WHEN** the suite runs
-- **THEN** only in-process fixtures and `deno`-launched mock subprocesses SHALL be spawned
+- **THEN** only in-process fixtures and `bun`-launched mock subprocesses SHALL be spawned
 - **AND** no `omp --version`, container build, bwrap invocation, or external provider request SHALL occur
 
 #### Scenario: No live external dependencies
@@ -1823,7 +1821,7 @@ Restricted script approval SHALL require the invocation entrypoint to match an e
 #### Scenario: Literal trusted recipe is approved
 
 - **GIVEN** an observed script under the resolved root and an otherwise valid restricted invocation
-- **WHEN** the script is invoked directly or as the entrypoint after `deno run`
+- **WHEN** the script is invoked directly or as the entrypoint after the exact literal prefix `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml`
 - **THEN** it SHALL be approved by exact canonical script membership
 - **AND** quoting the absolute script path or adding a tolerated fd redirect SHALL preserve the result
 
@@ -1923,7 +1921,7 @@ Script inventory SHALL use the single explicit resolved root and canonical absol
 - **GIVEN** the resolved root contains a skill whose scripts directory holds only a non-`.ts` executable (for example a `.py` or shell script)
 - **WHEN** the auto-approve inventory is constructed for either agent type and that script is invoked
 - **THEN** no inventory entry and no grant SHALL be created for it
-- **AND** enumeration SHALL remain limited to `scripts/*.ts` with the `deno` interpreter as the sole allowlisted entrypoint
+- **AND** enumeration SHALL remain limited to `scripts/*.ts` with direct execution and the exact literal `bun run` prefix as the only accepted invocation forms
 
 ### Requirement: Inventory Denial Invariants Survive The Ownership Relaxation
 
@@ -2439,3 +2437,90 @@ For OMP callback contexts, native state SHALL be excluded from broad callback wo
 - **WHEN** persisted journal provenance is checked
 - **THEN** both the header cwd and registered cwd SHALL be canonicalized through the same path rule before comparison
 - **AND** a valid alias SHALL remain usable without accepting a different workspace identity
+
+### Requirement: Agent Stdin Backpressure
+
+A write to the agent subprocess's stdin stream SHALL settle only after the operating system accepted the bytes, so a child that stops reading holds back the writer.
+
+#### Scenario: Sleeping child
+- **GIVEN** an agent subprocess that sleeps for 2 seconds before reading stdin
+- **WHEN** 16 MiB is written to its stdin stream
+- **THEN** the write SHALL still be pending 500 ms after it started, and SHALL resolve after the child starts reading
+
+#### Scenario: Data intact
+- **GIVEN** an agent subprocess that echoes stdin to stdout
+- **WHEN** 32 MiB of seeded bytes is written and stdin is closed
+- **THEN** the SHA-256 of the bytes read from stdout SHALL equal the SHA-256 of the bytes written
+
+### Requirement: Agent Exit Report
+
+The spawn boundary SHALL report an exit as a code, a signal name and a success flag, where a signal exit has a null code and the signal name, and success is true only for exit code 0.
+
+#### Scenario: Normal exit
+- **WHEN** the agent subprocess exits with code 3
+- **THEN** the report SHALL be code 3, signal null, success false
+
+#### Scenario: Signal exit
+- **WHEN** the agent wrapper is killed with `SIGKILL`
+- **THEN** the report SHALL be code null, signal `SIGKILL`, success false
+
+#### Scenario: Escalation after grace period
+- **GIVEN** an agent subprocess that ignores `SIGTERM`
+- **WHEN** the connector disconnects
+- **THEN** it SHALL send `SIGKILL` 2 seconds after `SIGTERM` and the exit report SHALL show `SIGKILL`
+
+### Requirement: Egress Resolution Happens Once Per Connection
+
+The egress proxy SHALL resolve a hostname once per client request, validate every A and AAAA answer, and connect to the validated address without resolving again.
+
+#### Scenario: Rebinding answer is not followed
+- **GIVEN** an allowlisted hostname whose DNS server answers `127.0.0.1` to the first A query and `127.0.0.2` afterward, with listeners on both addresses and the same port
+- **WHEN** a client issues `CONNECT` for that hostname
+- **THEN** the `127.0.0.1` listener SHALL receive the connection, the `127.0.0.2` listener SHALL receive none, and exactly one A query SHALL have been made
+
+#### Scenario: Disallowed AAAA behind a public A
+- **GIVEN** a hostname with a public A record and a loopback AAAA record
+- **WHEN** a client issues `CONNECT` for it
+- **THEN** the proxy SHALL reply 403
+
+### Requirement: Real Backend Reports Kernel Errno
+
+The real Linux backend SHALL report the errno the kernel set for each failed constrained call, including across many alternating successes and failures with event-loop turns between them.
+
+#### Scenario: Symlink and escape errnos
+- **GIVEN** a confinement root containing a symbolic link and a directory escape path
+- **WHEN** the real backend opens each with resolve flags that forbid links and escapes
+- **THEN** it SHALL report `ELOOP` for the link and `EXDEV` for the escape
+
+#### Scenario: Alternating failures
+- **GIVEN** a confinement root with one existing and one missing file
+- **WHEN** the real backend opens them alternately 10,000 times, yielding to the event loop every 100 calls
+- **THEN** every missing-file result SHALL report `ENOENT` and every existing-file result SHALL return a descriptor
+
+### Requirement: Escalated Disconnect Reaps The Agent Process Tree
+
+When a disconnect escalates to `SIGKILL`, the connector SHALL send `SIGKILL` to every descendant of the agent wrapper and to the wrapper, so no process started under that wrapper survives.
+
+#### Scenario: Child ignoring SIGTERM
+- **GIVEN** an agent whose child process ignores `SIGTERM` and keeps running
+- **WHEN** the connector disconnects and the 2-second grace period expires
+- **THEN** within 1 second after escalation, no process whose ancestor was the wrapper SHALL remain
+
+#### Scenario: Graceful exit is not escalated
+- **GIVEN** an agent that exits on `SIGTERM`
+- **WHEN** the connector disconnects
+- **THEN** no `SIGKILL` SHALL be sent
+
+### Requirement: Integration Suites Leave No Leaked Descriptors Or Processes
+
+Each agent integration test SHALL end with the test process's open file-descriptor count and its descendant-process count back at the values measured before the test started.
+
+#### Scenario: Shared-process suite teardown
+- **GIVEN** a shared-process integration test that spawned mock agents
+- **WHEN** the test's teardown has completed
+- **THEN** the test process SHALL have no descendant process and no more open descriptors than before the test
+
+#### Scenario: Leak is reported
+- **GIVEN** a test that leaves one spawned mock agent running
+- **WHEN** the leak check runs after teardown
+- **THEN** the check SHALL fail and name the surviving PID

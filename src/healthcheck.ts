@@ -6,6 +6,10 @@ import { metricsRegistry, skillReadinessGauge } from "@utils/metrics.ts";
 import type { MetricsConfig } from "./types/config.ts";
 import { getDefaultAgentType } from "@acp/agent-factory.ts";
 import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
+import fsp from "node:fs/promises";
+import { removePath } from "./utils/fs-compat.ts";
+import { spawnSync } from "node:child_process";
+import type { Server } from "bun";
 
 const logger = createLogger("HealthCheck");
 
@@ -48,7 +52,7 @@ const READINESS_CACHE_TTL_MS = 30_000;
  */
 export class HealthCheckServer {
   private context: AppContext | null = null;
-  private server: Deno.HttpServer | null = null;
+  private server: Server<undefined> | null = null;
   private startTime: Date = new Date();
   private port: number;
   private metricsConfig: MetricsConfig | null;
@@ -71,10 +75,12 @@ export class HealthCheckServer {
    * Start the health check server
    */
   start(): void {
-    this.server = Deno.serve(
-      { port: this.port },
-      (request) => this.handleRequest(request),
-    );
+    this.server = Bun.serve({
+      port: this.port,
+      // Deno had no idle timeout; keep readiness probes uncut mid-subprocess.
+      idleTimeout: 0,
+      fetch: (request) => this.handleRequest(request),
+    });
 
     logger.info("Health check server started", { port: this.port });
   }
@@ -84,7 +90,7 @@ export class HealthCheckServer {
    */
   async stop(): Promise<void> {
     if (this.server) {
-      await this.server.shutdown();
+      await this.server.stop();
       this.server = null;
       logger.info("Health check server stopped");
     }
@@ -215,7 +221,7 @@ export class HealthCheckServer {
         for (const name of skillNames) {
           const scriptPath = `${skillsDir}/${name}/scripts/${name}.ts`;
           try {
-            await Deno.stat(scriptPath);
+            await fsp.stat(scriptPath);
             checks.push({ name: `scripts:${name}`, ready: true });
           } catch {
             checks.push({
@@ -238,25 +244,18 @@ export class HealthCheckServer {
       }
 
       // 2. Check required binaries
-      for (const bin of ["rg", "deno", "git"]) {
-        try {
-          const cmd = new Deno.Command(bin, {
-            args: ["--version"],
-            stdout: "null",
-            stderr: "null",
-          });
-          const { success } = await cmd.output();
-          if (success) {
-            checks.push({ name: `binary:${bin}`, ready: true });
-          } else {
-            checks.push({
-              name: `binary:${bin}`,
-              ready: false,
-              message: `${bin} exited with non-zero status`,
-            });
-          }
-        } catch {
+      for (const bin of ["rg", "bun", "git"]) {
+        const result = spawnSync(bin, ["--version"], { stdio: "ignore" });
+        if (result.error) {
           checks.push({ name: `binary:${bin}`, ready: false, message: `${bin} not found in PATH` });
+        } else if (result.status !== 0) {
+          checks.push({
+            name: `binary:${bin}`,
+            ready: false,
+            message: `${bin} exited with non-zero status`,
+          });
+        } else {
+          checks.push({ name: `binary:${bin}`, ready: true });
         }
       }
 
@@ -283,8 +282,8 @@ export class HealthCheckServer {
       const repoPath = this.context.config.workspace.repoPath;
       try {
         const testFile = `${repoPath}/.healthcheck_write_test_${now}`;
-        await Deno.writeTextFile(testFile, "");
-        await Deno.remove(testFile);
+        await fsp.writeFile(testFile, "");
+        await removePath(testFile);
         checks.push({ name: "workspace:writable", ready: true });
       } catch {
         checks.push({

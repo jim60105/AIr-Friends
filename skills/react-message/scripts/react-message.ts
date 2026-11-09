@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -9,17 +9,37 @@ import {
   SkillSessionUnresolvedError,
 } from "../../lib/client.ts";
 
+export interface ReactMessageArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  emoji?: string;
+}
+
+export function parseReactMessageArgs(argv: string[]): ReactMessageArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      emoji: { type: "string", short: "e" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    emoji: typeof values.emoji === "string" ? values.emoji : undefined,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    // Parse arguments
-    const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "emoji"],
-      alias: { s: "session-id", a: "api-url", e: "emoji" },
-    });
+    const { emoji } = parseReactMessageArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
-
-    const emoji = args.emoji;
     if (!emoji) {
       exitWithError("Missing required argument: --emoji");
     }
@@ -32,7 +52,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     exitWithError(
@@ -42,4 +62,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

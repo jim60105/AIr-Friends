@@ -10,8 +10,9 @@ import {
   resolveModelSelection,
   resolveReasoningValue,
 } from "@acp/session-config.ts";
+import { test } from "bun:test";
 
-Deno.test("findOptionByCategory - returns option matching category or undefined", () => {
+test("findOptionByCategory - returns option matching category or undefined", () => {
   const options: acp.SessionConfigOption[] = [
     {
       id: "model_cfg",
@@ -27,7 +28,7 @@ Deno.test("findOptionByCategory - returns option matching category or undefined"
   assertEquals(findOptionByCategory(null, "model"), undefined);
 });
 
-Deno.test("collectOptionValues - flat and grouped catalogs flatten identically", () => {
+test("collectOptionValues - flat and grouped catalogs flatten identically", () => {
   const flatOption: acp.SessionConfigOption = {
     id: "model",
     name: "Model",
@@ -65,7 +66,7 @@ Deno.test("collectOptionValues - flat and grouped catalogs flatten identically",
   assertEquals(collectOptionValues(groupedOption), expected);
 });
 
-Deno.test("collectOptionValues - skips entries lacking string value", () => {
+test("collectOptionValues - skips entries lacking string value", () => {
   const mixedOption: acp.SessionConfigOption = {
     id: "opt_flat",
     name: "Opt Flat",
@@ -101,7 +102,7 @@ Deno.test("collectOptionValues - skips entries lacking string value", () => {
   assertEquals(collectOptionValues(mixedGroupOption), ["valid-2"]);
 });
 
-Deno.test("resolveCanonicalValue - case-insensitive match returns advertised casing", () => {
+test("resolveCanonicalValue - case-insensitive match returns advertised casing", () => {
   const values = ["gpt-4o", "Claude-3-5-Sonnet", "gemini-1.5-pro"];
   assertEquals(resolveCanonicalValue(values, "GPT-4O"), "gpt-4o");
   assertEquals(resolveCanonicalValue(values, "claude-3-5-sonnet"), "Claude-3-5-Sonnet");
@@ -109,13 +110,13 @@ Deno.test("resolveCanonicalValue - case-insensitive match returns advertised cas
   assertEquals(resolveCanonicalValue(values, "unknown-model"), undefined);
 });
 
-Deno.test("resolveCanonicalValue - case-only ties pick the first advertised entry", () => {
+test("resolveCanonicalValue - case-only ties pick the first advertised entry", () => {
   const values = ["Model-A", "model-a", "MODEL-A"];
   assertEquals(resolveCanonicalValue(values, "MODEL-A"), "Model-A");
   assertEquals(resolveCanonicalValue(values, "model-a"), "Model-A");
 });
 
-Deno.test("resolveModelSelection - no model option returns unstable-fallback even when other categories exist", () => {
+test("resolveModelSelection - no model option returns unstable-fallback even when other categories exist", () => {
   const options: acp.SessionConfigOption[] = [
     {
       id: "thought_level",
@@ -138,7 +139,7 @@ Deno.test("resolveModelSelection - no model option returns unstable-fallback eve
   });
 });
 
-Deno.test("resolveModelSelection - model option with empty value list is catalog-miss for any request", () => {
+test("resolveModelSelection - model option with empty value list is catalog-miss for any request", () => {
   const options: acp.SessionConfigOption[] = [
     {
       id: "model",
@@ -156,7 +157,7 @@ Deno.test("resolveModelSelection - model option with empty value list is catalog
   });
 });
 
-Deno.test("resolveModelSelection - model found returns stable with canonical value and configId", () => {
+test("resolveModelSelection - model found returns stable with canonical value and configId", () => {
   const options: acp.SessionConfigOption[] = [
     {
       id: "cfg_model_select",
@@ -177,7 +178,7 @@ Deno.test("resolveModelSelection - model found returns stable with canonical val
   });
 });
 
-Deno.test("resolveModelSelection - model absent returns catalog-miss with all advertised values", () => {
+test("resolveModelSelection - model absent returns catalog-miss with all advertised values", () => {
   const options: acp.SessionConfigOption[] = [
     {
       id: "cfg_model_select",
@@ -198,7 +199,7 @@ Deno.test("resolveModelSelection - model absent returns catalog-miss with all ad
   });
 });
 
-Deno.test("resolveReasoningValue - exact hit, none->off alias, none with neither, exact none beating off", () => {
+test("resolveReasoningValue - exact hit, none->off alias, none with neither, exact none beating off", () => {
   // Exact hit
   assertEquals(resolveReasoningValue("high", ["low", "High"]), {
     kind: "applied",
@@ -224,21 +225,21 @@ Deno.test("resolveReasoningValue - exact hit, none->off alias, none with neither
   });
 });
 
-Deno.test("resolveReasoningValue - off-requested never reverse-aliased", () => {
+test("resolveReasoningValue - off-requested never reverse-aliased", () => {
   assertEquals(resolveReasoningValue("off", ["none", "low"]), {
     kind: "applied",
     value: "off",
   });
 });
 
-Deno.test("resolveReasoningValue - low-requested never aliased and reported not-offered if absent", () => {
+test("resolveReasoningValue - low-requested never aliased and reported not-offered if absent", () => {
   assertEquals(resolveReasoningValue("low", ["off", "high"]), {
     kind: "not-offered",
     availableValues: ["off", "high"],
   });
 });
 
-Deno.test("resolveReasoningValue - passthrough token sent as-is, nullish/empty option lists", () => {
+test("resolveReasoningValue - passthrough token sent as-is, nullish/empty option lists", () => {
   // Passthrough token (unknown token) with available values
   assertEquals(resolveReasoningValue("ultra", ["low", "high"]), {
     kind: "applied",
@@ -256,7 +257,7 @@ Deno.test("resolveReasoningValue - passthrough token sent as-is, nullish/empty o
   });
 });
 
-Deno.test("formatAdvertisedValuesPreview - length and count bounds", () => {
+test("formatAdvertisedValuesPreview - length and count bounds", () => {
   assertEquals(formatAdvertisedValuesPreview([]), "[]");
   assertEquals(formatAdvertisedValuesPreview(["a", "b"]), '["a", "b"]');
 

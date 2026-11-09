@@ -9,6 +9,9 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export interface ImapFixtureMessage {
   uid: number;
@@ -44,46 +47,56 @@ let cachedCert: GeneratedTlsCert | null = null;
 export function getOrCreateFixtureCert(): GeneratedTlsCert {
   if (cachedCert) return cachedCert;
 
-  const res = spawnSync("openssl", [
-    "req",
-    "-x509",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
-    "-sha256",
-    "-subj",
-    "/CN=127.0.0.1",
-    "-addext",
-    "subjectAltName=IP:127.0.0.1,DNS:localhost",
-    "-days",
-    "7",
-    "-keyout",
-    "/dev/stdout",
-  ], { encoding: "utf8" });
+  // Bun gives every child a socketpair for stdio, so openssl cannot open
+  // `/dev/stdout` (ENXIO). Write both PEM documents to files instead.
+  const dir = fs.mkdtempSync(join(tmpdir(), "email-imap-cert-"));
+  try {
+    const keyPath = join(dir, "key.pem");
+    const certPath = join(dir, "cert.pem");
+    const res = spawnSync("openssl", [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-sha256",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1,DNS:localhost",
+      "-days",
+      "7",
+      "-keyout",
+      keyPath,
+      "-out",
+      certPath,
+    ], { encoding: "utf8" });
 
-  if (res.error || res.status !== 0) {
-    throw new Error(
-      `Failed to generate self-signed test cert: ${res.error?.message || res.stderr}`,
+    if (res.error || res.status !== 0) {
+      throw new Error(
+        `Failed to generate self-signed test cert: ${res.error?.message || res.stderr}`,
+      );
+    }
+
+    const keyMatch = fs.readFileSync(keyPath, "utf8").match(
+      /-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----/,
     );
+    const certMatch = fs.readFileSync(certPath, "utf8").match(
+      /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/,
+    );
+
+    if (!keyMatch || !certMatch) {
+      throw new Error("Could not parse key and certificate from openssl output");
+    }
+
+    cachedCert = {
+      key: keyMatch[0],
+      cert: certMatch[0],
+    };
+    return cachedCert;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-
-  const output = res.stdout;
-  const keyMatch = output.match(
-    /-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----/,
-  );
-  const certMatch = output.match(
-    /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/,
-  );
-
-  if (!keyMatch || !certMatch) {
-    throw new Error("Could not parse key and certificate from openssl output");
-  }
-
-  cachedCert = {
-    key: keyMatch[0],
-    cert: certMatch[0],
-  };
-  return cachedCert;
 }
 
 export class EmailImapTestService {

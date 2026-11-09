@@ -17,7 +17,9 @@
  * official host binary invoking or honoring it.
  */
 
-const bundleUrl = Deno.args[0];
+export {};
+
+const bundleUrl = process.argv[2];
 
 if (!bundleUrl) {
   throw new Error("usage: omp-bundle-smoke-driver.ts <bundle-file-url>");

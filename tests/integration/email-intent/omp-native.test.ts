@@ -34,7 +34,7 @@
 // - Prerequisites are EXACT. With `EMAIL_INTENT_OMP_ACCEPTANCE=1` (the
 //   documented acceptance mode) every unavailable prerequisite is a FAILED test
 //   naming the precise reason; without it the native leg stays UNEXERCISED
-//   (Deno reports the test as ignored) rather than claiming native success.
+//   (Bun reports the test as skipped) rather than claiming native success.
 // - The denial-attribution assertion is written against the pinned pre-dispatch
 //   contract `{block: true, reason}`: the extension blocks EVERY name on this
 //   launch, so the model must see that bounded reason rather than an executed
@@ -48,8 +48,8 @@
 
 import * as acp from "@agentclientprotocol/sdk";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { dirname, join, resolve } from "@std/path";
-import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
+import { dirname, join, resolve } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createEmailIntentAgentConfig,
   EMAIL_INTENT_PROFILE,
@@ -64,6 +64,12 @@ import {
   parityMarkerPath,
 } from "../../fixtures/omp-native-runtime/unknown-tools.js";
 import type { AgentConfig } from "@acp/types.ts";
+import { createAgentProcess } from "../../../src/acp/agent-process.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
+import { spawnSync } from "node:child_process";
 
 /** Checkout root (this file lives at `<root>/tests/integration/email-intent/`). */
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..", "..", "..");
@@ -81,7 +87,7 @@ const FIXTURE_MODELS_PATH = join(
 const PINNED_OMP_VERSION = "18.6.1";
 
 /** Acceptance mode: every unavailable prerequisite becomes a named failure. */
-const ACCEPTANCE_MODE = Deno.env.get("EMAIL_INTENT_OMP_ACCEPTANCE") === "1";
+const ACCEPTANCE_MODE = process.env["EMAIL_INTENT_OMP_ACCEPTANCE"] === "1";
 
 /** Fixed loopback HOST: the ephemeral PORT is this run's own. */
 const LOOPBACK_HOST = "127.0.0.1";
@@ -166,9 +172,10 @@ function observedToolResults(requests: readonly unknown[]): Map<string, string> 
 function startScriptedProvider(plan: readonly PlannedCall[]): ScriptedProvider {
   const requests: unknown[] = [];
   const pathCounts = new Map<string, number>();
-  const service = Deno.serve(
-    { hostname: LOOPBACK_HOST, port: 0, onListen: () => {} },
-    async (request) => {
+  const service = Bun.serve({
+    hostname: LOOPBACK_HOST,
+    port: 0,
+    async fetch(request) {
       const url = new URL(request.url);
       pathCounts.set(url.pathname, (pathCounts.get(url.pathname) ?? 0) + 1);
       if (url.pathname !== CHAT_COMPLETIONS_PATH) {
@@ -230,12 +237,12 @@ function startScriptedProvider(plan: readonly PlannedCall[]): ScriptedProvider {
       });
       return new Response(stream, { headers: { "content-type": "text/event-stream" } });
     },
-  );
+  });
   return {
-    origin: `http://${LOOPBACK_HOST}:${service.addr.port}`,
+    origin: `http://${LOOPBACK_HOST}:${service.port}`,
     requests,
     pathCounts,
-    shutdown: () => service.shutdown(),
+    shutdown: () => service.stop(true),
   };
 }
 
@@ -246,7 +253,7 @@ function startScriptedProvider(plan: readonly PlannedCall[]): ScriptedProvider {
  */
 function fixtureCatalog(origin: string): string {
   const document = requireObject(
-    parseYaml(Deno.readTextFileSync(FIXTURE_MODELS_PATH)),
+    parseYaml(fs.readFileSync(FIXTURE_MODELS_PATH, "utf8")),
     "the tracked loopback model fixture",
   );
   const providers = requireObject(document["providers"], "providers");
@@ -298,16 +305,12 @@ async function runProfilePrompt(
   agentConfig: AgentConfig,
   promptText: string,
 ): Promise<ClientObservations> {
-  const command = new Deno.Command(agentConfig.command, {
+  const child = createAgentProcess({
+    command: agentConfig.command,
     args: [...agentConfig.args, "--trusted-extension", FIXTURE_EXTENSION_PATH],
     cwd: agentConfig.cwd,
-    clearEnv: true,
-    env: agentConfig.env,
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
+    env: agentConfig.env ?? {},
   });
-  const process = command.spawn();
   const observations: ClientObservations = {
     plannedToolCallIds: new Set<string>(),
     notificationText: "",
@@ -316,7 +319,7 @@ async function runProfilePrompt(
     fsReads: 0,
     fsWrites: 0,
   };
-  const stream = acp.ndJsonStream(process.stdin, process.stdout);
+  const stream = acp.ndJsonStream(child.stdin, child.stdout);
   const connection = new acp.ClientSideConnection(
     () => ({
       sessionUpdate: (notification) => {
@@ -385,22 +388,17 @@ async function runProfilePrompt(
     assertEquals(prompt.stopReason, "end_turn");
     return observations;
   } finally {
-    try {
-      process.kill();
-    } catch {
-      // Already gone.
-    }
-    await process.status;
-    await process.stderr.cancel().catch(() => {});
+    child.kill("SIGKILL");
+    await child.exited;
+    await child.stderr.cancel().catch(() => {});
   }
 }
 
 /** Synchronous command probe (no shell). */
 function runSyncProbe(command: string, args: readonly string[]): string | undefined {
   try {
-    const result = new Deno.Command(command, { args: [...args], stdout: "piped", stderr: "null" })
-      .outputSync();
-    return result.success ? new TextDecoder().decode(result.stdout).trim() : undefined;
+    const result = spawnSync(command, [...args], { encoding: "utf8" });
+    return result.status === 0 ? result.stdout.trim() : undefined;
   } catch {
     return undefined;
   }
@@ -424,7 +422,7 @@ const FIXTURE_EXTENSION_PATH = resolve(
 /** Synchronous file existence probe. */
 function existsSync(path: string): boolean {
   try {
-    return Deno.statSync(path).isFile;
+    return fs.statSync(path).isFile();
   } catch {
     return false;
   }
@@ -448,7 +446,7 @@ function assertNativePrerequisites(): void {
       throw new Error(
         path === TRUSTED_EXTENSION_PATH
           ? `the generated trusted extension bundle is missing at "${path}"; build it with ` +
-            `deno task bundle:omp-extension`
+            `bun run bundle:omp-extension`
           : `the fixture asset "${path}" is missing`,
       );
     }
@@ -487,8 +485,8 @@ async function runLeg(
   const root = join(fixture.root, label);
   try {
     const catalogPath = join(root, "models.yml");
-    Deno.mkdirSync(root, { recursive: true });
-    Deno.writeTextFileSync(catalogPath, fixtureCatalog(provider.origin));
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(catalogPath, fixtureCatalog(provider.origin));
 
     const options: EmailIntentProfileOptions = {
       authoredConfigPath: SHIPPED_SETTINGS_PATH,
@@ -520,23 +518,22 @@ async function runLeg(
   }
 }
 
-Deno.test({
-  name: "email-intent OMP profile - scripts every native surface and observes zero effects",
-  ignore: !ACCEPTANCE_MODE,
-  async fn() {
+test.skipIf(!ACCEPTANCE_MODE)(
+  "email-intent OMP profile - scripts every native surface and observes zero effects",
+  async function () {
     assertNativePrerequisites();
     const executable = resolveOnPath("omp");
     assert(executable !== undefined, "the pinned omp executable resolves on PATH");
 
-    const root = await Deno.makeTempDir({ prefix: "email-intent-omp-native-" });
+    const root = await makeTempDir({ prefix: "email-intent-omp-native-" });
     try {
       // A sentinel file OUTSIDE the profile's private roots: if any read tool
       // ever ran, its marker would travel back to the scripted provider.
       const outside = join(root, "outside");
-      Deno.mkdirSync(outside, { recursive: true });
+      fs.mkdirSync(outside, { recursive: true });
       const sentinel = join(outside, "sentinel.txt");
-      Deno.writeTextFileSync(sentinel, `# sentinel\n\n${READ_SENTINEL_MARKER}\n`);
-      const sentinelBytes = Deno.readTextFileSync(sentinel);
+      fs.writeFileSync(sentinel, `# sentinel\n\n${READ_SENTINEL_MARKER}\n`);
+      const sentinelBytes = fs.readFileSync(sentinel, "utf8");
 
       const payload = await prepareOmpNativeCache({
         executable,
@@ -602,7 +599,7 @@ Deno.test({
         // Zero side effects: the denied command never ran, the sentinel file is
         // byte-identical, and neither exposure-control tool wrote its marker.
         assert(!existsSync(bashSentinel), "the denied bash command must never have run");
-        assertEquals(Deno.readTextFileSync(sentinel), sentinelBytes);
+        assertEquals(fs.readFileSync(sentinel, "utf8"), sentinelBytes);
         for (const marker of ["direct", "mounted"] as const) {
           const markerPath = parityMarkerPath(
             join(root, "intent", "cwd"),
@@ -680,7 +677,7 @@ Deno.test({
           `native payload platform=${ompNativeCachePlatform()}`,
       );
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await fsp.rm(root, { recursive: true }).catch(() => {});
     }
   },
-});
+);

@@ -267,7 +267,7 @@ When `audit.hashContent` is `true`, the system SHALL hash user content fields us
 
 ### Requirement: Retention Cleanup
 
-The `cleanupAuditLogs()` function SHALL delete JSONL files whose `mtime` is older than `retentionDays`. The `AuditRetentionScheduler` SHALL execute cleanup at startup (when no restored state exists) and then every 24 hours (fixed interval). Empty user directories SHALL be cleaned up after file deletion. If the audit directory does not exist (`Deno.errors.NotFound`), cleanup SHALL complete silently without error.
+The `cleanupAuditLogs()` function SHALL delete JSONL files whose `mtime` is older than `retentionDays`. The `AuditRetentionScheduler` SHALL execute cleanup at startup (when no restored state exists) and then every 24 hours (fixed interval). Empty user directories SHALL be cleaned up after file deletion. If the audit directory does not exist (the filesystem reports not-found, `ENOENT`), cleanup SHALL complete silently without error.
 
 #### Scenario: Expired file cleanup
 - **GIVEN** `retentionDays` is `7`

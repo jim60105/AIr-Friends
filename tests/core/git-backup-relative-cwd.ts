@@ -10,13 +10,14 @@
 //
 // argv: [bareRemoteUrl]
 import { GitBackupService } from "@core/git-backup-service.ts";
+import fsp from "node:fs/promises";
 
-await Deno.mkdir("./data", { recursive: true });
+await fsp.mkdir("./data", { recursive: true });
 
 const service = new GitBackupService(
   {
     enabled: true,
-    remoteUrl: Deno.args[0] ?? "",
+    remoteUrl: process.argv[2] ?? "",
     intervalMs: 3600000,
     authorName: "Test Author",
     authorEmail: "test@example.com",

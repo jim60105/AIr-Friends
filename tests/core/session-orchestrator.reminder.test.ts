@@ -16,17 +16,19 @@ import type {
   EmailReplyEligibilityResolver,
   EmailReplyEligibilityResult,
 } from "../../src/platforms/email/reply-eligibility.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
-import { resolve } from "@std/path";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
+import { resolve } from "node:path";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 /**
  * The ONE deployment-resolved skill-script root
  * (`unify-skill-root-and-inventory`): the repository `skills/` tree — what
  * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types.
  */
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
-  resolve(import.meta.dirname ?? ".", "../../skills"),
-);
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 class MockAgentConnector {
   connected = false;
@@ -157,13 +159,13 @@ async function createReminderTestOrchestrator(tempDir: string) {
   const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
 
-  await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-  await Deno.writeTextFile(
+  await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+  await fsp.writeFile(
     `${tempDir}/prompts/system_reply.md`,
     "You are a helper.\n{{ if sessionId }}\nSession: {{ sessionId }}\n{{ /if }}\n" +
       "Skill root: {{ skillsDir }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     `${tempDir}/prompts/system_reminder.md`,
     "Reminder: {{ reminderMessage }}\nCreated: {{ reminderCreatedAt }}\nScheduled: {{ reminderScheduledAt }}\nPlatform: {{ platform }}\nUser: {{ userId }}\nChannel: {{ channelId }}\n" +
       "Skill root: {{ skillsDir }}",
@@ -188,8 +190,8 @@ async function createReminderTestOrchestrator(tempDir: string) {
   return { orchestrator, skillRegistry, sessionRegistry, config };
 }
 
-Deno.test("processReminder - delivers reminder and disables it on success", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - delivers reminder and disables it on success", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, skillRegistry, sessionRegistry } = await createReminderTestOrchestrator(
       tempDir,
@@ -224,12 +226,12 @@ Deno.test("processReminder - delivers reminder and disables it on success", asyn
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - cancels reminder when DM channel cannot be resolved", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - cancels reminder when DM channel cannot be resolved", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createReminderTestOrchestrator(tempDir);
 
@@ -247,12 +249,12 @@ Deno.test("processReminder - cancels reminder when DM channel cannot be resolved
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - renders template with reminder content", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - renders template with reminder content", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, skillRegistry, sessionRegistry } = await createReminderTestOrchestrator(
       tempDir,
@@ -297,12 +299,12 @@ Deno.test("processReminder - renders template with reminder content", async () =
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - disconnects and cleans up on error", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - disconnects and cleans up on error", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createReminderTestOrchestrator(tempDir);
 
@@ -322,12 +324,12 @@ Deno.test("processReminder - disconnects and cleans up on error", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - sets model from agent config", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - sets model from agent config", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, skillRegistry, sessionRegistry, config } =
       await createReminderTestOrchestrator(tempDir);
@@ -355,12 +357,12 @@ Deno.test("processReminder - sets model from agent config", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - returns failure when agent does not send reply", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - returns failure when agent does not send reply", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createReminderTestOrchestrator(tempDir);
 
@@ -385,7 +387,7 @@ Deno.test("processReminder - returns failure when agent does not send reply", as
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -459,8 +461,8 @@ function enableEmailAccount(config: Config, enabled = true): void {
 /** Test seam: the delivered-reply state the Skill API would set after a send. */
 type ReplyStateAccess = { replySentMap: Map<string, boolean> };
 
-Deno.test("processReminder - email reminder delivers into its persisted thread and operation", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - email reminder delivers into its persisted thread and operation", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -514,12 +516,12 @@ Deno.test("processReminder - email reminder delivers into its persisted thread a
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - a foreign reply on the same thread never delivers the email reminder", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - a foreign reply on the same thread never delivers the email reminder", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, skillRegistry, sessionRegistry, config } =
       await createReminderTestOrchestrator(tempDir);
@@ -554,12 +556,12 @@ Deno.test("processReminder - a foreign reply on the same thread never delivers t
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - missing email origin is review-required with no session", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - missing email origin is review-required with no session", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -581,12 +583,12 @@ Deno.test("processReminder - missing email origin is review-required with no ses
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - a corrupt email origin never gets a guessed thread", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - a corrupt email origin never gets a guessed thread", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -646,12 +648,12 @@ Deno.test("processReminder - a corrupt email origin never gets a guessed thread"
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - a disabled or removed email account prevents reminder delivery", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - a disabled or removed email account prevents reminder delivery", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -684,12 +686,12 @@ Deno.test("processReminder - a disabled or removed email account prevents remind
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - a submitted reminder operation is not resubmitted after a failed patch", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - a submitted reminder operation is not resubmitted after a failed patch", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -734,12 +736,12 @@ Deno.test("processReminder - a submitted reminder operation is not resubmitted a
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - an unresolved reminder operation is review-required, never replayed", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - an unresolved reminder operation is review-required, never replayed", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -776,12 +778,12 @@ Deno.test("processReminder - an unresolved reminder operation is review-required
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - an in-flight reminder operation is review-required, never replayed", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - an in-flight reminder operation is review-required, never replayed", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -818,12 +820,12 @@ Deno.test("processReminder - an in-flight reminder operation is review-required,
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - email without an eligibility capability fails closed", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - email without an eligibility capability fails closed", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -845,12 +847,12 @@ Deno.test("processReminder - email without an eligibility capability fails close
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - Discord reminder behavior is unchanged by the email path", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - Discord reminder behavior is unchanged by the email path", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, skillRegistry, sessionRegistry } = await createReminderTestOrchestrator(
       tempDir,
@@ -882,7 +884,7 @@ Deno.test("processReminder - Discord reminder behavior is unchanged by the email
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -895,8 +897,8 @@ function makeFailingReminderStore(): ReminderStore {
   } as unknown as ReminderStore;
 }
 
-Deno.test("processReminder - a failed reminder patch never resends a submitted email reminder", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - a failed reminder patch never resends a submitted email reminder", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -952,12 +954,12 @@ Deno.test("processReminder - a failed reminder patch never resends a submitted e
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("processReminder - a failed reminder patch never replays an unresolved email reminder", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("processReminder - a failed reminder patch never replays an unresolved email reminder", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createReminderTestOrchestrator(
       tempDir,
@@ -1006,6 +1008,6 @@ Deno.test("processReminder - a failed reminder patch never replays an unresolved
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });

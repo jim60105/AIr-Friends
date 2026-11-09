@@ -36,8 +36,8 @@
  */
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { copy } from "@std/fs/copy";
-import { basename, dirname, join, resolve } from "@std/path";
+import { basename, dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { createAgentConfig } from "@acp/agent-factory.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { canConfineFilesystem } from "@acp/sandbox-capabilities.ts";
@@ -62,6 +62,10 @@ import { Logger, LogLevel } from "@utils/logger.ts";
 import type { AgentConfig, AgentConnectorOptions } from "@acp/types.ts";
 import type { Config, SandboxConfig } from "../../src/types/config.ts";
 import type { DriverParams, DriverResult } from "../mocks/omp-native-lifecycle-driver.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // ---------------------------------------------------------------------------
 // Pinned prerequisites and authored-asset inventory
@@ -124,10 +128,10 @@ const EXPECTED_NATIVE_STATE = ["agent.db", "sessions"];
 /**
  * Acceptance mode. Set for the documented acceptance run so every prerequisite
  * becomes REQUIRED and is reported as a FAILURE naming the exact reason. Unset
- * (ordinary `deno task test` / CI), an unavailable prerequisite leaves the leg
+ * (ordinary `bun test` / CI), an unavailable prerequisite leaves the leg
  * UNEXERCISED instead of passing a native claim.
  */
-const ACCEPTANCE_MODE = Deno.env.get("OMP_NATIVE_ACCEPTANCE") === "1";
+const ACCEPTANCE_MODE = process.env["OMP_NATIVE_ACCEPTANCE"] === "1";
 
 // ---------------------------------------------------------------------------
 // Synchronous prerequisite observation
@@ -141,29 +145,18 @@ interface SyncProbe {
 }
 
 function runSyncProbe(command: string, args: readonly string[]): SyncProbe {
-  try {
-    const output = new Deno.Command(command, {
-      args: [...args],
-      stdout: "piped",
-      stderr: "piped",
-    }).outputSync();
-    return {
-      ran: true,
-      success: output.success,
-      stdout: new TextDecoder().decode(output.stdout).trim(),
-    };
-  } catch {
-    return { ran: false, success: false, stdout: "" };
-  }
+  const output = spawnSync(command, [...args], { encoding: "utf8" });
+  if (output.error !== undefined) return { ran: false, success: false, stdout: "" };
+  return { ran: true, success: output.status === 0, stdout: output.stdout.trim() };
 }
 
 /** Resolve an executable on `PATH` to its absolute spelling, without a shell. */
 function resolveOnPath(name: string): string | undefined {
-  for (const dir of (Deno.env.get("PATH") ?? "").split(":")) {
+  for (const dir of (process.env["PATH"] ?? "").split(":")) {
     if (dir === "") continue;
     const candidate = join(dir, name);
     try {
-      if (Deno.statSync(candidate).isFile) return candidate;
+      if (fs.statSync(candidate).isFile()) return candidate;
     } catch {
       // Not in this directory; keep scanning.
     }
@@ -212,7 +205,7 @@ const CONFINEMENT_HOST_REASON =
 function confinementHostUnsupported(): boolean {
   if (!canConfineFilesystem()) return false;
   try {
-    return Deno.lstatSync("/usr/local").isSymlink;
+    return fs.lstatSync("/usr/local").isSymbolicLink();
   } catch {
     return false;
   }
@@ -309,13 +302,13 @@ function writeSyntheticNativeCachePayload(base: string): OmpNativeCache {
   // The arm64 requirement is a pattern (`pi_natives.*linux-arm64*.node`); this
   // name satisfies it without a binary.
   const names = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
-  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  fs.mkdirSync(cache.versionDir, { recursive: true });
   const files = names.map((name) => {
     const bytes = new TextEncoder().encode(`synthetic native stand-in ${name}`);
-    Deno.writeFileSync(join(cache.versionDir, name), bytes);
+    fs.writeFileSync(join(cache.versionDir, name), bytes);
     return { name, size: bytes.byteLength };
   });
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -332,7 +325,7 @@ function writeSyntheticNativeCachePayload(base: string): OmpNativeCache {
  *
  * - `"prepared"` (default, the gated native legs): expose the operator's
  *   AMBIENT development cache through `XDG_CACHE_HOME`, so the shipped resolver
- *   selects the REAL payload `deno task prepare:omp-natives` published (the
+ *   selects the REAL payload `bun run prepare:omp-natives` published (the
  *   documented acceptance prerequisite) even though this fixture overrides HOME
  *   to its own temporary tree.
  * - `"synthetic"`: publish a complete stand-in payload under a temporary cache
@@ -351,36 +344,44 @@ async function withNativeFixture(
   run: (fixture: NativeFixture) => Promise<void>,
   nativeCache: FixtureNativeCache = "prepared",
 ): Promise<void> {
-  const root = await Deno.makeTempDir({ prefix: "air-omp-native-runtime-" });
-  const previousHome = Deno.env.get("HOME");
-  const previousCacheHome = Deno.env.get("XDG_CACHE_HOME");
+  const root = await makeTempDir({ prefix: "air-omp-native-runtime-" });
+  const previousHome = process.env["HOME"];
+  const previousCacheHome = process.env["XDG_CACHE_HOME"];
   let syntheticCacheRoot: string | undefined;
   try {
     const home = join(root, "home");
     const skillsRoot = join(home, ".agents", "skills");
     const workspace = join(root, "workspace");
-    await Deno.mkdir(join(home, ".omp", "agent"), { recursive: true });
-    await Deno.mkdir(join(workspace, "tmp"), { recursive: true });
+    await fsp.mkdir(join(home, ".omp", "agent"), { recursive: true });
+    await fsp.mkdir(join(workspace, "tmp"), { recursive: true });
 
     // Authored bytes are installed FIRST: the observation interval starts only
     // after this provisioning, so every later access is a production/native
     // access rather than a setup write.
-    await copy(FIXTURE_MODELS_PATH, join(home, HOME_MODELS_RELATIVE));
-    await copy(TRACKED_SKILLS_DIR, skillsRoot);
+    await fsp.cp(FIXTURE_MODELS_PATH, join(home, HOME_MODELS_RELATIVE), {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+    });
+    await fsp.cp(TRACKED_SKILLS_DIR, skillsRoot, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+    });
 
-    const authoredBytes = await Deno.readTextFile(FIXTURE_MODELS_PATH);
+    const authoredBytes = await fsp.readFile(FIXTURE_MODELS_PATH, "utf8");
     assertEquals(
-      await Deno.readTextFile(join(home, HOME_MODELS_RELATIVE)),
+      await fsp.readFile(join(home, HOME_MODELS_RELATIVE), "utf8"),
       authoredBytes,
       "fixture provisioning installs the authored bytes verbatim",
     );
 
-    Deno.env.set("HOME", home);
+    process.env["HOME"] = home;
     let nativeCacheSelection: NativeFixture["nativeCacheSelection"];
     if (nativeCache === "synthetic") {
-      syntheticCacheRoot = await Deno.makeTempDir({ prefix: "air-omp-native-cache-" });
+      syntheticCacheRoot = await makeTempDir({ prefix: "air-omp-native-cache-" });
       const payload = writeSyntheticNativeCachePayload(syntheticCacheRoot);
-      Deno.env.set("XDG_CACHE_HOME", syntheticCacheRoot);
+      process.env["XDG_CACHE_HOME"] = syntheticCacheRoot;
       nativeCacheSelection = {
         installRoot: payload.installRoot,
         launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
@@ -390,18 +391,18 @@ async function withNativeFixture(
       // writes to, captured BEFORE HOME was overridden.
       const ambientBase = previousCacheHome?.trim() ||
         join(previousHome ?? home, ".cache");
-      Deno.env.set("XDG_CACHE_HOME", ambientBase);
+      process.env["XDG_CACHE_HOME"] = ambientBase;
     }
     await run({ root, home, workspace, skillsRoot, nativeCacheSelection });
   } finally {
-    if (previousHome === undefined) Deno.env.delete("HOME");
-    else Deno.env.set("HOME", previousHome);
-    if (previousCacheHome === undefined) Deno.env.delete("XDG_CACHE_HOME");
-    else Deno.env.set("XDG_CACHE_HOME", previousCacheHome);
+    if (previousHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = previousHome;
+    if (previousCacheHome === undefined) delete process.env["XDG_CACHE_HOME"];
+    else process.env["XDG_CACHE_HOME"] = previousCacheHome;
     if (syntheticCacheRoot !== undefined) {
-      await Deno.remove(syntheticCacheRoot, { recursive: true }).catch(() => {});
+      await fsp.rm(syntheticCacheRoot, { recursive: true }).catch(() => {});
     }
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 }
 
@@ -488,7 +489,7 @@ async function waitForPoolIdle(pool: AgentProcessPool, timeoutMs: number): Promi
 /** Whether a pid still exists (Linux `/proc`); used for the leak assertion. */
 function processAlive(pid: number): boolean {
   try {
-    Deno.statSync(`/proc/${pid}`);
+    fs.statSync(`/proc/${pid}`);
     return true;
   } catch {
     return false;
@@ -500,19 +501,15 @@ function processAlive(pid: number): boolean {
  * own child drain uses), so the leak assertion covers the native process beneath
  * its `dumb-init`/`bwrap` wrappers rather than only the wrapper itself.
  */
-async function liveProcessTree(pid: number): Promise<number[]> {
+function liveProcessTree(pid: number): number[] {
   const tree = [pid];
   const seen = new Set<number>([pid]);
   const queue = [pid];
   while (queue.length > 0 && seen.size < 64) {
     const parent = queue.shift()!;
-    const output = await new Deno.Command("pgrep", {
-      args: ["-P", String(parent)],
-      stdout: "piped",
-      stderr: "null",
-    }).output().catch(() => null);
-    if (output === null || !output.success) continue;
-    for (const token of new TextDecoder().decode(output.stdout).split("\n")) {
+    const output = spawnSync("pgrep", ["-P", String(parent)], { encoding: "utf8" });
+    if (output.error !== undefined || output.status !== 0) continue;
+    for (const token of output.stdout.split("\n")) {
       const child = Number(token.trim());
       if (token.trim() === "" || !Number.isInteger(child) || seen.has(child)) continue;
       seen.add(child);
@@ -524,13 +521,13 @@ async function liveProcessTree(pid: number): Promise<number[]> {
 }
 
 /** Record a connector's live native process tree (wrapper plus descendants). */
-async function recordProcessTree(
+function recordProcessTree(
   connector: AgentConnector,
   into: Set<number>,
-): Promise<void> {
+): void {
   const pid = connector.getProcessPid();
   if (pid === undefined) return;
-  for (const treePid of await liveProcessTree(pid)) into.add(treePid);
+  for (const treePid of liveProcessTree(pid)) into.add(treePid);
 }
 
 /** Boundedly wait for every recorded process to exit; returns the survivors. */
@@ -712,9 +709,10 @@ async function runTracedLifecycle(params: {
   readonly home: string;
 }): Promise<{ readonly success: boolean; readonly stderr: string }> {
   assert(TRACER_PATH !== undefined, "the traced lifecycle requires strace");
-  await Deno.writeTextFile(params.paramsPath, JSON.stringify(params.driverParams));
-  const output = await new Deno.Command("dumb-init", {
-    args: [
+  await fsp.writeFile(params.paramsPath, JSON.stringify(params.driverParams));
+  const output = spawnSync(
+    "dumb-init",
+    [
       "--",
       TRACER_PATH,
       "-f",
@@ -726,25 +724,17 @@ async function runTracedLifecycle(params: {
       "-o",
       params.tracePath,
       "--",
-      Deno.execPath(),
+      process.execPath,
       "run",
-      "--allow-net",
-      "--allow-read",
-      "--allow-write",
-      "--allow-env",
-      "--allow-run",
-      "--allow-ffi",
+      "--no-env-file",
       DRIVER_PATH,
       params.paramsPath,
     ],
-    cwd: REPO_ROOT,
-    env: { ...Deno.env.toObject(), HOME: params.home },
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
+    { cwd: REPO_ROOT, env: { ...process.env, HOME: params.home }, encoding: "utf8" },
+  );
   return {
-    success: output.success,
-    stderr: new TextDecoder().decode(output.stderr),
+    success: output.status === 0,
+    stderr: output.stderr,
   };
 }
 
@@ -752,7 +742,7 @@ async function runTracedLifecycle(params: {
 // Test 1 — the observer's own classification contract
 // ---------------------------------------------------------------------------
 
-Deno.test("native probe observer: mutating events are resolved and classified fail-closed", () => {
+test("native probe observer: mutating events are resolved and classified fail-closed", () => {
   const trace = [
     // Absolute writable open of a watched file: a mutation.
     `100  openat(AT_FDCWD, "/cfg/models.yml", O_RDWR|O_CREAT, 0644) = 7`,
@@ -858,82 +848,73 @@ Deno.test("native probe observer: mutating events are resolved and classified fa
 // Test 2 — authored fixture and the provisioning boundary (no native binary)
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name:
-    "native probe fixture: authored model bytes are installed into the configured HOME and skill root",
-  fn: async () => {
-    const authored = await Deno.readTextFile(FIXTURE_MODELS_PATH);
-    // Hand-authored, never generated: the design's one credential-free,
-    // zero-cost provider/model field set (provisioning identity, not native
-    // schema or no-write evidence).
-    assert(authored.includes(`${FIXTURE_MODEL_ID}:`), "authored provider key");
-    assert(authored.includes("baseUrl: http://127.0.0.1:43187/v1"), "authored loopback baseUrl");
-    assert(authored.includes("auth: none"), "authored credential-free provider");
-    assert(authored.includes("api: openai-completions"), "authored provider api");
-    assert(authored.includes(`- id: ${FIXTURE_MODEL_ID}`), "authored model id");
-    assert(authored.includes("contextWindow: 8192"), "authored context window");
-    assert(authored.includes("maxTokens: 1024"), "authored max tokens");
-    assert(authored.includes("cacheWrite: 0"), "authored zero cost");
+test("native probe fixture: authored model bytes are installed into the configured HOME and skill root", async () => {
+  const authored = await fsp.readFile(FIXTURE_MODELS_PATH, "utf8");
+  // Hand-authored, never generated: the design's one credential-free,
+  // zero-cost provider/model field set (provisioning identity, not native
+  // schema or no-write evidence).
+  assert(authored.includes(`${FIXTURE_MODEL_ID}:`), "authored provider key");
+  assert(authored.includes("baseUrl: http://127.0.0.1:43187/v1"), "authored loopback baseUrl");
+  assert(authored.includes("auth: none"), "authored credential-free provider");
+  assert(authored.includes("api: openai-completions"), "authored provider api");
+  assert(authored.includes(`- id: ${FIXTURE_MODEL_ID}`), "authored model id");
+  assert(authored.includes("contextWindow: 8192"), "authored context window");
+  assert(authored.includes("maxTokens: 1024"), "authored max tokens");
+  assert(authored.includes("cacheWrite: 0"), "authored zero cost");
 
-    const parentHome = Deno.env.get("HOME");
-    await withNativeFixture(async (fixture) => {
-      // The observation boundary: authored bytes installed, HOME exported, the
-      // ONE configured skill root provisioned from tracked skill bytes.
-      assertEquals(await Deno.readTextFile(join(fixture.home, HOME_MODELS_RELATIVE)), authored);
-      assertEquals(Deno.env.get("HOME"), fixture.home);
-      const observation = observeTrustedSkillsRoot("omp", fixture.skillsRoot);
-      assertEquals(observation.root, await Deno.realPath(fixture.skillsRoot));
-      assert(observation.identity !== undefined, "the provisioned root carries an identity");
+  const parentHome = process.env["HOME"];
+  await withNativeFixture(async (fixture) => {
+    // The observation boundary: authored bytes installed, HOME exported, the
+    // ONE configured skill root provisioned from tracked skill bytes.
+    assertEquals(await fsp.readFile(join(fixture.home, HOME_MODELS_RELATIVE), "utf8"), authored);
+    assertEquals(process.env["HOME"], fixture.home);
+    const observation = observeTrustedSkillsRoot("omp", fixture.skillsRoot);
+    assertEquals(observation.root, await fsp.realpath(fixture.skillsRoot));
+    assert(observation.identity !== undefined, "the provisioned root carries an identity");
 
-      // The configured root IS the provisioned root (one root for every consumer).
-      const config = probeConfig(fixture, false);
-      // This leg runs without an installed executable or a prepared cache, so it
-      // consumes the fixture's complete stand-in payload through the documented
-      // internal selection seam (no OMP process is spawned here).
-      config.agent.ompNativeCache = fixture.nativeCacheSelection;
-      assertEquals(config.agent.skillsDir, fixture.skillsRoot);
-      const agentConfig = createAgentConfig("omp", fixture.workspace, config, false);
-      assertEquals(agentConfig.skillsRoot?.root, observation.root);
+    // The configured root IS the provisioned root (one root for every consumer).
+    const config = probeConfig(fixture, false);
+    // This leg runs without an installed executable or a prepared cache, so it
+    // consumes the fixture's complete stand-in payload through the documented
+    // internal selection seam (no OMP process is spawned here).
+    config.agent.ompNativeCache = fixture.nativeCacheSelection;
+    assertEquals(config.agent.skillsDir, fixture.skillsRoot);
+    const agentConfig = createAgentConfig("omp", fixture.workspace, config, false);
+    assertEquals(agentConfig.skillsRoot?.root, observation.root);
 
-      // The authored mode document is selected verbatim, and nothing generates
-      // or rewrites configuration inside the fixture root.
-      const selected = [
-        ...agentConfig.args.filter((_arg, index) =>
-          agentConfig.args[index - 1] === "--config" ||
-          agentConfig.args[index - 1] === "--system-prompt"
-        ),
-        join(fixture.home, HOME_MODELS_RELATIVE),
-      ];
+    // The authored mode document is selected verbatim, and nothing generates
+    // or rewrites configuration inside the fixture root.
+    const selected = [
+      ...agentConfig.args.filter((_arg, index) =>
+        agentConfig.args[index - 1] === "--config" ||
+        agentConfig.args[index - 1] === "--system-prompt"
+      ),
+      join(fixture.home, HOME_MODELS_RELATIVE),
+    ];
+    assert(
+      selected.some((path) => path.endsWith("restricted.yml")),
+      `the restricted launch selected an authored mode document: ${selected.join(", ")}`,
+    );
+    for (const entry of fs.readdirSync(fixture.root, { withFileTypes: true })) {
       assert(
-        selected.some((path) => path.endsWith("restricted.yml")),
-        `the restricted launch selected an authored mode document: ${selected.join(", ")}`,
+        entry.name === "home" || entry.name === "workspace",
+        `the fixture root gained unexpected entry ${entry.name}`,
       );
-      for (const entry of Deno.readDirSync(fixture.root)) {
-        assert(
-          entry.name === "home" || entry.name === "workspace",
-          `the fixture root gained unexpected entry ${entry.name}`,
-        );
-      }
-    }, "synthetic");
+    }
+  }, "synthetic");
 
-    // The parent environment is restored once the fixture boundary closes.
-    assertEquals(Deno.env.get("HOME"), parentHome);
-  },
-  sanitizeOps: false,
-  sanitizeResources: false,
+  // The parent environment is restored once the fixture boundary closes.
+  assertEquals(process.env["HOME"], parentHome);
 });
 
 // ---------------------------------------------------------------------------
 // Test 3 — traced factory + real unconfined native lifecycle in BOTH modes
 // ---------------------------------------------------------------------------
 
-Deno.test({
-  name: `native OMP ACP lifecycle in both launch modes: traced production factory + real ` +
+test.skipIf(!ACCEPTANCE_MODE && !(PINNED_BINARY_READY && TRACER_PATH !== undefined))(
+  `native OMP ACP lifecycle in both launch modes: traced production factory + real ` +
     `${PINNED_OMP_VERSION} start, advertised fixture catalog, respawn+load, zero authored writes`,
-  // Acceptance mode makes the prerequisites REQUIRED (the body fails loudly);
-  // otherwise an unavailable runtime leaves this evidence UNEXERCISED.
-  ignore: !ACCEPTANCE_MODE && !(PINNED_BINARY_READY && TRACER_PATH !== undefined),
-  fn: async () => {
+  async () => {
     assertPinnedBinaryPrerequisite();
     assertObserverPrerequisite();
 
@@ -962,7 +943,7 @@ Deno.test({
         });
         assert(run.success, `${mode}: traced driver failed: ${run.stderr}`);
 
-        const result = JSON.parse(await Deno.readTextFile(resultPath)) as DriverResult;
+        const result = JSON.parse(await fsp.readFile(resultPath, "utf8")) as DriverResult;
         assert(result.sessionId.length > 0, `${mode}: the native agent returned a real session id`);
         assertEquals(result.resumed, true, `${mode}: the real session was restored`);
         // The negative control's rejection message carries the REAL advertised
@@ -987,9 +968,9 @@ Deno.test({
 
         // Native persistence beneath the SELECTED mode root, including the
         // artifacts `session/load` needs.
-        const nativeState = [...Deno.readDirSync(join(result.dataRoot, "omp"))].map((entry) =>
-          entry.name
-        );
+        const nativeState = [
+          ...fs.readdirSync(join(result.dataRoot, "omp"), { withFileTypes: true }),
+        ].map((entry) => entry.name);
         for (const expected of EXPECTED_NATIVE_STATE) {
           assert(
             nativeState.includes(expected),
@@ -997,7 +978,7 @@ Deno.test({
           );
         }
 
-        const traceText = await Deno.readTextFile(tracePath);
+        const traceText = await fsp.readFile(tracePath, "utf8");
         const events = parseMutationEvents(traceText);
         // Positive control: the observer really saw this mode's native writes.
         assert(
@@ -1025,9 +1006,7 @@ Deno.test({
       }
     });
   },
-  sanitizeOps: false,
-  sanitizeResources: false,
-});
+);
 
 // ---------------------------------------------------------------------------
 // Test 4 — confined real pool consumers
@@ -1042,12 +1021,10 @@ function statusReader(stdout: string): (key: string) => number {
   };
 }
 
-Deno.test({
-  name:
-    "confined pooled native consumers: opposite modes on one pool key, selected-root IO controls, " +
+test.skipIf(!ACCEPTANCE_MODE && !(PINNED_BINARY_READY && CONFINEMENT_READY))(
+  "confined pooled native consumers: opposite modes on one pool key, selected-root IO controls, " +
     "own-data persistence and same-mode reload",
-  ignore: !ACCEPTANCE_MODE && !(PINNED_BINARY_READY && CONFINEMENT_READY),
-  fn: async () => {
+  async () => {
     assertPinnedBinaryPrerequisite();
     assertConfinementPrerequisites();
 
@@ -1110,10 +1087,10 @@ Deno.test({
             mode === "restricted" ? "native-yolo" : "restricted",
           );
           const siblingMarker = join(siblingXdgRoot, "sibling-marker");
-          await Deno.mkdir(siblingXdgRoot, { recursive: true });
+          await fsp.mkdir(siblingXdgRoot, { recursive: true });
           const siblingSentinel = `sibling-${mode}-sentinel`;
-          await Deno.writeTextFile(siblingMarker, siblingSentinel);
-          assertEquals(await Deno.readTextFile(siblingMarker), siblingSentinel);
+          await fsp.writeFile(siblingMarker, siblingSentinel);
+          assertEquals(await fsp.readFile(siblingMarker, "utf8"), siblingSentinel);
 
           const options: PoolRunOptions = {
             poolKey,
@@ -1152,7 +1129,9 @@ Deno.test({
           // THIS mode's own selected data root: identifiable native artifacts,
           // never a setup marker.
           const ownDataRoot = join(ompXdgDataHome(poolBase, mode), "omp");
-          const nativeState = [...Deno.readDirSync(ownDataRoot)].map((entry) => entry.name);
+          const nativeState = [...fs.readdirSync(ownDataRoot, { withFileTypes: true })].map((
+            entry,
+          ) => entry.name);
           for (const expected of EXPECTED_NATIVE_STATE) {
             assert(
               nativeState.includes(expected),
@@ -1167,7 +1146,7 @@ Deno.test({
             connector: captured[captured.length - 1],
             sessionId: result.acpSessionId,
           });
-          await recordProcessTree(captured[captured.length - 1], recordedPids);
+          recordProcessTree(captured[captured.length - 1], recordedPids);
         }
 
         // ── Per-spawn confined root ───────────────────────────────────────────
@@ -1178,7 +1157,7 @@ Deno.test({
         // link resolves through, so reading payload bytes through the link proves
         // the shadow does not hide the payload binding (task 4.1).
         const perSpawnCwd = join(fixture.root, "per-spawn-workspace");
-        await Deno.mkdir(join(perSpawnCwd, "tmp"), { recursive: true });
+        await fsp.mkdir(join(perSpawnCwd, "tmp"), { recursive: true });
         const perSpawnConfig = createAgentConfig("omp", perSpawnCwd, config, false);
         const perSpawnMounts = perSpawnConfig.runtimeMounts;
         assert(perSpawnMounts !== undefined, "the per-spawn factory exposes its runtime mounts");
@@ -1194,7 +1173,7 @@ Deno.test({
           "natives",
         );
         assertEquals(
-          Deno.readLinkSync(perSpawnLink),
+          fs.readlinkSync(perSpawnLink),
           payloadDir,
           "the per-spawn root's reserved entry links to the shared payload",
         );
@@ -1205,20 +1184,22 @@ Deno.test({
           "omp",
           "sibling-marker",
         );
-        await Deno.mkdir(dirname(perSpawnSiblingMarker), { recursive: true });
+        await fsp.mkdir(dirname(perSpawnSiblingMarker), { recursive: true });
         const perSpawnSiblingSentinel = "per-spawn-sibling-sentinel";
-        await Deno.writeTextFile(perSpawnSiblingMarker, perSpawnSiblingSentinel);
+        await fsp.writeFile(perSpawnSiblingMarker, perSpawnSiblingSentinel);
         assertEquals(
-          await Deno.readTextFile(perSpawnSiblingMarker),
+          await fsp.readFile(perSpawnSiblingMarker, "utf8"),
           perSpawnSiblingSentinel,
         );
 
-        const payloadAddon = [...Deno.readDirSync(join(payloadDir, PINNED_OMP_VERSION))]
+        const payloadAddon = [
+          ...fs.readdirSync(join(payloadDir, PINNED_OMP_VERSION), { withFileTypes: true }),
+        ]
           .map((entry) => entry.name)
           .find((name) => name.endsWith(".node"));
         assert(payloadAddon !== undefined, "the prepared payload holds a native addon");
         const payloadFile = join(payloadDir, PINNED_OMP_VERSION, payloadAddon);
-        const payloadBytesBefore = await Deno.readFile(payloadFile);
+        const payloadBytesBefore = await fsp.readFile(payloadFile);
 
         const perSpawnScript = [
           `cat '${join(perSpawnLink, PINNED_OMP_VERSION, payloadAddon)}' >/dev/null`,
@@ -1259,20 +1240,16 @@ Deno.test({
           "the payload is never bound through the lenient -try variant",
         );
 
-        const perSpawnOutput = await new Deno.Command(perSpawnSpawn.command, {
-          args: perSpawnSpawn.args,
+        const perSpawnOutput = spawnSync(perSpawnSpawn.command, perSpawnSpawn.args, {
           cwd: perSpawnSpawn.cwd,
-          env: perSpawnSpawn.env,
-          stdout: "piped",
-          stderr: "piped",
-        }).output();
+          env: { ...process.env, ...perSpawnSpawn.env },
+          encoding: "utf8",
+        });
         assert(
-          perSpawnOutput.success,
-          `per-spawn confined control exited ${perSpawnOutput.code}: ${
-            new TextDecoder().decode(perSpawnOutput.stderr)
-          }`,
+          perSpawnOutput.status === 0,
+          `per-spawn confined control exited ${perSpawnOutput.status}: ${perSpawnOutput.stderr}`,
         );
-        const perSpawnStatus = statusReader(new TextDecoder().decode(perSpawnOutput.stdout));
+        const perSpawnStatus = statusReader(perSpawnOutput.stdout);
         assertEquals(
           perSpawnStatus("payload_read_status"),
           0,
@@ -1289,7 +1266,7 @@ Deno.test({
           "the per-spawn sibling mode's state stays hidden",
         );
         assertEquals(
-          await Deno.readFile(payloadFile),
+          await fsp.readFile(payloadFile),
           payloadBytesBefore,
           "the shared payload bytes stay unchanged",
         );
@@ -1331,26 +1308,24 @@ Deno.test({
           restrictedConfig.runtimeMounts,
         );
         assertEquals(spawn.command, "bwrap");
-        const output = await new Deno.Command(spawn.command, {
-          args: spawn.args,
+        const output = spawnSync(spawn.command, spawn.args, {
           cwd: spawn.cwd,
-          env: spawn.env,
-          stdout: "piped",
-          stderr: "piped",
-        }).output();
-        const stdout = new TextDecoder().decode(output.stdout);
+          env: { ...process.env, ...spawn.env },
+          encoding: "utf8",
+        });
+        const stdout = output.stdout;
         assert(
-          output.success,
-          `confined IO control exited ${output.code}: ${new TextDecoder().decode(output.stderr)}`,
+          output.status === 0,
+          `confined IO control exited ${output.status}: ${output.stderr}`,
         );
         const status = statusReader(stdout);
         assertEquals(status("models_read_status"), 0, "the authored model file reads ro-mounted");
         assertEquals(status("own_write_status"), 0, "the selected native data child is writable");
-        assertEquals(await Deno.readTextFile(ownMarker), "native-probe-marker");
+        assertEquals(await fsp.readFile(ownMarker, "utf8"), "native-probe-marker");
         assertEquals(status("skill_read_status"), 0, "the configured skill root reads read-only");
         assert(status("skill_write_status") !== 0, "the skill root refuses writes");
         assert(
-          (await Deno.lstat(forbiddenSkillFile).catch(() => null)) === null,
+          (await fsp.lstat(forbiddenSkillFile).catch(() => null)) === null,
           "the refused skill-root write landed nowhere on the host",
         );
         assert(status("sibling_read_status") !== 0, "the sibling mode's state is unreachable");
@@ -1365,14 +1340,14 @@ Deno.test({
           );
           assertEquals(resumed, true, `${run.mode}: the confined session was restored`);
           // Record the respawned tree BEFORE it is torn down below.
-          await recordProcessTree(run.connector, recordedPids);
+          recordProcessTree(run.connector, recordedPids);
         }
       } finally {
         // Every process tree this leg started is already recorded (each acquire
         // and each recovery respawn); capture the still-live trees once more so
         // nothing started between those points is missed.
         for (const connector of captured) {
-          await recordProcessTree(connector, recordedPids);
+          recordProcessTree(connector, recordedPids);
         }
 
         await waitForPoolIdle(pool, POOL_IDLE_TIMEOUT_MS).catch(() => {});
@@ -1401,6 +1376,4 @@ Deno.test({
       }
     });
   },
-  sanitizeOps: false,
-  sanitizeResources: false,
-});
+);

@@ -6,7 +6,16 @@
 // proves the production enumeration (pgrep + /proc) end to end.
 
 import { assert, assertEquals } from "@std/assert";
-import { awaitChildQuiescence, type ChildDrainDeps } from "../../src/utils/process-lifecycle.ts";
+import {
+  awaitChildQuiescence,
+  type ChildDrainDeps,
+  killProcessTree,
+  listDescendantPids,
+  processAlive,
+} from "../../src/utils/process-lifecycle.ts";
+import { execFile, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { test } from "bun:test";
 
 /** Fake PIDs far above any live process, so /proc lookups never match. */
 const WRAPPER = 999_901;
@@ -79,7 +88,7 @@ function makeTree(options: {
 const FAST = { drainTimeoutMs: 5, killWindowMs: 5 } as const;
 
 /** A wrapper whose only child is the long-lived agent: nothing to drain. */
-Deno.test("awaitChildQuiescence - an agent-only wrapper is quiescent without signalling it", async () => {
+test("awaitChildQuiescence - an agent-only wrapper is quiescent without signalling it", async () => {
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT]]]),
     alive: new Set([WRAPPER, AGENT]),
@@ -92,7 +101,7 @@ Deno.test("awaitChildQuiescence - an agent-only wrapper is quiescent without sig
 });
 
 /** No children at all is the one observation reported as `no-child`. */
-Deno.test("awaitChildQuiescence - a childless wrapper is quiescent", async () => {
+test("awaitChildQuiescence - a childless wrapper is quiescent", async () => {
   const tree = makeTree({
     children: new Map(),
     alive: new Set([WRAPPER]),
@@ -103,7 +112,7 @@ Deno.test("awaitChildQuiescence - a childless wrapper is quiescent", async () =>
   assertEquals(verdict, { status: "quiescent", drained: "no-child" });
 });
 
-Deno.test("awaitChildQuiescence - a tool child that exits on its own is drained", async () => {
+test("awaitChildQuiescence - a tool child that exits on its own is drained", async () => {
   const children = new Map([[WRAPPER, [AGENT, TOOL]]]);
   const tree = makeTree({
     children,
@@ -125,7 +134,7 @@ Deno.test("awaitChildQuiescence - a tool child that exits on its own is drained"
   assert(!tree.killed.some((k) => k.pid === AGENT), "the agent must never be signalled");
 });
 
-Deno.test("awaitChildQuiescence - only a surviving tool child is TERM/KILLed, then observed empty", async () => {
+test("awaitChildQuiescence - only a surviving tool child is TERM/KILLed, then observed empty", async () => {
   const alive = new Set([WRAPPER, AGENT, TOOL]);
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT, TOOL]]]),
@@ -140,7 +149,7 @@ Deno.test("awaitChildQuiescence - only a surviving tool child is TERM/KILLed, th
   assert(alive.has(AGENT), "the long-lived agent is untouched");
 });
 
-Deno.test("awaitChildQuiescence - a tool child surviving termination is uncertain", async () => {
+test("awaitChildQuiescence - a tool child surviving termination is uncertain", async () => {
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT, TOOL]]]),
     alive: new Set([WRAPPER, AGENT, TOOL]),
@@ -151,7 +160,7 @@ Deno.test("awaitChildQuiescence - a tool child surviving termination is uncertai
   assertEquals(verdict, { status: "uncertain", reason: "survivors-remain" });
 });
 
-Deno.test("awaitChildQuiescence - an observable-then-gone wrapper is uncertain", async () => {
+test("awaitChildQuiescence - an observable-then-gone wrapper is uncertain", async () => {
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT, TOOL]]]),
     alive: new Set([WRAPPER, AGENT, TOOL]),
@@ -164,7 +173,7 @@ Deno.test("awaitChildQuiescence - an observable-then-gone wrapper is uncertain",
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
-Deno.test("awaitChildQuiescence - an unobservable wrapper is uncertain, not drained", async () => {
+test("awaitChildQuiescence - an unobservable wrapper is uncertain, not drained", async () => {
   const tree = makeTree({
     children: new Map(),
     alive: new Set([AGENT]),
@@ -175,7 +184,7 @@ Deno.test("awaitChildQuiescence - an unobservable wrapper is uncertain, not drai
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
-Deno.test("awaitChildQuiescence - an emptied child list is not trusted once the wrapper vanished", async () => {
+test("awaitChildQuiescence - an emptied child list is not trusted once the wrapper vanished", async () => {
   // The wrapper was alive for the initial check, then exited before the
   // enumeration returned "no children": its children re-parented away, so the
   // empty list proves nothing and must never be reported as quiescent.
@@ -190,7 +199,7 @@ Deno.test("awaitChildQuiescence - an emptied child list is not trusted once the 
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
-Deno.test("awaitChildQuiescence - an emptied tool tree is not trusted once the wrapper vanished", async () => {
+test("awaitChildQuiescence - an emptied tool tree is not trusted once the wrapper vanished", async () => {
   // The wrapper's only remaining child is the agent (the tool already exited),
   // so the tool tree enumerates empty — but the wrapper disappeared while that
   // snapshot was taken, so it is uncertain, not drained.
@@ -216,7 +225,7 @@ function makeToolTree(): {
   return { tree: makeTree({ children, alive }), children, alive };
 }
 
-Deno.test("awaitChildQuiescence - a wrapper vanishing during the kill-loop snapshot is uncertain", async () => {
+test("awaitChildQuiescence - a wrapper vanishing during the kill-loop snapshot is uncertain", async () => {
   const { tree, alive } = makeToolTree();
   const originalKill = tree.deps.killPids!;
   const originalList = tree.deps.listChildPids!;
@@ -245,7 +254,7 @@ Deno.test("awaitChildQuiescence - a wrapper vanishing during the kill-loop snaps
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
-Deno.test("awaitChildQuiescence - a wrapper vanishing at the first final observation is uncertain", async () => {
+test("awaitChildQuiescence - a wrapper vanishing at the first final observation is uncertain", async () => {
   const { tree, alive } = makeToolTree();
   const originalKill = tree.deps.killPids!;
   const originalList = tree.deps.listChildPids!;
@@ -274,7 +283,7 @@ Deno.test("awaitChildQuiescence - a wrapper vanishing at the first final observa
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
-Deno.test("awaitChildQuiescence - a wrapper vanishing at the second final observation is uncertain", async () => {
+test("awaitChildQuiescence - a wrapper vanishing at the second final observation is uncertain", async () => {
   const { tree, alive } = makeToolTree();
   const originalKill = tree.deps.killPids!;
   const originalList = tree.deps.listChildPids!;
@@ -301,7 +310,7 @@ Deno.test("awaitChildQuiescence - a wrapper vanishing at the second final observ
   assertEquals(verdict, { status: "uncertain", reason: "wrapper-not-observable" });
 });
 
-Deno.test("awaitChildQuiescence - failed enumeration at any level is uncertain", async () => {
+test("awaitChildQuiescence - failed enumeration at any level is uncertain", async () => {
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT, TOOL]]]),
     alive: new Set([WRAPPER, AGENT, TOOL]),
@@ -314,7 +323,7 @@ Deno.test("awaitChildQuiescence - failed enumeration at any level is uncertain",
   assertEquals(verdict, { status: "uncertain", reason: "enumeration-failed" });
 });
 
-Deno.test("awaitChildQuiescence - descendant-enumeration failure is uncertain", async () => {
+test("awaitChildQuiescence - descendant-enumeration failure is uncertain", async () => {
   const tree = makeTree({
     children: new Map([[WRAPPER, [AGENT]], [AGENT, [TOOL]]]),
     alive: new Set([WRAPPER, AGENT, TOOL]),
@@ -328,21 +337,17 @@ Deno.test("awaitChildQuiescence - descendant-enumeration failure is uncertain", 
   assertEquals(verdict, { status: "uncertain", reason: "enumeration-failed" });
 });
 
-Deno.test("awaitChildQuiescence - real process tree: agent child excluded, tool child waited for", async () => {
+test("awaitChildQuiescence - real process tree: agent child excluded, tool child waited for", async () => {
   // Wrapper = this shell; its OLDEST child is a long-lived "agent", and the
   // younger child is the tool that exits shortly after — the production
   // pgrep + /proc enumeration must resolve both and drain only the tool.
-  const wrapper = new Deno.Command("sh", {
-    args: ["-c", "sleep 2 & sleep 0.6; wait"],
-    stdout: "null",
-    stderr: "null",
-  }).spawn();
+  const wrapper = spawn("sh", ["-c", "sleep 2 & sleep 0.6; wait"], { stdio: "ignore" });
   try {
     // Child-ready handshake: the production enumeration needs BOTH children to
     // exist before the drain starts, otherwise the test would prove nothing
     // about how the pair is resolved. The kernel's own answer is the barrier.
-    await waitForDirectChildren(wrapper.pid, 2);
-    const verdict = await awaitChildQuiescence(wrapper.pid, {
+    await waitForDirectChildren(wrapper.pid!, 2);
+    const verdict = await awaitChildQuiescence(wrapper.pid!, {
       drainTimeoutMs: 3_000,
       killWindowMs: 1_000,
     });
@@ -353,9 +358,110 @@ Deno.test("awaitChildQuiescence - real process tree: agent child excluded, tool 
     } catch {
       // Already gone.
     }
-    await wrapper.status;
+    await onceExited(wrapper);
   }
 });
+
+/**
+ * A root shell with one child shell that has one grandchild, all alive on
+ * real PIDs: `killProcessTree` must enumerate them before signalling and send
+ * SIGKILL to the deepest process first, the root last. The chain is
+ * root -> sh -> sleep; the inner shell waits (`sleep 600; :`) instead of
+ * exec'ing the sleep, so the grandchild really exists.
+ */
+test("killProcessTree - signals descendants deepest first, then the root", async () => {
+  const root = spawn("sh", ["-c", "sh -c 'sleep 600; :' & wait"], { stdio: "ignore" });
+  const rootPid = root.pid!;
+  try {
+    const descendants = await waitForDescendants(rootPid, 2);
+    // Breadth-first discovery: the child shell precedes its sleep grandchild.
+    assertEquals(descendants.length, 2);
+    const [childShell, grandchild] = descendants;
+
+    const result = await killProcessTree(rootPid, "SIGKILL");
+
+    assertEquals(result.ok, true);
+    // The grandchild is signalled before its parent, and the root last.
+    assertEquals(result.signalled, [grandchild, childShell, rootPid]);
+    await waitForGone([rootPid, ...descendants]);
+    for (const pid of [rootPid, ...descendants]) {
+      assertEquals(await processAlive(pid), false, `process ${pid} must be gone`);
+    }
+  } finally {
+    for (const pid of [rootPid, ...(await listDescendantPids(rootPid)).pids]) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    await onceExited(root);
+  }
+});
+
+/** Bounded wait for a process's exit (the OS event, never a guessed sleep). */
+function onceExited(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  const { promise, resolve } = Promise.withResolvers<void>();
+  child.once("exit", () => resolve());
+  return promise;
+}
+
+/** Direct child PIDs via `pgrep -P`; a test-side observation of the kernel. */
+function directChildPids(pid: number): Promise<number[]> {
+  const { promise, resolve } = Promise.withResolvers<number[]>();
+  execFile("pgrep", ["-P", String(pid)], (error, stdout) => {
+    if (error !== null) {
+      resolve([]);
+      return;
+    }
+    resolve(
+      stdout.trim().split("\n").filter((line) => line.trim() !== "").map((line) =>
+        parseInt(line.trim(), 10)
+      ),
+    );
+  });
+  return promise;
+}
+
+/**
+ * Real delay: a spawned kernel process's arrival cannot be driven by a fake
+ * clock, so the barrier polls the kernel's own answer within a bounded deadline
+ * (the sanctioned exception, as in `waitForDirectChildren`).
+ */
+async function waitForDescendants(pid: number, expected: number): Promise<number[]> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const direct = await directChildPids(pid);
+    if (direct.length > 0) {
+      const descendants = await listDescendantPids(pid);
+      if (descendants.ok && descendants.pids.length >= expected) return descendants.pids;
+    }
+    await delay(10);
+  }
+  throw new Error(`process ${pid} never reached ${expected} descendants`);
+}
+
+/**
+ * Real delay: process death is an OS event, not a timer we control, so poll the
+ * kernel within a bounded deadline rather than guessing one sleep.
+ */
+async function waitForGone(pids: number[]): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const alive: number[] = [];
+    for (const pid of pids) {
+      if (await processAlive(pid)) alive.push(pid);
+    }
+    if (alive.length === 0) return;
+    await delay(20);
+  }
+  const survivors: number[] = [];
+  for (const pid of pids) {
+    if (await processAlive(pid)) survivors.push(pid);
+  }
+  throw new Error(`processes still alive after teardown: ${survivors.join(", ")}`);
+}
 
 /**
  * Bounded readiness barrier: wait until `pid` has at least `expected` children.
@@ -366,16 +472,15 @@ Deno.test("awaitChildQuiescence - real process tree: agent child excluded, tool 
 async function waitForDirectChildren(pid: number, expected: number): Promise<void> {
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
-    const out = await new Deno.Command("pgrep", { args: ["-P", String(pid)] }).output();
-    const count = new TextDecoder()
-      .decode(out.stdout)
-      .trim()
-      .split("\n")
-      .filter((line) => line.trim() !== "").length;
-    if (out.success && count >= expected) return;
-    const { promise, resolve } = Promise.withResolvers<void>();
-    setTimeout(resolve, 10);
-    await promise;
+    if ((await directChildPids(pid)).length >= expected) return;
+    await delay(10);
   }
   throw new Error(`wrapper ${pid} never reached ${expected} direct children`);
+}
+
+/** A small real delay for bounded kernel polling. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
 }

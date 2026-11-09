@@ -268,7 +268,7 @@ The system SHALL provide HTTP health check endpoints when `health.enabled` is `t
 
 - **GIVEN** the health check server is running
 - **WHEN** `GET /ready` or `GET /readyz` is requested
-- **THEN** the response SHALL check: platform connections, skill script existence, required binaries (rg, deno, git), Skill API connectivity (when `skillApi.enabled`), and workspace directory writability
+- **THEN** the response SHALL check: platform connections, skill script existence, required binaries (rg, bun, git), Skill API connectivity (when `skillApi.enabled`), and workspace directory writability
 - **AND** HTTP 200 SHALL be returned only when all checks pass
 - **AND** readiness results SHALL be cached for 30 seconds to avoid excessive subprocess spawning
 
@@ -293,7 +293,7 @@ The system SHALL install global handlers for unhandled errors and graceful shutd
 
 - **GIVEN** `setupGlobalErrorHandler` has been called
 - **WHEN** an unhandled promise rejection occurs
-- **THEN** the event SHALL be prevented from default handling
+- **THEN** the process SHALL keep running instead of exiting
 - **AND** the error SHALL be logged at ERROR level with stack trace
 - **AND** `BaseError` instances SHALL use `toJSON()` for structured logging
 
@@ -301,7 +301,7 @@ The system SHALL install global handlers for unhandled errors and graceful shutd
 
 - **GIVEN** `setupGlobalErrorHandler` has been called
 - **WHEN** an uncaught error occurs
-- **THEN** the error SHALL be logged at FATAL level with filename, line number, column number, and stack trace
+- **THEN** the error SHALL be logged at FATAL level with its message and stack trace, which carries the file, line and column
 - **AND** the optional `onFatalError` callback SHALL be invoked
 
 #### Scenario: SIGTERM Graceful Shutdown
@@ -364,3 +364,17 @@ Tool-outcome classification SHALL preserve existing non-failed updates, audit ph
 #### Scenario: Completed updates remain unchanged
 - **WHEN** any agent reports a completed, pending or in-progress tool update
 - **THEN** its existing INFO update path and execution behavior SHALL remain unchanged
+
+### Requirement: Shutdown Signals Reach Every Registered Handler
+
+A `SIGTERM` or `SIGINT` delivered to the daemon, including one the daemon sends to itself, SHALL invoke every handler registered by the shutdown handler and the global error handler, once per handler.
+
+#### Scenario: Self-sent SIGTERM
+- **GIVEN** a process that registered the shutdown handler's signal handlers with a recording shutdown context
+- **WHEN** the process sends `SIGTERM` to its own PID
+- **THEN** the recording context SHALL observe exactly one shutdown and the process SHALL exit with code 0
+
+#### Scenario: Both handlers registered
+- **GIVEN** a process with both the shutdown handler's signal handlers and the global error handler with graceful shutdown enabled
+- **WHEN** it receives `SIGINT`
+- **THEN** the shutdown flow SHALL run once and the global `"shutdown"` event SHALL be dispatched once

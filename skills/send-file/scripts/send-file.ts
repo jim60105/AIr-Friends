@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -10,19 +10,42 @@ import {
 } from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
-async function main() {
-  try {
-    const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "file-paths"],
-      collect: ["file-paths"],
-      alias: { s: "session-id", a: "api-url", f: "file-paths" },
-    });
+export interface SendFileArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  filePaths?: string[];
+}
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
+export function parseSendFileArgs(argv: string[]): SendFileArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      "file-paths": { type: "string", short: "f", multiple: true },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    filePaths: Array.isArray(values["file-paths"])
+      ? values["file-paths"] as string[]
+      : undefined,
+  };
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  try {
+    const { filePaths } = parseSendFileArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
     // Reject the removed singular --file-path flag (both forms) BEFORE any API
     // call with an instructive error teaching the repeatable --file-paths form.
-    for (const token of Deno.args) {
+    for (const token of argv) {
       if (token === "--file-path" || token.startsWith("--file-path=")) {
         exitWithError(
           `The --file-path flag is no longer supported: it was replaced by the repeatable ` +
@@ -36,7 +59,6 @@ async function main() {
       }
     }
 
-    const filePaths = args["file-paths"];
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       exitWithError(
         "Missing required argument: --file-paths (repeatable, one occurrence per file, " +
@@ -44,7 +66,7 @@ async function main() {
       );
     }
 
-    const caption = await readPayloadArg(Deno.args, "caption", {
+    const caption = await readPayloadArg(argv, "caption", {
       sessionId,
       alias: "c",
       required: false,
@@ -63,7 +85,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -77,4 +99,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

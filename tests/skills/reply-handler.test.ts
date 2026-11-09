@@ -6,6 +6,7 @@ import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { LocalEmailAttachment, PlatformMessage } from "../../src/types/events.ts";
+import { test } from "bun:test";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (
@@ -40,7 +41,7 @@ const createMockPlatformAdapter = (
   } as unknown as PlatformAdapter;
 };
 
-Deno.test("ReplyHandler - handleSendReply sends reply successfully", async () => {
+test("ReplyHandler - handleSendReply sends reply successfully", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -72,7 +73,7 @@ Deno.test("ReplyHandler - handleSendReply sends reply successfully", async () =>
   assertEquals(typeof result.data, "object");
 });
 
-Deno.test("ReplyHandler - handleSendReply allows multiple replies", async () => {
+test("ReplyHandler - handleSendReply allows multiple replies", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -114,7 +115,7 @@ Deno.test("ReplyHandler - handleSendReply allows multiple replies", async () => 
   assertEquals(result2.success, true);
 });
 
-Deno.test("ReplyHandler - handleSendReply validates message parameter", async () => {
+test("ReplyHandler - handleSendReply validates message parameter", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -146,7 +147,7 @@ Deno.test("ReplyHandler - handleSendReply validates message parameter", async ()
   assertEquals(result2.error, "Message cannot be empty");
 });
 
-Deno.test("ReplyHandler - clearReplyState clears state", async () => {
+test("ReplyHandler - clearReplyState clears state", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -178,7 +179,7 @@ Deno.test("ReplyHandler - clearReplyState clears state", async () => {
   assertEquals(result.success, true);
 });
 
-Deno.test("ReplyHandler - handleSendReply handles platform failure", async () => {
+test("ReplyHandler - handleSendReply handles platform failure", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -208,7 +209,7 @@ Deno.test("ReplyHandler - handleSendReply handles platform failure", async () =>
   assertEquals(result.error, "Platform error");
 });
 
-Deno.test("ReplyHandler - handleSendReply validates attachments type", async () => {
+test("ReplyHandler - handleSendReply validates attachments type", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -238,7 +239,7 @@ Deno.test("ReplyHandler - handleSendReply validates attachments type", async () 
   assertEquals(result.error, "Invalid 'attachments' parameter. Must be an array");
 });
 
-Deno.test("ReplyHandler - handleSendReply logs warning for attachments", async () => {
+test("ReplyHandler - handleSendReply logs warning for attachments", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -273,7 +274,7 @@ Deno.test("ReplyHandler - handleSendReply logs warning for attachments", async (
 
 // ============ edit-reply tests ============
 
-Deno.test("ReplyHandler - handleEditReply succeeds after send-reply", async () => {
+test("ReplyHandler - handleEditReply succeeds after send-reply", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -308,7 +309,7 @@ Deno.test("ReplyHandler - handleEditReply succeeds after send-reply", async () =
   assertEquals((result.data as Record<string, unknown>).messageId, "msg_edit1");
 });
 
-Deno.test("ReplyHandler - handleEditReply fails without prior send-reply", async () => {
+test("ReplyHandler - handleEditReply fails without prior send-reply", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -335,7 +336,7 @@ Deno.test("ReplyHandler - handleEditReply fails without prior send-reply", async
   assertEquals(result.error, "No reply has been sent yet. Use send-reply first.");
 });
 
-Deno.test("ReplyHandler - handleEditReply validates messageId parameter", async () => {
+test("ReplyHandler - handleEditReply validates messageId parameter", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -360,7 +361,7 @@ Deno.test("ReplyHandler - handleEditReply validates messageId parameter", async 
   assertEquals(result.error, "Missing or invalid 'messageId' parameter");
 });
 
-Deno.test("ReplyHandler - handleEditReply validates message parameter", async () => {
+test("ReplyHandler - handleEditReply validates message parameter", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -392,7 +393,7 @@ Deno.test("ReplyHandler - handleEditReply validates message parameter", async ()
   assertEquals(result2.error, "Message cannot be empty");
 });
 
-Deno.test("ReplyHandler - handleEditReply handles platform failure", async () => {
+test("ReplyHandler - handleEditReply handles platform failure", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -425,7 +426,7 @@ Deno.test("ReplyHandler - handleEditReply handles platform failure", async () =>
   assertEquals(result.error, "Message not found");
 });
 
-Deno.test("ReplyHandler - handleEditReply allows multiple edits", async () => {
+test("ReplyHandler - handleEditReply allows multiple edits", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -462,7 +463,7 @@ Deno.test("ReplyHandler - handleEditReply allows multiple edits", async () => {
   assertEquals(result2.success, true);
 });
 
-Deno.test("ReplyHandler - handleEditReply handles thrown exception", async () => {
+test("ReplyHandler - handleEditReply handles thrown exception", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -497,7 +498,7 @@ Deno.test("ReplyHandler - handleEditReply handles thrown exception", async () =>
   assertEquals(result.error, "Network failure");
 });
 
-Deno.test("ReplyHandler - handleEditReply handles non-Error exception", async () => {
+test("ReplyHandler - handleEditReply handles non-Error exception", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -532,7 +533,7 @@ Deno.test("ReplyHandler - handleEditReply handles non-Error exception", async ()
   assertEquals(result.error, "Unknown error");
 });
 
-Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage", async () => {
+test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -577,7 +578,7 @@ Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage
   assertEquals(capturedReplyToMessageId, "trigger_msg_123");
 });
 
-Deno.test("ReplyHandler - handleEditReply passes lastReplyAnchorMessageId to editMessage", async () => {
+test("ReplyHandler - handleEditReply passes lastReplyAnchorMessageId to editMessage", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -627,45 +628,45 @@ Deno.test("ReplyHandler - handleEditReply passes lastReplyAnchorMessageId to edi
 
 // ============ stripXmlTags tests ============
 
-Deno.test("stripXmlTags - strips simple XML tags", () => {
+test("stripXmlTags - strips simple XML tags", () => {
   assertEquals(stripXmlTags("<e>😆</e>"), "😆");
 });
 
-Deno.test("stripXmlTags - strips multiple different tags", () => {
+test("stripXmlTags - strips multiple different tags", () => {
   assertEquals(stripXmlTags("<e>😆</e> <t>text</t>"), "😆 text");
 });
 
-Deno.test("stripXmlTags - strips nested-looking tags", () => {
+test("stripXmlTags - strips nested-looking tags", () => {
   assertEquals(stripXmlTags("<a><e>😆</e></a>"), "😆");
 });
 
-Deno.test("stripXmlTags - preserves text without tags", () => {
+test("stripXmlTags - preserves text without tags", () => {
   assertEquals(stripXmlTags("Hello, world!"), "Hello, world!");
 });
 
-Deno.test("stripXmlTags - strips multi-character tag names", () => {
+test("stripXmlTags - strips multi-character tag names", () => {
   assertEquals(stripXmlTags("<scenario>text</scenario>"), "text");
 });
 
-Deno.test("stripXmlTags - preserves angle brackets in non-tag contexts", () => {
+test("stripXmlTags - preserves angle brackets in non-tag contexts", () => {
   assertEquals(stripXmlTags("1 < 2 and 3 > 1"), "1 < 2 and 3 > 1");
 });
 
-Deno.test("stripXmlTags - handles empty string", () => {
+test("stripXmlTags - handles empty string", () => {
   assertEquals(stripXmlTags(""), "");
 });
 
-Deno.test("stripXmlTags - strips tags with alphanumeric names", () => {
+test("stripXmlTags - strips tags with alphanumeric names", () => {
   assertEquals(stripXmlTags("<h1>Title</h1>"), "Title");
 });
 
-Deno.test("stripXmlTags - strips self-closing-like tag pairs", () => {
+test("stripXmlTags - strips self-closing-like tag pairs", () => {
   assertEquals(stripXmlTags("before <r>reaction</r> after"), "before reaction after");
 });
 
 // ============ XML tag stripping integration tests ============
 
-Deno.test("ReplyHandler - handleSendReply strips XML tags from message", async () => {
+test("ReplyHandler - handleSendReply strips XML tags from message", async () => {
   const handler = new ReplyHandler();
 
   let capturedContent = "";
@@ -699,7 +700,7 @@ Deno.test("ReplyHandler - handleSendReply strips XML tags from message", async (
   assertEquals(capturedContent, "Hello 😆 world");
 });
 
-Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async () => {
+test("ReplyHandler - handleEditReply strips XML tags from message", async () => {
   const handler = new ReplyHandler();
 
   let capturedContent = "";
@@ -741,7 +742,7 @@ Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async (
   assertEquals(capturedContent, "edited 🎉");
 });
 
-Deno.test("ReplyHandler - handleEditReply skips edit when content is unchanged", async () => {
+test("ReplyHandler - handleEditReply skips edit when content is unchanged", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -785,7 +786,7 @@ Deno.test("ReplyHandler - handleEditReply skips edit when content is unchanged",
   );
 });
 
-Deno.test("ReplyHandler - handleEditReply proceeds when content is different", async () => {
+test("ReplyHandler - handleEditReply proceeds when content is different", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -829,7 +830,7 @@ Deno.test("ReplyHandler - handleEditReply proceeds when content is different", a
   assertEquals((result.data as Record<string, unknown>).messageId, "msg_cmp2");
 });
 
-Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage returns null", async () => {
+test("ReplyHandler - handleEditReply proceeds when fetchMessage returns null", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -865,7 +866,7 @@ Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage returns nul
   assertEquals(result.success, true);
 });
 
-Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage throws", async () => {
+test("ReplyHandler - handleEditReply proceeds when fetchMessage throws", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -902,7 +903,7 @@ Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage throws", as
   assertEquals(result.success, true);
 });
 
-Deno.test("ReplyHandler - handleEditReply compares content after XML strip and unescape", async () => {
+test("ReplyHandler - handleEditReply compares content after XML strip and unescape", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -949,7 +950,7 @@ Deno.test("ReplyHandler - handleEditReply compares content after XML strip and u
   );
 });
 
-Deno.test("ReplyHandler - handleEditReply success response includes nextAction", async () => {
+test("ReplyHandler - handleEditReply success response includes nextAction", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -990,7 +991,7 @@ Deno.test("ReplyHandler - handleEditReply success response includes nextAction",
 
 // ============ F7: edit-reply scoping to session's own last-sent message ============
 
-Deno.test("F7 handleEditReply - rejects foreign messageId (no edit/delete)", async () => {
+test("F7 handleEditReply - rejects foreign messageId (no edit/delete)", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1028,7 +1029,7 @@ Deno.test("F7 handleEditReply - rejects foreign messageId (no edit/delete)", asy
   assertEquals(editCalled, false);
 });
 
-Deno.test("F7 handleEditReply - two consecutive Misskey edits (new ID after delete) both succeed", async () => {
+test("F7 handleEditReply - two consecutive Misskey edits (new ID after delete) both succeed", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1080,33 +1081,33 @@ Deno.test("F7 handleEditReply - two consecutive Misskey edits (new ID after dele
 
 // --- unescapeNewlines tests ---
 
-Deno.test("unescapeNewlines - converts literal backslash-n to newline", () => {
+test("unescapeNewlines - converts literal backslash-n to newline", () => {
   assertEquals(unescapeNewlines("hello\\nworld"), "hello\nworld");
 });
 
-Deno.test("unescapeNewlines - converts multiple occurrences", () => {
+test("unescapeNewlines - converts multiple occurrences", () => {
   assertEquals(unescapeNewlines("a\\nb\\nc"), "a\nb\nc");
 });
 
-Deno.test("unescapeNewlines - preserves existing real newlines", () => {
+test("unescapeNewlines - preserves existing real newlines", () => {
   assertEquals(unescapeNewlines("hello\nworld"), "hello\nworld");
 });
 
-Deno.test("unescapeNewlines - handles empty string", () => {
+test("unescapeNewlines - handles empty string", () => {
   assertEquals(unescapeNewlines(""), "");
 });
 
-Deno.test("unescapeNewlines - handles string without newlines", () => {
+test("unescapeNewlines - handles string without newlines", () => {
   assertEquals(unescapeNewlines("hello world"), "hello world");
 });
 
-Deno.test("unescapeNewlines - handles mixed real and literal newlines", () => {
+test("unescapeNewlines - handles mixed real and literal newlines", () => {
   assertEquals(unescapeNewlines("line1\nline2\\nline3"), "line1\nline2\nline3");
 });
 
 // ============ get-message tests ============
 
-Deno.test("ReplyHandler - handleGetMessage with explicit messageId success", async () => {
+test("ReplyHandler - handleGetMessage with explicit messageId success", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1146,7 +1147,7 @@ Deno.test("ReplyHandler - handleGetMessage with explicit messageId success", asy
   assertEquals(data.isBot, false);
 });
 
-Deno.test("ReplyHandler - handleGetMessage uses lastSentMessageId fallback", async () => {
+test("ReplyHandler - handleGetMessage uses lastSentMessageId fallback", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1188,7 +1189,7 @@ Deno.test("ReplyHandler - handleGetMessage uses lastSentMessageId fallback", asy
   assertEquals(capturedMessageId, "last_sent_999");
 });
 
-Deno.test("ReplyHandler - handleGetMessage fails with no messageId and no lastSentMessageId", async () => {
+test("ReplyHandler - handleGetMessage fails with no messageId and no lastSentMessageId", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1215,7 +1216,7 @@ Deno.test("ReplyHandler - handleGetMessage fails with no messageId and no lastSe
   );
 });
 
-Deno.test("ReplyHandler - handleGetMessage returns error when message not found", async () => {
+test("ReplyHandler - handleGetMessage returns error when message not found", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1243,7 +1244,7 @@ Deno.test("ReplyHandler - handleGetMessage returns error when message not found"
   assertEquals(result.error, "Message not found: nonexistent");
 });
 
-Deno.test("ReplyHandler - handleGetMessage handles platform error", async () => {
+test("ReplyHandler - handleGetMessage handles platform error", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1272,7 +1273,7 @@ Deno.test("ReplyHandler - handleGetMessage handles platform error", async () => 
   assertEquals(result.error, "API connection failed");
 });
 
-Deno.test("ReplyHandler - handleGetMessage handles non-Error exception", async () => {
+test("ReplyHandler - handleGetMessage handles non-Error exception", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1301,7 +1302,7 @@ Deno.test("ReplyHandler - handleGetMessage handles non-Error exception", async (
   assertEquals(result.error, "Unknown error");
 });
 
-Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastSentMessageId", async () => {
+test("ReplyHandler - handleGetMessage prefers explicit messageId over lastSentMessageId", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1342,7 +1343,7 @@ Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastS
   assertEquals(capturedMessageId, "explicit_id");
 });
 
-Deno.test("ReplyHandler - handleGetMessage falls back to lastFileMessageId", async () => {
+test("ReplyHandler - handleGetMessage falls back to lastFileMessageId", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1399,7 +1400,7 @@ Deno.test("ReplyHandler - handleGetMessage falls back to lastFileMessageId", asy
   assertEquals("content" in data ? data.content : undefined, "File message");
 });
 
-Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastFileMessageId", async () => {
+test("ReplyHandler - handleGetMessage prefers explicit messageId over lastFileMessageId", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -1483,7 +1484,7 @@ function emailSkillContext(
   };
 }
 
-Deno.test("ReplyHandler - handleGetMessage returns current-session staged email attachments", async () => {
+test("ReplyHandler - handleGetMessage returns current-session staged email attachments", async () => {
   const adapter = createMockPlatformAdapter();
   (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
     Promise.resolve(emailMessageWithLocalAttachment());
@@ -1512,7 +1513,7 @@ Deno.test("ReplyHandler - handleGetMessage returns current-session staged email 
   );
 });
 
-Deno.test("ReplyHandler - get-message gives two sessions their own attachment locations", async () => {
+test("ReplyHandler - get-message gives two sessions their own attachment locations", async () => {
   const adapter = createMockPlatformAdapter();
   (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
     Promise.resolve(emailMessageWithLocalAttachment());
@@ -1543,7 +1544,7 @@ Deno.test("ReplyHandler - get-message gives two sessions their own attachment lo
   assertEquals(secondPath, "/workspace/tmp/session-b/attachments/a1/report.pdf");
 });
 
-Deno.test("ReplyHandler - get-message fails explicitly without the staging capability", async () => {
+test("ReplyHandler - get-message fails explicitly without the staging capability", async () => {
   const adapter = createMockPlatformAdapter();
   (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
     Promise.resolve(emailMessageWithLocalAttachment());
@@ -1557,7 +1558,7 @@ Deno.test("ReplyHandler - get-message fails explicitly without the staging capab
   assertEquals(result.error, "email_attachment_unavailable");
 });
 
-Deno.test("ReplyHandler - get-message hides private detail when staging fails", async () => {
+test("ReplyHandler - get-message hides private detail when staging fails", async () => {
   const adapter = createMockPlatformAdapter();
   (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
     Promise.resolve(emailMessageWithLocalAttachment());

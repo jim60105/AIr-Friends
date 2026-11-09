@@ -7,6 +7,8 @@
 // receives the raw key — it only gets the per-session JWT file via `SKILL_JWT_DIR`.
 
 import { createLogger } from "@utils/logger.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError, removePath } from "./fs-compat.ts";
 
 const logger = createLogger("SkillSecret");
 
@@ -53,7 +55,7 @@ export async function resolveSkillApiSecret(
   { ok: true; secret: string; source: "env" | "file" | "generated" } | { ok: false; error: string }
 > {
   // 1. Environment override.
-  const envSecret = Deno.env.get("AGENT_SKILL_API_SECRET");
+  const envSecret = process.env["AGENT_SKILL_API_SECRET"];
   if (envSecret !== undefined && envSecret !== "") {
     if (!isValidSkillSecret(envSecret)) {
       return {
@@ -69,9 +71,9 @@ export async function resolveSkillApiSecret(
   // 2. Existing file.
   let existing: string | undefined;
   try {
-    existing = await Deno.readTextFile(secretPath);
+    existing = await fsp.readFile(secretPath, "utf8");
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    if (!(isNotFoundError(error))) throw error;
     existing = undefined;
   }
   if (existing !== undefined) {
@@ -103,30 +105,30 @@ export async function resolveSkillApiSecret(
  */
 export async function atomicWritePrivate(filePath: string, data: string): Promise<void> {
   const parent = parentDir(filePath);
-  await Deno.mkdir(parent, { recursive: true });
+  await fsp.mkdir(parent, { recursive: true });
   const base = filePath.slice(parent.length + 1);
   const tmpPath = `${parent}/.${base}.tmp-${crypto.randomUUID()}`;
   try {
-    const file = await Deno.open(tmpPath, { createNew: true, write: true, mode: 0o600 });
+    const file = await fsp.open(tmpPath, "wx", 0o600);
     try {
       await file.write(new TextEncoder().encode(data));
     } finally {
-      file.close();
+      await file.close();
     }
-    await Deno.chmod(tmpPath, 0o600);
+    await fsp.chmod(tmpPath, 0o600);
     try {
-      const target = await Deno.lstat(filePath);
-      if (target.isSymlink) {
+      const target = await fsp.lstat(filePath);
+      if (target.isSymbolicLink()) {
         throw new Error(`refusing to replace symlink target: ${filePath}`);
       }
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
+      if (!(isNotFoundError(error))) {
         throw error;
       }
     }
-    await Deno.rename(tmpPath, filePath);
+    await fsp.rename(tmpPath, filePath);
   } catch (error) {
-    await Deno.remove(tmpPath).catch(() => {});
+    await removePath(tmpPath).catch(() => {});
     throw error;
   }
 }
@@ -141,9 +143,9 @@ function parentDir(path: string): string {
  * so the orchestrator can write `{jwtDir}/{sessionId}.jwt` files at lease acquisition.
  */
 export async function ensureSkillJwtDir(jwtDir: string): Promise<void> {
-  await Deno.mkdir(jwtDir, { recursive: true });
+  await fsp.mkdir(jwtDir, { recursive: true });
   try {
-    await Deno.chmod(jwtDir, 0o700);
+    await fsp.chmod(jwtDir, 0o700);
   } catch {
     // chmod can fail on non-POSIX filesystems; not fatal.
   }

@@ -11,6 +11,9 @@ import { SkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const TEST_SKILL_SECRET = "0123456789abcdef0123456789abcdef01";
 
@@ -25,8 +28,8 @@ interface TestRig {
 let nextPort = 3400;
 
 async function setup(timeoutMs?: number): Promise<TestRig> {
-  const tempDir = await Deno.makeTempDir();
-  await Deno.mkdir(`${tempDir}/workspaces/discord/123`, { recursive: true });
+  const tempDir = await makeTempDir();
+  await fsp.mkdir(`${tempDir}/workspaces/discord/123`, { recursive: true });
 
   const sessionRegistry = new SessionRegistry(timeoutMs);
   const workspaceManager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
@@ -65,7 +68,7 @@ async function setup(timeoutMs?: number): Promise<TestRig> {
         tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
         isDm: false,
       },
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: { platform: "discord" } as any,
     });
 
@@ -75,7 +78,7 @@ async function setup(timeoutMs?: number): Promise<TestRig> {
 async function teardown(rig: TestRig): Promise<void> {
   await rig.server.stop();
   rig.sessionRegistry.stop();
-  await Deno.remove(rig.tempDir, { recursive: true });
+  await fsp.rm(rig.tempDir, { recursive: true });
 }
 
 function call(port: number, sessionId: string, token?: string): Promise<Response> {
@@ -98,7 +101,7 @@ function jwtFor(rig: TestRig, sessionId: string): Promise<string> {
   });
 }
 
-Deno.test("F13 - valid session ID without token is rejected 403", async () => {
+test("F13 - valid session ID without token is rejected 403", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -111,7 +114,7 @@ Deno.test("F13 - valid session ID without token is rejected 403", async () => {
   }
 });
 
-Deno.test("F13 - valid session ID with wrong token is rejected 403", async () => {
+test("F13 - valid session ID with wrong token is rejected 403", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -123,7 +126,7 @@ Deno.test("F13 - valid session ID with wrong token is rejected 403", async () =>
   }
 });
 
-Deno.test("F13 - a token of a different length is rejected 403", async () => {
+test("F13 - a token of a different length is rejected 403", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -135,7 +138,7 @@ Deno.test("F13 - a token of a different length is rejected 403", async () => {
   }
 });
 
-Deno.test("F13 - valid session ID with matching JWT succeeds", async () => {
+test("F13 - valid session ID with matching JWT succeeds", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -148,7 +151,7 @@ Deno.test("F13 - valid session ID with matching JWT succeeds", async () => {
   }
 });
 
-Deno.test("F13 - legacy raw caller token is rejected 403", async () => {
+test("F13 - legacy raw caller token is rejected 403", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -161,7 +164,7 @@ Deno.test("F13 - legacy raw caller token is rejected 403", async () => {
   }
 });
 
-Deno.test("F13 - idle session past timeoutMs is treated as absent (401)", async () => {
+test("F13 - idle session past timeoutMs is treated as absent (401)", async () => {
   const rig = await setup(150); // 150ms idle timeout
   try {
     const sessionId = rig.register();
@@ -180,7 +183,7 @@ Deno.test("F13 - idle session past timeoutMs is treated as absent (401)", async 
   }
 });
 
-Deno.test("F13 - active calls keep a session alive across the idle window", async () => {
+test("F13 - active calls keep a session alive across the idle window", async () => {
   const rig = await setup(200);
   try {
     const sessionId = rig.register();
@@ -199,7 +202,7 @@ Deno.test("F13 - active calls keep a session alive across the idle window", asyn
   }
 });
 
-Deno.test("F13 - a wrong-token 403 is not cached and does not poison the legit caller", async () => {
+test("F13 - a wrong-token 403 is not cached and does not poison the legit caller", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -234,7 +237,7 @@ function saveMemory(
   });
 }
 
-Deno.test("recovery fence - side-effect skill is rejected 409 while recoveryFenced", async () => {
+test("recovery fence - side-effect skill is rejected 409 while recoveryFenced", async () => {
   const rig = await setup();
   try {
     const sessionId = rig.register();
@@ -251,9 +254,9 @@ Deno.test("recovery fence - side-effect skill is rejected 409 while recoveryFenc
     const memFile = `${rig.tempDir}/workspaces/discord/123/memory.public.jsonl`;
     let written = true;
     try {
-      await Deno.stat(memFile);
+      await fsp.stat(memFile);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) written = false;
+      if (isNotFoundError(error)) written = false;
       else throw error;
     }
     assertEquals(written, false);

@@ -1,5 +1,5 @@
 /** Decision-time command containment; not protected command execution. */
-import { basename, dirname, resolve } from "@std/path";
+import { basename, dirname, resolve } from "node:path";
 import {
   opencodeDataRoot,
   opencodeToolOutputDir,
@@ -133,7 +133,7 @@ async function directoryRoot(
   try {
     const canonicalPath = await reader.realPath(path);
     const info = await reader.lstat(canonicalPath);
-    if (!info.isDirectory) return failure("invalid_root", "Command root is not a directory");
+    if (!info.isDirectory()) return failure("invalid_root", "Command root is not a directory");
     if (info.dev == null || info.ino == null) {
       return failure("root_unavailable", "Command root identity unavailable");
     }

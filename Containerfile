@@ -7,9 +7,14 @@ ARG RELEASE=0
 
 ########################################
 # Base stage
-# Deno official Debian image as base
+# Official Bun Debian image, pinned by digest; the application runtime base.
 ########################################
-FROM docker.io/denoland/deno:debian AS base
+FROM docker.io/oven/bun@sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73 AS base
+
+# The base image already ships a `bun` account at UID 1000 (gid 1000) and runs
+# as root until switched, so no `useradd` runs anywhere in this file. `USER
+# $UID` selects that account numerically, and the final stage points HOME at
+# /home/air, which it creates owned by $UID:0.
 
 # RUN mount cache for multi-arch: https://github.com/docker/buildx/issues/549#issuecomment-1788297892
 ARG TARGETARCH
@@ -56,7 +61,8 @@ RUN case "${TARGETARCH}" in \
       arm64) NODE_ARCH="arm64"; NODE_SHA256="${NODE_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+    "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
     -o /tmp/node.tar.xz && \
     echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - && \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner && \
@@ -88,41 +94,50 @@ RUN case "${TARGETARCH}" in \
       arm64) OC_ARCH="arm64"; OC_SHA256="${OPENCODE_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+    "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
     -o /tmp/opencode.tar.gz && \
     echo "${OC_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /opencode && \
     rm -f /tmp/opencode.tar.gz
 
 ########################################
-# Cache stage
-# Pre-cache Deno dependencies for layer reuse
+# Production dependency stage
+# Frozen production install, consumed by the runtime image
 ########################################
-FROM base AS cache
+FROM base AS deps
 
 WORKDIR /app
 
-# Copy dependency files and source code
-COPY deno.json deno.lock ./
+# The jieba native binding is a production dependency (`@node-rs/jieba` in
+# package.json), so the runtime image gets it from this tree. A lock mismatch
+# fails the build here instead of resolving a different graph later.
+COPY package.json bun.lock bunfig.toml ./
+RUN bun install --frozen-lockfile --production
+
+########################################
+# Build stage
+# Frozen full install plus sources, used to bundle the OMP extension and to
+# prepare the OMP native cache. Never published as the runtime image.
+########################################
+FROM base AS build
+
+WORKDIR /app
+
+COPY package.json bun.lock bunfig.toml tsconfig.json ./
+RUN bun install --frozen-lockfile
+
 COPY src/ ./src/
 COPY assets/ ./assets/
-
-# Pre-cache dependencies by caching the main entry point
-# Deno caches modules in DENO_DIR (default: /deno-dir/ in official image)
-# The jieba native binding is cached explicitly: nothing imports it yet, but the
-# recall tokenizer (and its offline `deno eval` smoke checks) rely on it at runtime.
-RUN deno cache --lock=deno.lock src/main.ts && \
-    deno cache --lock=deno.lock "npm:@node-rs/jieba"
 
 # Owned-tree build scripts (root-owned read-only; never in the runtime image).
 # They stay a SIBLING of `src/` because `bundle-extension.ts` and
 # `bundle-declaration.ts` import `../../src/...`, and module specifiers resolve
 # against the importing file's own URL — a relocated copy looks for `/opt/src`
-# and the build fails. Copied AFTER the dependency cache so editing a packaging
-# script cannot invalidate the cached module graph. `deno bundle` fetches its
-# own esbuild backend from the registry at build time; that fetch is intentional
-# and independent of this stage's module cache.
-COPY --link --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/
+# and the build fails. Copied AFTER the dependency install so editing a packaging
+# script cannot invalidate the cached dependency layer. `bun build` uses the
+# `bun.lock`-installed `node_modules` above and fetches no build backend.
+COPY --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/
 
 ########################################
 # OMP unpack stage
@@ -161,32 +176,22 @@ RUN case "${TARGETARCH}" in \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
     mkdir -p /omp/out /omp/licenses && \
-    # Asset allowlist WITHIN the exact tag only: select the unique executable
-    # asset named exactly `omp-linux-${OMP_ARCH}` or matching
-    # `omp-linux-${OMP_ARCH}-<variant>`. The base image's floating `debian` tag
-    # can move the libc the binary runs against, so the exact filename is
-    # allowlisted (rule above), not pinned; uniqueness + the pinned digest keep
-    # any asset-name/content change under the same tag failing closed at the
-    # checksum step. Zero matches or >1 match aborts the build naming the count.
-    # Downloads use the SAME API listing's per-asset browser_download_url (not a
-    # re-derived download URL), so uniqueness and the fetched bytes bind to one
-    # listing response; the pinned digests stay the fail-closed content check.
-    # Observed asset name (echoed below; also recorded in docs/agent/acp-engine.md):
-    #   v18.6.1 publishes plain `omp-linux-x64` / `omp-linux-arm64` names.
-    listing="$(curl -fsSL "https://api.github.com/repos/can1357/oh-my-pi/releases/tags/v${OMP_VERSION}")" && \
-    sel="$(printf '%s' "${listing}" | jq -r '.assets[].name' | grep -E "^omp-linux-${OMP_ARCH}[^/]*$" || true)" && \
-    count="$(printf '%s\n' "${sel}" | sed '/^$/d' | wc -l)" && \
-    if [ "${count}" != "1" ]; then \
-      echo "OMP asset selection failed for arch ${OMP_ARCH}: expected exactly 1 asset match, found ${count}" && exit 1; \
-    fi && \
-    asset="$(printf '%s\n' "${sel}" | sed '/^$/d')" && \
-    echo "observed OMP executable asset name: ${asset}" && \
-    asset_url="$(printf '%s' "${listing}" | jq -r --arg n "${asset}" '.assets[] | select(.name==$n) | .browser_download_url')" && \
-    license_url="$(printf '%s' "${listing}" | jq -r '.assets[] | select(.name=="LICENSE") | .browser_download_url')" && \
-    notices_url="$(printf '%s' "${listing}" | jq -r '.assets[] | select(.name=="THIRD-PARTY-NOTICES.txt") | .browser_download_url')" && \
-    curl -fsSL "${asset_url}" -o /tmp/omp.bin && \
-    curl -fsSL "${license_url}" -o /tmp/LICENSE && \
-    curl -fsSL "${notices_url}" -o /tmp/THIRD-PARTY-NOTICES.txt && \
+    # Deterministic release-download URLs for the exact tag: v18.6.1 publishes
+    # plain `omp-linux-x64` / `omp-linux-arm64`, LICENSE and
+    # THIRD-PARTY-NOTICES.txt names. This host is not the rate-limited
+    # api.github.com endpoint, so the build does not depend on an
+    # unauthenticated release-listing request. The pinned digests remain the
+    # fail-closed content check: a moved or tampered asset fails sha256sum.
+    asset_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/omp-linux-${OMP_ARCH}" && \
+    license_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/LICENSE" && \
+    notices_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/THIRD-PARTY-NOTICES.txt" && \
+    echo "downloading pinned OMP executable: ${asset_url}" && \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+      "${asset_url}" -o /tmp/omp.bin && \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+      "${license_url}" -o /tmp/LICENSE && \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+      "${notices_url}" -o /tmp/THIRD-PARTY-NOTICES.txt && \
     # Fail closed: every checksum verifies BEFORE any install/COPY consumption.
     echo "${OMP_SHA256}  /tmp/omp.bin" | sha256sum -c - && \
     echo "${OMP_LICENSE_SHA256}  /tmp/LICENSE" | sha256sum -c - && \
@@ -202,30 +207,27 @@ RUN case "${TARGETARCH}" in \
     mv /tmp/THIRD-PARTY-NOTICES.txt /omp/licenses/THIRD-PARTY-NOTICES.txt
 
 # Prepare the ONE shared OMP native runtime payload from the SAME checksum-verified
-# executable (design D1; `deno task prepare:omp-natives` is the same entry) and publish it
+# executable (design D1; `bun run prepare:omp-natives` is the same entry) and publish it
 # at the image layout the launch resolver reads (`src/utils/omp-native-cache.ts`).
 # Ordered AFTER the checksum step above and handed that stage's OMP_SHA256 explicitly, so
 # the executable pin and the cache identity cannot drift. The entry runs the pinned
 # executable's real, bounded ACP initialization in a throwaway HOME/cwd/XDG and publishes
 # ONLY the native subtree plus its sidecar manifest — probe databases, HOME and sessions are
-# discarded. The `--mount` reuses the cache stage's root-owned copy of the committed entry
-# and its sources, and the step reads that copy's own `deno.json`/`deno.lock` explicitly with
-# `--frozen`, so the mount stays read-only and lock drift fails the build. The Deno runtime
-# is already part of the base image, so no JavaScript/Bun runtime is installed by this step.
+# discarded. The `--mount` reuses the build stage's root-owned copy of the committed entry
+# and its sources, whose `node_modules` is the product of `bun install --frozen-lockfile`,
+# so the mount stays read-only and lock drift fails at that install layer. The Bun runtime
+# is already part of the base image, so no JavaScript runtime is installed by this step.
 # A separate layer keeps preparation re-runnable without touching the verified
 # executable/notices install above, and any change to the entry or its sources invalidates
 # exactly this layer. Packaged as root here; the final stage installs the result under the
 # ordinary $UID:0 + 775 convention.
-RUN --mount=type=bind,from=cache,src=/app,target=/build-src \
+RUN --mount=type=bind,from=build,src=/app,target=/build-src \
     case "${TARGETARCH}" in \
       amd64) OMP_PLATFORM="linux-x64"; OMP_SHA256="${OMP_SHA256_X64}" ;; \
       arm64) OMP_PLATFORM="linux-arm64"; OMP_SHA256="${OMP_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    deno run --frozen \
-    --config /build-src/deno.json \
-    --lock=/build-src/deno.lock \
-    --allow-read --allow-write --allow-env --allow-run \
+    bun run --no-env-file \
     /build-src/scripts/omp/prepare-native-cache.ts \
     --executable /omp/out/omp \
     --cache-root /opt/air/omp/native-cache \
@@ -252,7 +254,7 @@ ARG NODE_ENV=production
 ENV NODE_ENV=$NODE_ENV
 
 # Copy license file (OpenShift Policy)
-COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
+COPY --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
 
 # Get Dumb Init
 # Pinned release + per-arch SHA-256, verified BEFORE install exactly like the
@@ -270,14 +272,16 @@ RUN case "${TARGETARCH}" in \
       arm64) DUMBINIT_ARCH="aarch64"; DUMBINIT_SHA256="${DUMBINIT_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/Yelp/dumb-init/releases/download/v${DUMBINIT_VERSION}/dumb-init_${DUMBINIT_VERSION}_${DUMBINIT_ARCH}" \
+    curl -fsSL --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 900 --connect-timeout 30 --max-time 900 \
+    "https://github.com/Yelp/dumb-init/releases/download/v${DUMBINIT_VERSION}/dumb-init_${DUMBINIT_VERSION}_${DUMBINIT_ARCH}" \
     -o /usr/local/bin/dumb-init && \
     echo "${DUMBINIT_SHA256}  /usr/local/bin/dumb-init" | sha256sum -c - && \
     chmod 755 /usr/local/bin/dumb-init && \
     chown $UID:0 /usr/local/bin/dumb-init
 
-# Copy cached Deno dependencies from cache stage
-COPY --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
+# Copy the frozen production dependency tree from the deps stage. Bun resolves
+# every runtime import from this tree; there is no separate module cache.
+COPY --chown=$UID:0 --chmod=775 --from=deps /app/node_modules /app/node_modules
 
 # Get agent-browser
 RUN npm install -g agent-browser && \
@@ -289,22 +293,22 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
     npx playwright install-deps chromium-headless-shell
 
 # Copy Agents CLI binary
-COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
+COPY --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
 
 # Copy the official OMP executable, following the same $UID:0 + 775 install
 # convention as the OpenCode binary above. The runtime needs the exec bit; the
 # install location is a deployment path, not an ownership authority.
 # No-new-Bun rule: the official executable is self-contained; no OMP step
-# installs a JavaScript/Bun runtime or speculative helper packages (the
-# pre-existing denoland/deno base is the image's only such dependency and is
-# not modified by these steps).
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/out/omp /usr/local/bin/omp
+# installs a JavaScript/Bun runtime or speculative helper packages (the pinned
+# Bun base is the image's only such dependency and is not modified by these
+# steps).
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/out/omp /usr/local/bin/omp
 
 # Copy official OMP notices (checksum-verified in the unpacker stage above)
 # under the image's third-party license location, following the normal
 # $UID:0 + 775 license-packaging convention used for the project LICENSE.
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
 
 # Copy the prepared shared native runtime payload (extracted by the pinned, checksum-
 # verified executable in the unpacker stage above) to the same absolute image path the
@@ -312,10 +316,10 @@ COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-P
 # install convention. Exactly ONE `{platform}` subtree is present, because the unpacker
 # stage prepared only its own target platform: the executable, LICENSE and
 # THIRD-PARTY-NOTICES installs above are unchanged.
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /opt/air/omp/native-cache /opt/air/omp/native-cache
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /opt/air/omp/native-cache /opt/air/omp/native-cache
 
 # Copy OpenCode configuration
-COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
+COPY --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/air/.config/opencode/opencode.json
 
 # Authored deny-all OpenCode intent profile (`email-opencode-intent-profile`).
 # Installed at its OWN deployment path instead of beside the deployed global
@@ -325,25 +329,27 @@ COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.co
 # development-tree spelling outside an image) and injects the document through
 # OPENCODE_CONFIG_CONTENT. The ordinary configuration above stays
 # byte-identical; directory modes are prepared in the post-COPY directory step
-# below, like every other linked copy in this stage.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/email-intent-opencode.json /opt/air/opencode/config/email-intent-opencode.json
+# below, like every other copy in this stage.
+COPY --chown=$UID:0 --chmod=775 agent-config/email-intent-opencode.json /opt/air/opencode/config/email-intent-opencode.json
 
 # Authored native OMP model configuration. Native OMP reads `models.yml` from
 # `getAgentDir()/models.yml` (config HOME), so the authored provider header is
 # installed at the NATIVE config path instead of a second overlay tree,
 # following the project's ordinary $UID:0 + 775 install convention.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/models.yml /home/deno/.omp/agent/models.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/models.yml /home/air/.omp/agent/models.yml
 
 # Copy application files
-COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
-COPY --link --chown=$UID:0 --chmod=775 config.example.yaml /app/config.yaml
-COPY --link --chown=$UID:0 --chmod=775 src/ /app/src/
-COPY --link --chown=$UID:0 --chmod=775 assets/ /app/assets/
+# `tsconfig.json` carries the path aliases (`@utils/*`, `@acp/*`, …) Bun resolves
+# at run time; `bunfig.toml` holds the registry scope and test-root settings.
+COPY --chown=$UID:0 --chmod=775 package.json bun.lock bunfig.toml tsconfig.json /app/
+COPY --chown=$UID:0 --chmod=775 config.example.yaml /app/config.yaml
+COPY --chown=$UID:0 --chmod=775 src/ /app/src/
+COPY --chown=$UID:0 --chmod=775 assets/ /app/assets/
 # Copy default prompts (can be overridden by mounting custom prompts to /app/prompts)
-COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
+COPY --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 
 # Copy skills to ~/.agents/skills/ for personal skills
-COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/
+COPY --chown=$UID:0 --chmod=775 skills/ /home/air/.agents/skills/
 
 # The COPY above is the image's ONLY skill tree (`collapse-skill-packaging-to-
 # one-tree`): both agent types resolve that one path through `AGENT_SKILLS_DIR`
@@ -353,76 +359,76 @@ COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/
 # Authored OMP mode settings and prompt artifact, installed at the stable
 # /opt/air/omp deployment paths under the project's ordinary $UID:0 + 775
 # convention (the same convention as agent-config/opencode.json). Directory
-# modes are prepared in the post-COPY directory step below: a `COPY --link`
-# lands as an independent layer that recreates its destination's parent
-# directories, so preparing them here would be discarded.
+# modes are prepared in the post-COPY directory step below: a copy that
+# creates its destination's parent directories applies that copy's `--chown`,
+# so preparing them here would be discarded.
 # Content-faithful install: the settings/prompt content lands byte-identical
 # from these authored paths; the extension-tree step below installs the
 # GENERATED native-loadable bundle — a deterministic transformation of
 # canonical source plus frozen-lock dependencies (package-bun-compatible-
 # omp-extension). No independently edited or augmented content exists either
 # way, and the build synthesizes or rewrites no OMP YAML.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
 # INTERNAL email-intent profile settings (`email-omp-intent-profile`): the
 # authored DENY-ALL native document the intent launch selects with `--config`.
 # It lands beside the two ordinary mode documents, never in the native config
 # home (`~/.omp/agent`), so no ordinary launch ever discovers it.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/email-intent.yml /opt/air/omp/config/email-intent.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/email-intent.yml /opt/air/omp/config/email-intent.yml
 # Row-8 prompt mapping: the SYSTEM.md prompt artifact installs under its
 # contracted name; operator prompt mounts keep their existing semantics and
 # are never relocated (src/utils/omp-paths.ts resolveOmpSystemPromptPath).
-COPY --link --chown=$UID:0 --chmod=775 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
+COPY --chown=$UID:0 --chmod=775 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
 
 # Trusted-extension tree: build the native-loadable ESM bundle (the single
 # generated index.js) from the committed canonical sources and frozen lock and
 # install it at the stable extension path. Runs as ROOT (before USER $UID)
-# reading the root-owned cache-stage copy of the committed sources (/build-src
-# — a bind mount of the cache stage's /app, NOT the agent-writable /app/src 775
+# reading the root-owned build-stage copy of the committed sources (/build-src
+# — a bind mount of the build stage's /app, NOT the agent-writable /app/src 775
 # copy), so nothing consumed into the tree comes from agent-modifiable bytes
-# during the build.
-RUN --mount=type=bind,from=cache,src=/app,target=/build-src \
-    /build-src/scripts/omp/bundle-omp-extension.sh /build-src /opt/air/omp/extension /build-src/deno.lock
+# during the build. The bundler verifies `/build-src/bun.lock` and
+# `/build-src/node_modules` exist, which the build stage produced with
+# `bun install --frozen-lockfile`.
+RUN --mount=type=bind,from=build,src=/app,target=/build-src \
+    /build-src/scripts/omp/bundle-omp-extension.sh /build-src /opt/air/omp/extension
 
 # Set up directories with proper permissions.
 # OpenShift compatibility: root group (GID 0) for arbitrary UID support.
 #
-# THIS RUN MUST FOLLOW EVERY `COPY --link` IN THIS STAGE. A linked copy lands as
-# an independent layer that re-creates the destination's PARENT directories as
-# plain 0755 entries owned by that copy's `--chown`, discarding modes prepared
-# earlier — verified under rootless podman, where /app and /home/deno came back
-# 0755 while the non-parent /app/data and /deno-dir kept 0775. A linked copy
-# added after this RUN silently resets /app to 0755 again.
-# Deliberately NOT declared here, and therefore left at 0755: /home/deno/.config
-# (the 775 entry below is its `opencode` child) and /home/deno/.agents /
-# /home/deno/.agents/skills (the packaged personal-skill tree).
+# THIS RUN MUST FOLLOW EVERY COPY IN THIS STAGE. A copy that creates the
+# destination's PARENT directories applies that copy's `--chown`, discarding
+# modes prepared earlier — verified under rootless podman, where /app and
+# /home/air came back 0755 while the non-parent /app/data kept 0775. A copy
+# added after this RUN can reset /app to 0755 again.
+# Deliberately NOT declared here, and therefore left at 0755: /home/air/.config
+# (the 775 entry below is its `opencode` child) and /home/air/.agents /
+# /home/air/.agents/skills (the packaged personal-skill tree).
 RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /app/data && \
     install -d -m 775 -o $UID -g 0 /licenses && \
     install -d -m 775 -o $UID -g 0 /licenses/omp && \
-    install -d -m 775 -o $UID -g 0 /deno-dir/ && \
-    install -d -m 775 -o $UID -g 0 /home/deno/ && \
+    install -d -m 775 -o $UID -g 0 /home/air/ && \
     # Native OMP config HOME (`~/.omp/agent`): holds the authored models.yml
     # installed above and the native auth/session side files.
-    install -d -m 775 -o $UID -g 0 /home/deno/.omp/agent && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.local && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
+    install -d -m 775 -o $UID -g 0 /home/air/.omp/agent && \
+    install -d -m 775 -o $UID -g 0 /home/air/.local && \
+    install -d -m 775 -o $UID -g 0 /home/air/.local/bin && \
+    install -d -m 775 -o $UID -g 0 /home/air/.local/share/opencode && \
+    install -d -m 775 -o $UID -g 0 /home/air/.config/opencode && \
     # OpenCode intent-profile deployment tree (`email-opencode-intent-profile`):
     # holds the authored deny-all document installed above and nothing else.
     install -d -m 775 -o $UID -g 0 /opt/air/opencode && \
     install -d -m 775 -o $UID -g 0 /opt/air/opencode/config && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser && \
+    install -d -m 775 -o $UID -g 0 /home/air/.cache && \
+    install -d -m 775 -o $UID -g 0 /home/air/.agent-browser && \
     # OMP artifact destinations (mode settings, prompt artifact, generated
     # extension bundle, prepared shared native cache). Prepared AFTER every
-    # linked copy above — including the FILES in them, which is why the
+    # copy above — including the FILES in them, which is why the
     # generated tree is re-owned and re-moded here: the build-time bundler and
     # the native-cache preparation run as root while the deployment convention
     # is $UID:0 + 775. Only these named paths get 775; the `/opt` and
     # `/opt/air` ancestors are created by the linked copies as $UID:0 0755 and
-    # are deliberately left that way.
+    # are set back to root-owned 0755 by the final two commands of this RUN.
     install -d -m 775 -o $UID -g 0 /opt/air/omp && \
     install -d -m 775 -o $UID -g 0 /opt/air/omp/config && \
     install -d -m 775 -o $UID -g 0 /opt/air/omp/prompt && \
@@ -433,10 +439,16 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     find /opt/air/omp -type f -exec chmod 775 {} + && \
     # Root-owned and NOT group-writable, unlike the $UID:0 entries above: this
     # is the SHARED binary directory both agents and dumb-init live in, and the
-    # declaration exists to stop linked-copy parent-directory drift (an
-    # un-declared parent takes the owner of whichever linked copy touched it
+    # declaration exists to stop copy parent-directory drift (an
+    # un-declared parent takes the owner of whichever copy touched it
     # last). It is not an OMP-artifact protection property.
-    install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin
+    install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin && \
+    # Root-owned and NOT writable by $UID: the agent itself runs as $UID, so a
+    # $UID-owned /opt/air would let it replace the trusted skill config. The
+    # empty 0444 file is the skill shebang's `--config` target (design §4.4);
+    # a missing file must stop the skill, so it ships in the image.
+    install -d -m 755 -o 0 -g 0 /opt /opt/air && \
+    install -m 444 -o 0 -g 0 /dev/null /opt/air/skill-bunfig.toml
 
 WORKDIR /app
 
@@ -446,16 +458,16 @@ VOLUME ["/app/data"]
 VOLUME ["/app/prompts"]
 
 # Set HOME environment variable for agent skills discovery
-ENV HOME=/home/deno
+ENV HOME=/home/air
 
 # Stock-image OpenCode installed-root declaration (`unify-omp-skill-root-resolution`
 # D1): the shipped config names the SAME tree the COPY above installs and the
 # resolver canonicalizes, so a stock image matches the Helm default instead of
 # silently resolving `skills` against the working directory. Development default
 # (`skills`) stays unchanged.
-ENV AGENT_SKILLS_DIR=/home/deno/.agents/skills
+ENV AGENT_SKILLS_DIR=/home/air/.agents/skills
 
-ENV PATH="/home/deno/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ENV PATH="/home/air/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Switch to non-privileged user
 USER $UID
@@ -464,7 +476,7 @@ USER $UID
 RUN npx playwright install chromium-headless-shell
 
 # Replace Playwright's bundled ffmpeg with system ffmpeg
-RUN for dir in /home/deno/.cache/ms-playwright/ffmpeg-*; do \
+RUN for dir in /home/air/.cache/ms-playwright/ffmpeg-*; do \
     rm -f "$dir/ffmpeg-linux" && \
     ln -s /usr/bin/ffmpeg "$dir/ffmpeg-linux"; \
     done
@@ -479,7 +491,7 @@ STOPSIGNAL SIGTERM
 ENTRYPOINT ["dumb-init", "--"]
 
 # Default command to run the chatbot
-CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "--allow-ffi", "--allow-sys", "src/main.ts"]
+CMD ["bun", "run", "--no-env-file", "--config=/app/bunfig.toml", "src/main.ts"]
 
 ARG VERSION
 ARG RELEASE

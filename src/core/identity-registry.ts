@@ -1,6 +1,6 @@
 // src/core/identity-registry.ts
 
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { IdentityGroupConfig } from "../types/config.ts";
 import type { Platform } from "../types/events.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";

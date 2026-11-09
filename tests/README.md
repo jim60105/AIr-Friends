@@ -2,14 +2,20 @@
 
 ## Unit vs integration split
 
-| Task                                          | Scope                                                                                                                                                  |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `deno task test:unit`                         | Everything under `tests/` except `tests/integration/` (`--ignore=tests/integration`).                                                                  |
-| `deno task test:integration`                  | `tests/integration/` only. Subprocess-backed tests self-skip (`ignore:`) when `dumb-init` or `deno` is absent from `PATH`; the container bundles both. |
-| `deno task test:coverage` + `coverage:report` | Coverage gate (> 75%) over the same tree.                                                                                                              |
-| `deno task fmt:check` / `lint` / `check`      | Formatting, lint, and type gate for `src/` + `tests/`.                                                                                                 |
+| Task                                                  | Scope                                                                                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bun run test:unit`                                   | The unit directories plus `tests/main.test.ts` and `tests/healthcheck.test.ts`; `tests/integration/` is not selected.                      |
+| `bun run test:integration`                            | `tests/integration/` only. Subprocess-backed tests self-skip (`ignore:`) when `dumb-init` is absent from `PATH`; the container bundles it. |
+| `bun run test:coverage` + `scripts/coverage-floor.ts` | Line-coverage gate (75% floor over `src/` from `coverage/lcov.info`) over the same tree.                                                   |
+| `bun run fmt:check` / `lint` / `check`                | Formatting (dprint), lint (oxlint), and type (tsc) gate for `src/` + `tests/`.                                                             |
 
-Never run bare `deno test`; use the tasks above so permission flags match CI.
+Never run bare `bun test`; use the scripts above or the CI-equivalent invocation.
+CI runs each set as `bun --no-env-file test --timeout=120000 --isolate <paths>`
+so the process-wide metrics registry and environment state cannot leak between
+files. The full suite first runs `bun run bundle:omp-extension` and
+`bun run prepare:omp-natives --executable <pinned omp>` to provide its generated
+extension and prepared native cache; the package scripts do not add those
+prerequisites.
 
 The packaging suite's local-architecture image scenario
 (`tests/utils/omp-packaging.test.ts`) is an explicit opt-in: it runs ONLY with
@@ -21,7 +27,7 @@ build, and every other scenario under `tests/` stays mock/unit evidence.
 ## Mock harness inventory (`tests/mocks/`)
 
 - **`mock-acp-agent.ts`** — scripted ACP agent spoken over stdio JSON-RPC
-  (the `dumb-init -- deno run …` spawn pattern used by
+  (the `dumb-init -- bun run …` spawn pattern used by
   `tests/integration/shared-process.integration.test.ts`). Baseline behavior:
   prompt delay, Skill-API callbacks (memory-save / send-reply). OMP lifecycle
   behavior activates ONLY on opt-in env inputs the shipped OpenCode suites
@@ -78,7 +84,7 @@ exists anywhere in this tree.
 - Waiting is limited to bounded polls of explicitly observable facts
   (`kill -0` liveness, pool `isIdle()` after the documented release drain),
   each with a hard attempt cap.
-- Subprocess spawns in the integration task are exclusively `deno run`
+- Subprocess spawns in the integration task are exclusively `bun run`
   mocks of `mock-acp-agent.ts`: no real `omp` executable, provider or paid
   credentials, network egress, container/bwrap, or live-acceptance path.
 
@@ -103,17 +109,17 @@ failing startup, and no client-observable readiness assertion compensates.
 
 The original (P0–P9) suite was test-only: `CHANGELOG.md` was intentionally
 untouched (the batch changelog sync is owned by the final docs row), and
-`config.example.yaml`, `.env.example`, `helm/values.yaml`, and `deno.json`
-carried no changes. Correction-batch row C2 (`align-omp-native-tool-contracts`)
-once pinned `@sinclair/typebox` in `deno.json`/`deno.lock` so Deno fixtures
-resolved the schema-builder facade the pinned host resolved; the native
-runtime cutover removed that alias, so no import-map pin remains
-(`docs/agent/acp-engine.md`).
+`config.example.yaml`, `.env.example`, `helm/values.yaml`, and the retired
+runtime manifest carried no changes. Correction-batch row C2
+(`align-omp-native-tool-contracts`) once pinned `@sinclair/typebox` in the
+then-current manifest and lock so the fixture runtime resolved the
+schema-builder facade the pinned host resolved; the native runtime cutover
+removed that alias, so no import-map pin remains (`docs/agent/acp-engine.md`).
 Correction-batch row C3 (`package-bun-compatible-omp-extension`) replaces the
-extension packaging under test: the image-side mirror tree and generated
-`deno.json` import map are gone, replaced by ONE generated native-loadable
-bundle (`deno task bundle:omp-extension` → `index.js`; the packaging suite
-builds it, audits its emitted edges and asserts that no digest inventory is
-prepended). The bundled capability-admission closure carries no external
+extension packaging under test: the image-side mirror tree and its generated
+import map are gone, replaced by ONE generated native-loadable bundle
+(`bun run bundle:omp-extension` → `index.js`; the packaging suite builds it,
+audits its emitted edges and asserts that no digest inventory is prepended).
+The bundled capability-admission closure carries no external
 dependency edge at all — documented `node:`/`bun:` builtins stay external
 because the native runtime provides them — and the bundle installs no npm: pin.

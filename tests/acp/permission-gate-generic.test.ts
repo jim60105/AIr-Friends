@@ -8,6 +8,7 @@ import { FD_REDIRECT_TOKEN_PATTERN, splitCommandSegments } from "@acp/command-sy
 import { referencesOutOfWorkspacePath } from "@acp/client.ts";
 import { type CommandFixture, createCommandFixture } from "./command-test-fixture.ts";
 import type { CommandGateContext } from "@acp/command-path-policy.ts";
+import { test as bunTest } from "bun:test";
 
 let fixture: CommandFixture;
 let WS: string;
@@ -20,7 +21,7 @@ let DIRS_WITH_AGENT: string[];
 let RUNTIME_ENV: NonNullable<CommandGateContext["runtimeEnv"]>;
 
 function test(name: string, run: () => void | Promise<void>) {
-  Deno.test(name, async () => {
+  bunTest(name, async () => {
     fixture = createCommandFixture();
     WS = fixture.workspace;
     DATA_ROOT = fixture.dataRoot;
@@ -92,7 +93,7 @@ test("F12 D2 - out-of-workspace reads are rejected", async () => {
 test("F12 D2 - out-of-workspace OUTPUT target is rejected", async () => {
   // Allow-listed tools that also write must reject an out-of-workspace output path.
   assertEquals(await approve("pdftoppm in.pdf /etc/cron.d/evil"), false);
-  assertEquals(await approve("pdfimages in.pdf /home/deno/.ssh/authorized_keys"), false);
+  assertEquals(await approve("pdfimages in.pdf /home/air/.ssh/authorized_keys"), false);
 });
 
 test("F12 D2 - tools with file-DSL / indirection are NOT allow-listed (only safe under D4)", async () => {
@@ -304,7 +305,7 @@ test("F12 D2 - shared home-rooted tool-output directory is never within bounds",
   assertEquals(await approve("cat ~/.local/share/opencode/tool-output/tool_x"), false);
   assertEquals(await approve("cat $HOME/.local/share/opencode/tool-output/tool_x"), false);
   assertEquals(await approve("cat ${HOME}/.local/share/opencode/tool-output/tool_x"), false);
-  assertEquals(await approve("cat /home/deno/.local/share/opencode/tool-output/tool_x"), false);
+  assertEquals(await approve("cat /home/air/.local/share/opencode/tool-output/tool_x"), false);
 });
 
 test("F12 D2 - home-anchored sensitive paths still rejected after expansion", async () => {

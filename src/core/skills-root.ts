@@ -9,7 +9,7 @@
 //
 // - the existing installed-root resolution — `agent.skillsDir` (env
 //   `AGENT_SKILLS_DIR`; the stock container deployment declares
-//   `/home/deno/.agents/skills`, the repository default is `skills`) —
+//   `/home/air/.agents/skills`, the repository default is `skills`) —
 //   relative roots resolved against the daemon/deployment process working
 //   directory, never the agent child's HOME.
 // - No skill-root constant exists anymore: `align-omp-skill-trust-to-shared-root`
@@ -31,7 +31,8 @@
 // shares the SAME canonical absolute spelling and a root identity an inventory
 // can recheck at decision time.
 
-import { isAbsolute, resolve } from "@std/path";
+import fs from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { isSupportedAgentType } from "../acp/types.ts";
 import type { AgentType } from "../acp/types.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
@@ -75,13 +76,13 @@ function defaultObserveDirectory(
     // synthetic path) keeps the configured spelling with NO recorded
     // identity, which identity-requiring consumers then refuse.
     try {
-      const stat = Deno.statSync(path);
+      const stat = fs.statSync(path);
       // Some platforms report `null` dev/ino: no identity is then recorded,
       // which identity-requiring consumers refuse rather than trust.
       const identity = stat.dev !== null && stat.ino !== null
         ? { dev: stat.dev, ino: stat.ino }
         : undefined;
-      return { root: Deno.realPathSync(path), identity };
+      return { root: fs.realpathSync(path), identity };
     } catch {
       return { root: path };
     }
@@ -133,7 +134,7 @@ export function observeTrustedSkillsRoot(
       // refused outright, so a symlinked host renders a root those consumers
       // would deny — a fail-closed confusion, never an escape.
       try {
-        return Deno.statSync(path).isDirectory;
+        return fs.statSync(path).isDirectory();
       } catch {
         return false;
       }
@@ -171,7 +172,7 @@ export function observeTrustedSkillsRoot(
     : "skills";
   const root = isAbsolute(configured)
     ? configured
-    : resolve(options.deploymentCwd ?? Deno.cwd(), configured);
+    : resolve(options.deploymentCwd ?? process.cwd(), configured);
   if (!directoryExists(root)) {
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,

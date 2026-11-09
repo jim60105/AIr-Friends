@@ -12,7 +12,7 @@
 // about the official OMP binary.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { ChatbotClient, type SessionGateContext } from "@acp/client.ts";
@@ -23,6 +23,10 @@ import { Logger, LogLevel } from "@utils/logger.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
 import { emptySkillList } from "./skill-inventory-fixture.ts";
 import { createMockAcpConnection } from "../mocks/mock-acp-connection.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const UUID_A = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
 const UUID_B = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c";
@@ -38,7 +42,7 @@ function writeJournal(path: string, uuid: string, cwd: string): void {
     updatedAt: "2026-01-02T03-04-05-678Z",
     pad: " ".repeat(24),
   });
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     path,
     `${titleSlot}\n${JSON.stringify({ type: "session", version: 3, id: uuid, cwd })}\n`,
   );
@@ -70,28 +74,28 @@ function connectorFixture(params: {
   beforeOpen?: (path: string) => void;
 }): ConnectorFixture {
   const agentType = params.agentType ?? "omp";
-  const base = Deno.makeTempDirSync();
+  const base = makeTempDirSync();
   const workspace = join(base, "workspace");
   const shared = join(workspace, "shared");
   const staging = join(workspace, "tmp", SKILL_API_ID);
   const skills = join(base, "trusted-skills");
   for (const path of [workspace, shared, staging, skills]) {
-    Deno.mkdirSync(path, { recursive: true });
+    fs.mkdirSync(path, { recursive: true });
   }
-  Deno.writeTextFileSync(join(skills, "helper.ts"), "owned helper");
+  fs.writeFileSync(join(skills, "helper.ts"), "owned helper");
 
   const dataRoot = join(workspace, "tmp", "omp-agent", params.mode, "xdg-data");
   const sessionsRoot = join(dataRoot, "omp", "sessions");
   const bucket = join(sessionsRoot, "-tmp-workspace");
-  Deno.mkdirSync(bucket, { recursive: true });
+  fs.mkdirSync(bucket, { recursive: true });
   const journalNames = new Map<string, string>();
   for (const uuid of params.journalCases ?? [UUID_A, UUID_B]) {
     const name = `2026-01-02T03-04-05-678Z_${uuid}.jsonl`;
     journalNames.set(uuid, name);
     writeJournal(join(bucket, name), uuid, workspace);
     const artifactDir = join(bucket, name.slice(0, -".jsonl".length));
-    Deno.mkdirSync(artifactDir, { recursive: true });
-    Deno.writeTextFileSync(join(artifactDir, "17.bash.log"), SPILL);
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(join(artifactDir, "17.bash.log"), SPILL);
   }
 
   const logger = new Logger("test", { level: LogLevel.FATAL });
@@ -100,7 +104,7 @@ function connectorFixture(params: {
   );
   const calls = createFilesystemTestCalls(params.beforeOpen);
   const contentCalls: string[] = [];
-  const skillsInfo = Deno.lstatSync(skills);
+  const skillsInfo = fs.lstatSync(skills);
   const clientConfig = {
     workingDir: workspace,
     platform: "discord",
@@ -195,7 +199,7 @@ function connectorFixture(params: {
   };
 }
 
-Deno.test("OMP connector: new-session registration carries provenance and reads its own spill", async () => {
+test("OMP connector: new-session registration carries provenance and reads its own spill", async () => {
   for (const mode of ["restricted", "native-yolo"] as const) {
     const f = connectorFixture({ mode });
     try {
@@ -229,14 +233,14 @@ Deno.test("OMP connector: new-session registration carries provenance and reads 
         "Filesystem request denied: rejected_omp_native_state",
         mode,
       );
-      assertEquals(Deno.readTextFileSync(join(f.artifactDirFor(UUID_A), "17.bash.log")), SPILL);
+      assertEquals(fs.readFileSync(join(f.artifactDirFor(UUID_A), "17.bash.log"), "utf8"), SPILL);
     } finally {
-      Deno.removeSync(f.base, { recursive: true });
+      fs.rmSync(f.base, { recursive: true });
     }
   }
 });
 
-Deno.test("OMP connector: a later full re-registration keeps the proven provenance", async () => {
+test("OMP connector: a later full re-registration keeps the proven provenance", async () => {
   const f = connectorFixture({ mode: "restricted" });
   try {
     await f.connector.createSession([]);
@@ -266,7 +270,7 @@ Deno.test("OMP connector: a later full re-registration keeps the proven provenan
     // A re-registration that MOVES the session drops the old provenance instead
     // of carrying it into the new cwd.
     const moved = join(f.base, "moved-workspace");
-    Deno.mkdirSync(moved, { recursive: true });
+    fs.mkdirSync(moved, { recursive: true });
     f.connector.setSessionGateContext(UUID_A, { cwd: moved, shellSessionId: SKILL_API_ID });
     assertEquals(f.client["sessionContexts"].get(UUID_A)?.ompNativeState, undefined);
     await assertRejects(
@@ -278,11 +282,11 @@ Deno.test("OMP connector: a later full re-registration keeps the proven provenan
       acp.RequestError,
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: sibling sessions on one connection stay isolated", async () => {
+test("OMP connector: sibling sessions on one connection stay isolated", async () => {
   const f = connectorFixture({ mode: "native-yolo" });
   try {
     await f.connector.createSession([]);
@@ -315,13 +319,13 @@ Deno.test("OMP connector: sibling sessions on one connection stay isolated", asy
         reader,
       );
     }
-    assertEquals(Deno.readTextFileSync(join(f.artifactDirFor(UUID_B), "17.bash.log")), SPILL);
+    assertEquals(fs.readFileSync(join(f.artifactDirFor(UUID_B), "17.bash.log"), "utf8"), SPILL);
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: failed optional discovery keeps the session usable", async () => {
+test("OMP connector: failed optional discovery keeps the session usable", async () => {
   const f = connectorFixture({ mode: "restricted" });
   try {
     f.scriptNewSession(UUID_MISSING);
@@ -343,7 +347,7 @@ Deno.test("OMP connector: failed optional discovery keeps the session usable", a
     );
     // Unrelated operations are unaffected (the session is still available).
     const memory = join(f.workspace, "memory.public.jsonl");
-    Deno.writeTextFileSync(memory, "memory");
+    fs.writeFileSync(memory, "memory");
     assertEquals(
       (await f.client.readTextFile({ sessionId: UUID_MISSING, path: memory })).content,
       "memory",
@@ -353,13 +357,13 @@ Deno.test("OMP connector: failed optional discovery keeps the session usable", a
       path: "$TMPDIR/$SESSION_ID/reply.md",
       content: "staged",
     });
-    assertEquals(Deno.readTextFileSync(join(f.staging, "reply.md")), "staged");
+    assertEquals(fs.readFileSync(join(f.staging, "reply.md"), "utf8"), "staged");
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: disconnect revokes prior-epoch artifact authority and replay denies", async () => {
+test("OMP connector: disconnect revokes prior-epoch artifact authority and replay denies", async () => {
   const f = connectorFixture({ mode: "native-yolo" });
   try {
     await f.connector.createSession([]);
@@ -386,17 +390,17 @@ Deno.test("OMP connector: disconnect revokes prior-epoch artifact authority and 
       "Filesystem request denied: rejected_omp_native_state",
     );
     const memory = join(f.workspace, "memory.public.jsonl");
-    Deno.writeTextFileSync(memory, "memory");
+    fs.writeFileSync(memory, "memory");
     assertEquals(
       (await fresh.readTextFile({ sessionId: UUID_A, path: memory })).content,
       "memory",
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: a successful session/load re-resolves fresh provenance", async () => {
+test("OMP connector: a successful session/load re-resolves fresh provenance", async () => {
   const f = connectorFixture({ mode: "restricted" });
   try {
     await f.connector.createSession([]);
@@ -405,7 +409,7 @@ Deno.test("OMP connector: a successful session/load re-resolves fresh provenance
     // The native runtime now persists the same session elsewhere: move the
     // journal and its artifact directory to a new bucket.
     const movedBucket = join(f.sessionsRoot, "-tmp-workspace-moved");
-    Deno.renameSync(f.bucket, movedBucket);
+    fs.renameSync(f.bucket, movedBucket);
     const newJournal = join(movedBucket, oldJournal.split("/").pop()!);
     const newArtifact = join(
       movedBucket,
@@ -444,11 +448,11 @@ Deno.test("OMP connector: a successful session/load re-resolves fresh provenance
       "Filesystem request denied: rejected_omp_native_state",
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: OpenCode callbacks gain no reservation and keep their outcomes", async () => {
+test("OMP connector: OpenCode callbacks gain no reservation and keep their outcomes", async () => {
   const f = connectorFixture({ mode: "restricted", agentType: "opencode" });
   try {
     await f.connector.createSession([]);
@@ -477,19 +481,19 @@ Deno.test("OMP connector: OpenCode callbacks gain no reservation and keep their 
       path: join(f.staging, "reply.md"),
       content: "opencode staged",
     });
-    assertEquals(Deno.readTextFileSync(join(f.staging, "reply.md")), "opencode staged");
+    assertEquals(fs.readFileSync(join(f.staging, "reply.md"), "utf8"), "opencode staged");
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: a context replaced mid-observation never authorizes the request", async () => {
+test("OMP connector: a context replaced mid-observation never authorizes the request", async () => {
   const f = connectorFixture({ mode: "restricted" });
-  const originalRealPath = Deno.realPath;
+  const originalRealPath = fsp.realpath;
   try {
     await f.connector.createSession([]);
     let revoked = false;
-    Deno.realPath = async (value) => {
+    fsp.realpath = (async (value) => {
       const result = await originalRealPath(value);
       if (!revoked) {
         revoked = true;
@@ -500,7 +504,7 @@ Deno.test("OMP connector: a context replaced mid-observation never authorizes th
         });
       }
       return result;
-    };
+    }) as typeof fsp.realpath;
     await assertRejects(
       () =>
         f.client.readTextFile({
@@ -520,12 +524,12 @@ Deno.test("OMP connector: a context replaced mid-observation never authorizes th
       SPILL,
     );
   } finally {
-    Deno.realPath = originalRealPath;
-    Deno.removeSync(f.base, { recursive: true });
+    fsp.realpath = originalRealPath;
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: restricted generic commands keep their per-spawn reach", async () => {
+test("OMP connector: restricted generic commands keep their per-spawn reach", async () => {
   const f = connectorFixture({ mode: "restricted" });
   try {
     await f.connector.createSession([]);
@@ -549,18 +553,18 @@ Deno.test("OMP connector: restricted generic commands keep their per-spawn reach
     assertEquals(response.outcome.outcome, "selected");
     assertEquals(f.client.getRecentPermissionRejections().length, 0);
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP connector: a disconnect during an in-flight artifact read denies it", async () => {
+test("OMP connector: a disconnect during an in-flight artifact read denies it", async () => {
   const f = connectorFixture({ mode: "restricted" });
-  const originalRealPath = Deno.realPath;
+  const originalRealPath = fsp.realpath;
   try {
     await f.connector.createSession([]);
     const callsBefore = f.contentCalls.length;
     let disconnected = false;
-    Deno.realPath = async (value) => {
+    fsp.realpath = (async (value) => {
       const result = await originalRealPath(value);
       if (!disconnected) {
         disconnected = true;
@@ -568,7 +572,7 @@ Deno.test("OMP connector: a disconnect during an in-flight artifact read denies 
         await f.connector.disconnect();
       }
       return result;
-    };
+    }) as typeof fsp.realpath;
     await assertRejects(
       () =>
         f.client.readTextFile({
@@ -593,7 +597,7 @@ Deno.test("OMP connector: a disconnect during an in-flight artifact read denies 
     );
     assertEquals(f.contentCalls.length, callsBefore);
   } finally {
-    Deno.realPath = originalRealPath;
-    Deno.removeSync(f.base, { recursive: true });
+    fsp.realpath = originalRealPath;
+    fs.rmSync(f.base, { recursive: true });
   }
 });

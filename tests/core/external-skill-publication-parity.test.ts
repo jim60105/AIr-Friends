@@ -15,16 +15,21 @@ import { observeTrustedSkillsRoot, resolveTrustedSkillsRoot } from "@core/skills
 import { buildSkillAutoApproveList } from "@acp/skill-inventory.ts";
 import { getDefaultAgentType } from "@acp/agent-factory.ts";
 import type { Config } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** Materializes one skill under the private installer HOME, as the CLI does. */
 const executor: SkillInstallExecutor = {
   async run(_cmd, args, options) {
     const skill = args[args.indexOf("-s") + 1];
+    // oxlint-disable-next-line typescript/no-non-null-asserted-optional-chain
     const home = options?.env?.HOME!;
     const dir = `${home}/.agents/skills/${skill}`;
-    await Deno.mkdir(`${dir}/scripts`, { recursive: true });
-    await Deno.writeTextFile(`${dir}/SKILL.md`, `# ${skill}`);
-    await Deno.writeTextFile(`${dir}/scripts/${skill}.ts`, "// published");
+    await fsp.mkdir(`${dir}/scripts`, { recursive: true });
+    await fsp.writeFile(`${dir}/SKILL.md`, `# ${skill}`);
+    await fsp.writeFile(`${dir}/scripts/${skill}.ts`, "// published");
     return { code: 0, stdout: new Uint8Array(), stderr: new Uint8Array() };
   },
 };
@@ -65,8 +70,8 @@ function makeConfig(agentOverrides: Partial<Config["agent"]>): Config {
   };
 }
 
-Deno.test("parity - the publication destination is the SAME root for both default agent types", () => {
-  const deploymentRoot = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-deploy-" }));
+test("parity - the publication destination is the SAME root for both default agent types", () => {
+  const deploymentRoot = fs.realpathSync(makeTempDirSync({ prefix: "air-deploy-" }));
   try {
     const opencodeDefault = makeConfig({
       defaultAgentType: "opencode",
@@ -87,14 +92,14 @@ Deno.test("parity - the publication destination is the SAME root for both defaul
       deploymentRoot,
     );
   } finally {
-    Deno.removeSync(deploymentRoot, { recursive: true });
+    fs.rmSync(deploymentRoot, { recursive: true });
   }
 });
 
-Deno.test("parity - a startup-installed external skill is eligible for BOTH agent types", async () => {
+test("parity - a startup-installed external skill is eligible for BOTH agent types", async () => {
   // The external name is NOT in the authored catalog: after this change neither
   // agent type requires a catalog entry for a skill published into the root.
-  const deploymentRoot = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-deploy-" }));
+  const deploymentRoot = fs.realpathSync(makeTempDirSync({ prefix: "air-deploy-" }));
   try {
     await installExternalSkills(
       deploymentRoot,
@@ -119,16 +124,16 @@ Deno.test("parity - a startup-installed external skill is eligible for BOTH agen
       }
     }
   } finally {
-    await Deno.remove(deploymentRoot, { recursive: true });
+    await fsp.rm(deploymentRoot, { recursive: true });
   }
 });
 
-Deno.test("parity - collision refusals and per-entry failure isolation are unchanged", async () => {
+test("parity - collision refusals and per-entry failure isolation are unchanged", async () => {
   // A bundled-catalog name, the reserved `lib` entry and a traversing name are
   // each refused WITHOUT touching the destination or any path outside it, while
   // one failing install never blocks the remaining entries (the link/escape
   // refusals themselves stay pinned by tests/core/skill-installer.test.ts).
-  const deploymentRoot = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-deploy-" }));
+  const deploymentRoot = fs.realpathSync(makeTempDirSync({ prefix: "air-deploy-" }));
   try {
     await installExternalSkills(
       deploymentRoot,
@@ -145,11 +150,13 @@ Deno.test("parity - collision refusals and per-entry failure isolation are uncha
     // Only the one valid entry was published; every refusal/failure left the
     // root (and its parent) untouched.
     assertEquals(
-      [...Deno.readDirSync(deploymentRoot)].map((entry) => entry.name),
+      [...fs.readdirSync(deploymentRoot, { withFileTypes: true })].map((entry) => entry.name),
       ["create-blog-post"],
     );
     assert(
-      ![...Deno.readDirSync(`${deploymentRoot}/..`)].some((entry) => entry.name === "escape"),
+      ![...fs.readdirSync(`${deploymentRoot}/..`, { withFileTypes: true })].some((entry) =>
+        entry.name === "escape"
+      ),
       "a traversing skill name must not create anything outside the resolved root",
     );
     // The surviving publication is still granted to both agent types.
@@ -164,6 +171,6 @@ Deno.test("parity - collision refusals and per-entry failure isolation are uncha
       );
     }
   } finally {
-    await Deno.remove(deploymentRoot, { recursive: true });
+    await fsp.rm(deploymentRoot, { recursive: true });
   }
 });

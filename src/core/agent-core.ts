@@ -495,8 +495,8 @@ export class AgentCore {
   async shutdown(): Promise<void> {
     logger.info("Shutting down Agent Core");
 
-    // Stop the shared process pool (reclaims idle agent processes).
-    this.processPool?.stop();
+    // Stop the shared process pool, terminating every pooled agent process.
+    await this.processPool?.stop();
 
     // Stop skill API server
     if (this.skillApiServer) {

@@ -36,12 +36,12 @@
  * The benchmark is offline: it makes no network request and no LLM call.
  *
  * Usage:
- *   deno run --allow-read --allow-write --allow-env --allow-ffi \
+ *   bun run --no-env-file \
  *     scripts/memory-recall-benchmark.ts [--write] [--quiet]
  */
 
-import { dirname } from "@std/path";
-import { parse as parseYaml } from "@std/yaml";
+import { dirname } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   estimateMemorySectionTokens,
   estimateNoteSectionTokens,
@@ -57,6 +57,8 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { Platform } from "../src/types/events.ts";
 import type { MemoryLogEvent, NoteRecallResult } from "../src/types/memory.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../src/types/workspace.ts";
+import fsp from "node:fs/promises";
+import { makeTempDir } from "../src/utils/fs-compat.ts";
 
 /** Fixed clock of the fixture, so recency bonuses are stable (design §12). */
 export const FIXED_CLOCK = new Date("2026-09-01T00:00:00.000Z");
@@ -477,8 +479,8 @@ export function parseQueries(text: string): QuerySpec[] {
 /** Reads the committed agent workspace notes, in name order. */
 export async function loadNotes(): Promise<NoteFixture[]> {
   const names: string[] = [];
-  for await (const entry of Deno.readDir(NOTES_URL)) {
-    if (entry.isFile && entry.name.endsWith(".md")) names.push(entry.name);
+  for (const entry of await fsp.readdir(NOTES_URL, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".md")) names.push(entry.name);
   }
   names.sort();
   if (names.length === 0) fail("notes/", "holds no Markdown note");
@@ -487,7 +489,7 @@ export async function loadNotes(): Promise<NoteFixture[]> {
   for (const name of names) {
     notes.push({
       path: `notes/${name}`,
-      content: await Deno.readTextFile(new URL(name, NOTES_URL)),
+      content: await fsp.readFile(new URL(name, NOTES_URL), "utf8"),
     });
   }
   return notes;
@@ -500,8 +502,8 @@ export async function loadFixture(): Promise<{
   notes: NoteFixture[];
 }> {
   const [corpusText, queriesText, notes] = await Promise.all([
-    Deno.readTextFile(CORPUS_URL),
-    Deno.readTextFile(QUERIES_URL),
+    fsp.readFile(CORPUS_URL, "utf8"),
+    fsp.readFile(QUERIES_URL, "utf8"),
     loadNotes(),
   ]);
   return { corpus: parseCorpus(corpusText), queries: parseQueries(queriesText), notes };
@@ -515,7 +517,7 @@ export async function materializeFixture(
   corpus: readonly CorpusEntry[],
   notes: readonly NoteFixture[],
 ): Promise<Fixture> {
-  const root = await Deno.makeTempDir({ prefix: "memory-recall-benchmark-" });
+  const root = await makeTempDir({ prefix: "memory-recall-benchmark-" });
   const manager = new WorkspaceManager({ repoPath: root, workspacesDir: "workspaces" });
   const store = new MemoryStore(manager, {});
   const event = (isDm: boolean) => ({
@@ -549,7 +551,7 @@ export async function materializeFixture(
   // always build the same tree (the snapshot cache keys on size + mtime).
   for (const source of CORPUS_SOURCES) {
     if (lines[source].length === 0) continue;
-    await Deno.writeTextFile(paths[source], lines[source].join("\n") + "\n");
+    await fsp.writeFile(paths[source], lines[source].join("\n") + "\n");
   }
 
   // Fixed file set and fixed write order here too, so the note walk of the
@@ -557,8 +559,8 @@ export async function materializeFixture(
   const agentWorkspacePath = `${root}/agent-workspace`;
   for (const note of notes) {
     const path = `${agentWorkspacePath}/${note.path}`;
-    await Deno.mkdir(dirname(path), { recursive: true });
-    await Deno.writeTextFile(path, note.content);
+    await fsp.mkdir(dirname(path), { recursive: true });
+    await fsp.writeFile(path, note.content);
   }
 
   return {
@@ -583,7 +585,7 @@ export async function withFixture<T>(
   try {
     return await fn(fixture);
   } finally {
-    await Deno.remove(fixture.root, { recursive: true });
+    await fsp.rm(fixture.root, { recursive: true });
   }
 }
 
@@ -1402,7 +1404,7 @@ export function toMetricsFile(result: BenchmarkResult): Record<string, unknown> 
 /** Writes `metrics.json` next to the fixture. */
 export async function writeMetrics(result: BenchmarkResult): Promise<void> {
   const payload = toMetricsFile(result);
-  await Deno.writeTextFile(METRICS_URL, `${JSON.stringify(payload, null, 2)}\n`);
+  await fsp.writeFile(METRICS_URL, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
 /** The two constraint-analysis counters of one threshold search stage. */
@@ -1718,7 +1720,7 @@ function parseArgs(args: readonly string[]): Options {
   return options;
 }
 
-const USAGE = `Usage: deno run --allow-read --allow-write --allow-env --allow-ffi \\
+const USAGE = `Usage: bun run --no-env-file \\
   scripts/memory-recall-benchmark.ts [--write] [--quiet]
 
   --write   record the calibrated thresholds and metrics in metrics.json
@@ -1726,7 +1728,7 @@ const USAGE = `Usage: deno run --allow-read --allow-write --allow-env --allow-ff
 `;
 
 async function main(): Promise<void> {
-  const options = parseArgs(Deno.args);
+  const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     console.log(USAGE);
     return;
@@ -1742,7 +1744,7 @@ async function main(): Promise<void> {
       "memory-recall-benchmark: the 5% false-positive cap is unattainable; " +
         "fix the fixture or the ranking, never the cap.",
     );
-    Deno.exitCode = 1;
+    process.exitCode = 1;
     return;
   }
   if (options.quiet) {

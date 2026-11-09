@@ -23,6 +23,7 @@ import {
   shouldRespondToChatMessage,
   shouldRespondToNote,
 } from "@platforms/misskey/misskey-utils.ts";
+import { test } from "bun:test";
 
 // Create a minimal mock note for testing utility functions
 function createMockNote(overrides: Partial<MisskeyNote> = {}): MisskeyNote {
@@ -62,7 +63,7 @@ function createMockNote(overrides: Partial<MisskeyNote> = {}): MisskeyNote {
   return base;
 }
 
-Deno.test("normalizeMisskeyNote - should normalize public mention", () => {
+test("normalizeMisskeyNote - should normalize public mention", () => {
   const note = createMockNote();
   const event = normalizeMisskeyNote(note, "bot123", false);
 
@@ -74,7 +75,7 @@ Deno.test("normalizeMisskeyNote - should normalize public mention", () => {
   assertEquals(event.content, "Hello @testbot!");
 });
 
-Deno.test("normalizeMisskeyNote - should normalize DM", () => {
+test("normalizeMisskeyNote - should normalize DM", () => {
   const note = createMockNote({ visibility: "specified" });
   const event = normalizeMisskeyNote(note, "bot123", true);
 
@@ -82,45 +83,45 @@ Deno.test("normalizeMisskeyNote - should normalize DM", () => {
   assertEquals(event.channelId, "dm:user123");
 });
 
-Deno.test("isMentionToBot - should detect @username mention", () => {
+test("isMentionToBot - should detect @username mention", () => {
   const note = createMockNote({ text: "Hello @testbot how are you?" });
   assertEquals(isMentionToBot(note, "testbot"), true);
 });
 
-Deno.test("isMentionToBot - should detect @username@instance mention", () => {
+test("isMentionToBot - should detect @username@instance mention", () => {
   const note = createMockNote({ text: "Hello @testbot@example.com" });
   assertEquals(isMentionToBot(note, "testbot"), true);
 });
 
-Deno.test("isMentionToBot - should not detect different username", () => {
+test("isMentionToBot - should not detect different username", () => {
   const note = createMockNote({ text: "Hello @otheruser" });
   assertEquals(isMentionToBot(note, "testbot"), false);
 });
 
-Deno.test("removeBotMention - should remove mention from text", () => {
+test("removeBotMention - should remove mention from text", () => {
   const result = removeBotMention("Hello @testbot how are you?", "testbot");
   assertEquals(result, "Hello how are you?");
 });
 
-Deno.test("removeBotMention - should remove mention with instance", () => {
+test("removeBotMention - should remove mention with instance", () => {
   const result = removeBotMention("@testbot@example.com Hello!", "testbot");
   assertEquals(result, "Hello!");
 });
 
 // ============ ReDoS / regex-escaping regression ============
 
-Deno.test("sanitizeMentionUsername - escapes regex metacharacters", () => {
+test("sanitizeMentionUsername - escapes regex metacharacters", () => {
   assertEquals(sanitizeMentionUsername("a+b*c?"), "a\\+b\\*c\\?");
   assertEquals(sanitizeMentionUsername("plain"), "plain");
 });
 
-Deno.test("sanitizeMentionUsername - returns null for empty username", () => {
+test("sanitizeMentionUsername - returns null for empty username", () => {
   assertEquals(sanitizeMentionUsername(""), null);
   assertEquals(sanitizeMentionUsername(null), null);
   assertEquals(sanitizeMentionUsername(undefined), null);
 });
 
-Deno.test("isMentionToBot - malicious metacharacter username does not crash or false-match", () => {
+test("isMentionToBot - malicious metacharacter username does not crash or false-match", () => {
   // The username contains regex metacharacters (+, *, ?) that must be escaped.
   // It ends in a word char (d) so the trailing \b boundary is satisfied.
   const note = createMockNote({ text: "Hello @a+b*c?d there" });
@@ -130,34 +131,34 @@ Deno.test("isMentionToBot - malicious metacharacter username does not crash or f
   assertEquals(isMentionToBot(pathological, "aaaaaaaaaaaaaaaaaaaaa"), true);
 });
 
-Deno.test("isMentionToBot - username containing a dot still detects mention (escaping preserves functionality)", () => {
+test("isMentionToBot - username containing a dot still detects mention (escaping preserves functionality)", () => {
   const note = createMockNote({ text: "Hello @my.bot there" });
   assertEquals(isMentionToBot(note, "my.bot"), true);
   assertEquals(isMentionToBot(createMockNote({ text: "hi" }), "my.bot"), false);
 });
 
-Deno.test("removeBotMention - empty username returns text unchanged", () => {
+test("removeBotMention - empty username returns text unchanged", () => {
   assertEquals(removeBotMention("Hello @testbot!", ""), "Hello @testbot!");
 });
 
-Deno.test("isMentionToBot - empty username returns false", () => {
+test("isMentionToBot - empty username returns false", () => {
   const note = createMockNote({ text: "Hello @testbot!" });
   assertEquals(isMentionToBot(note, ""), false);
 });
 
-Deno.test("isDirectMessage - should detect specified visibility", () => {
+test("isDirectMessage - should detect specified visibility", () => {
   const note = createMockNote({ visibility: "specified" });
   assertEquals(isDirectMessage(note), true);
 });
 
-Deno.test("isDirectMessage - should not detect public visibility", () => {
+test("isDirectMessage - should not detect public visibility", () => {
   const note = createMockNote({ visibility: "public" });
   assertEquals(isDirectMessage(note), false);
 });
 
 // ============ F11: specified notes classified as DM + reply-policy gating ============
 
-Deno.test("F11 - specified note normalized with isDm true via isDirectMessage", () => {
+test("F11 - specified note normalized with isDm true via isDirectMessage", () => {
   // Models the adapter's mention handler: isDm is derived from isDirectMessage(note).
   const note = createMockNote({ visibility: "specified" });
   const isDm = isDirectMessage(note);
@@ -167,14 +168,14 @@ Deno.test("F11 - specified note normalized with isDm true via isDirectMessage", 
   assertEquals(event.channelId, "dm:user123");
 });
 
-Deno.test("F11 - public note normalized with isDm false via isDirectMessage", () => {
+test("F11 - public note normalized with isDm false via isDirectMessage", () => {
   const note = createMockNote({ visibility: "public" });
   const isDm = isDirectMessage(note);
   const event = normalizeMisskeyNote(note, "bot123", isDm);
   assertEquals(event.isDm, false);
 });
 
-Deno.test("F11 - reply policy in public mode denies non-whitelisted specified note", async () => {
+test("F11 - reply policy in public mode denies non-whitelisted specified note", async () => {
   const { ReplyPolicyEvaluator } = await import("@core/reply-policy.ts");
   const note = createMockNote({ visibility: "specified" });
   const event = normalizeMisskeyNote(note, "bot123", isDirectMessage(note));
@@ -189,7 +190,7 @@ Deno.test("F11 - reply policy in public mode denies non-whitelisted specified no
   assertEquals(evaluator.shouldReply(publicEvent), true);
 });
 
-Deno.test("shouldRespondToNote - should not respond to self", () => {
+test("shouldRespondToNote - should not respond to self", () => {
   const note = createMockNote({ userId: "bot123" });
   const result = shouldRespondToNote(note, "bot123", "testbot", {
     allowDm: true,
@@ -198,7 +199,7 @@ Deno.test("shouldRespondToNote - should not respond to self", () => {
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToNote - should respond to DM when allowed", () => {
+test("shouldRespondToNote - should respond to DM when allowed", () => {
   const note = createMockNote({ visibility: "specified" });
   const result = shouldRespondToNote(note, "bot123", "testbot", {
     allowDm: true,
@@ -207,7 +208,7 @@ Deno.test("shouldRespondToNote - should respond to DM when allowed", () => {
   assertEquals(result, true);
 });
 
-Deno.test("shouldRespondToNote - should not respond to DM when not allowed", () => {
+test("shouldRespondToNote - should not respond to DM when not allowed", () => {
   const note = createMockNote({ visibility: "specified" });
   const result = shouldRespondToNote(note, "bot123", "testbot", {
     allowDm: false,
@@ -216,7 +217,7 @@ Deno.test("shouldRespondToNote - should not respond to DM when not allowed", () 
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToNote - should not respond to bot accounts", () => {
+test("shouldRespondToNote - should not respond to bot accounts", () => {
   const note = createMockNote({
     user: {
       ...createMockNote().user,
@@ -230,7 +231,7 @@ Deno.test("shouldRespondToNote - should not respond to bot accounts", () => {
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToNote - should respond to mention", () => {
+test("shouldRespondToNote - should respond to mention", () => {
   const note = createMockNote({ text: "Hello @testbot" });
   const result = shouldRespondToNote(note, "bot123", "testbot", {
     allowDm: true,
@@ -239,21 +240,21 @@ Deno.test("shouldRespondToNote - should respond to mention", () => {
   assertEquals(result, true);
 });
 
-Deno.test("buildReplyParams - should use specified for DM reply", () => {
+test("buildReplyParams - should use specified for DM reply", () => {
   const note = createMockNote({ visibility: "specified" });
   const params = buildReplyParams(note);
   assertEquals(params.visibility, "specified");
   assertEquals(params.visibleUserIds, ["user123"]);
 });
 
-Deno.test("buildReplyParams - should use same visibility for public", () => {
+test("buildReplyParams - should use same visibility for public", () => {
   const note = createMockNote({ visibility: "public" });
   const params = buildReplyParams(note);
   assertEquals(params.visibility, "public");
   assertEquals(params.visibleUserIds, undefined);
 });
 
-Deno.test("noteToPlatformMessage - should convert correctly", () => {
+test("noteToPlatformMessage - should convert correctly", () => {
   const note = createMockNote();
   const msg = noteToPlatformMessage(note, "bot123");
 
@@ -264,13 +265,13 @@ Deno.test("noteToPlatformMessage - should convert correctly", () => {
   assertEquals(msg.isBot, false);
 });
 
-Deno.test("noteToPlatformMessage - should mark bot messages", () => {
+test("noteToPlatformMessage - should mark bot messages", () => {
   const note = createMockNote({ userId: "bot123" });
   const msg = noteToPlatformMessage(note, "bot123");
   assertEquals(msg.isBot, true);
 });
 
-Deno.test("noteToPlatformMessage - should mark other bot messages", () => {
+test("noteToPlatformMessage - should mark other bot messages", () => {
   const note = createMockNote({
     userId: "otherbot456",
     user: {
@@ -340,7 +341,7 @@ function createMockChatMessageLite(
   };
 }
 
-Deno.test("normalizeMisskeyChatMessage - should normalize chat message", () => {
+test("normalizeMisskeyChatMessage - should normalize chat message", () => {
   const message = createMockChatMessage();
   const event = normalizeMisskeyChatMessage(message, "bot123");
 
@@ -353,14 +354,14 @@ Deno.test("normalizeMisskeyChatMessage - should normalize chat message", () => {
   assertEquals(event.guildId, "");
 });
 
-Deno.test("normalizeMisskeyChatMessage - should handle null text", () => {
+test("normalizeMisskeyChatMessage - should handle null text", () => {
   const message = createMockChatMessage({ text: null });
   const event = normalizeMisskeyChatMessage(message, "bot123");
 
   assertEquals(event.content, "");
 });
 
-Deno.test("chatMessageToPlatformMessage - should convert MisskeyMessage", () => {
+test("chatMessageToPlatformMessage - should convert MisskeyMessage", () => {
   const message = createMockChatMessage();
   const msg = chatMessageToPlatformMessage(message, "bot123");
 
@@ -371,7 +372,7 @@ Deno.test("chatMessageToPlatformMessage - should convert MisskeyMessage", () => 
   assertEquals(msg.isBot, false);
 });
 
-Deno.test("chatMessageToPlatformMessage - should convert ChatMessageLite", () => {
+test("chatMessageToPlatformMessage - should convert ChatMessageLite", () => {
   const message = createMockChatMessageLite();
   const msg = chatMessageToPlatformMessage(message, "bot123");
 
@@ -382,13 +383,13 @@ Deno.test("chatMessageToPlatformMessage - should convert ChatMessageLite", () =>
   assertEquals(msg.isBot, false);
 });
 
-Deno.test("chatMessageToPlatformMessage - should mark bot messages", () => {
+test("chatMessageToPlatformMessage - should mark bot messages", () => {
   const message = createMockChatMessage({ fromUserId: "bot123" });
   const msg = chatMessageToPlatformMessage(message, "bot123");
   assertEquals(msg.isBot, true);
 });
 
-Deno.test("chatMessageToPlatformMessage - should mark other bot messages", () => {
+test("chatMessageToPlatformMessage - should mark other bot messages", () => {
   const message = createMockChatMessage({
     fromUserId: "otherbot456",
     fromUser: {
@@ -401,9 +402,9 @@ Deno.test("chatMessageToPlatformMessage - should mark other bot messages", () =>
   assertEquals(msg.isBot, true);
 });
 
-Deno.test("chatMessageToPlatformMessage - should fallback to username if name is null", () => {
+test("chatMessageToPlatformMessage - should fallback to username if name is null", () => {
   const message = createMockChatMessage();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (message as any).fromUser = {
     id: "user456",
     name: null,
@@ -414,7 +415,7 @@ Deno.test("chatMessageToPlatformMessage - should fallback to username if name is
   assertEquals(msg.username, "@chatuser");
 });
 
-Deno.test("chatMessageToPlatformMessage - should fallback to userId if fromUser is missing", () => {
+test("chatMessageToPlatformMessage - should fallback to userId if fromUser is missing", () => {
   const message = createMockChatMessageLite();
   delete message.fromUser;
   const msg = chatMessageToPlatformMessage(message, "bot123");
@@ -422,14 +423,14 @@ Deno.test("chatMessageToPlatformMessage - should fallback to userId if fromUser 
   assertEquals(msg.username, "@user789");
 });
 
-Deno.test("shouldRespondToChatMessage - should not respond to self", () => {
+test("shouldRespondToChatMessage - should not respond to self", () => {
   const message = createMockChatMessage({ fromUserId: "bot123" });
   const result = shouldRespondToChatMessage(message, "bot123", { allowDm: true });
 
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToChatMessage - should not respond to bot accounts", () => {
+test("shouldRespondToChatMessage - should not respond to bot accounts", () => {
   const message = createMockChatMessage({
     fromUser: {
       ...createMockChatMessage().fromUser,
@@ -440,14 +441,14 @@ Deno.test("shouldRespondToChatMessage - should not respond to bot accounts", () 
   assertEquals(result, false);
 });
 
-Deno.test("shouldRespondToChatMessage - should respond when DM allowed", () => {
+test("shouldRespondToChatMessage - should respond when DM allowed", () => {
   const message = createMockChatMessage();
   const result = shouldRespondToChatMessage(message, "bot123", { allowDm: true });
 
   assertEquals(result, true);
 });
 
-Deno.test("shouldRespondToChatMessage - should not respond when DM not allowed", () => {
+test("shouldRespondToChatMessage - should not respond when DM not allowed", () => {
   const message = createMockChatMessage();
   const result = shouldRespondToChatMessage(message, "bot123", { allowDm: false });
 
@@ -511,11 +512,11 @@ function createAdapterWithMockClient(
   });
 
   // Set botId so noteToPlatformMessage works
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
 
   // Replace the client.request method with our mock
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const client = (adapter as any).client;
   client.request = (
     endpoint: string,
@@ -532,7 +533,7 @@ function createAdapterWithMockClient(
   return adapter;
 }
 
-Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, and replies", async () => {
+test("fetchRecentMessages - note: channel fetches ancestors, current note, and replies", async () => {
   const ancestor = createMockNote({
     id: "ancestor1",
     text: "ancestor",
@@ -572,7 +573,7 @@ Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, 
   assertEquals(endpoints.includes("notes/children"), false);
 });
 
-Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => {
+test("fetchRecentMessages - note: channel deduplicates notes", async () => {
   const note = createMockNote({
     id: "noteABC",
     text: "same note",
@@ -594,7 +595,7 @@ Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => 
   assertEquals(messages[0].messageId, "noteABC");
 });
 
-Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () => {
+test("fetchRecentMessages - note: channel sorts chronologically", async () => {
   const late = createMockNote({
     id: "late",
     text: "late",
@@ -630,7 +631,7 @@ Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () 
   assertEquals(messages[2].messageId, "late");
 });
 
-Deno.test("fetchRecentMessages - note: channel applies limit keeping latest notes", async () => {
+test("fetchRecentMessages - note: channel applies limit keeping latest notes", async () => {
   const notes = Array.from({ length: 5 }, (_, i) =>
     createMockNote({
       id: `note${i}`,
@@ -657,7 +658,7 @@ Deno.test("fetchRecentMessages - note: channel applies limit keeping latest note
   assertEquals(messages[2].messageId, "note4");
 });
 
-Deno.test("fetchRecentMessages - note: channel with empty ancestors and replies", async () => {
+test("fetchRecentMessages - note: channel with empty ancestors and replies", async () => {
   const current = createMockNote({
     id: "noteOnly",
     text: "standalone note",
@@ -678,7 +679,7 @@ Deno.test("fetchRecentMessages - note: channel with empty ancestors and replies"
   assertEquals(messages[0].content, "standalone note");
 });
 
-Deno.test("fetchRecentMessages - note: channel passes noteId and limit to API calls", async () => {
+test("fetchRecentMessages - note: channel passes noteId and limit to API calls", async () => {
   const capturedCalls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
   const adapter = createAdapterWithMockClient((endpoint, params) => {
@@ -706,7 +707,7 @@ Deno.test("fetchRecentMessages - note: channel passes noteId and limit to API ca
   );
 });
 
-Deno.test("fetchRecentMessages - note: channel wraps API errors in PlatformError", async () => {
+test("fetchRecentMessages - note: channel wraps API errors in PlatformError", async () => {
   const adapter = createAdapterWithMockClient((endpoint) => {
     if (endpoint === "notes/show") throw new Error("API failure");
     return [];
@@ -719,7 +720,7 @@ Deno.test("fetchRecentMessages - note: channel wraps API errors in PlatformError
   );
 });
 
-Deno.test("fetchRecentMessages - note: channel walks multi-level ancestor chain", async () => {
+test("fetchRecentMessages - note: channel walks multi-level ancestor chain", async () => {
   const grandparent = createMockNote({
     id: "gp",
     text: "grandparent",
@@ -757,7 +758,7 @@ Deno.test("fetchRecentMessages - note: channel walks multi-level ancestor chain"
   assertEquals(messages[2].messageId, "c");
 });
 
-Deno.test("fetchRecentMessages - note: channel handles ancestor fetch error gracefully", async () => {
+test("fetchRecentMessages - note: channel handles ancestor fetch error gracefully", async () => {
   const current = createMockNote({
     id: "c",
     text: "current",
@@ -783,7 +784,7 @@ Deno.test("fetchRecentMessages - note: channel handles ancestor fetch error grac
 
 // ==================== MisskeyAdapter.fetchRecentMessages (chat: channel) Tests ====================
 
-Deno.test("fetchRecentMessages - chat channel returns messages sorted oldest-first", async () => {
+test("fetchRecentMessages - chat channel returns messages sorted oldest-first", async () => {
   const newestFirst = [
     createMockChatMessage({
       id: "3",
@@ -819,7 +820,7 @@ Deno.test("fetchRecentMessages - chat channel returns messages sorted oldest-fir
 
 // ==================== Replies Fallback Chain Tests ====================
 
-Deno.test("fetchRecentMessages - note: falls back to notes/children when notes/replies is missing", async () => {
+test("fetchRecentMessages - note: falls back to notes/children when notes/replies is missing", async () => {
   const current = createMockNote({
     id: "noteX",
     text: "current",
@@ -855,7 +856,7 @@ Deno.test("fetchRecentMessages - note: falls back to notes/children when notes/r
   );
 });
 
-Deno.test("fetchRecentMessages - note: a 404 status from notes/replies also triggers the fallback", async () => {
+test("fetchRecentMessages - note: a 404 status from notes/replies also triggers the fallback", async () => {
   const current = createMockNote({
     id: "noteF",
     text: "current",
@@ -886,7 +887,7 @@ Deno.test("fetchRecentMessages - note: a 404 status from notes/replies also trig
   assertEquals(calledEndpoints.includes("notes/children"), true);
 });
 
-Deno.test("fetchRecentMessages - note: returns current note when both reply endpoints are missing", async () => {
+test("fetchRecentMessages - note: returns current note when both reply endpoints are missing", async () => {
   const current = createMockNote({
     id: "noteY",
     text: "standalone",
@@ -914,7 +915,7 @@ Deno.test("fetchRecentMessages - note: returns current note when both reply endp
   assertEquals(calledEndpoints.includes("notes/children"), true);
 });
 
-Deno.test("fetchRecentMessages - note: transient reply errors do not fall back and do not fake an empty list", async () => {
+test("fetchRecentMessages - note: transient reply errors do not fall back and do not fake an empty list", async () => {
   const transientErrors = [RATE_LIMITED, INVALID_PARAM, SERVER_ERROR];
 
   for (const error of transientErrors) {
@@ -949,7 +950,7 @@ Deno.test("fetchRecentMessages - note: transient reply errors do not fall back a
   }
 });
 
-Deno.test("fetchRecentMessages - note: a transient reply failure still returns the fetched ancestors", async () => {
+test("fetchRecentMessages - note: a transient reply failure still returns the fetched ancestors", async () => {
   const ancestor = createMockNote({
     id: "ancD",
     text: "ancestor",
@@ -978,7 +979,7 @@ Deno.test("fetchRecentMessages - note: a transient reply failure still returns t
   assertEquals(calledEndpoints.includes("notes/children"), false);
 });
 
-Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints are missing", async () => {
+test("fetchRecentMessages - note: ancestors still work when reply endpoints are missing", async () => {
   const parent = createMockNote({
     id: "parentZ",
     text: "parent note",
@@ -1027,9 +1028,9 @@ function createAdapterWithFullMockClient(
     host: "misskey.test",
     token: "test-token",
   });
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const client = (adapter as any).client;
   client.request = (
     endpoint: string,
@@ -1041,7 +1042,7 @@ function createAdapterWithFullMockClient(
   return adapter;
 }
 
-Deno.test("fetchRecentMessages - note: uses notes/conversation for ancestors when available", async () => {
+test("fetchRecentMessages - note: uses notes/conversation for ancestors when available", async () => {
   const ancestor = createMockNote({
     id: "anc1",
     text: "ancestor note",
@@ -1073,7 +1074,7 @@ Deno.test("fetchRecentMessages - note: uses notes/conversation for ancestors whe
   assertEquals(calledEndpoints.includes("notes/conversation"), true);
 });
 
-Deno.test("fetchRecentMessages - note: falls back to replyId walk when notes/conversation fails", async () => {
+test("fetchRecentMessages - note: falls back to replyId walk when notes/conversation fails", async () => {
   const ancestor = createMockNote({
     id: "anc2",
     text: "ancestor note",
@@ -1109,7 +1110,7 @@ Deno.test("fetchRecentMessages - note: falls back to replyId walk when notes/con
   assertEquals(showCalls.length >= 2, true); // At least current + ancestor
 });
 
-Deno.test("fetchRecentMessages - note: deep ancestor chain (7 levels)", async () => {
+test("fetchRecentMessages - note: deep ancestor chain (7 levels)", async () => {
   // Create a chain of 7 notes
   const notes = Array.from({ length: 7 }, (_, i) =>
     createMockNote({
@@ -1136,7 +1137,7 @@ Deno.test("fetchRecentMessages - note: deep ancestor chain (7 levels)", async ()
   assertEquals(messages[6].messageId, "deep6"); // Trigger
 });
 
-Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in single call", async () => {
+test("fetchRecentMessages - note: notes/conversation returns deep chain in single call", async () => {
   // Create a chain of 7 notes
   const notes = Array.from({ length: 7 }, (_, i) =>
     createMockNote({
@@ -1168,7 +1169,7 @@ Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in 
   assertEquals(showCalls.length, 1);
 });
 
-Deno.test("fetchRecentMessages - note: a transient notes/conversation error does not trigger the replyId walk", async () => {
+test("fetchRecentMessages - note: a transient notes/conversation error does not trigger the replyId walk", async () => {
   const current = createMockNote({
     id: "noteG",
     text: "current note",
@@ -1194,7 +1195,7 @@ Deno.test("fetchRecentMessages - note: a transient notes/conversation error does
   assertEquals(showCalls, ["noteG"]);
 });
 
-Deno.test("fetchRecentMessages - note: the replyId walk keeps partial ancestors when a step fails", async () => {
+test("fetchRecentMessages - note: the replyId walk keeps partial ancestors when a step fails", async () => {
   const parent = createMockNote({
     id: "parentW",
     text: "parent",
@@ -1231,7 +1232,7 @@ Deno.test("fetchRecentMessages - note: the replyId walk keeps partial ancestors 
  * Misskey rejects `limit` outside 1..100 with INVALID_PARAM, so the adapter
  * clamps every paginated request at its boundary.
  */
-Deno.test("fetchRecentMessages - clamps out-of-range limits at the adapter boundary", async () => {
+test("fetchRecentMessages - clamps out-of-range limits at the adapter boundary", async () => {
   const cases: Array<[number, number]> = [
     [0, 1],
     [-5, 1],
@@ -1262,7 +1263,7 @@ Deno.test("fetchRecentMessages - clamps out-of-range limits at the adapter bound
   }
 });
 
-Deno.test("fetchRecentMessages - timeline:self sends withReplies and clamps the limit", async () => {
+test("fetchRecentMessages - timeline:self sends withReplies and clamps the limit", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
@@ -1277,7 +1278,7 @@ Deno.test("fetchRecentMessages - timeline:self sends withReplies and clamps the 
   assertEquals("includeReplies" in calls[0].params, false);
 });
 
-Deno.test("fetchRecentMessages - dm: channel clamps the limit", async () => {
+test("fetchRecentMessages - dm: channel clamps the limit", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
@@ -1292,7 +1293,7 @@ Deno.test("fetchRecentMessages - dm: channel clamps the limit", async () => {
   ]);
 });
 
-Deno.test("fetchRecentMessages - note: channel clamps the limit for conversation and replies", async () => {
+test("fetchRecentMessages - note: channel clamps the limit for conversation and replies", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
@@ -1311,7 +1312,7 @@ Deno.test("fetchRecentMessages - note: channel clamps the limit for conversation
   assertEquals(calls.some((c) => c.endpoint === "notes/children"), false);
 });
 
-Deno.test("fetchRecentMessages - note: clamps the limit for the primary notes/replies request", async () => {
+test("fetchRecentMessages - note: clamps the limit for the primary notes/replies request", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
@@ -1326,7 +1327,7 @@ Deno.test("fetchRecentMessages - note: clamps the limit for the primary notes/re
   assertEquals(calls.some((c) => c.endpoint === "notes/children"), false);
 });
 
-Deno.test("searchRelatedMessages - clamps the limit", async () => {
+test("searchRelatedMessages - clamps the limit", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
@@ -1346,7 +1347,7 @@ function createMockBotNote(overrides: Partial<MisskeyNote> = {}): MisskeyNote {
   return createMockNote({ userId: "bot123", user, ...overrides });
 }
 
-Deno.test("fetchRecentMessages - dm: channel keeps only the bot's specified notes visible to the user", async () => {
+test("fetchRecentMessages - dm: channel keeps only the bot's specified notes visible to the user", async () => {
   const toTarget = createMockBotNote({
     id: "out-target",
     createdAt: "2024-01-01T02:00:00.000Z",
@@ -1390,7 +1391,7 @@ Deno.test("fetchRecentMessages - dm: channel keeps only the bot's specified note
   assertEquals(messages.map((m) => m.messageId), ["out-target"]);
 });
 
-Deno.test("fetchRecentMessages - dm: channel merges, dedupes, sorts, and applies the limit", async () => {
+test("fetchRecentMessages - dm: channel merges, dedupes, sorts, and applies the limit", async () => {
   const incomingLater = createMockNote({
     id: "inc-1",
     userId: "user9",
@@ -1437,7 +1438,7 @@ Deno.test("fetchRecentMessages - dm: channel merges, dedupes, sorts, and applies
   assertEquals(dup.isBot, false);
 });
 
-Deno.test("fetchRecentMessages - dm: channel excludes third-party replies that mention the bot", async () => {
+test("fetchRecentMessages - dm: channel excludes third-party replies that mention the bot", async () => {
   const thirdParty = createMockNote({
     id: "third-party",
     userId: "thirduser",
@@ -1456,7 +1457,7 @@ Deno.test("fetchRecentMessages - dm: channel excludes third-party replies that m
   assertEquals(messages, []);
 });
 
-Deno.test("fetchRecentMessages - dm: channel includes the bot's own specified reply to the user", async () => {
+test("fetchRecentMessages - dm: channel includes the bot's own specified reply to the user", async () => {
   const botReply = createMockBotNote({
     id: "bot-reply",
     text: "hi there",
@@ -1479,7 +1480,7 @@ Deno.test("fetchRecentMessages - dm: channel includes the bot's own specified re
   assertEquals(messages[0].content, "hi there");
 });
 
-Deno.test("fetchRecentMessages - dm: channel skips the outgoing fetch when botId is unset", async () => {
+test("fetchRecentMessages - dm: channel skips the outgoing fetch when botId is unset", async () => {
   const incoming = createMockNote({
     id: "inc-1",
     userId: "user9",
@@ -1501,7 +1502,7 @@ Deno.test("fetchRecentMessages - dm: channel skips the outgoing fetch when botId
   assertEquals(endpoints, ["notes/mentions"]);
 });
 
-Deno.test("normalizeMisskeyNote - files produce attachments", () => {
+test("normalizeMisskeyNote - files produce attachments", () => {
   const file = {
     id: "file1",
     url: "https://example.com/file.png",
@@ -1510,7 +1511,7 @@ Deno.test("normalizeMisskeyNote - files produce attachments", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const ev = normalizeMisskeyNote(note, "bot123", false);
   assertEquals(ev.attachments?.length, 1);
@@ -1520,13 +1521,13 @@ Deno.test("normalizeMisskeyNote - files produce attachments", () => {
   assertEquals(ev.attachments![0].height, 480);
 });
 
-Deno.test("normalizeMisskeyNote - no files means no attachments", () => {
+test("normalizeMisskeyNote - no files means no attachments", () => {
   const note = createMockNote();
   const ev = normalizeMisskeyNote(note, "bot123", false);
   assertEquals(ev.attachments, undefined);
 });
 
-Deno.test("noteToPlatformMessage - with files", () => {
+test("noteToPlatformMessage - with files", () => {
   const file = {
     id: "file1",
     url: "https://example.com/file.png",
@@ -1535,7 +1536,7 @@ Deno.test("noteToPlatformMessage - with files", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const pm = noteToPlatformMessage(note, "bot123");
   assertEquals(pm.attachments?.length, 1);
@@ -1545,13 +1546,13 @@ Deno.test("noteToPlatformMessage - with files", () => {
   assertEquals(pm.attachments![0].isImage, true);
 });
 
-Deno.test("noteToPlatformMessage - without files", () => {
+test("noteToPlatformMessage - without files", () => {
   const note = createMockNote();
   const pm = noteToPlatformMessage(note, "bot123");
   assertEquals(pm.attachments, undefined);
 });
 
-Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
+test("normalizeMisskeyChatMessage - file becomes attachment", () => {
   const file = {
     id: "file1",
     url: "https://example.com/file.png",
@@ -1560,7 +1561,7 @@ Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const chat = createMockChatMessage({ file: file as any });
   const ev = normalizeMisskeyChatMessage(chat, "bot123");
   assertEquals(ev.attachments?.length, 1);
@@ -1568,13 +1569,13 @@ Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
   assertEquals(ev.attachments![0].filename, "photo.png");
 });
 
-Deno.test("normalizeMisskeyChatMessage - no file means no attachments", () => {
+test("normalizeMisskeyChatMessage - no file means no attachments", () => {
   const chat = createMockChatMessage();
   const ev = normalizeMisskeyChatMessage(chat, "bot123");
   assertEquals(ev.attachments, undefined);
 });
 
-Deno.test("chatMessageToPlatformMessage - with file", () => {
+test("chatMessageToPlatformMessage - with file", () => {
   const file = {
     id: "file1",
     url: "https://example.com/file.png",
@@ -1583,7 +1584,7 @@ Deno.test("chatMessageToPlatformMessage - with file", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const chat = createMockChatMessage({ file: file as any });
   const pm = chatMessageToPlatformMessage(chat, "bot123");
   assertEquals(pm.attachments?.length, 1);
@@ -1591,7 +1592,7 @@ Deno.test("chatMessageToPlatformMessage - with file", () => {
   assertEquals(pm.attachments![0].mimeType, "image/png");
 });
 
-Deno.test("chatMessageToPlatformMessage - without file", () => {
+test("chatMessageToPlatformMessage - without file", () => {
   const chat = createMockChatMessage();
   const pm = chatMessageToPlatformMessage(chat, "bot123");
   assertEquals(pm.attachments, undefined);
@@ -1608,13 +1609,13 @@ function createMockMisskeyAdapter(): MisskeyAdapter {
   return adapter;
 }
 
-// deno-lint-ignore no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 function mockClientRequest(adapter: MisskeyAdapter, fn: (...args: any[]) => any): void {
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = { request: fn };
 }
 
-Deno.test("MisskeyAdapter.editMessage - edits note via delete-recreate", async () => {
+test("MisskeyAdapter.editMessage - edits note via delete-recreate", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: string[] = [];
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
@@ -1637,7 +1638,7 @@ Deno.test("MisskeyAdapter.editMessage - edits note via delete-recreate", async (
   assertEquals(calls, ["notes/show", "notes/delete", "notes/create"]);
 });
 
-Deno.test("MisskeyAdapter.editMessage - edits chat via delete-recreate", async () => {
+test("MisskeyAdapter.editMessage - edits chat via delete-recreate", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: string[] = [];
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
@@ -1657,7 +1658,7 @@ Deno.test("MisskeyAdapter.editMessage - edits chat via delete-recreate", async (
   assertEquals(calls, ["chat/messages/delete", "chat/messages/create-to-user"]);
 });
 
-Deno.test("MisskeyAdapter.editMessage - handles note delete failure", async () => {
+test("MisskeyAdapter.editMessage - handles note delete failure", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
     if (endpoint === "notes/show") {
@@ -1674,7 +1675,7 @@ Deno.test("MisskeyAdapter.editMessage - handles note delete failure", async () =
   assertEquals(result.error, "Failed to edit note: Note not found");
 });
 
-Deno.test("MisskeyAdapter.editMessage - handles chat delete failure", async () => {
+test("MisskeyAdapter.editMessage - handles chat delete failure", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
     if (endpoint === "chat/messages/delete") {
@@ -1688,7 +1689,7 @@ Deno.test("MisskeyAdapter.editMessage - handles chat delete failure", async () =
   assertEquals(result.error, "Failed to edit chat message: Chat message not found");
 });
 
-Deno.test("MisskeyAdapter.editMessage - truncates long note content", async () => {
+test("MisskeyAdapter.editMessage - truncates long note content", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedText = "";
   mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
@@ -1708,7 +1709,7 @@ Deno.test("MisskeyAdapter.editMessage - truncates long note content", async () =
   assertEquals(capturedText.endsWith("..."), true);
 });
 
-Deno.test("MisskeyAdapter.editMessage - truncates long chat content", async () => {
+test("MisskeyAdapter.editMessage - truncates long chat content", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedText = "";
   mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
@@ -1725,7 +1726,7 @@ Deno.test("MisskeyAdapter.editMessage - truncates long chat content", async () =
   assertEquals(capturedText.endsWith("..."), true);
 });
 
-Deno.test("MisskeyAdapter.editMessage - preserves specified visibility (DM)", async () => {
+test("MisskeyAdapter.editMessage - preserves specified visibility (DM)", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedParams: Record<string, unknown> = {};
   mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
@@ -1748,7 +1749,7 @@ Deno.test("MisskeyAdapter.editMessage - preserves specified visibility (DM)", as
   assertEquals(capturedParams.visibleUserIds, ["user_x", "user_y"]);
 });
 
-Deno.test("MisskeyAdapter.editMessage - uses default visibility when show fails", async () => {
+test("MisskeyAdapter.editMessage - uses default visibility when show fails", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedParams: Record<string, unknown> = {};
   mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
@@ -1767,7 +1768,7 @@ Deno.test("MisskeyAdapter.editMessage - uses default visibility when show fails"
   assertEquals(capturedParams.visibility, "public");
 });
 
-Deno.test("MisskeyAdapter.editMessage - passes replyToMessageId as replyId", async () => {
+test("MisskeyAdapter.editMessage - passes replyToMessageId as replyId", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedParams: Record<string, unknown> = {};
   const calls: string[] = [];
@@ -1795,7 +1796,7 @@ Deno.test("MisskeyAdapter.editMessage - passes replyToMessageId as replyId", asy
   assertEquals(capturedParams.visibility, "home");
 });
 
-Deno.test("MisskeyAdapter.editMessage - no replyId when no replyToMessageId", async () => {
+test("MisskeyAdapter.editMessage - no replyId when no replyToMessageId", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedParams: Record<string, unknown> = {};
   mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
@@ -1813,7 +1814,7 @@ Deno.test("MisskeyAdapter.editMessage - no replyId when no replyToMessageId", as
   assertEquals(capturedParams.replyId, undefined);
 });
 
-Deno.test("MisskeyAdapter.editMessage - returns new messageId for note", async () => {
+test("MisskeyAdapter.editMessage - returns new messageId for note", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
     if (endpoint === "notes/show") {
@@ -1830,7 +1831,7 @@ Deno.test("MisskeyAdapter.editMessage - returns new messageId for note", async (
   assertEquals(result.messageId, "brand_new_note");
 });
 
-Deno.test("MisskeyAdapter.editMessage - handles non-Error object in note error", async () => {
+test("MisskeyAdapter.editMessage - handles non-Error object in note error", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
     if (endpoint === "notes/show") {
@@ -1847,7 +1848,7 @@ Deno.test("MisskeyAdapter.editMessage - handles non-Error object in note error",
   assertEquals(result.error, "Failed to edit note: Note not found");
 });
 
-Deno.test("MisskeyAdapter.editMessage - handles non-Error object in chat error", async () => {
+test("MisskeyAdapter.editMessage - handles non-Error object in chat error", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
     if (endpoint === "chat/messages/delete") {
@@ -1863,14 +1864,14 @@ Deno.test("MisskeyAdapter.editMessage - handles non-Error object in chat error",
 
 // ============ sendFile Tests ============
 
-Deno.test("MisskeyAdapter.sendFile - sends files via chat message (one per file, caption on first)", async () => {
+test("MisskeyAdapter.sendFile - sends files via chat message (one per file, caption on first)", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
   // Mock client with both request and uploadFile
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, params: any) => {
       calls.push({ endpoint, params });
       if (endpoint === "chat/messages/create-to-user") {
@@ -1905,13 +1906,13 @@ Deno.test("MisskeyAdapter.sendFile - sends files via chat message (one per file,
   assertEquals(chatCalls[1].params.fileId, "file_id_2");
 });
 
-Deno.test("MisskeyAdapter.sendFile - sends files via note for non-chat channels (all fileIds in one note)", async () => {
+test("MisskeyAdapter.sendFile - sends files via note for non-chat channels (all fileIds in one note)", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, params: any) => {
       calls.push({ endpoint, params });
       if (endpoint === "notes/create") {
@@ -1942,13 +1943,13 @@ Deno.test("MisskeyAdapter.sendFile - sends files via note for non-chat channels 
   assertEquals(calls.filter((c) => c.endpoint === "drive/files/create").length, 2);
 });
 
-Deno.test("MisskeyAdapter.sendFile - sends files via note with reply threading", async () => {
+test("MisskeyAdapter.sendFile - sends files via note with reply threading", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: string[] = [];
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, _params: any) => {
       calls.push(endpoint);
       if (endpoint === "notes/show") {
@@ -1981,11 +1982,11 @@ Deno.test("MisskeyAdapter.sendFile - sends files via note with reply threading",
   assertEquals(calls.includes("notes/create"), true);
 });
 
-Deno.test("MisskeyAdapter.sendFile - handles upload failure before any message is sent", async () => {
+test("MisskeyAdapter.sendFile - handles upload failure before any message is sent", async () => {
   const adapter = createMockMisskeyAdapter();
   const chatCalls: string[] = [];
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
     request: (endpoint: string) => {
       if (endpoint === "chat/messages/create-to-user") {
@@ -2011,10 +2012,10 @@ Deno.test("MisskeyAdapter.sendFile - handles upload failure before any message i
   assertEquals(chatCalls.length, 0);
 });
 
-Deno.test("MisskeyAdapter.sendFile - handles non-Error object in error", async () => {
+test("MisskeyAdapter.sendFile - handles non-Error object in error", async () => {
   const adapter = createMockMisskeyAdapter();
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
     uploadFile: () => {
       throw { code: "RATE_LIMIT", message: "Too many requests" };
@@ -2030,15 +2031,15 @@ Deno.test("MisskeyAdapter.sendFile - handles non-Error object in error", async (
   assertEquals(result.success, false);
 });
 
-Deno.test("MisskeyAdapter.sendFile - mid-batch chat failure reports partial delivery and cleans up unreferenced uploads", async () => {
+test("MisskeyAdapter.sendFile - mid-batch chat failure reports partial delivery and cleans up unreferenced uploads", async () => {
   const adapter = createMockMisskeyAdapter();
   const endpoints: string[] = [];
   const deleteCalls: string[] = [];
   let uploadCounter = 0;
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).client = {
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     request: (endpoint: string, params: any) => {
       endpoints.push(endpoint);
       if (endpoint === "chat/messages/create-to-user") {
@@ -2080,20 +2081,20 @@ Deno.test("MisskeyAdapter.sendFile - mid-batch chat failure reports partial deli
 
 // ============ getDmChannelId Tests ============
 
-Deno.test("MisskeyAdapter.getDmChannelId - returns chat channel format", async () => {
+test("MisskeyAdapter.getDmChannelId - returns chat channel format", async () => {
   const adapter = createMockMisskeyAdapter();
   const result = await adapter.getDmChannelId("user123");
   assertEquals(result, "chat:user123");
 });
 
-Deno.test("MisskeyAdapter.getDmChannelId - never returns null", async () => {
+test("MisskeyAdapter.getDmChannelId - never returns null", async () => {
   const adapter = createMockMisskeyAdapter();
   const result = await adapter.getDmChannelId("any_user_id");
   assertEquals(result !== null, true);
   assertEquals(typeof result, "string");
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns true when myReaction exists", async () => {
+test("MisskeyAdapter.hasBotReaction - returns true when myReaction exists", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2105,7 +2106,7 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns true when myReaction exists",
   assertEquals(result, true);
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns false when myReaction is null", async () => {
+test("MisskeyAdapter.hasBotReaction - returns false when myReaction is null", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2117,9 +2118,9 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false when myReaction is null
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns true when bot reacted to chat message", async () => {
+test("MisskeyAdapter.hasBotReaction - returns true when bot reacted to chat message", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "chat/messages/show") {
@@ -2133,9 +2134,9 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns true when bot reacted to chat
   assertEquals(result, true);
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns false when bot has not reacted to chat message", async () => {
+test("MisskeyAdapter.hasBotReaction - returns false when bot has not reacted to chat message", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "chat/messages/show") {
@@ -2147,9 +2148,9 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false when bot has not reacte
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns false on chat API error", async () => {
+test("MisskeyAdapter.hasBotReaction - returns false on chat API error", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "chat/messages/show") {
@@ -2161,7 +2162,7 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false on chat API error", asy
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.addReaction - adds reaction to chat message successfully", async () => {
+test("MisskeyAdapter.addReaction - adds reaction to chat message successfully", async () => {
   const adapter = createMockMisskeyAdapter();
   let calledEndpoint = "";
   let calledParams: Record<string, unknown> = {};
@@ -2176,7 +2177,7 @@ Deno.test("MisskeyAdapter.addReaction - adds reaction to chat message successful
   assertEquals(calledParams, { messageId: "msg1", reaction: "👍" });
 });
 
-Deno.test("MisskeyAdapter.addReaction - handles chat reaction failure", async () => {
+test("MisskeyAdapter.addReaction - handles chat reaction failure", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, () => {
     return Promise.reject(new Error("reaction failed"));
@@ -2186,7 +2187,7 @@ Deno.test("MisskeyAdapter.addReaction - handles chat reaction failure", async ()
   assertEquals(typeof result.error, "string");
 });
 
-Deno.test("MisskeyAdapter.addReaction - reports the stored reaction and pins the readback request", async () => {
+test("MisskeyAdapter.addReaction - reports the stored reaction and pins the readback request", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
@@ -2205,7 +2206,7 @@ Deno.test("MisskeyAdapter.addReaction - reports the stored reaction and pins the
   ]);
 });
 
-Deno.test("MisskeyAdapter.addReaction - reports the server's downgraded reaction", async () => {
+test("MisskeyAdapter.addReaction - reports the server's downgraded reaction", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2219,7 +2220,7 @@ Deno.test("MisskeyAdapter.addReaction - reports the server's downgraded reaction
   assertEquals(result, { success: true, storedReaction: ":restricted:", verified: true });
 });
 
-Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback fails", async () => {
+test("MisskeyAdapter.addReaction - reports unconfirmed when the readback fails", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") return Promise.reject(new Error("readback failed"));
@@ -2231,7 +2232,7 @@ Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback fa
   assertEquals(result, { success: true, verified: false });
 });
 
-Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback has no stored reaction", async () => {
+test("MisskeyAdapter.addReaction - reports unconfirmed when the readback has no stored reaction", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") return Promise.resolve({ id: "note1", myReaction: null });
@@ -2243,7 +2244,7 @@ Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback ha
   assertEquals(result, { success: true, verified: false });
 });
 
-Deno.test("MisskeyAdapter.addReaction - a failed notes/reactions/create stays a failure", async () => {
+test("MisskeyAdapter.addReaction - a failed notes/reactions/create stays a failure", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: string[] = [];
   mockClientRequest(adapter, (endpoint: string) => {
@@ -2259,7 +2260,7 @@ Deno.test("MisskeyAdapter.addReaction - a failed notes/reactions/create stays a 
   assertEquals(calls, ["notes/reactions/create"]);
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async () => {
+test("MisskeyAdapter.hasBotReaction - returns false on API error", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, () => {
     return Promise.reject(new Error("API error"));
@@ -2268,10 +2269,10 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async ()
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.hasBotMention - returns true when mention matches", async () => {
+test("MisskeyAdapter.hasBotMention - returns true when mention matches", async () => {
   const adapter = createMockMisskeyAdapter();
   // Set botUsername
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botUsername = "testbot";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2283,9 +2284,9 @@ Deno.test("MisskeyAdapter.hasBotMention - returns true when mention matches", as
   assertEquals(result, true);
 });
 
-Deno.test("MisskeyAdapter.hasBotMention - returns false when no mention", async () => {
+test("MisskeyAdapter.hasBotMention - returns false when no mention", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botUsername = "testbot";
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "notes/show") {
@@ -2297,15 +2298,15 @@ Deno.test("MisskeyAdapter.hasBotMention - returns false when no mention", async 
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.hasBotMention - returns false for chat messages", async () => {
+test("MisskeyAdapter.hasBotMention - returns false for chat messages", async () => {
   const adapter = createMockMisskeyAdapter();
   const result = await adapter.hasBotMention("chat:user1", "msg1");
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.hasBotMention - returns false on API error", async () => {
+test("MisskeyAdapter.hasBotMention - returns false on API error", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botUsername = "testbot";
   mockClientRequest(adapter, () => {
     return Promise.reject(new Error("API error"));
@@ -2316,34 +2317,34 @@ Deno.test("MisskeyAdapter.hasBotMention - returns false on API error", async () 
 
 // ============ MisskeyAdapter.determineSpontaneousTarget tests ============
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - returns timeline:self", async () => {
+test("MisskeyAdapter.determineSpontaneousTarget - returns timeline:self", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [{ id: "misskey/timeline/self", spontaneousPost: true }],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target?.channelId, "timeline:self");
 });
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - no spontaneousPost channels returns null", async () => {
+test("MisskeyAdapter.determineSpontaneousTarget - no spontaneousPost channels returns null", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [{ id: "misskey/account/user123" }],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target, null);
 });
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - includes DM targets with spontaneousPost", async () => {
+test("MisskeyAdapter.determineSpontaneousTarget - includes DM targets with spontaneousPost", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [
       { id: "misskey/timeline/self", spontaneousPost: true },
       { id: "misskey/account/user123", spontaneousPost: true },
     ],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const results = new Set<string>();
   for (let i = 0; i < 100; i++) {
@@ -2354,11 +2355,11 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - includes DM targets with 
   assertEquals(results.has("chat:user123"), true);
 });
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - only non-misskey entries returns null", async () => {
+test("MisskeyAdapter.determineSpontaneousTarget - only non-misskey entries returns null", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
     channels: [{ id: "discord/account/123", spontaneousPost: true }],
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target, null);
@@ -2366,14 +2367,14 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - only non-misskey entries 
 
 // ==================== MisskeyAdapter heartbeat & reconnect cleanup Tests ====================
 
-Deno.test("MisskeyAdapter - connect cleans up existing stream before reconnecting", async () => {
+test("MisskeyAdapter - connect cleans up existing stream before reconnecting", async () => {
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
     token: "test-token",
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   const disposed: string[] = [];
@@ -2402,14 +2403,14 @@ Deno.test("MisskeyAdapter - connect cleans up existing stream before reconnectin
   assertEquals(disconnectCalls.length >= 1, true);
 });
 
-Deno.test("MisskeyAdapter - heartbeat starts and stops correctly", () => {
+test("MisskeyAdapter - heartbeat starts and stops correctly", () => {
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
     token: "test-token",
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   assertEquals(adapterAny.heartbeatIntervalId, null);
@@ -2427,14 +2428,14 @@ Deno.test("MisskeyAdapter - heartbeat starts and stops correctly", () => {
   assertEquals(adapterAny.heartbeatIntervalId, null);
 });
 
-Deno.test("MisskeyAdapter - stopHeartbeat is idempotent", () => {
+test("MisskeyAdapter - stopHeartbeat is idempotent", () => {
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
     token: "test-token",
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   adapterAny.client = {
@@ -2450,14 +2451,14 @@ Deno.test("MisskeyAdapter - stopHeartbeat is idempotent", () => {
   assertEquals(adapterAny.heartbeatIntervalId, null);
 });
 
-Deno.test("MisskeyAdapter - disconnect stops heartbeat", async () => {
+test("MisskeyAdapter - disconnect stops heartbeat", async () => {
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
     token: "test-token",
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   adapterAny.client = {
@@ -2472,14 +2473,14 @@ Deno.test("MisskeyAdapter - disconnect stops heartbeat", async () => {
   assertEquals(adapterAny.heartbeatIntervalId, null);
 });
 
-Deno.test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
+test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
     token: "test-token",
     secure: false,
   });
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const adapterAny = adapter as any;
 
   adapterAny.client = {
@@ -2492,9 +2493,9 @@ Deno.test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
 
 // ==================== MisskeyAdapter.fetchMessage Tests ====================
 
-Deno.test("MisskeyAdapter.fetchMessage - fetches note (non-chat channelId)", async () => {
+test("MisskeyAdapter.fetchMessage - fetches note (non-chat channelId)", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
 
   let capturedEndpoint = "";
@@ -2516,9 +2517,9 @@ Deno.test("MisskeyAdapter.fetchMessage - fetches note (non-chat channelId)", asy
   assertEquals(capturedParams.noteId, "note_fetched");
 });
 
-Deno.test("MisskeyAdapter.fetchMessage - fetches chat message (channelId starts with chat:)", async () => {
+test("MisskeyAdapter.fetchMessage - fetches chat message (channelId starts with chat:)", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
 
   let capturedEndpoint = "";
@@ -2540,9 +2541,9 @@ Deno.test("MisskeyAdapter.fetchMessage - fetches chat message (channelId starts 
   assertEquals(capturedParams.messageId, "chat_fetched");
 });
 
-Deno.test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
+test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   (adapter as any).botId = "bot123";
   mockClientRequest(adapter, () => {
     return Promise.reject(new Error("Not found"));
@@ -2554,7 +2555,7 @@ Deno.test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
 
 // ==================== MisskeyAdapter.fetchEmojis Tests ====================
 
-Deno.test("MisskeyAdapter.fetchEmojis - preserves reaction-availability metadata", async () => {
+test("MisskeyAdapter.fetchEmojis - preserves reaction-availability metadata", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, (endpoint: string) => {
     if (endpoint === "emojis") {
@@ -2676,7 +2677,7 @@ const SOURCE_AUTHOR = {
   displayName: "Source Author",
 };
 
-Deno.test("normalizeMisskeyNote - an embedded quoted source needs no request", () => {
+test("normalizeMisskeyNote - an embedded quoted source needs no request", () => {
   const source = createMockSourceNote({
     text: "Guardian article on unexploded WWII ordnance: https://www.theguardian.com/world/example",
     uri: "https://remote.example/notes/src1",
@@ -2716,7 +2717,7 @@ Deno.test("normalizeMisskeyNote - an embedded quoted source needs no request", (
   assertEquals(event.attachments, undefined);
 });
 
-Deno.test("normalizeMisskeyNote - remote provenance stays distinct from the local source id", () => {
+test("normalizeMisskeyNote - remote provenance stays distinct from the local source id", () => {
   const event = normalizeMisskeyNote(
     createMockQuoteNote({
       renote: createMockSourceNote({
@@ -2735,7 +2736,7 @@ Deno.test("normalizeMisskeyNote - remote provenance stays distinct from the loca
   assertEquals(quoted.author.host, "remote.example");
 });
 
-Deno.test("normalizeMisskeyNote - non-HTTP source URLs are omitted in favour of the derived one", () => {
+test("normalizeMisskeyNote - non-HTTP source URLs are omitted in favour of the derived one", () => {
   const source = createMockSourceNote({
     uri: "javascript:alert(1)",
     url: "ftp://remote.example/notes/src1",
@@ -2761,7 +2762,7 @@ Deno.test("normalizeMisskeyNote - non-HTTP source URLs are omitted in favour of 
   assertEquals("sourceUrl" in (withoutOrigin.quotedNote as AvailableQuotedNote), false);
 });
 
-Deno.test("normalizeMisskeyNote - a valid URL wins over a malformed candidate", () => {
+test("normalizeMisskeyNote - a valid URL wins over a malformed candidate", () => {
   const event = normalizeMisskeyNote(
     createMockQuoteNote({
       renote: createMockSourceNote({ uri: "https://", url: "https://misskey.test/notes/src1" }),
@@ -2776,7 +2777,7 @@ Deno.test("normalizeMisskeyNote - a valid URL wins over a malformed candidate", 
   );
 });
 
-Deno.test("normalizeMisskeyNote - a nested quote is not expanded", () => {
+test("normalizeMisskeyNote - a nested quote is not expanded", () => {
   const nested = createMockSourceNote({ id: "nested1", text: "Nested body" });
   const source = createMockSourceNote({ id: "src1", renoteId: "nested1", renote: nested });
 
@@ -2794,7 +2795,7 @@ Deno.test("normalizeMisskeyNote - a nested quote is not expanded", () => {
   assertEquals(JSON.stringify(quoted).includes("nested1"), false);
 });
 
-Deno.test("normalizeMisskeyNote - an empty source is available, not unavailable", () => {
+test("normalizeMisskeyNote - an empty source is available, not unavailable", () => {
   const event = normalizeMisskeyNote(
     createMockQuoteNote({ renote: createMockSourceNote({ text: null }) }),
     "bot123",
@@ -2811,7 +2812,7 @@ Deno.test("normalizeMisskeyNote - an empty source is available, not unavailable"
   });
 });
 
-Deno.test("normalizeMisskeyNote - an attachment-only source keeps its files", () => {
+test("normalizeMisskeyNote - an attachment-only source keeps its files", () => {
   const event = normalizeMisskeyNote(
     createMockQuoteNote({
       renote: createMockSourceNote({
@@ -2839,7 +2840,7 @@ Deno.test("normalizeMisskeyNote - an attachment-only source keeps its files", ()
   }]);
 });
 
-Deno.test("normalizeMisskeyNote - a conflicting embedded id never becomes source content", () => {
+test("normalizeMisskeyNote - a conflicting embedded id never becomes source content", () => {
   const event = normalizeMisskeyNote(
     createMockQuoteNote({
       renoteId: "authoritative1",
@@ -2857,7 +2858,7 @@ Deno.test("normalizeMisskeyNote - a conflicting embedded id never becomes source
   });
 });
 
-Deno.test("normalizeMisskeyNote - unusable embedded data without an authoritative id is final", () => {
+test("normalizeMisskeyNote - unusable embedded data without an authoritative id is final", () => {
   const broken = createMockSourceNote({
     id: "src1",
     user: { ...createMockNote().user, id: "", username: "who" },
@@ -2876,7 +2877,7 @@ Deno.test("normalizeMisskeyNote - unusable embedded data without an authoritativ
   });
 });
 
-Deno.test("normalizeMisskeyNote - malformed quoted files never discard the outer note", () => {
+test("normalizeMisskeyNote - malformed quoted files never discard the outer note", () => {
   // Missing the URL and MIME type the attachment mapper reads.
   const brokenFile = { id: "broken", name: "broken.png" } as unknown as entities.DriveFile;
   const withBrokenFile = normalizeMisskeyNote(
@@ -2900,7 +2901,7 @@ Deno.test("normalizeMisskeyNote - malformed quoted files never discard the outer
   assertEquals((withNonListFiles.quotedNote as AvailableQuotedNote).attachments, undefined);
 });
 
-Deno.test("normalizeMisskeyNote - a pure renote keeps its previous behavior", () => {
+test("normalizeMisskeyNote - a pure renote keeps its previous behavior", () => {
   const pureRenote = createMockNote({
     id: "pure1",
     text: null,
@@ -2922,7 +2923,7 @@ Deno.test("normalizeMisskeyNote - a pure renote keeps its previous behavior", ()
   );
 });
 
-Deno.test("normalizeMisskeyNote - ordinary notes and chat messages carry no quote field", () => {
+test("normalizeMisskeyNote - ordinary notes and chat messages carry no quote field", () => {
   assertEquals("quotedNote" in normalizeMisskeyNote(createMockNote(), "bot123", false), false);
   assertEquals(
     "quotedNote" in normalizeMisskeyChatMessage(createMockChatMessage(), "bot123"),
@@ -2931,7 +2932,7 @@ Deno.test("normalizeMisskeyNote - ordinary notes and chat messages carry no quot
   assertEquals("quotedNote" in noteToPlatformMessage(createMockNote(), "bot123"), false);
 });
 
-Deno.test("noteToPlatformMessage - the quote stays separate from the outer bot status", () => {
+test("noteToPlatformMessage - the quote stays separate from the outer bot status", () => {
   const message = noteToPlatformMessage(
     createMockBotNote({
       id: "bot-out",
@@ -2949,7 +2950,7 @@ Deno.test("noteToPlatformMessage - the quote stays separate from the outer bot s
   assertEquals(message.attachments, undefined);
 });
 
-Deno.test("MisskeyAdapter.handleNote - a quote trigger reaches the event without extra requests", async () => {
+test("MisskeyAdapter.handleNote - a quote trigger reaches the event without extra requests", async () => {
   const requests: string[] = [];
   const adapter = createAdapterWithFullMockClient((endpoint) => {
     requests.push(endpoint);
@@ -2981,7 +2982,7 @@ Deno.test("MisskeyAdapter.handleNote - a quote trigger reaches the event without
   );
 });
 
-Deno.test("MisskeyAdapter.handleNote - a source-id-only quote issues one instance lookup", async () => {
+test("MisskeyAdapter.handleNote - a source-id-only quote issues one instance lookup", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
@@ -3010,7 +3011,7 @@ Deno.test("MisskeyAdapter.handleNote - a source-id-only quote issues one instanc
   );
 });
 
-Deno.test("MisskeyAdapter.handleNote - a filtered-out note causes no source lookup", async () => {
+test("MisskeyAdapter.handleNote - a filtered-out note causes no source lookup", async () => {
   const requests: string[] = [];
   const adapter = createAdapterWithFullMockClient((endpoint) => {
     requests.push(endpoint);
@@ -3031,7 +3032,7 @@ Deno.test("MisskeyAdapter.handleNote - a filtered-out note causes no source look
   assertEquals(received.length, 0);
 });
 
-Deno.test("fetchRecentMessages - note: channel enriches retained quotes once per source", async () => {
+test("fetchRecentMessages - note: channel enriches retained quotes once per source", async () => {
   const sourceLookups: string[] = [];
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     const noteId = typeof params.noteId === "string" ? params.noteId : "";
@@ -3064,7 +3065,7 @@ Deno.test("fetchRecentMessages - note: channel enriches retained quotes once per
   );
 });
 
-Deno.test("fetchRecentMessages - notes excluded by the limit cause no source lookups", async () => {
+test("fetchRecentMessages - notes excluded by the limit cause no source lookups", async () => {
   const sourceLookups: string[] = [];
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     const noteId = typeof params.noteId === "string" ? params.noteId : "";
@@ -3088,7 +3089,7 @@ Deno.test("fetchRecentMessages - notes excluded by the limit cause no source loo
   assertEquals(sourceLookups, ["src-new"]);
 });
 
-Deno.test("fetchRecentMessages - a failed source lookup is nonfatal and attempted once", async () => {
+test("fetchRecentMessages - a failed source lookup is nonfatal and attempted once", async () => {
   const sourceLookups: string[] = [];
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     const noteId = typeof params.noteId === "string" ? params.noteId : "";
@@ -3124,7 +3125,7 @@ Deno.test("fetchRecentMessages - a failed source lookup is nonfatal and attempte
   assertEquals(messages.map((m) => m.content), ["comment cur", "comment rep1", "comment rep2"]);
 });
 
-Deno.test("fetchRecentMessages - an unusable lookup response is invalid_source", async () => {
+test("fetchRecentMessages - an unusable lookup response is invalid_source", async () => {
   const responses: Array<[string, unknown]> = [
     ["a mismatched source id", createMockSourceNote({ id: "someone-else" })],
     ["a null response", null],
@@ -3152,7 +3153,7 @@ Deno.test("fetchRecentMessages - an unusable lookup response is invalid_source",
   }
 });
 
-Deno.test("fetchRecentMessages - the quote deadline is cumulative and aborts the pending lookup", async () => {
+test("fetchRecentMessages - the quote deadline is cumulative and aborts the pending lookup", async () => {
   using clock = new FakeTime("2026-01-01T00:00:00.000Z");
   const sourceLookups: string[] = [];
 
@@ -3223,7 +3224,7 @@ Deno.test("fetchRecentMessages - the quote deadline is cumulative and aborts the
   assertEquals(clock.next(), false);
 });
 
-Deno.test("fetchRecentMessages - timeline:self enriches the bot's own retained quotes", async () => {
+test("fetchRecentMessages - timeline:self enriches the bot's own retained quotes", async () => {
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     const noteId = typeof params.noteId === "string" ? params.noteId : "";
     if (endpoint === "users/notes") {
@@ -3248,7 +3249,7 @@ Deno.test("fetchRecentMessages - timeline:self enriches the bot's own retained q
   assertEquals((messages[0].quotedNote as AvailableQuotedNote).content, "own source");
 });
 
-Deno.test("fetchRecentMessages - dm: channel enriches incoming quotes", async () => {
+test("fetchRecentMessages - dm: channel enriches incoming quotes", async () => {
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     const noteId = typeof params.noteId === "string" ? params.noteId : "";
     if (endpoint === "notes/mentions") {
@@ -3268,7 +3269,7 @@ Deno.test("fetchRecentMessages - dm: channel enriches incoming quotes", async ()
   assertEquals((messages[0].quotedNote as AvailableQuotedNote).content, "dm source");
 });
 
-Deno.test("searchRelatedMessages - enriches retained quotes and keeps the result order", async () => {
+test("searchRelatedMessages - enriches retained quotes and keeps the result order", async () => {
   const adapter = createAdapterWithFullMockClient((endpoint, params) => {
     const noteId = typeof params.noteId === "string" ? params.noteId : "";
     if (endpoint === "notes/search") {
@@ -3290,7 +3291,7 @@ Deno.test("searchRelatedMessages - enriches retained quotes and keeps the result
   assertEquals("quotedNote" in messages[1], false);
 });
 
-Deno.test("fetchRecentMessages - chat messages never gain a quote field", async () => {
+test("fetchRecentMessages - chat messages never gain a quote field", async () => {
   const adapter = createAdapterWithFullMockClient((endpoint) => {
     if (endpoint === "chat/messages/user-timeline") return [createMockChatMessage({ id: "c1" })];
     return [];

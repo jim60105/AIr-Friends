@@ -11,7 +11,7 @@
 - **Podman 與 Podman Compose**，或相容的 Docker 環境（Docker 24.0 以上搭配 Compose v2.20 以上）。
 - **Git**：用於複製專案儲存庫。
 - 若要在本機直接執行（不透過容器）。
-  - **Deno** 2.x 以上版本。
+  - **Bun** 1.4.2（版本固定於 `package.json` 的 `packageManager`）。
   - **Node.js** 22.20.0 以上版本（選用，供安裝與管理特定外部技能）。
 
 ---

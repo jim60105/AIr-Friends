@@ -9,7 +9,10 @@
  * grant authorization tokens or guarantee race-free execution across later IO.
  */
 
-import { basename, dirname, isAbsolute, normalize, resolve, SEPARATOR } from "@std/path";
+import { basename, dirname, isAbsolute, normalize, resolve, sep as SEPARATOR } from "node:path";
+import fsp from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 export type RootRole =
   | "workspace"
@@ -188,13 +191,13 @@ export interface TrustedSkillsRootConfig {
 }
 
 export interface MetadataReader {
-  lstat(path: string): Promise<Deno.FileInfo>;
+  lstat(path: string): Promise<Stats>;
   realPath(path: string): Promise<string>;
 }
 
 export const defaultMetadataReader: MetadataReader = {
-  lstat: (path: string) => Deno.lstat(path),
-  realPath: (path: string) => Deno.realPath(path),
+  lstat: (path: string) => fsp.lstat(path),
+  realPath: (path: string) => fsp.realpath(path),
 };
 
 /**
@@ -418,7 +421,7 @@ export function resolveSessionPath(
     };
   }
 
-  // Anchor relative path to sessionCwd (NEVER Deno.cwd())
+  // Anchor relative path to sessionCwd (NEVER the process cwd)
   let normalized: string;
   if (isAbsolute(expanded)) {
     normalized = normalize(expanded);
@@ -438,7 +441,7 @@ export function resolveSessionPath(
   };
 }
 
-function extractIdentity(info: Deno.FileInfo): ObservedIdentity | undefined {
+function extractIdentity(info: Stats): ObservedIdentity | undefined {
   if (info.dev !== null && info.dev !== undefined && info.ino !== null && info.ino !== undefined) {
     return { dev: info.dev, ino: info.ino };
   }
@@ -463,7 +466,7 @@ export async function canonicalizeSessionRoots(
   let workspaceIdentity: ObservedIdentity | undefined;
   try {
     const lstatWorkspace = await reader.lstat(context.sessionCwd);
-    if (!lstatWorkspace.isDirectory && !lstatWorkspace.isSymlink) {
+    if (!lstatWorkspace.isDirectory() && !lstatWorkspace.isSymbolicLink()) {
       return {
         ok: false,
         reason: "invalid_root",
@@ -472,7 +475,7 @@ export async function canonicalizeSessionRoots(
     }
     canonicalWorkspace = await reader.realPath(context.sessionCwd);
     const destInfo = await reader.lstat(canonicalWorkspace);
-    if (!destInfo.isDirectory) {
+    if (!destInfo.isDirectory()) {
       return {
         ok: false,
         reason: "invalid_root",
@@ -502,7 +505,7 @@ export async function canonicalizeSessionRoots(
   const configuredStaging = resolve(context.sessionCwd, "tmp", context.skillSessionId);
 
   let stagingInfo: CanonicalRootInfo;
-  let stagingLstat: Deno.FileInfo | undefined;
+  let stagingLstat: Stats | undefined;
   try {
     stagingLstat = await reader.lstat(configuredStaging);
   } catch {
@@ -514,7 +517,7 @@ export async function canonicalizeSessionRoots(
       // Staging exists physically
       const canonicalStaging = await reader.realPath(configuredStaging);
       const destInfo = await reader.lstat(canonicalStaging);
-      if (!destInfo.isDirectory) {
+      if (!destInfo.isDirectory()) {
         return {
           ok: false,
           reason: "invalid_root",
@@ -539,15 +542,9 @@ export async function canonicalizeSessionRoots(
         readOnly: false,
       };
     } catch (err) {
-      const errName =
-        (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-          ? err.name
-          : undefined;
-      if (
-        stagingLstat.isSymlink &&
-        (errName === "NotFound" ||
-          (err instanceof Error && err.message.toLowerCase().includes("no such file")))
-      ) {
+      const isNotFound = isNotFoundError(err) ||
+        (err instanceof Error && err.message.toLowerCase().includes("no such file"));
+      if (stagingLstat.isSymbolicLink() && isNotFound) {
         return {
           ok: false,
           reason: "dangling_symlink",
@@ -570,8 +567,7 @@ export async function canonicalizeSessionRoots(
     } catch (e) {
       lstatErr = e;
     }
-    const isNotFound = (lstatErr && typeof lstatErr === "object" && "name" in lstatErr &&
-      lstatErr.name === "NotFound") ||
+    const isNotFound = isNotFoundError(lstatErr) ||
       (lstatErr instanceof Error && lstatErr.message.toLowerCase().includes("no such file"));
     if (!isNotFound) {
       return {
@@ -591,7 +587,7 @@ export async function canonicalizeSessionRoots(
       await reader.lstat(configuredTmp);
       canonicalTmp = await reader.realPath(configuredTmp);
       const tmpInfo = await reader.lstat(canonicalTmp);
-      if (tmpInfo.isDirectory) {
+      if (tmpInfo.isDirectory()) {
         tmpExists = true;
       }
     } catch {
@@ -613,7 +609,7 @@ export async function canonicalizeSessionRoots(
         };
       }
       const tmpDestInfo = await reader.lstat(canonicalTmp);
-      if (!tmpDestInfo.isDirectory) {
+      if (!tmpDestInfo.isDirectory()) {
         return { ok: false, reason: "invalid_root", message: `Workspace 'tmp' is not a directory` };
       }
       prospectiveAncestor = canonicalTmp;
@@ -641,7 +637,7 @@ export async function canonicalizeSessionRoots(
   if (context.sharedWorkspacePath) {
     try {
       const lstatShared = await reader.lstat(context.sharedWorkspacePath);
-      if (!lstatShared.isDirectory && !lstatShared.isSymlink) {
+      if (!lstatShared.isDirectory() && !lstatShared.isSymbolicLink()) {
         return {
           ok: false,
           reason: "invalid_root",
@@ -650,7 +646,7 @@ export async function canonicalizeSessionRoots(
       }
       const canonicalShared = await reader.realPath(context.sharedWorkspacePath);
       const destInfo = await reader.lstat(canonicalShared);
-      if (!destInfo.isDirectory) {
+      if (!destInfo.isDirectory()) {
         return {
           ok: false,
           reason: "invalid_root",
@@ -687,7 +683,7 @@ export async function canonicalizeSessionRoots(
 
     try {
       const lstatSkills = await reader.lstat(trustedSkills.ownedRootPath);
-      if (!lstatSkills.isDirectory && !lstatSkills.isSymlink) {
+      if (!lstatSkills.isDirectory() && !lstatSkills.isSymbolicLink()) {
         return {
           ok: false,
           reason: "invalid_root",
@@ -707,7 +703,7 @@ export async function canonicalizeSessionRoots(
         // remain mandatory.
         !trustedSkills.rootIdentity ||
         (
-          lstatSkills.isSymlink || canonicalSkills !== trustedSkills.ownedRootPath ||
+          lstatSkills.isSymbolicLink() || canonicalSkills !== trustedSkills.ownedRootPath ||
           destInfo.dev !== trustedSkills.rootIdentity.dev ||
           destInfo.ino !== trustedSkills.rootIdentity.ino
         )
@@ -718,7 +714,7 @@ export async function canonicalizeSessionRoots(
           message: "Owned skill root identity changed",
         };
       }
-      if (!destInfo.isDirectory) {
+      if (!destInfo.isDirectory()) {
         return {
           ok: false,
           reason: "invalid_root",
@@ -796,11 +792,11 @@ async function observeLinkFreeDirectory(
 ): Promise<{ canonicalPath: string; identity?: ObservedIdentity } | undefined> {
   try {
     const info = await reader.lstat(path);
-    if (!info.isDirectory || info.isSymlink) return undefined;
+    if (!info.isDirectory() || info.isSymbolicLink()) return undefined;
     const canonicalPath = await reader.realPath(path);
     if (canonicalPath !== path) return undefined;
     const destInfo = await reader.lstat(canonicalPath);
-    if (!destInfo.isDirectory) return undefined;
+    if (!destInfo.isDirectory()) return undefined;
     return { canonicalPath, identity: extractIdentity(destInfo) };
   } catch {
     return undefined;
@@ -913,14 +909,14 @@ async function observeOmpNativeState(
   ) {
     return { ok: true, value: { reservedPaths } };
   }
-  let journalInfo: Deno.FileInfo;
+  let journalInfo: Stats;
   try {
     journalInfo = await reader.lstat(artifacts.journalPath);
   } catch {
     return { ok: true, value: { reservedPaths } };
   }
   if (
-    !journalInfo.isFile || journalInfo.isSymlink ||
+    !journalInfo.isFile() || journalInfo.isSymbolicLink() ||
     dirname(artifacts.journalPath) !== artifacts.anchorDirectory ||
     !sameObservedIdentity(extractIdentity(journalInfo), artifacts.journalIdentity)
   ) {
@@ -942,7 +938,7 @@ async function observeOmpNativeState(
     let anchorExists = false;
     try {
       const anchorInfo = await reader.lstat(artifacts.anchorDirectory);
-      anchorExists = anchorInfo.isDirectory && !anchorInfo.isSymlink;
+      anchorExists = anchorInfo.isDirectory() && !anchorInfo.isSymbolicLink();
     } catch {
       anchorExists = false;
     }
@@ -991,7 +987,7 @@ async function observeOmpNativeState(
 interface PathComponentCheck {
   readonly status: "exists" | "missing" | "symlink_escape" | "dangling" | "loop" | "error";
   readonly finalCanonicalPath?: string;
-  readonly fileInfo?: Deno.FileInfo;
+  readonly fileInfo?: Stats;
   readonly observedSymlinks: ObservedSymlink[];
   readonly prospectiveAncestor?: string;
   readonly missingSuffix?: string[];
@@ -1055,15 +1051,11 @@ async function tracePathUnderRoot(
   for (let i = 0; i < segments.length; i++) {
     const nextPath = resolve(currentPhysicalPath, segments[i]);
 
-    let stat: Deno.FileInfo;
+    let stat: Stats;
     try {
       stat = await reader.lstat(nextPath);
     } catch (err) {
-      const errName =
-        (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-          ? err.name
-          : undefined;
-      const isNotFound = errName === "NotFound" ||
+      const isNotFound = isNotFoundError(err) ||
         (err instanceof Error && err.message.toLowerCase().includes("no such file"));
       if (isNotFound) {
         // Component does not exist.
@@ -1087,19 +1079,14 @@ async function tracePathUnderRoot(
       };
     }
 
-    if (stat.isSymlink) {
+    if (stat.isSymbolicLink()) {
       let linkTargetCanonical: string;
       try {
         linkTargetCanonical = await reader.realPath(nextPath);
       } catch (err) {
-        const errName =
-          (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-            ? err.name
-            : undefined;
-        if (
-          errName === "NotFound" ||
-          (err instanceof Error && err.message.toLowerCase().includes("no such file"))
-        ) {
+        const isNotFound = isNotFoundError(err) ||
+          (err instanceof Error && err.message.toLowerCase().includes("no such file"));
+        if (isNotFound) {
           return {
             status: "dangling",
             observedSymlinks,
@@ -1108,10 +1095,15 @@ async function tracePathUnderRoot(
             error: err,
           };
         }
+        const errCode = (err && typeof err === "object" && "code" in err &&
+            typeof err.code === "string")
+          ? err.code
+          : undefined;
         if (
-          errName === "FilesystemLoop" ||
+          errCode === "ELOOP" ||
           (err instanceof Error &&
-            (err.message.includes("loop") || err.message.includes("too many levels")))
+            (err.message.includes("loop") || err.message.includes("ELOOP") ||
+              err.message.includes("too many levels")))
         ) {
           return {
             status: "loop",
@@ -1314,7 +1306,7 @@ export async function resolveFilesystemTarget(
       // Ancestor must be an existing directory
       try {
         const ancInfo = await reader.lstat(ancestor);
-        if (!ancInfo.isDirectory) {
+        if (!ancInfo.isDirectory()) {
           firstFatalFailure = {
             ok: false,
             reason: "wrong_target_type",
@@ -1374,7 +1366,7 @@ export async function resolveFilesystemTarget(
       }
       const fileInfo = check.fileInfo!;
       // For file-or-new, if target exists, it must be a regular file, NOT a directory
-      if (expectation === "file-or-new" && !fileInfo.isFile) {
+      if (expectation === "file-or-new" && !fileInfo.isFile()) {
         firstFatalFailure = {
           ok: false,
           reason: "wrong_target_type",
@@ -1385,7 +1377,7 @@ export async function resolveFilesystemTarget(
       }
 
       // Special node check: reject FIFO, socket, block/char device
-      if (!fileInfo.isFile && !fileInfo.isDirectory && !fileInfo.isSymlink) {
+      if (!fileInfo.isFile() && !fileInfo.isDirectory() && !fileInfo.isSymbolicLink()) {
         firstFatalFailure = {
           ok: false,
           reason: "wrong_target_type",
@@ -1395,7 +1387,7 @@ export async function resolveFilesystemTarget(
       }
 
       // Check expectation
-      if (expectation === "existing-file" && !fileInfo.isFile) {
+      if (expectation === "existing-file" && !fileInfo.isFile()) {
         firstFatalFailure = {
           ok: false,
           reason: "wrong_target_type",
@@ -1405,7 +1397,7 @@ export async function resolveFilesystemTarget(
         continue;
       }
 
-      if (expectation === "existing-directory" && !fileInfo.isDirectory) {
+      if (expectation === "existing-directory" && !fileInfo.isDirectory()) {
         firstFatalFailure = {
           ok: false,
           reason: "wrong_target_type",
@@ -1443,7 +1435,7 @@ export async function resolveFilesystemTarget(
         if (rootRel.startsWith(SEPARATOR)) rootRel = rootRel.slice(1);
         primarySuccess = {
           canonicalTarget: canonicalDest,
-          targetType: fileInfo.isDirectory ? "directory" : "file",
+          targetType: fileInfo.isDirectory() ? "directory" : "file",
           targetIdentity: extractIdentity(fileInfo),
           observedSymlinks: check.observedSymlinks,
           rootRelativePath: rootRel,

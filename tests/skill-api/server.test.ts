@@ -15,6 +15,9 @@ import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.
 import type { EmailReminderSession } from "../../src/types/reminder.ts";
 import { EmailMessageStore } from "../../src/platforms/email/message-store.ts";
 import { createEmailAttachmentPreparation } from "../../src/platforms/email/attachment-preparation.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // Build request headers, optionally with the per-session caller token (F13).
 function jsonHeaders(token?: string): Record<string, string> {
@@ -53,8 +56,8 @@ async function waitForServer(port: number, maxAttempts = 10): Promise<boolean> {
   return false;
 }
 
-Deno.test("SkillAPIServer - constructs successfully", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - constructs successfully", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -78,12 +81,12 @@ Deno.test("SkillAPIServer - constructs successfully", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - starts and stops", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - starts and stops", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -119,12 +122,12 @@ Deno.test("SkillAPIServer - starts and stops", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - handles OPTIONS preflight", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - handles OPTIONS preflight", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -157,12 +160,12 @@ Deno.test("SkillAPIServer - handles OPTIONS preflight", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - rejects non-POST methods", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - rejects non-POST methods", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -198,12 +201,12 @@ Deno.test("SkillAPIServer - rejects non-POST methods", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - returns 404 for invalid routes", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - returns 404 for invalid routes", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -239,12 +242,12 @@ Deno.test("SkillAPIServer - returns 404 for invalid routes", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - validates session ID", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - validates session ID", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -295,12 +298,12 @@ Deno.test("SkillAPIServer - validates session ID", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - validates skill name", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - validates skill name", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -328,7 +331,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
       userId: "123",
       isDm: false,
       workspace: mockWorkspace,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: {} as any,
       triggerEvent: {
         platform: "discord",
@@ -371,12 +374,12 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - allows multiple replies within limit", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -400,7 +403,7 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -453,12 +456,12 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-reply rejected after reaching limit", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -481,7 +484,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -546,12 +549,12 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - reply count not incremented on failed send-reply", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -574,7 +577,7 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: false, error: "Platform error" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -634,12 +637,12 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply not affected by reply limit", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -663,7 +666,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -727,12 +730,12 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - reply count incremented even on rejection", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - reply count incremented even on rejection", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -755,7 +758,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -833,12 +836,12 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -861,7 +864,7 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -926,12 +929,12 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loop", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loop", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -954,7 +957,7 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "test123" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1021,12 +1024,12 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-reply success updates lastSentMessageId", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1049,7 +1052,7 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1107,12 +1110,12 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply success updates lastSentMessageId", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1136,7 +1139,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "original_msg" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_new" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1204,12 +1207,12 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - get-message skill via API", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - get-message skill via API", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1240,7 +1243,7 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
           timestamp: new Date("2024-07-01T10:00:00Z"),
           isBot: false,
         }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1295,12 +1298,12 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - get-message uses lastSentMessageId from session", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1335,7 +1338,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
           isBot: true,
         });
       },
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1400,12 +1403,12 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1429,7 +1432,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1507,12 +1510,12 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termination", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termination", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1536,7 +1539,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1634,12 +1637,12 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1663,7 +1666,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1749,12 +1752,12 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - edit-reply count independent from reply count", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply count independent from reply count", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1778,7 +1781,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -1845,15 +1848,15 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - skill API call refreshes session timeout", async () => {
+  const tempDir = await makeTempDir();
   try {
     // Create workspace directory structure for memory-stats
-    await Deno.mkdir(`${tempDir}/workspaces/discord/123`, { recursive: true });
+    await fsp.mkdir(`${tempDir}/workspaces/discord/123`, { recursive: true });
 
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1890,7 +1893,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
         tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
         isDm: false,
       },
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: { platform: "discord" } as any,
       triggerEvent: {
         platform: "discord",
@@ -1901,7 +1904,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
         guildId: "",
         content: "test",
         timestamp: new Date(),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
 
@@ -1928,13 +1931,13 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
 // 8.4: edit-reply writes reply_edited audit entry
-Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - edit-reply success writes reply_edited audit entry", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -1955,7 +1958,7 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
     const mockAdapter = {
       sendReply: () => Promise.resolve({ success: true, messageId: "original_msg" }),
       editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg" }),
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const sessionId = sessionRegistry.register({
@@ -2025,7 +2028,7 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
 
     // Read audit file and verify reply_edited entry
     const auditPath = `${auditDir}/discord/123/${sessionId}.jsonl`;
-    const content = await Deno.readTextFile(auditPath);
+    const content = await fsp.readFile(auditPath, "utf8");
     const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
     const editedEntry = entries.find((e: { phase: string }) => e.phase === "reply_edited");
     assertExists(editedEntry);
@@ -2035,13 +2038,13 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
 // 8.5: memory-save writes memory_operation audit entry
-Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - memory-save writes memory_operation audit entry", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -2052,7 +2055,7 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const wsDir = `${tempDir}/workspaces/discord/123`;
-    await Deno.mkdir(wsDir, { recursive: true });
+    await fsp.mkdir(wsDir, { recursive: true });
 
     const mockWorkspace = {
       key: "discord/123",
@@ -2068,7 +2071,7 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
       userId: "123",
       isDm: false,
       workspace: mockWorkspace,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: {} as any,
       triggerEvent: {
         platform: "discord",
@@ -2119,7 +2122,7 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
     await new Promise((r) => setTimeout(r, 200));
 
     const auditPath = `${auditDir}/discord/123/${sessionId}.jsonl`;
-    const content = await Deno.readTextFile(auditPath);
+    const content = await fsp.readFile(auditPath, "utf8");
     const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
     const memEntry = entries.find((e: { phase: string }) => e.phase === "memory_operation");
     assertExists(memEntry);
@@ -2131,13 +2134,13 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
 // 8.5: memory-search writes memory_operation audit entry
-Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - memory-search writes memory_operation audit entry", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -2148,7 +2151,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const wsDir = `${tempDir}/workspaces/discord/123`;
-    await Deno.mkdir(wsDir, { recursive: true });
+    await fsp.mkdir(wsDir, { recursive: true });
 
     const mockWorkspace = {
       key: "discord/123",
@@ -2164,7 +2167,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
       userId: "123",
       isDm: false,
       workspace: mockWorkspace,
-      // deno-lint-ignore no-explicit-any
+      // oxlint-disable-next-line typescript/no-explicit-any
       platformAdapter: {} as any,
       triggerEvent: {
         platform: "discord",
@@ -2215,7 +2218,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
     await new Promise((r) => setTimeout(r, 200));
 
     const auditPath = `${auditDir}/discord/123/${sessionId}.jsonl`;
-    const content = await Deno.readTextFile(auditPath);
+    const content = await fsp.readFile(auditPath, "utf8");
     const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
     const memEntry = entries.find((e: { phase: string }) => e.phase === "memory_operation");
     assertExists(memEntry);
@@ -2224,7 +2227,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -2262,7 +2265,7 @@ function createSendFileRig(
         messageId: "file_msg_1",
         messageIds: ["file_msg_1"],
       }),
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 
   const sessionId = sessionRegistry.register({
@@ -2287,11 +2290,11 @@ function createSendFileRig(
   return { sessionRegistry, skillRegistry, sessionId, mockWorkspace };
 }
 
-Deno.test("SkillAPIServer - send-file rejected after one successful call", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file rejected after one successful call", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     const port = 3101;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2324,7 +2327,7 @@ Deno.test("SkillAPIServer - send-file rejected after one successful call", async
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -2334,11 +2337,11 @@ Deno.test("SkillAPIServer - send-file rejected after one successful call", async
 // recovery table lists as "confirmed pre-delivery failure" are rejected by the
 // script before the Skill API is called; an unreadable path is the equivalent
 // server-side preflight rejection and must behave the same way for the quota.
-Deno.test("SkillAPIServer - send-file preflight rejection leaves the slot unused and a corrected call delivers", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file preflight rejection leaves the slot unused and a corrected call delivers", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/good.png`, "content");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/good.png`, "content");
 
     const port = 3109;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2380,20 +2383,20 @@ Deno.test("SkillAPIServer - send-file preflight rejection leaves the slot unused
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file quota not consumed on total failure (rollback)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file quota not consumed on total failure (rollback)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir, {
       adapter: {
         sendFile: () => Promise.resolve({ success: false, error: "Platform error" }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     const port = 3102;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2429,15 +2432,15 @@ Deno.test("SkillAPIServer - send-file quota not consumed on total failure (rollb
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file doom-loop terminates agent after 4 attempts", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file doom-loop terminates agent after 4 attempts", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     let terminated = false;
     rig.sessionRegistry.setTerminateCallback(rig.sessionId, () => {
@@ -2483,16 +2486,16 @@ Deno.test("SkillAPIServer - send-file doom-loop terminates agent after 4 attempt
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file writes file_sent audit entry (hashContent true)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file writes file_sent audit entry (hashContent true)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.png`, "aaa");
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/b.png`, "bbb");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.png`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/b.png`, "bbb");
 
     const { SessionAuditWriter } = await import("@core/audit-logger.ts");
     const auditDir = `${tempDir}/audit`;
@@ -2527,7 +2530,7 @@ Deno.test("SkillAPIServer - send-file writes file_sent audit entry (hashContent 
     await new Promise((r) => setTimeout(r, 200));
 
     const auditPath = `${auditDir}/discord/123/${rig.sessionId}.jsonl`;
-    const content = await Deno.readTextFile(auditPath);
+    const content = await fsp.readFile(auditPath, "utf8");
     const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
     const sentEntry = entries.find((e: { phase: string }) => e.phase === "file_sent");
     assertExists(sentEntry);
@@ -2544,15 +2547,15 @@ Deno.test("SkillAPIServer - send-file writes file_sent audit entry (hashContent 
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - file_sent audit entry without caption and without hashing", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - file_sent audit entry without caption and without hashing", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.png`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.png`, "aaa");
 
     const { SessionAuditWriter } = await import("@core/audit-logger.ts");
     const auditDir = `${tempDir}/audit`;
@@ -2587,7 +2590,7 @@ Deno.test("SkillAPIServer - file_sent audit entry without caption and without ha
     await new Promise((r) => setTimeout(r, 200));
 
     const auditPath = `${auditDir}/discord/123/${rig.sessionId}.jsonl`;
-    const content = await Deno.readTextFile(auditPath);
+    const content = await fsp.readFile(auditPath, "utf8");
     const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
     const sentEntry = entries.find((e: { phase: string }) => e.phase === "file_sent");
     assertExists(sentEntry);
@@ -2599,12 +2602,12 @@ Deno.test("SkillAPIServer - file_sent audit entry without caption and without ha
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no triggerEvent)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file rejected for triggerless sessions (no triggerEvent)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -2639,7 +2642,7 @@ Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no trig
             messageId: "m",
             messageIds: ["m"],
           }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
 
@@ -2676,12 +2679,12 @@ Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no trig
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - partial delivery marks fileSent and keeps the quota slot", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - partial delivery marks fileSent and keeps the quota slot", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir, {
       adapter: {
@@ -2692,10 +2695,10 @@ Deno.test("SkillAPIServer - partial delivery marks fileSent and keeps the quota 
             messageIds: ["chat_1"],
             error: "Mid-batch failure",
           }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     const port = 3107;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2722,15 +2725,15 @@ Deno.test("SkillAPIServer - partial delivery marks fileSent and keeps the quota 
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - identical repeated send-file calls still reach the doom-loop gate (no result caching)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - identical repeated send-file calls still reach the doom-loop gate (no result caching)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     let terminated = false;
     rig.sessionRegistry.setTerminateCallback(rig.sessionId, () => {
@@ -2771,17 +2774,17 @@ Deno.test("SkillAPIServer - identical repeated send-file calls still reach the d
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
 // ============ Reply threading anchor tests (file-message-reply-threading) ============
 
-Deno.test("SkillAPIServer - send-file success stores lastFileMessageId (not lastSentMessageId)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file success stores lastFileMessageId (not lastSentMessageId)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     const port = 3201;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2809,16 +2812,16 @@ Deno.test("SkillAPIServer - send-file success stores lastFileMessageId (not last
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file workspace-prefixed path returns typed guidance code", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file workspace-prefixed path returns typed guidance code", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir);
     // The de-prefixed candidate EXISTS at the workspace root
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/out.png`, "candidate");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/out.png`, "candidate");
 
     const port = 3201;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2848,20 +2851,20 @@ Deno.test("SkillAPIServer - send-file workspace-prefixed path returns typed guid
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file total failure records no message ID", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file total failure records no message ID", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir, {
       adapter: {
         sendFile: () => Promise.resolve({ success: false, error: "Platform error" }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     const port = 3202;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2884,20 +2887,20 @@ Deno.test("SkillAPIServer - send-file total failure records no message ID", asyn
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-file delivery without a usable message ID records no anchor", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-file delivery without a usable message ID records no anchor", async () => {
+  const tempDir = await makeTempDir();
   try {
     const rig = createSendFileRig(tempDir, {
       adapter: {
         sendFile: () => Promise.resolve({ success: true }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
     });
-    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+    await fsp.writeFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
 
     const port = 3203;
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
@@ -2924,12 +2927,12 @@ Deno.test("SkillAPIServer - send-file delivery without a usable message ID recor
     await server.stop();
     rig.sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-reply success records the per-reply anchor", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -2953,7 +2956,7 @@ Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", as
       },
       platformAdapter: {
         sendReply: () => Promise.resolve({ success: true, messageId: "reply_1" }),
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -2994,12 +2997,12 @@ Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", as
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - send-reply after send-file threads to the file message", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - send-reply after send-file threads to the file message", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -3053,7 +3056,7 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
           capturedEditAnchor = replyToMessageId;
           return Promise.resolve({ success: true, messageId: "reply_1_edited" });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3066,7 +3069,7 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
         timestamp: new Date(),
       },
     });
-    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+    await fsp.writeFile(`${tempDir}/a.txt`, "aaa");
 
     const port = 3205;
     const server = new SkillAPIServer(
@@ -3123,12 +3126,12 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - react-message after a file send targets the trigger message", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - react-message after a file send targets the trigger message", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -3167,7 +3170,7 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
           reactedMessageId = messageId;
           return Promise.resolve({ success: true });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3180,7 +3183,7 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
         timestamp: new Date(),
       },
     });
-    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+    await fsp.writeFile(`${tempDir}/a.txt`, "aaa");
 
     const port = 3206;
     const server = new SkillAPIServer(
@@ -3218,12 +3221,12 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited reply on the trigger anchor", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - ordering: reply → file → edit keeps the edited reply on the trigger anchor", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -3269,7 +3272,7 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
           editAnchor = replyToMessageId;
           return Promise.resolve({ success: true, messageId: "reply_1_edited" });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "discord",
@@ -3282,7 +3285,7 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
         timestamp: new Date(),
       },
     });
-    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+    await fsp.writeFile(`${tempDir}/a.txt`, "aaa");
 
     const port = 3207;
     const server = new SkillAPIServer(
@@ -3331,12 +3334,12 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("SkillAPIServer - Misskey chat partial delivery records the last delivered ID and threads to it", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - Misskey chat partial delivery records the last delivered ID and threads to it", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -3379,7 +3382,7 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
           capturedReplyAnchor = options?.replyToMessageId;
           return Promise.resolve({ success: true, messageId: "reply_1" });
         },
-        // deno-lint-ignore no-explicit-any
+        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       triggerEvent: {
         platform: "misskey",
@@ -3392,9 +3395,9 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
         timestamp: new Date(),
       },
     });
-    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
-    await Deno.writeTextFile(`${tempDir}/b.txt`, "bbb");
-    await Deno.writeTextFile(`${tempDir}/c.txt`, "ccc");
+    await fsp.writeFile(`${tempDir}/a.txt`, "aaa");
+    await fsp.writeFile(`${tempDir}/b.txt`, "bbb");
+    await fsp.writeFile(`${tempDir}/c.txt`, "ccc");
 
     const port = 3208;
     const server = new SkillAPIServer(
@@ -3440,7 +3443,7 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -3464,8 +3467,8 @@ function quotedHistoryAdapter(quoted: QuotedNote, plain: PlatformMessage): Platf
   } as unknown as PlatformAdapter;
 }
 
-Deno.test("SkillAPIServer - fetch-context preserves quoted references in recent and search results", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - fetch-context preserves quoted references in recent and search results", async () => {
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -3499,7 +3502,7 @@ Deno.test("SkillAPIServer - fetch-context preserves quoted references in recent 
     };
 
     const wsDir = `${tempDir}/workspaces/misskey/900`;
-    await Deno.mkdir(wsDir, { recursive: true });
+    await fsp.mkdir(wsDir, { recursive: true });
     const sessionId = sessionRegistry.register({
       platform: "misskey",
       channelId: "note:chan",
@@ -3558,7 +3561,7 @@ Deno.test("SkillAPIServer - fetch-context preserves quoted references in recent 
       sessionRegistry.stop();
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
@@ -3634,7 +3637,7 @@ async function createEmailServerHarness(
     port: number;
   },
 ): Promise<EmailServerHarness> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   const platform = options.platform ?? "email";
   const sessionRegistry = new SessionRegistry();
   const workspaceManager = new WorkspaceManager({
@@ -3718,12 +3721,12 @@ async function createEmailServerHarness(
     dispose: async () => {
       await server.stop();
       sessionRegistry.stop();
-      await Deno.remove(tempDir, { recursive: true });
+      await fsp.rm(tempDir, { recursive: true });
     },
   };
 }
 
-Deno.test("SkillAPIServer - email session sends with the host operation context and records accounting", async () => {
+test("SkillAPIServer - email session sends with the host operation context and records accounting", async () => {
   const harness = await createEmailServerHarness({
     port: 3061,
     reply: {
@@ -3760,7 +3763,7 @@ Deno.test("SkillAPIServer - email session sends with the host operation context 
   }
 });
 
-Deno.test("SkillAPIServer - an unknown send-reply rolls back the reply flag but latches uncertainty", async () => {
+test("SkillAPIServer - an unknown send-reply rolls back the reply flag but latches uncertainty", async () => {
   const harness = await createEmailServerHarness({
     port: 3062,
     reply: {
@@ -3786,7 +3789,7 @@ Deno.test("SkillAPIServer - an unknown send-reply rolls back the reply flag but 
   }
 });
 
-Deno.test("SkillAPIServer - a recorded submission keeps the reserved reply slot", async () => {
+test("SkillAPIServer - a recorded submission keeps the reserved reply slot", async () => {
   const harness = await createEmailServerHarness({
     port: 3063,
     reply: {
@@ -3809,7 +3812,7 @@ Deno.test("SkillAPIServer - a recorded submission keeps the reserved reply slot"
   }
 });
 
-Deno.test("SkillAPIServer - a failing email send with no metadata consults the durable journal", async () => {
+test("SkillAPIServer - a failing email send with no metadata consults the durable journal", async () => {
   const harness = await createEmailServerHarness({
     port: 3064,
     reply: { success: false, error: "transport error with no recorded result" },
@@ -3841,7 +3844,7 @@ Deno.test("SkillAPIServer - a failing email send with no metadata consults the d
   }
 });
 
-Deno.test("SkillAPIServer - a composed email is accounted on the host work item", async () => {
+test("SkillAPIServer - a composed email is accounted on the host work item", async () => {
   const drafts: { workId: string; actionSlot: string }[] = [];
   const mailService: EmailComposeMailService = {
     send: (draft) => {
@@ -3873,7 +3876,7 @@ Deno.test("SkillAPIServer - a composed email is accounted on the host work item"
   }
 });
 
-Deno.test("SkillAPIServer - a Discord session carries no email context or accounting", async () => {
+test("SkillAPIServer - a Discord session carries no email context or accounting", async () => {
   const harness = await createEmailServerHarness({ port: 3067, platform: "discord" });
   try {
     const response = await harness.post("send-reply", { message: "hello" });
@@ -3894,7 +3897,7 @@ Deno.test("SkillAPIServer - a Discord session carries no email context or accoun
 const REMINDER_ID = "rem_row23";
 const REMINDER_ANCHOR_ID = "00000000-9999-4999-8999-999999999999";
 
-Deno.test("SkillAPIServer - a reminder session binds its own operation and persisted anchor", async () => {
+test("SkillAPIServer - a reminder session binds its own operation and persisted anchor", async () => {
   const harness = await createEmailServerHarness({
     port: 3068,
     reminder: {
@@ -3933,7 +3936,7 @@ Deno.test("SkillAPIServer - a reminder session binds its own operation and persi
   }
 });
 
-Deno.test("SkillAPIServer - a reminder session cannot compose or send files", async () => {
+test("SkillAPIServer - a reminder session cannot compose or send files", async () => {
   let composeCalls = 0;
   const mailService = {
     send: () => {
@@ -3963,11 +3966,11 @@ Deno.test("SkillAPIServer - a reminder session cannot compose or send files", as
   }
 });
 
-Deno.test("SkillAPIServer - email retrieval stages archived attachments into each calling session", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillAPIServer - email retrieval stages archived attachments into each calling session", async () => {
+  const tempDir = await makeTempDir();
   const workspacesRoot = `${tempDir}/workspaces`;
   const workspacePath = `${workspacesRoot}/email/${EMAIL_OWNER}`;
-  await Deno.mkdir(`${workspacePath}/tmp`, { recursive: true });
+  await fsp.mkdir(`${workspacePath}/tmp`, { recursive: true });
   const store = new EmailMessageStore({ workspacesRoot });
   const sessionRegistry = new SessionRegistry();
   const server = new SkillAPIServer(
@@ -4047,7 +4050,7 @@ Deno.test("SkillAPIServer - email retrieval stages archived attachments into eac
     assertEquals(getBody.success, true);
     const firstPath = getBody.data.attachments[0].sessionPath as string;
     assert(firstPath.startsWith(`${workspacePath}/tmp/${firstSession}/attachments/`));
-    assertEquals(await Deno.readFile(firstPath), bytes);
+    assertEquals(new Uint8Array(await fsp.readFile(firstPath)), bytes);
 
     const contextBody = await post(firstSession, "fetch-context", {
       type: "recent_messages",
@@ -4062,7 +4065,7 @@ Deno.test("SkillAPIServer - email retrieval stages archived attachments into eac
     const secondPath = secondBody.data.attachments[0].sessionPath as string;
     assert(secondPath.startsWith(`${workspacePath}/tmp/${secondSession}/attachments/`));
     assert(secondPath !== firstPath);
-    assertEquals(await Deno.readFile(secondPath), bytes);
+    assertEquals(new Uint8Array(await fsp.readFile(secondPath)), bytes);
 
     // The backend archive bytes are exactly what forwarding reads.
     assertEquals(await store.attachment(EMAIL_OWNER, recordId, attachmentId), bytes);
@@ -4070,6 +4073,6 @@ Deno.test("SkillAPIServer - email retrieval stages archived attachments into eac
     await server.stop();
     sessionRegistry.stop();
     store.close();
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });

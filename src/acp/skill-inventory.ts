@@ -4,7 +4,7 @@
 // D2, generalizing `unify-omp-skill-root-resolution` D3). One EXPLICIT
 // deployment-resolved absolute root — the output of `resolveTrustedSkillsRoot`,
 // the SAME root for BOTH agent types, never a HOME scan and never a
-// `Deno.cwd()/skills` constructor default — is observed once at construction and
+// process-cwd-relative `skills` constructor default — is observed once at construction and
 // rechecked at every decision:
 //
 // - `scripts` records CANONICAL ABSOLUTE regular-file paths plus their
@@ -21,8 +21,8 @@
 // - BOTH agent types discover installed entries by scanning that root; neither
 //   restricts eligibility to an authored name catalog, so an external skill
 //   published into the root is eligible for either agent type. The retained
-//   bounding rules are the `scripts/*.ts`-only enumeration, the `deno`-only
-//   interpreter allowlist, the reserved-entry exclusion and the decision-time
+//   bounding rules are the `scripts/*.ts`-only enumeration, the exact two-form
+//   Bun invocation grammar, the reserved-entry exclusion and the decision-time
 //   identity rechecks below.
 // - A configured name filters observed entries inside the root and contributes
 //   NOTHING for a missing/inaccessible skill: the old absent-skill → command-
@@ -38,7 +38,7 @@
 //   identity, or a replaced script identity all deny. Identity-tuple fields are
 //   denial-only: a changed field can never widen authority.
 
-import { SEPARATOR } from "@std/path";
+import { sep as SEPARATOR } from "node:path";
 import { isValidSkillNameComponent, RESERVED_SKILL_ENTRIES } from "@core/bundled-skills.ts";
 import type { SkillsRootObservation } from "@core/skills-root.ts";
 import {
@@ -48,6 +48,9 @@ import {
   FD_REDIRECT_TOKEN_PATTERN,
   tokenizeShellCommand,
 } from "./command-syntax.ts";
+import fs from "node:fs";
+import type { Dirent, Stats } from "node:fs";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 /**
  * Stat fields beyond (dev, ino) that pin a physical object. `ctimeMs` and
@@ -55,10 +58,12 @@ import {
  * null-equal, so the tuple never tautologically denies; a tuple field that is
  * PRESENT at build time and differs at decision time always denies.
  */
-function statTuple(stat: Deno.FileInfo): { ctimeMs: number | null; size: number | null } {
+function statTuple(stat: Stats): { ctimeMs: number | null; size: number | null } {
   return {
-    ctimeMs: stat.ctime === null ? null : stat.ctime.getTime(),
-    size: stat.size === null ? null : stat.size,
+    // Node reports `ctimeMs` with sub-second precision; the identity rule is
+    // unchanged at whole-second granularity, so the truncation is now explicit.
+    ctimeMs: Math.floor(stat.ctimeMs / 1000) * 1000,
+    size: stat.size,
   };
 }
 
@@ -71,8 +76,8 @@ export interface SkillScriptEntry {
   readonly dev: number;
   readonly ino: number;
   /**
-   * Inode change time at enumeration, in milliseconds but at whole-second
-   * granularity (Deno truncates `ctime` to seconds); null when unobservable.
+   * Inode change time at enumeration, in milliseconds rounded down to
+   * whole-second granularity; null when unobservable.
    */
   readonly ctimeMs: number | null;
   /** Byte size at enumeration: clock-independent replacement discriminator. */
@@ -106,15 +111,15 @@ export interface SkillAutoApproveList {
 
 /** Injectable filesystem seam; defaults to the real filesystem. */
 export interface SkillInventoryFs {
-  lstat(path: string): Deno.FileInfo;
-  readDir(path: string): Deno.DirEntry[];
+  lstat(path: string): Stats;
+  readDir(path: string): Dirent[];
   realPath(path: string): string;
 }
 
 const realFs: SkillInventoryFs = {
-  lstat: (path) => Deno.lstatSync(path),
-  readDir: (path) => [...Deno.readDirSync(path)],
-  realPath: (path) => Deno.realPathSync(path),
+  lstat: (path) => fs.lstatSync(path),
+  readDir: (path) => [...fs.readdirSync(path, { withFileTypes: true })],
+  realPath: (path) => fs.realpathSync(path),
 };
 
 export interface BuildSkillAutoApproveListInput {
@@ -156,7 +161,7 @@ export function buildSkillAutoApproveList(
   // The root must be physically present, a real directory, and still the same
   // physical tree the resolver canonicalized.
   const rootStat = fs.lstat(canonicalPath);
-  if (!rootStat.isDirectory || fs.realPath(canonicalPath) !== canonicalPath) {
+  if (!rootStat.isDirectory() || fs.realPath(canonicalPath) !== canonicalPath) {
     throw new Error(`Skill inventory root "${canonicalPath}" is not a canonical directory`);
   }
 
@@ -168,7 +173,7 @@ export function buildSkillAutoApproveList(
   // entries, exactly as before — with no agent-type (or catalog) restriction.
   const candidateNames: string[] = [];
   for (const entry of fs.readDir(canonicalPath)) {
-    if (!entry.isDirectory) continue;
+    if (!entry.isDirectory()) continue;
     if (RESERVED_SKILL_ENTRIES.includes(entry.name)) continue;
     if (explicitFilter && !configuredSet.has(entry.name)) continue;
     candidateNames.push(entry.name);
@@ -182,7 +187,7 @@ export function buildSkillAutoApproveList(
     let skillIsRealDirectory = false;
     try {
       const stat = fs.lstat(skillDir);
-      skillIsRealDirectory = stat.isDirectory && fs.realPath(skillDir) === skillDir;
+      skillIsRealDirectory = stat.isDirectory() && fs.realPath(skillDir) === skillDir;
     } catch {
       skillIsRealDirectory = false;
     }
@@ -193,18 +198,18 @@ export function buildSkillAutoApproveList(
     }
     let hasSkillDocument = false;
     try {
-      hasSkillDocument = fs.lstat(`${skillDir}${SEPARATOR}SKILL.md`).isFile;
+      hasSkillDocument = fs.lstat(`${skillDir}${SEPARATOR}SKILL.md`).isFile();
     } catch {
       hasSkillDocument = false;
     }
     const scriptsDir = `${skillDir}${SEPARATOR}scripts`;
-    let scriptsEntries: Deno.DirEntry[] | null;
+    let scriptsEntries: Dirent[] | null;
     let scriptsDirAbsent = false;
     try {
       scriptsEntries = fs.readDir(scriptsDir);
     } catch {
       scriptsEntries = null;
-      // ABSENT (nothing exists at the path — Deno.errors.NotFound ONLY) is a
+      // ABSENT (nothing exists at the path — ENOENT ONLY) is a
       // command-based skill shape; a path that EXISTS but fails enumeration,
       // or whose metadata cannot be OBSERVED at all (permission/IO errors —
       // post-duck N1: an unobservable path is not proof of absence), never
@@ -213,7 +218,7 @@ export function buildSkillAutoApproveList(
         fs.lstat(scriptsDir);
         scriptsDirAbsent = false;
       } catch (error) {
-        scriptsDirAbsent = error instanceof Deno.errors.NotFound;
+        scriptsDirAbsent = isNotFoundError(error);
       }
     }
     if (scriptsEntries === null) {
@@ -225,11 +230,11 @@ export function buildSkillAutoApproveList(
       continue;
     }
     for (const script of scriptsEntries) {
-      if (!script.isFile || !script.name.endsWith(".ts")) continue;
+      if (!script.isFile() || !script.name.endsWith(".ts")) continue;
       const scriptPath = `${scriptsDir}${SEPARATOR}${script.name}`;
       try {
         const stat = fs.lstat(scriptPath);
-        if (!stat.isFile) continue;
+        if (!stat.isFile()) continue;
         const canonical = fs.realPath(scriptPath);
         // Reject linked/escaping scripts: the canonical file must remain the
         // exact spelling enumerated under the root.
@@ -273,34 +278,34 @@ export function isUnderRoot(path: string, root: string): boolean {
 // Decision-time entrypoint matching
 // ---------------------------------------------------------------------------
 
-/** Interpreters that may precede a skill script as the launcher. */
-const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
-
 /**
- * Flags the `deno [flags] run [flags] <script>` grammar may carry without
- * ever introducing or affecting an executable module (post-duck B2: skipping
- * every dash token allowed `--preload <trusted> <evil>` to launder the
- * trusted token as the "entrypoint" while Deno executes the preload module
- * and an unapproved main). ONLY these value-less / value-inconsequential
- * permission-and-noise flags are skipped; anything else — `--preload`/
- * `--import`, `--import-map`, `--inspect`, `--v8-flags`, `--config`, `--env`,
- * `--` and any unknown flag — denies fail-closed rather than guessing arity.
+ * The exact literal `bun run` prefix a skill script may be launched through
+ * (design section 4.4). Every token, in this order, is required; the script
+ * spelling follows it. No other `bun` spelling is an interpreter route.
  */
-const DENO_RUN_SAFE_FLAGS =
-  /^(-A|--allow-all|--allow-(net|read|write|env|run|ffi|hrtime|sys|import)(=\S+)?|--no-check|-r|--quiet|-q|--no-lock)$/;
+export const LITERAL_BUN_RUN = [
+  "bun",
+  "run",
+  "--no-env-file",
+  "--no-install",
+  "--config=/opt/air/skill-bunfig.toml",
+] as const;
 
 /**
  * Locate the invocation ENTRYPOINT and its class.
  *
- * Direct shebang execution: the first token is the entrypoint — but ONLY when
- * it is not a known interpreter. Interpreter launch requires the supported
- * grammar `deno [flags...] run [flags...] <script> <args...>`: the FIRST
- * non-flag token after `deno` must be exactly the `run` subcommand (so
- * `deno task run <script>` — where `run` merely launches a workspace task and
- * the path is its ARGUMENT — is never an interpreter entrypoint), and the
- * entrypoint is the first positional after `run`. Flags after `run` are
- * restricted to {@link DENO_RUN_SAFE_FLAGS}: a flag that can introduce an
- * executable module or take an arity-guessable value aborts the match.
+ * Exactly two forms are accepted (design section 4.4): direct execution of a
+ * slash-containing path (the kernel applies the script's own shebang), or the
+ * exact {@link LITERAL_BUN_RUN} prefix followed by such a path. The safe-flag
+ * set is gone on purpose: a working-directory `.env`, a `bunfig.toml`
+ * `preload`, or a `BUN_OPTIONS` environment prefix would otherwise run
+ * attacker code inside a trusted skill. Every other `bun` form — `bun run
+ * <script>`, `bun -e`, `bun x`, `bun <file>`, any extra or reordered prefix
+ * token — denies fail-closed, and an environment assignment as the first token
+ * is a direct spelling without a slash, which the matcher then denies.
+ *
+ * A dash-prefixed or slashless spelling after the literal prefix also denies:
+ * `bun run <name>` looks up `package.json` scripts before any file.
  */
 function resolveScriptEntrypoint(
   tokens: string[],
@@ -308,36 +313,19 @@ function resolveScriptEntrypoint(
   if (tokens.length === 0) return undefined;
   const first = decodeLiteralToken(tokens[0]);
   if (first === undefined) return undefined;
-  if (!ALLOWED_SCRIPT_INTERPRETERS.has(first)) {
+  if (first !== LITERAL_BUN_RUN[0]) {
     return { token: first, viaInterpreter: false };
   }
-  // Interpreter route: `deno ... run ...`
-  let position = 1;
-  while (position < tokens.length) {
-    const token = decodeLiteralToken(tokens[position]);
-    if (token === undefined) return undefined;
-    if (token.startsWith("-")) {
-      if (!DENO_RUN_SAFE_FLAGS.test(token)) return undefined;
-      position++;
-      continue;
-    }
-    // The first positional after `deno` MUST be the `run` subcommand.
-    if (token !== "run") return undefined;
-    position++;
-    break;
+  // Literal route: the prefix must match token for token, then one spelling.
+  if (tokens.length < LITERAL_BUN_RUN.length + 1) return undefined;
+  for (let i = 1; i < LITERAL_BUN_RUN.length; i++) {
+    if (decodeLiteralToken(tokens[i]) !== LITERAL_BUN_RUN[i]) return undefined;
   }
-  if (position >= tokens.length) return undefined;
-  while (position < tokens.length) {
-    const token = decodeLiteralToken(tokens[position]);
-    if (token === undefined) return undefined;
-    if (token.startsWith("-")) {
-      if (!DENO_RUN_SAFE_FLAGS.test(token)) return undefined;
-      position++;
-      continue;
-    }
-    return { token, viaInterpreter: true };
-  }
-  return undefined;
+  const script = decodeLiteralToken(tokens[LITERAL_BUN_RUN.length]);
+  if (script === undefined) return undefined;
+  if (script.startsWith("-")) return undefined;
+  if (!script.includes("/")) return undefined;
+  return { token: script, viaInterpreter: true };
 }
 
 /**
@@ -411,14 +399,12 @@ export interface ScriptEntrypointDecisionContext {
 }
 
 /**
- * Lexical (no-symlink-traversal) normalization, matching how Deno turns a
- * module argument into a URL (`deno_path_util::normalize_path` collapses
- * `.`/`..` components WITHOUT resolving symlinks). Used ONLY as a disagreement
+ * Lexical (no-symlink-traversal) normalization. Used ONLY as a disagreement
  * guard for spellings containing a `..` component (post-duck B1): when a `..`
  * follows a symlinked directory, the kernel traversal the matcher observes and
- * the loader's lexical target DIFFER (`W/jump/../scripts/x.ts` physically
- * reaches the root grant while Deno lexically lands on `W/scripts/x.ts` — a
- * planted file). Such ambiguous spellings deny; ordinary `..` spellings on
+ * a loader's lexical target DIFFER (`W/jump/../scripts/x.ts` physically
+ * reaches the root grant while lexical normalization lands on `W/scripts/x.ts`
+ * — a planted file). Such ambiguous spellings deny; ordinary `..` spellings on
  * symlink-free paths still approve because lexical and physical agree.
  */
 function lexicallyNormalize(path: string): string {
@@ -446,11 +432,10 @@ function lexicallyNormalize(path: string): string {
  * session cwd by RAW component concatenation and handed to `realPath`, so a
  * symlink-free `..` spelling resolves exactly as the loader would. Exception
  * (post-duck B1): when the spelling contains a `..`, lexical and physical
- * resolution must AGREE — an ambiguous `link/../…` spelling whose loader-side
- * lexical target differs from the kernel traversal denies. A slashless
- * direct-exec token is PATH-resolved by the shell — never cwd — so it can
- * never name a script grant here; a slashless positional after a genuine
- * `deno run` IS cwd-relative to Deno and remains eligible.
+ * resolution must AGREE — an ambiguous `link/../…` spelling whose lexical
+ * target differs from the kernel traversal denies. A slashless token is
+ * PATH-resolved by the shell (direct form) or a `package.json` script name
+ * (literal form) — never a grant — so it is denied in both accepted forms.
  */
 export function matchScriptEntrypoint(
   segment: string,
@@ -470,9 +455,10 @@ export function matchScriptEntrypoint(
   const spelling = entrypoint.token;
   if (spelling.includes("\0")) return undefined;
 
-  // Direct execution of a slashless token goes through the shell's PATH, not
-  // the session cwd: only an explicit pathname can name a script grant.
-  if (!entrypoint.viaInterpreter && !spelling.startsWith("/") && !spelling.includes("/")) {
+  // Both accepted forms require a slash in the spelling: a slashless token
+  // either goes through the shell's PATH (direct form) or through Bun's
+  // `package.json` script lookup (literal form), so it can never name a grant.
+  if (!spelling.includes("/")) {
     return undefined;
   }
 
@@ -511,7 +497,7 @@ export function matchScriptEntrypoint(
   // deny without any suffix/home/cwd retry.
   try {
     const rootStat = fs.lstat(list.root.canonicalPath);
-    if (!rootStat.isDirectory) return undefined;
+    if (!rootStat.isDirectory()) return undefined;
     const rootIdentity = list.root.identity;
     if (
       rootStat.dev !== rootIdentity?.dev ||
@@ -524,7 +510,7 @@ export function matchScriptEntrypoint(
     }
     if (fs.realPath(list.root.canonicalPath) !== list.root.canonicalPath) return undefined;
     const stat = fs.lstat(entry.canonicalPath);
-    if (!stat.isFile) return undefined;
+    if (!stat.isFile()) return undefined;
     const tuple = statTuple(stat);
     if (
       stat.dev !== entry.dev ||

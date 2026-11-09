@@ -4,7 +4,7 @@
  * Implements OpenSpec change `enforce-acp-filesystem-authorization`.
  */
 
-import { extname } from "@std/path";
+import { extname } from "node:path";
 import type {
   CanonicalSessionRoots,
   CanonicalTarget,

@@ -1,18 +1,21 @@
 import { assertEquals } from "@std/assert";
 import { loadConfig } from "@core/config-loader.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 async function withTestConfig(
   configContent: string,
   fn: (dir: string) => Promise<void>,
 ): Promise<void> {
-  const dir = await Deno.makeTempDir();
+  const dir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${dir}/config.yaml`, configContent);
-    await Deno.mkdir(`${dir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(`${dir}/prompts/system_reply.md`, "test");
+    await fsp.writeFile(`${dir}/config.yaml`, configContent);
+    await fsp.mkdir(`${dir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${dir}/prompts/system_reply.md`, "test");
     await fn(dir);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 }
 
@@ -29,7 +32,7 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-Deno.test("config-loader - loadConfig applies reminder defaults when partial config", async () => {
+test("config-loader - loadConfig applies reminder defaults when partial config", async () => {
   await withTestConfig(
     baseConfig + `
 reminders:
@@ -46,7 +49,7 @@ reminders:
   );
 });
 
-Deno.test("config-loader - loadConfig clamps minIntervalMs to 10000", async () => {
+test("config-loader - loadConfig clamps minIntervalMs to 10000", async () => {
   await withTestConfig(
     baseConfig + `
 reminders:
@@ -60,7 +63,7 @@ reminders:
   );
 });
 
-Deno.test("config-loader - loadConfig clamps checkIntervalMs to 5000", async () => {
+test("config-loader - loadConfig clamps checkIntervalMs to 5000", async () => {
   await withTestConfig(
     baseConfig + `
 reminders:
@@ -74,7 +77,7 @@ reminders:
   );
 });
 
-Deno.test("config-loader - loadConfig applies channelLurk defaults when not set", async () => {
+test("config-loader - loadConfig applies channelLurk defaults when not set", async () => {
   await withTestConfig(
     baseConfig,
     async (dir) => {
@@ -85,7 +88,7 @@ Deno.test("config-loader - loadConfig applies channelLurk defaults when not set"
   );
 });
 
-Deno.test("config-loader - loadConfig merges channelLurk partial config with defaults", async () => {
+test("config-loader - loadConfig merges channelLurk partial config with defaults", async () => {
   const configWithLurk = `
 platforms:
   discord:
@@ -110,7 +113,7 @@ workspace:
   );
 });
 
-Deno.test("config-loader - loadConfig clamps channelLurk intervalMs to 60000", async () => {
+test("config-loader - loadConfig clamps channelLurk intervalMs to 60000", async () => {
   const configWithSmallInterval = `
 platforms:
   discord:
@@ -135,7 +138,7 @@ workspace:
   );
 });
 
-Deno.test("config-loader - channelLurk sessionType is valid in model routing", async () => {
+test("config-loader - channelLurk sessionType is valid in model routing", async () => {
   const configWithRouting = `
 platforms:
   discord:

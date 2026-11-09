@@ -1,7 +1,7 @@
 // tests/core/memory-recall/retriever.test.ts
 
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
-import { exists } from "@std/fs";
+import { makeTempDir, pathExists as exists } from "../../../src/utils/fs-compat.ts";
 import {
   estimateMemorySectionTokens,
   estimateNoteSectionTokens,
@@ -16,6 +16,8 @@ import type { MemoryRecallConfig } from "../../../src/types/config.ts";
 import type { Platform } from "../../../src/types/events.ts";
 import type { MemoryEntry, MemoryLogEvent, MemoryPatch } from "../../../src/types/memory.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../../../src/types/workspace.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 
 const NOW = new Date("2026-09-25T00:00:00.000Z");
 const TS = NOW.toISOString();
@@ -53,13 +55,14 @@ async function writeMemoryLog(
   append = false,
 ): Promise<void> {
   const body = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
-  await Deno.writeTextFile(path, body, { append });
+  if (append) await fsp.appendFile(path, body);
+  else await fsp.writeFile(path, body);
 }
 
 /** Writes one agent workspace note and returns its absolute path. */
 async function writeNote(fixture: Fixture, name: string, content: string): Promise<string> {
   const path = `${fixture.agentWorkspacePath}/notes/${name}`;
-  await Deno.writeTextFile(path, content);
+  await fsp.writeFile(path, content);
   return path;
 }
 
@@ -90,7 +93,7 @@ interface Fixture {
 }
 
 async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -108,9 +111,9 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
     const guildWorkspace = await manager.getOrCreateWorkspace(event(false));
     const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "channel123");
     const agentWorkspacePath = `${tempDir}/agent-workspace`;
-    await Deno.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
-    await Deno.writeTextFile(`${agentWorkspacePath}/README.md`, "# Agent Workspace\n");
-    await Deno.writeTextFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
+    await fsp.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
+    await fsp.writeFile(`${agentWorkspacePath}/README.md`, "# Agent Workspace\n");
+    await fsp.writeFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
 
     await fn({
       manager,
@@ -124,7 +127,7 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
       channelPath: store.getChannelMemoryFilePathFor(channelWorkspace),
     });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
@@ -144,7 +147,7 @@ function permissiveRetriever(
   );
 }
 
-Deno.test("search - returns the complete resolved memory with score and matched terms", async () => {
+test("search - returns the complete resolved memory with score and matched terms", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({
@@ -176,7 +179,7 @@ Deno.test("search - returns the complete resolved memory with score and matched 
   });
 });
 
-Deno.test("search - a private memory is recalled only in a DM", async () => {
+test("search - a private memory is recalled only in a DM", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "public", content: "鍵盤" }),
@@ -206,7 +209,7 @@ Deno.test("search - a private memory is recalled only in a DM", async () => {
   });
 });
 
-Deno.test("search - an excluded memory is not returned but still counts toward df", async () => {
+test("search - an excluded memory is not returned but still counts toward df", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "a", content: "keyboard" }),
@@ -236,7 +239,7 @@ Deno.test("search - an excluded memory is not returned but still counts toward d
   });
 });
 
-Deno.test("search - a memory sharing only one bigram is not eligible", async () => {
+test("search - a memory sharing only one bigram is not eligible", async () => {
   await withFixture(async (fixture) => {
     // jieba keeps 記憶系統 as one word, so the query 記憶 matches 記憶系統 only
     // through the bigram 記憶.
@@ -255,7 +258,7 @@ Deno.test("search - a memory sharing only one bigram is not eligible", async () 
   });
 });
 
-Deno.test("search - Fast Recall excludes a superseded memory", async () => {
+test("search - Fast Recall excludes a superseded memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "old", content: "我用 HHKB 鍵盤" }),
@@ -272,7 +275,7 @@ Deno.test("search - Fast Recall excludes a superseded memory", async () => {
   });
 });
 
-Deno.test("search - a historical query reaches the superseded memory", async () => {
+test("search - a historical query reaches the superseded memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "old", content: "我用 HHKB 鍵盤" }),
@@ -289,7 +292,7 @@ Deno.test("search - a historical query reaches the superseded memory", async () 
   });
 });
 
-Deno.test("search - Deep Recall also reaches the superseded memory", async () => {
+test("search - Deep Recall also reaches the superseded memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "old", content: "我用 HHKB 鍵盤" }),
@@ -306,7 +309,7 @@ Deno.test("search - Deep Recall also reaches the superseded memory", async () =>
   });
 });
 
-Deno.test("search - an omitted scope searches every allowed scope", async () => {
+test("search - an omitted scope searches every allowed scope", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "user-mem", content: "鍵盤" })]);
     await writeMemoryLog(fixture.channelPath, [
@@ -332,7 +335,7 @@ Deno.test("search - an omitted scope searches every allowed scope", async () => 
   });
 });
 
-Deno.test("search - the scope filter restricts eligibility", async () => {
+test("search - the scope filter restricts eligibility", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "user-mem", content: "鍵盤" })]);
     await writeMemoryLog(fixture.channelPath, [
@@ -363,7 +366,7 @@ Deno.test("search - the scope filter restricts eligibility", async () => {
   });
 });
 
-Deno.test("search - the category filter restricts eligibility", async () => {
+test("search - the category filter restricts eligibility", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "fact", content: "鍵盤", category: "fact" }),
@@ -381,7 +384,7 @@ Deno.test("search - the category filter restricts eligibility", async () => {
   });
 });
 
-Deno.test("search - relatedTo adds a relation bonus to an overlapping related memory", async () => {
+test("search - relatedTo adds a relation bonus to an overlapping related memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "parent", content: "keyboard mouse" }),
@@ -413,7 +416,7 @@ Deno.test("search - relatedTo adds a relation bonus to an overlapping related me
   });
 });
 
-Deno.test("search - a related memory without overlap is dropped", async () => {
+test("search - a related memory without overlap is dropped", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "parent", content: "keyboard", relatedTo: ["child"] }),
@@ -430,7 +433,7 @@ Deno.test("search - a related memory without overlap is dropped", async () => {
   });
 });
 
-Deno.test("search - relatedTo does not expand past one hop", async () => {
+test("search - relatedTo does not expand past one hop", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "a", content: "keyboard", relatedTo: ["c"] }),
@@ -448,7 +451,7 @@ Deno.test("search - relatedTo does not expand past one hop", async () => {
   });
 });
 
-Deno.test("search - a relation bonus never propagates a second hop", async () => {
+test("search - a relation bonus never propagates a second hop", async () => {
   await withFixture(async (fixture) => {
     // b boosts a, and a lists c. a must boost c with its own direct score, not
     // with the score it just received, so the bonus cannot chain.
@@ -485,7 +488,7 @@ Deno.test("search - a relation bonus never propagates a second hop", async () =>
   });
 });
 
-Deno.test("search - one candidate adds at most two related memories", async () => {
+test("search - one candidate adds at most two related memories", async () => {
   await withFixture(async (fixture) => {
     const request: MemoryRecallRequest = {
       mode: "deep",
@@ -520,7 +523,7 @@ Deno.test("search - one candidate adds at most two related memories", async () =
   });
 });
 
-Deno.test("search - Fast Recall selects nothing below minRecallScore", async () => {
+test("search - Fast Recall selects nothing below minRecallScore", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "only", content: "鍵盤" })]);
     const request: MemoryRecallRequest = {
@@ -536,7 +539,7 @@ Deno.test("search - Fast Recall selects nothing below minRecallScore", async () 
   });
 });
 
-Deno.test("search - Fast Recall takes a second memory only when both conditions hold", async () => {
+test("search - Fast Recall takes a second memory only when both conditions hold", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "top", content: "keyboard mouse" }),
@@ -566,7 +569,7 @@ Deno.test("search - Fast Recall takes a second memory only when both conditions 
   });
 });
 
-Deno.test("search - Fast Recall skips a memory that does not fit the token budget", async () => {
+test("search - Fast Recall skips a memory that does not fit the token budget", async () => {
   await withFixture(async (fixture) => {
     const short = memoryEvent({ id: "short", content: "鍵盤" });
     const long = memoryEvent({
@@ -603,7 +606,7 @@ Deno.test("search - Fast Recall skips a memory that does not fit the token budge
   });
 });
 
-Deno.test("search - Fast Recall never exceeds its result and token limits", async () => {
+test("search - Fast Recall never exceeds its result and token limits", async () => {
   await withFixture(async (fixture) => {
     const request: MemoryRecallRequest = {
       mode: "fast",
@@ -636,7 +639,7 @@ Deno.test("search - Fast Recall never exceeds its result and token limits", asyn
   });
 });
 
-Deno.test("search - Deep Recall returns every eligible memory Fast Recall rejects", async () => {
+test("search - Deep Recall returns every eligible memory Fast Recall rejects", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "strong", content: "Air75 V3 鍵盤" }),
@@ -660,7 +663,7 @@ Deno.test("search - Deep Recall returns every eligible memory Fast Recall reject
   });
 });
 
-Deno.test("search - Deep Recall caps the limit at 10", async () => {
+test("search - Deep Recall caps the limit at 10", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(
       fixture.publicPath,
@@ -682,7 +685,7 @@ Deno.test("search - Deep Recall caps the limit at 10", async () => {
   });
 });
 
-Deno.test("search - Deep Recall drops memories below deepMinRecallScore", async () => {
+test("search - Deep Recall drops memories below deepMinRecallScore", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "strong", content: "Air75 V3 鍵盤" }),
@@ -702,7 +705,7 @@ Deno.test("search - Deep Recall drops memories below deepMinRecallScore", async 
   });
 });
 
-Deno.test("search - fastRecallMaxResults caps the Fast selection", async () => {
+test("search - fastRecallMaxResults caps the Fast selection", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "a", content: "keyboard" }),
@@ -727,7 +730,7 @@ Deno.test("search - fastRecallMaxResults caps the Fast selection", async () => {
   });
 });
 
-Deno.test("search - the same request twice returns deep-equal results", async () => {
+test("search - the same request twice returns deep-equal results", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "a", content: "鍵盤 滑鼠", tier: "working" }),
@@ -749,15 +752,18 @@ Deno.test("search - the same request twice returns deep-equal results", async ()
   });
 });
 
-Deno.test("search - recall makes no network request", async () => {
+test("search - recall makes no network request", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "a", content: "鍵盤" })]);
     const originalFetch = globalThis.fetch;
     let called = false;
-    globalThis.fetch = () => {
+    // Test double: the call must never be observed, and Bun's fetch type
+    // carries an extra `preconnect` hook this double does not implement.
+    const fetchDouble = (() => {
       called = true;
       throw new Error("network access during recall");
-    };
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchDouble;
 
     try {
       const result = await permissiveRetriever(fixture.store).search({
@@ -774,7 +780,7 @@ Deno.test("search - recall makes no network request", async () => {
   });
 });
 
-Deno.test("search - a memory appended after a search is visible to the next one", async () => {
+test("search - a memory appended after a search is visible to the next one", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "first", content: "鍵盤" })]);
     const retriever = permissiveRetriever(fixture.store);
@@ -796,7 +802,7 @@ Deno.test("search - a memory appended after a search is visible to the next one"
   });
 });
 
-Deno.test("search - a patch that disables a memory takes effect on the next search", async () => {
+test("search - a patch that disables a memory takes effect on the next search", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "first", content: "鍵盤" })]);
     const retriever = permissiveRetriever(fixture.store);
@@ -814,13 +820,10 @@ Deno.test("search - a patch that disables a memory takes effect on the next sear
   });
 });
 
-Deno.test("search - Deep Recall returns a note pointer", async () => {
+test("search - Deep Recall returns a note pointer", async () => {
   await withFixture(async (fixture) => {
     const path = `${fixture.agentWorkspacePath}/notes/cooking.md`;
-    await Deno.writeTextFile(
-      path,
-      "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes.\n",
-    );
+    await fsp.writeFile(path, "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes.\n");
 
     const result = await permissiveRetriever(fixture.store).search({
       mode: "deep",
@@ -846,10 +849,10 @@ Deno.test("search - Deep Recall returns a note pointer", async () => {
   });
 });
 
-Deno.test("search - a note appears once with its best chunk and at most three chunks", async () => {
+test("search - a note appears once with its best chunk and at most three chunks", async () => {
   await withFixture(async (fixture) => {
     const path = `${fixture.agentWorkspacePath}/notes/guide.md`;
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       path,
       [
         "# Guide",
@@ -891,9 +894,9 @@ Deno.test("search - a note appears once with its best chunk and at most three ch
   });
 });
 
-Deno.test("search - the notes index page is not a result", async () => {
+test("search - the notes index page is not a result", async () => {
   await withFixture(async (fixture) => {
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       `${fixture.agentWorkspacePath}/notes/_index.md`,
       "# Notes Index\n\n- keyboard guide\n",
     );
@@ -909,11 +912,11 @@ Deno.test("search - the notes index page is not a result", async () => {
   });
 });
 
-Deno.test("search - a note symlinked outside the workspace is not indexed", async () => {
+test("search - a note symlinked outside the workspace is not indexed", async () => {
   await withFixture(async (fixture) => {
     const privatePath = `${fixture.agentWorkspacePath}/../memory.private.jsonl`;
-    await Deno.writeTextFile(privatePath, "leaked keyboard secret\n");
-    await Deno.symlink(privatePath, `${fixture.agentWorkspacePath}/notes/leak.md`);
+    await fsp.writeFile(privatePath, "leaked keyboard secret\n");
+    await fsp.symlink(privatePath, `${fixture.agentWorkspacePath}/notes/leak.md`);
 
     const result = await permissiveRetriever(fixture.store).search({
       mode: "deep",
@@ -926,9 +929,9 @@ Deno.test("search - a note symlinked outside the workspace is not indexed", asyn
   });
 });
 
-Deno.test("search - notes are empty without an agent workspace", async () => {
+test("search - notes are empty without an agent workspace", async () => {
   await withFixture(async (fixture) => {
-    await Deno.writeTextFile(`${fixture.agentWorkspacePath}/notes/cooking.md`, "# C\n\npasta\n");
+    await fsp.writeFile(`${fixture.agentWorkspacePath}/notes/cooking.md`, "# C\n\npasta\n");
 
     const result = await permissiveRetriever(fixture.store).search({
       mode: "deep",
@@ -940,7 +943,7 @@ Deno.test("search - notes are empty without an agent workspace", async () => {
   });
 });
 
-Deno.test("search - Fast Recall selects notes independently of the memories", async () => {
+test("search - Fast Recall selects notes independently of the memories", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "top", content: "鍵盤 keyboard" }),
@@ -970,7 +973,7 @@ Deno.test("search - Fast Recall selects notes independently of the memories", as
   });
 });
 
-Deno.test("search - Fast Recall omits a note below noteMinRecallScore", async () => {
+test("search - Fast Recall omits a note below noteMinRecallScore", async () => {
   await withFixture(async (fixture) => {
     const path = await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
     const request: MemoryRecallRequest = {
@@ -999,7 +1002,7 @@ Deno.test("search - Fast Recall omits a note below noteMinRecallScore", async ()
   });
 });
 
-Deno.test("search - Fast Recall selects no note when fastRecallNoteMaxResults is 0", async () => {
+test("search - Fast Recall selects no note when fastRecallNoteMaxResults is 0", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "mem", content: "鍵盤" })]);
     await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
@@ -1021,7 +1024,7 @@ Deno.test("search - Fast Recall selects no note when fastRecallNoteMaxResults is
   });
 });
 
-Deno.test("search - the note budget and the memory budget are independent", async () => {
+test("search - the note budget and the memory budget are independent", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "mem", content: "鍵盤" })]);
     const path = await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
@@ -1050,7 +1053,7 @@ Deno.test("search - the note budget and the memory budget are independent", asyn
   });
 });
 
-Deno.test("search - Fast Recall takes a second note only when both conditions hold", async () => {
+test("search - Fast Recall takes a second note only when both conditions hold", async () => {
   await withFixture(async (fixture) => {
     await writeNote(fixture, "strong.md", "# S\n\n## 鍵盤\n\n鍵盤 keyboard 鍵盤\n");
     await writeNote(fixture, "weak.md", "# W\n\n## 鍵盤\n\nkeyboard 鍵盤\n");
@@ -1089,7 +1092,7 @@ Deno.test("search - Fast Recall takes a second note only when both conditions ho
   });
 });
 
-Deno.test("search - Fast Recall skips a note that does not fit the note budget", async () => {
+test("search - Fast Recall skips a note that does not fit the note budget", async () => {
   await withFixture(async (fixture) => {
     await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
     await writeNote(fixture, "b.md", "# B\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
@@ -1119,7 +1122,7 @@ Deno.test("search - Fast Recall skips a note that does not fit the note budget",
   });
 });
 
-Deno.test("search - a Fast Recall note pointer is one excerpt without deep chunks", async () => {
+test("search - a Fast Recall note pointer is one excerpt without deep chunks", async () => {
   await withFixture(async (fixture) => {
     await writeNote(
       fixture,
@@ -1145,7 +1148,7 @@ Deno.test("search - a Fast Recall note pointer is one excerpt without deep chunk
   });
 });
 
-Deno.test("search - Fast Recall notes are empty without an agent workspace", async () => {
+test("search - Fast Recall notes are empty without an agent workspace", async () => {
   await withFixture(async (fixture) => {
     await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
 
@@ -1160,10 +1163,10 @@ Deno.test("search - Fast Recall notes are empty without an agent workspace", asy
   });
 });
 
-Deno.test("search - Deep Recall caps the note count at the limit", async () => {
+test("search - Deep Recall caps the note count at the limit", async () => {
   await withFixture(async (fixture) => {
     for (let index = 0; index < 12; index++) {
-      await Deno.writeTextFile(
+      await fsp.writeFile(
         `${fixture.agentWorkspacePath}/notes/note-${String(index).padStart(2, "0")}.md`,
         `# Note ${index}\n\nkeyboard\n`,
       );
@@ -1205,11 +1208,11 @@ async function writeLinkedMemory(
   visibility: "public" | "private",
   events: MemoryLogEvent[],
 ): Promise<void> {
-  await Deno.mkdir(linked.path, { recursive: true });
+  await fsp.mkdir(linked.path, { recursive: true });
   await writeMemoryLog(fixture.store.getMemoryFilePathFor(linked, visibility), events);
 }
 
-Deno.test("search - a linked account's public memory is recalled outside a DM", async () => {
+test("search - a linked account's public memory is recalled outside a DM", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "own", content: "keyboard" }),
@@ -1230,7 +1233,7 @@ Deno.test("search - a linked account's public memory is recalled outside a DM", 
   });
 });
 
-Deno.test("search - a linked account's private memory is recalled only in a DM", async () => {
+test("search - a linked account's private memory is recalled only in a DM", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "own", content: "keyboard" }),
@@ -1259,7 +1262,7 @@ Deno.test("search - a linked account's private memory is recalled only in a DM",
   });
 });
 
-Deno.test("search - a current memory supersedes a linked account's memory", async () => {
+test("search - a current memory supersedes a linked account's memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "b-superseder", content: "keyboard", supersedes: ["a-mem"] }),
@@ -1281,7 +1284,7 @@ Deno.test("search - a current memory supersedes a linked account's memory", asyn
   });
 });
 
-Deno.test("search - a relatedTo reference from a current memory boosts a linked memory", async () => {
+test("search - a relatedTo reference from a current memory boosts a linked memory", async () => {
   const search = async (relatedTo: string[]) => {
     let childScore = 0;
     await withFixture(async (fixture) => {
@@ -1312,7 +1315,7 @@ Deno.test("search - a relatedTo reference from a current memory boosts a linked 
   );
 });
 
-Deno.test("search - excludeIds applies to a linked memory", async () => {
+test("search - excludeIds applies to a linked memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "own", content: "mouse" }),
@@ -1341,7 +1344,7 @@ Deno.test("search - excludeIds applies to a linked memory", async () => {
   });
 });
 
-Deno.test("search - an empty linked-workspace list equals an omitted one", async () => {
+test("search - an empty linked-workspace list equals an omitted one", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "own", content: "keyboard" }),
@@ -1362,7 +1365,7 @@ Deno.test("search - an empty linked-workspace list equals an omitted one", async
   });
 });
 
-Deno.test("search - a linked account that never interacted contributes nothing", async () => {
+test("search - a linked account that never interacted contributes nothing", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "own", content: "keyboard" }),
@@ -1382,7 +1385,7 @@ Deno.test("search - a linked account that never interacted contributes nothing",
   });
 });
 
-Deno.test("search - an unreadable linked source is skipped", async () => {
+test("search - an unreadable linked source is skipped", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "own", content: "keyboard" }),
@@ -1390,7 +1393,7 @@ Deno.test("search - an unreadable linked source is skipped", async () => {
     const [linked] = linkedWorkspacesOf(fixture, fixture.guildWorkspace);
     // A directory where the memory file should be makes the load throw a
     // non-NotFound error, which the retriever must log and skip.
-    await Deno.mkdir(`${linked.path}/memory.public.jsonl`, { recursive: true });
+    await fsp.mkdir(`${linked.path}/memory.public.jsonl`, { recursive: true });
 
     const result = await permissiveRetriever(fixture.store).search({
       mode: "fast",
@@ -1403,7 +1406,7 @@ Deno.test("search - an unreadable linked source is skipped", async () => {
   });
 });
 
-Deno.test("search - a duplicate id keeps the current account's memory", async () => {
+test("search - a duplicate id keeps the current account's memory", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
       memoryEvent({ id: "dup", content: "current keyboard" }),

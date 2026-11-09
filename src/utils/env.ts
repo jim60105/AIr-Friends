@@ -206,7 +206,7 @@ export const ENV_MAPPINGS = {
  * Get required environment variable or throw
  */
 export function requireEnv(name: string): string {
-  const value = Deno.env.get(name);
+  const value = process.env[name];
   if (value === undefined || value === "") {
     throw new Error(`Required environment variable ${name} is not set`);
   }
@@ -217,14 +217,14 @@ export function requireEnv(name: string): string {
  * Get optional environment variable with default
  */
 export function getEnv(name: string, defaultValue: string): string {
-  return Deno.env.get(name) ?? defaultValue;
+  return process.env[name] ?? defaultValue;
 }
 
 /**
  * Get current environment name
  */
 export function getEnvironment(): string {
-  return Deno.env.get("DENO_ENV") ?? Deno.env.get("ENV") ?? "development";
+  return process.env["ENV"] ?? "development";
 }
 
 /**
@@ -254,7 +254,7 @@ export function setNestedProperty(
  */
 export function applyEnvOverrides(config: Record<string, unknown>): void {
   for (const [envName, configPath] of Object.entries(ENV_MAPPINGS)) {
-    const value = Deno.env.get(envName);
+    const value = process.env[envName];
     if (value !== undefined && value !== "") {
       // Handle special cases for boolean/number conversion
       let parsedValue: unknown = value;

@@ -8,7 +8,7 @@ Defines the shell-based skill execution architecture, Skill API HTTP server, ses
 
 ### Requirement: Shell-Based Skill Execution
 
-Skills SHALL be implemented as Deno TypeScript scripts in `skills/{skill-name}/scripts/`, each with a `SKILL.md` describing its usage, and SHALL be executed with a `--session-id` parameter while using the shared client library at `skills/lib/client.ts` to communicate back to the main bot via HTTP.
+Skills SHALL be implemented as TypeScript scripts run by Bun in `skills/{skill-name}/scripts/`, each with a `SKILL.md` describing its usage, and SHALL be executed with a `--session-id` parameter while using the shared client library at `skills/lib/client.ts` to communicate back to the main bot via HTTP.
 
 #### Scenario: Agent executes a skill script
 - **GIVEN** an ACP Agent decides to use the `memory-save` skill
@@ -84,8 +84,8 @@ Skills SHALL be implemented as Deno TypeScript scripts in `skills/{skill-name}/s
 #### Scenario: Skill scripts run with scoped Deno permissions
 - **GIVEN** a skill script is executed directly
 - **WHEN** it is run
-- **THEN** it SHALL use the shebang `#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write`
-- **AND** `--allow-read` SHALL be required for reading the staged payload file and the per-session JWT file, and `--allow-write` SHALL enable the script's best-effort deletion of the consumed payload file
+- **THEN** it SHALL use the shebang `#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml`
+- **AND** it SHALL load no `.env` file, install no package and read no `bunfig.toml` from its working directory, and SHALL stop with a non-zero exit when `/opt/air/skill-bunfig.toml` is missing
 
 #### Scenario: SKILL.md describes the session-id source truthfully
 - **GIVEN** a skill's `SKILL.md`
@@ -518,7 +518,7 @@ Skill scripts that carry free-text content SHALL accept that content exclusively
 #### Scenario: Real-path containment re-checked
 - **GIVEN** a payload file that exists
 - **WHEN** the script processes it
-- **THEN** it SHALL resolve the file's real path (`Deno.realPath`) and SHALL re-check the real path for containment
+- **THEN** it SHALL resolve the file's real path (`realpath`) and SHALL re-check the real path for containment
 - **AND** a symlink that escapes the staging directory (e.g. pointing at `/etc/passwd` or into another session's directory) SHALL be rejected
 
 #### Scenario: On success the payload is deleted
@@ -766,8 +766,8 @@ The `send-file` skill SHALL validate every requested `filePaths` path before sen
 #### Scenario: Real-path containment blocks symlink escapes
 - **GIVEN** a symlink inside the workspace that resolves outside the workspace or agent-workspace boundary
 - **WHEN** a `send-file` request for that path is validated
-- **THEN** containment SHALL be checked against the file's REAL path (`Deno.realPath`, symlink-aware) and the path SHALL be rejected
-- **AND** `Deno.stat`/`Deno.readFile` follow symlinks, so without this check they would exfiltrate arbitrary host files
+- **THEN** containment SHALL be checked against the file's REAL path (resolved with `realpath`, symlink-aware) and the path SHALL be rejected
+- **AND** `stat` and `readFile` follow symlinks, so without this check they would exfiltrate arbitrary host files
 
 #### Scenario: Batch limits checked before any byte is read
 - **GIVEN** a multi-file `send-file` invocation
@@ -1614,7 +1614,7 @@ An invalid payload invocation SHALL exit non-zero with a structured error and SH
 
 - **GIVEN** a session staging directory `{workspace}/tmp/sess_own` containing a symlink `leak.md` pointing at `/etc/passwd` (or at a path outside the staging directory)
 - **WHEN** a script is invoked with `--message-file {workspace}/tmp/sess_own/leak.md`
-- **THEN** the script SHALL resolve the real path (`Deno.realPath`) and reject the payload because the real path escapes the staging directory
+- **THEN** the script SHALL resolve the real path (`realpath`) and reject the payload because the real path escapes the staging directory
 - **AND** it SHALL NOT call the Skill API
 
 #### Scenario: Missing flag, absent file and unreadable file rejected
@@ -1635,3 +1635,22 @@ A payload path or structured file-tool path that still carries the `$TMPDIR`/`$S
 - **THEN** the script SHALL resolve and read it exactly as before this change
 - **AND** a payload helper invoked with a raw (unexpanded) `$TMPDIR`/`$SESSION_ID` token path SHALL retain its current documented resolution behavior
 - **AND** this compatibility SHALL be covered by tests
+
+### Requirement: Skill Argument Parsing Matches The Previous Parser
+
+Each built-in skill script SHALL parse its documented flags to the same values the previous parser produced, including aliases, defaults, repeated flags and numeric flags.
+
+#### Scenario: Alias and default
+- **GIVEN** the memory-search script invoked with `-s abc --query-file q.txt`
+- **WHEN** its arguments are parsed
+- **THEN** the session id SHALL be `abc` and the limit SHALL be the number `10`
+
+#### Scenario: Numeric flag
+- **GIVEN** the memory-search script invoked with `--limit 5`
+- **WHEN** its arguments are parsed
+- **THEN** the limit SHALL be the number `5`
+
+#### Scenario: Missing required flag
+- **GIVEN** a skill script invoked without `--session-id` and without a session pointer
+- **WHEN** it runs
+- **THEN** it SHALL exit non-zero before any HTTP request, as before

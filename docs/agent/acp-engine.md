@@ -25,10 +25,10 @@ ACP 引擎依部署型態需要不同的先決條件。
 | :--- | :--- | :--- |
 | **代理人執行檔** | 官方發布映像檔已預先包裝對應二進位檔 | 須於主機 `$PATH` 安裝 `opencode` 或 `omp` 執行檔 |
 | **OMP 原生模式 YAML** | 映像檔預先內建於 `/opt/air/omp/config/` | 須手動提供 `agent-config/omp/restricted.yml` 與 `native-yolo.yml`（無插值或產生器） |
-| **OMP 模型清單 (`models.yml`)** | 預先安裝至 `/home/deno/.omp/agent/models.yml` | 須手動建立於 `$HOME/.omp/agent/models.yml`，且模型 ID 須對齊 OMP 格式 |
-| **技能目錄 (`skills.customDirectories`)**| 指向單一共用根目錄 `/home/deno/.agents/skills/` | 在 OMP 模式檔與 `AGENT_SKILLS_DIR` 明確配置相同的技能目錄路徑 |
+| **OMP 模型清單 (`models.yml`)** | 預先安裝至 `/home/air/.omp/agent/models.yml` | 須手動建立於 `$HOME/.omp/agent/models.yml`，且模型 ID 須對齊 OMP 格式 |
+| **技能目錄 (`skills.customDirectories`)**| 指向單一共用根目錄 `/home/air/.agents/skills/` | 在 OMP 模式檔與 `AGENT_SKILLS_DIR` 明確配置相同的技能目錄路徑 |
 | **OMP 擴充套件 Bundle** | 映像檔建置時自動產生於 `/opt/air/omp/extension/index.js` | 開發環境使用產生的 `build/omp-extension/index.js` |
-| **OMP 原生執行階段快取** | 映像檔建置時自動準備於 `/opt/air/omp/native-cache/{platform}/natives/18.6.1/`（OMP 啟動的硬性先決條件） | 須以固定版本執行檔執行 `deno task prepare:omp-natives`，預設輸出於 `${XDG_CACHE_HOME:-$HOME/.cache}/air-friends/omp/{platform}/natives/18.6.1/` |
+| **OMP 原生執行階段快取** | 映像檔建置時自動準備於 `/opt/air/omp/native-cache/{platform}/natives/18.6.1/`（OMP 啟動的硬性先決條件） | 須以固定版本執行檔執行 `bun run prepare:omp-natives`，預設輸出於 `${XDG_CACHE_HOME:-$HOME/.cache}/air-friends/omp/{platform}/natives/18.6.1/` |
 | **LSP 阻絕政策** | 映像檔模式檔已設定 `tools.approval.lsp: deny` | 手寫模式檔必須在受限與 YOLO 模式中明確宣告 LSP 拒絕 |
 
 ---
@@ -63,11 +63,11 @@ OMP 的原生載入器會把內嵌的原生附加檔（native addons，單一平
 
 ```bash
 # 建置受信任原生擴充套件 Bundle（映像檔建置時自動執行相同步驟）
-deno task bundle:omp-extension
+bun run bundle:omp-extension
 
 # 準備共用的 OMP 原生執行階段快取
 # 預設輸出：${XDG_CACHE_HOME:-$HOME/.cache}/air-friends/omp/{platform}/natives/18.6.1/
-deno task prepare:omp-natives
+bun run prepare:omp-natives
 ```
 
 `prepare:omp-natives` 預設解析 `$PATH` 上的 `omp` 執行檔，也可以 `--executable <path>` 明確指定。準備程式要求執行檔版本恰為固定的 `18.6.1`（快取身分取自版本固定值，`AGENT_OMP_MIN_VERSION` 不影響快取身分）、驗證該平台官方執行檔的 SHA-256，接著以拋棄式的 HOME／工作目錄與既有的臨時 `XDG_DATA_HOME/omp` 執行一次有界的 ACP `initialize` 交握，最後只發布原生子樹與其附帶的 `native-manifest.json` 清單檔；探測過程產生的資料庫、HOME 與工作階段一律丟棄。
@@ -142,14 +142,12 @@ OMP 會把被截斷的 bash 輸出寫進原生工作階段日誌旁的產物目�
 omp --version # 必須回傳指定的相容版本 (如 18.6.1)
 
 # 2. 執行原生執行階段煙霧測試與沙盒掛載驗收
-OMP_NATIVE_ACCEPTANCE=1 deno test \
-  --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi \
+OMP_NATIVE_ACCEPTANCE=1 bun test --timeout=120000 \
   tests/acp/omp-native-runtime-smoke.test.ts \
   tests/acp/filesystem-confinement.test.ts \
   tests/core/omp-pool-modes.test.ts
 
 # 3. 執行伴隨模型驅動的原生工具派發整合測試
-OMP_NATIVE_ACCEPTANCE=1 deno test \
-  --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi \
+OMP_NATIVE_ACCEPTANCE=1 bun test --timeout=120000 \
   tests/integration/omp-native-runtime/native-runtime.integration.test.ts
 ```

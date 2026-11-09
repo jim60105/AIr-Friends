@@ -3,22 +3,24 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { HealthCheckServer } from "../src/healthcheck.ts";
 import { metricsRegistry } from "../src/utils/metrics.ts";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../src/utils/fs-compat.ts";
 
 // The ONE deployment-resolved skill root (`unify-skill-root-and-inventory`):
 // the repository `skills/` tree, which is what `agent.skillsDir` (default
 // `"skills"`) resolves to from the repository working directory for BOTH agent
 // types — used as the positive configured-root fixture for the OMP default.
-const REPO_SKILLS_ROOT = Deno.realPathSync(
-  resolve(import.meta.dirname ?? ".", "../skills"),
-);
+const REPO_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../skills"));
 
 // Helper to find an available port
 function getTestPort(): number {
   return 9100 + Math.floor(Math.random() * 900);
 }
 
-Deno.test("HealthCheckServer - /metrics returns prometheus format when enabled", async () => {
+test("HealthCheckServer - /metrics returns prometheus format when enabled", async () => {
   const port = getTestPort();
   const server = new HealthCheckServer(port, { enabled: true, path: "/metrics" });
   server.start();
@@ -35,7 +37,7 @@ Deno.test("HealthCheckServer - /metrics returns prometheus format when enabled",
   }
 });
 
-Deno.test("HealthCheckServer - /metrics returns 404 when disabled", async () => {
+test("HealthCheckServer - /metrics returns 404 when disabled", async () => {
   const port = getTestPort();
   const server = new HealthCheckServer(port);
   server.start();
@@ -49,7 +51,7 @@ Deno.test("HealthCheckServer - /metrics returns 404 when disabled", async () => 
   }
 });
 
-Deno.test("HealthCheckServer - custom metrics path works", async () => {
+test("HealthCheckServer - custom metrics path works", async () => {
   const port = getTestPort();
   const server = new HealthCheckServer(port, { enabled: true, path: "/custom-metrics" });
   server.start();
@@ -70,7 +72,7 @@ Deno.test("HealthCheckServer - custom metrics path works", async () => {
   }
 });
 
-Deno.test("HealthCheckServer - /health still works with metrics enabled", async () => {
+test("HealthCheckServer - /health still works with metrics enabled", async () => {
   const port = getTestPort();
   const server = new HealthCheckServer(port, { enabled: true, path: "/metrics" });
   server.start();
@@ -85,7 +87,7 @@ Deno.test("HealthCheckServer - /health still works with metrics enabled", async 
   }
 });
 
-Deno.test("HealthCheckServer - /readyz without context returns 503", async () => {
+test("HealthCheckServer - /readyz without context returns 503", async () => {
   const port = getTestPort();
   const server = new HealthCheckServer(port);
   server.start();
@@ -100,21 +102,21 @@ Deno.test("HealthCheckServer - /readyz without context returns 503", async () =>
   }
 });
 
-Deno.test("HealthCheckServer - checkSkillReadiness returns empty checks without context", async () => {
+test("HealthCheckServer - checkSkillReadiness returns empty checks without context", async () => {
   const server = new HealthCheckServer(9999);
   const result = await server.checkSkillReadiness();
   assertEquals(result.allReady, true);
   assertEquals(result.checks.length, 0);
 });
 
-Deno.test("HealthCheckServer - checkSkillReadiness caches results", async () => {
+test("HealthCheckServer - checkSkillReadiness caches results", async () => {
   const server = new HealthCheckServer(9999);
   const result1 = await server.checkSkillReadiness();
   const result2 = await server.checkSkillReadiness();
   assertEquals(result1, result2);
 });
 
-Deno.test("HealthCheckServer - skill readiness updates Prometheus gauge", async () => {
+test("HealthCheckServer - skill readiness updates Prometheus gauge", async () => {
   const server = new HealthCheckServer(9999);
   // Run check to populate gauges (no context = empty checks, but gauge code path is exercised)
   await server.checkSkillReadiness();
@@ -125,8 +127,8 @@ Deno.test("HealthCheckServer - skill readiness updates Prometheus gauge", async 
   assertStringIncludes(metrics, "airfriends_skill_readiness");
 });
 
-Deno.test("HealthCheckServer - workspace write permission check with temp dir", async () => {
-  const tmpDir = await Deno.makeTempDir();
+test("HealthCheckServer - workspace write permission check with temp dir", async () => {
+  const tmpDir = await makeTempDir();
   try {
     const port = getTestPort();
     const server = new HealthCheckServer(port);
@@ -148,7 +150,7 @@ Deno.test("HealthCheckServer - workspace write permission check with temp dir", 
       },
     };
 
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -156,20 +158,21 @@ Deno.test("HealthCheckServer - workspace write permission check with temp dir", 
     const workspaceCheck = result.checks.find((c) => c.name === "workspace:writable");
     assertEquals(workspaceCheck?.ready, true);
 
-    // binary checks for rg, deno, git should be present
+    // binary checks for rg, bun, git should be present
     const binaryChecks = result.checks.filter((c) => c.name.startsWith("binary:"));
     assertEquals(binaryChecks.length, 3);
 
-    // deno should always be available in test environment
-    const denoCheck = result.checks.find((c) => c.name === "binary:deno");
-    assertEquals(denoCheck?.ready, true);
+    // bun should always be available in test environment
+    const bunCheck = result.checks.find((c) => c.name === "binary:bun");
+    assertEquals(bunCheck?.ready, true);
+    assertEquals(result.checks.find((c) => c.name === "binary:deno"), undefined);
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
-Deno.test("HealthCheckServer - skill readiness reports missing script", async () => {
-  const tmpDir = await Deno.makeTempDir();
+test("HealthCheckServer - skill readiness reports missing script", async () => {
+  const tmpDir = await makeTempDir();
   try {
     const server = new HealthCheckServer(9999);
 
@@ -177,7 +180,7 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
     // `skill-root` failure); here it resolves and the registered skill's
     // script is what is missing.
     const skillsDir = tmpDir + "/skills";
-    await Deno.mkdir(skillsDir, { recursive: true });
+    await fsp.mkdir(skillsDir, { recursive: true });
 
     const mockContext = {
       config: {
@@ -195,7 +198,7 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
       },
     };
 
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -203,17 +206,17 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
     assertEquals(scriptCheck?.ready, false);
     assertStringIncludes(scriptCheck?.message ?? "", "not found");
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
 // --- Resolver-scoped readiness (`unify-omp-skill-root-resolution` D4 / 4.2) ---
 
-Deno.test("HealthCheckServer - the OMP default is no special case: readiness uses the ONE configured root", async () => {
+test("HealthCheckServer - the OMP default is no special case: readiness uses the ONE configured root", async () => {
   // `unify-skill-root-and-inventory` D4: with OMP as the default agent the
   // readiness root is the SAME configured `agent.skillsDir` value every other
   // consumer resolves — there is no image/owned alternate tree any more.
-  const tmpDir = await Deno.makeTempDir();
+  const tmpDir = await makeTempDir();
   try {
     const server = new HealthCheckServer(9999);
     const mockContext = {
@@ -227,7 +230,7 @@ Deno.test("HealthCheckServer - the OMP default is no special case: readiness use
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -241,15 +244,15 @@ Deno.test("HealthCheckServer - the OMP default is no special case: readiness use
       `${REPO_SKILLS_ROOT}/fake-skill/scripts/fake-skill.ts`,
     );
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
-Deno.test("HealthCheckServer - an unresolvable configured root fails readiness explicitly for the OMP default too", async () => {
+test("HealthCheckServer - an unresolvable configured root fails readiness explicitly for the OMP default too", async () => {
   // A root that cannot be resolved becomes an explicit failed `skill-root`
   // check naming the configured value — never a substituted image or
   // development tree, and never a silently empty (successful) check.
-  const tmpDir = await Deno.makeTempDir();
+  const tmpDir = await makeTempDir();
   try {
     const server = new HealthCheckServer(9999);
     const mockContext = {
@@ -263,7 +266,7 @@ Deno.test("HealthCheckServer - an unresolvable configured root fails readiness e
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -280,22 +283,22 @@ Deno.test("HealthCheckServer - an unresolvable configured root fails readiness e
     }
     assertEquals(result.allReady, false);
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
-Deno.test("HealthCheckServer - a registered script missing fails despite a copy elsewhere", async () => {
+test("HealthCheckServer - a registered script missing fails despite a copy elsewhere", async () => {
   // Removing a registered script from the resolved root fails its readiness
   // check even when a same-named copy exists in an alternate tree: readiness
   // consults ONLY the one resolved root, and the failure message names it.
-  const tmpDir = await Deno.makeTempDir();
+  const tmpDir = await makeTempDir();
   try {
     const root = tmpDir + "/trusted-skills";
-    await Deno.mkdir(root, { recursive: true });
+    await fsp.mkdir(root, { recursive: true });
     // A personal copy that must NOT satisfy the check:
     const personal = `${tmpDir}/personal/memory-save/scripts`;
-    await Deno.mkdir(personal, { recursive: true });
-    await Deno.writeTextFile(`${personal}/memory-save.ts`, "// copy\n");
+    await fsp.mkdir(personal, { recursive: true });
+    await fsp.writeFile(`${personal}/memory-save.ts`, "// copy\n");
 
     const server = new HealthCheckServer(9999);
     const mockContext = {
@@ -309,7 +312,7 @@ Deno.test("HealthCheckServer - a registered script missing fails despite a copy 
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -318,16 +321,16 @@ Deno.test("HealthCheckServer - a registered script missing fails despite a copy 
     assertStringIncludes(check?.message ?? "", `${root}/memory-save/scripts/memory-save.ts`);
     assertEquals(result.allReady, false);
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
-Deno.test("HealthCheckServer - resolver error yields explicit skill-root failure and Not-checked scripts", async () => {
+test("HealthCheckServer - resolver error yields explicit skill-root failure and Not-checked scripts", async () => {
   // An unresolvable configured root (missing directory) becomes an explicit
   // failed `skill-root` entry — never a fallback tree — and the registered
   // script checks are recorded as honest not-checked failures (HTTP 503 via
   // allReady in handleReadyz).
-  const tmpDir = await Deno.makeTempDir();
+  const tmpDir = await makeTempDir();
   try {
     const server = new HealthCheckServer(9999);
     const mockContext = {
@@ -341,7 +344,7 @@ Deno.test("HealthCheckServer - resolver error yields explicit skill-root failure
       },
       platformRegistry: { isAllConnected: () => true },
     };
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
@@ -353,15 +356,15 @@ Deno.test("HealthCheckServer - resolver error yields explicit skill-root failure
     assertStringIncludes(scriptCheck?.message ?? "", "Not checked");
     assertEquals(result.allReady, false);
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
-Deno.test("HealthCheckServer - readiness cache holds across context changes for the TTL window", async () => {
-  const tmpDir = await Deno.makeTempDir();
+test("HealthCheckServer - readiness cache holds across context changes for the TTL window", async () => {
+  const tmpDir = await makeTempDir();
   try {
     const root = tmpDir + "/skills";
-    await Deno.mkdir(root, { recursive: true });
+    await fsp.mkdir(root, { recursive: true });
     const server = new HealthCheckServer(9999);
     const mkContext = (skills: string[]) => ({
       config: { agent: { skillsDir: root }, workspace: { repoPath: tmpDir }, skillApi: undefined },
@@ -370,31 +373,31 @@ Deno.test("HealthCheckServer - readiness cache holds across context changes for 
       },
       platformRegistry: { isAllConnected: () => true },
     });
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mkContext(["memory-save"]) as any);
     const first = await server.checkSkillReadiness();
     // Replacement context registers a different skill list, but the 30-second
     // cache must keep serving the previous result unchanged.
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mkContext(["totally-new-skill"]) as any);
     const second = await server.checkSkillReadiness();
     assertEquals(second, first);
     assertEquals(second.checks.some((c) => c.name === "scripts:totally-new-skill"), false);
   } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });
 
-Deno.test("HealthCheckServer - skill API connectivity check", async () => {
+test("HealthCheckServer - skill API connectivity check", async () => {
   // Start a simple HTTP server to simulate skill API
   const port = getTestPort();
-  const testServer = Deno.serve({ port }, () => new Response("OK"));
+  const testServer = Bun.serve({ port, fetch: () => new Response("OK") });
 
   try {
     await new Promise((r) => setTimeout(r, 200));
 
     const server = new HealthCheckServer(9999);
-    const tmpDir = await Deno.makeTempDir();
+    const tmpDir = await makeTempDir();
 
     const mockContext = {
       config: {
@@ -412,23 +415,23 @@ Deno.test("HealthCheckServer - skill API connectivity check", async () => {
       },
     };
 
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     server.setContext(mockContext as any);
     const result = await server.checkSkillReadiness();
 
     const apiCheck = result.checks.find((c) => c.name === "skill-api");
     assertEquals(apiCheck?.ready, true);
 
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   } finally {
-    await testServer.shutdown();
+    await testServer.stop();
   }
 });
 
-Deno.test("HealthCheckServer - /readyz includes skillReadiness field", async () => {
+test("HealthCheckServer - /readyz includes skillReadiness field", async () => {
   const port = getTestPort();
   const server = new HealthCheckServer(port);
-  const tmpDir = await Deno.makeTempDir();
+  const tmpDir = await makeTempDir();
 
   const mockContext = {
     config: {
@@ -446,7 +449,7 @@ Deno.test("HealthCheckServer - /readyz includes skillReadiness field", async () 
     },
   };
 
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   server.setContext(mockContext as any);
   server.start();
 
@@ -462,6 +465,6 @@ Deno.test("HealthCheckServer - /readyz includes skillReadiness field", async () 
     assertEquals(Array.isArray(body.skillReadiness.checks), true);
   } finally {
     await server.stop();
-    await Deno.remove(tmpDir, { recursive: true });
+    await fsp.rm(tmpDir, { recursive: true });
   }
 });

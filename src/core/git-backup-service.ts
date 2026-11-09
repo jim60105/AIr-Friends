@@ -1,12 +1,72 @@
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import {
   isReservedOmpNativeCachePath,
   ompNativeCacheExclusionPathspecs,
 } from "@utils/omp-native-cache.ts";
 import type { GitBackupConfig } from "../types/config.ts";
+import fsp from "node:fs/promises";
+import { removePath } from "../utils/fs-compat.ts";
+import { execFile } from "node:child_process";
 
 const logger = createLogger("GitBackupService");
+
+/**
+ * Output ceiling for one captured git invocation. Backups read diffs and index listings, so
+ * the limit sits far above the largest of them; exceeding it rejects like any other failure.
+ */
+const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+interface CommandOutput {
+  code: number;
+  success: boolean;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+}
+
+/**
+ * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`. `env` is
+ * the merged environment the caller built; an absent binary (a string error code such as
+ * `ENOENT`) rejects like the original throw, and a signal-terminated child reports `-1`
+ * rather than reading as success.
+ */
+function runCommand(
+  command: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv },
+): Promise<CommandOutput> {
+  const pending = Promise.withResolvers<CommandOutput>();
+  execFile(command, args, {
+    ...options,
+    encoding: "buffer",
+    maxBuffer: MAX_COMMAND_OUTPUT_BYTES,
+  }, (error, stdout, stderr) => {
+    if (error === null) {
+      pending.resolve({
+        code: 0,
+        success: true,
+        stdout: new Uint8Array(stdout),
+        stderr: new Uint8Array(stderr),
+      });
+      return;
+    }
+    if (typeof error.code === "string") {
+      pending.reject(error);
+      return;
+    }
+    pending.resolve({
+      code: typeof error.code === "number" ? error.code : -1,
+      success: false,
+      stdout: new Uint8Array(
+        typeof error.stdout === "string" ? Buffer.from(error.stdout) : error.stdout ?? stdout,
+      ),
+      stderr: new Uint8Array(
+        typeof error.stderr === "string" ? Buffer.from(error.stderr) : error.stderr ?? stderr,
+      ),
+    });
+  });
+  return pending.promise;
+}
 
 /**
  * Command-scoped configuration every git invocation carries: disable git's implicit
@@ -81,7 +141,7 @@ export class GitBackupService {
   /** Check if a directory is empty. */
   private async isDirEmpty(path: string): Promise<boolean> {
     try {
-      for await (const _entry of Deno.readDir(path)) {
+      for (const _entry of await fsp.readdir(path, { withFileTypes: true })) {
         return false;
       }
       return true;
@@ -363,7 +423,7 @@ export class GitBackupService {
   /** Build the authenticated remote URL with credentials injected. */
   private getAuthenticatedUrl(): string {
     const password = this.config.authPassword ??
-      Deno.env.get("GITHUB_TOKEN") ?? "";
+      process.env["GITHUB_TOKEN"] ?? "";
     if (!password) return this.config.remoteUrl;
 
     const username = this.config.authUser ??
@@ -400,22 +460,23 @@ export class GitBackupService {
     args: string[],
     expectedExitCodes: number[] = [0],
   ): Promise<{ success: boolean; output: string; errorOutput: string }> {
-    const command = new Deno.Command("git", {
-      args: [...BYTE_PRESERVING_GIT_ARGS, ...args],
-      cwd: this.dataDir,
-      env: {
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_AUTHOR_NAME: this.config.authorName,
-        GIT_AUTHOR_EMAIL: this.config.authorEmail,
-        GIT_COMMITTER_NAME: this.config.authorName,
-        GIT_COMMITTER_EMAIL: this.config.authorEmail,
+    // The parent environment stays visible to git (credentials, proxy, operator git config)
+    // with the listed values overriding it, exactly as the Deno spawn without a clearing flag.
+    const { code, stdout, stderr } = await runCommand(
+      "git",
+      [...BYTE_PRESERVING_GIT_ARGS, ...args],
+      {
+        cwd: this.dataDir,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_AUTHOR_NAME: this.config.authorName,
+          GIT_AUTHOR_EMAIL: this.config.authorEmail,
+          GIT_COMMITTER_NAME: this.config.authorName,
+          GIT_COMMITTER_EMAIL: this.config.authorEmail,
+        },
       },
-      stdout: "piped",
-      stderr: "piped",
-    });
-
-    const process = command.spawn();
-    const { code, stdout, stderr } = await process.output();
+    );
     const output = new TextDecoder().decode(stdout);
     const errorOutput = new TextDecoder().decode(stderr);
 
@@ -507,7 +568,7 @@ export class GitBackupService {
     // Also remove .gitmodules if it was auto-created
     const gitmodulesPath = `${this.dataDir}/.gitmodules`;
     try {
-      await Deno.remove(gitmodulesPath);
+      await removePath(gitmodulesPath);
     } catch {
       // .gitmodules doesn't exist — this is the normal case
     }
@@ -526,8 +587,8 @@ export class GitBackupService {
   /** Check if a directory exists. */
   private async dirExists(path: string): Promise<boolean> {
     try {
-      const stat = await Deno.stat(path);
-      return stat.isDirectory;
+      const stat = await fsp.stat(path);
+      return stat.isDirectory();
     } catch {
       return false;
     }
@@ -537,7 +598,7 @@ export class GitBackupService {
   private async cleanStaleLockFiles(): Promise<void> {
     const lockPath = `${this.dataDir}/.git/index.lock`;
     try {
-      await Deno.remove(lockPath);
+      await removePath(lockPath);
       logger.warn("Removed stale Git lock file: {lockPath}", { lockPath });
     } catch {
       // Lock file doesn't exist — this is the normal case

@@ -46,8 +46,11 @@ import {
   OMP_INTENT_PROFILE_FLAG_VALUE,
 } from "./omp/extension/native-registration.ts";
 import { OMP_TOOL_CAPABILITY_MAP } from "./omp/tool-inventory.ts";
-import { dirname, isAbsolute, join, resolve } from "@std/path";
-import { parse as parseYaml } from "@std/yaml";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
+import fs from "node:fs";
+import type { Stats } from "node:fs";
+import { runtimeOs } from "@utils/runtime-platform.ts";
 
 /**
  * Contracted authored native OMP settings documents (development-tree paths;
@@ -76,7 +79,7 @@ export function createAgentConfig(
   // builds its script inventory from it. The observation is identical for both
   // agent types (the resolver has no agent-type selection), so a dashboard
   // agent-type override flows through this same call and lands on the same root.
-  // No consumer re-derives from HOME, `Deno.cwd()/skills` or an image tree, and
+  // No consumer re-derives from HOME, `process.cwd()/skills` or an image tree, and
   // an unresolvable root fails here explicitly before the child is ever spawned.
   const skillsRoot = observeTrustedSkillsRoot(type, appConfig.agent.skillsDir);
 
@@ -134,25 +137,25 @@ function buildBaseAgentConfig(
       const env: Record<string, string> = {};
 
       const opencodeApiKey = appConfig.agent.opencodeApiKey ??
-        Deno.env.get("OPENCODE_API_KEY");
+        process.env["OPENCODE_API_KEY"];
       if (opencodeApiKey) {
         env["OPENCODE_API_KEY"] = opencodeApiKey;
       }
       const openRouterApiKey = appConfig.agent.openRouterApiKey ??
-        Deno.env.get("OPENROUTER_API_KEY");
+        process.env["OPENROUTER_API_KEY"];
       if (openRouterApiKey) {
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
       const geminiApiKey = appConfig.agent.geminiApiKey ??
-        Deno.env.get("GEMINI_API_KEY");
+        process.env["GEMINI_API_KEY"];
       if (geminiApiKey) {
         env["GEMINI_API_KEY"] = geminiApiKey;
         env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
       }
 
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
+      const inheritVars = ["PATH", "HOME", "LANG", "LC_ALL", "USER", "TMPDIR"];
       for (const varName of inheritVars) {
-        const value = Deno.env.get(varName);
+        const value = process.env[varName];
         if (value !== undefined) {
           env[varName] = value;
         }
@@ -196,7 +199,7 @@ function buildBaseAgentConfig(
       }
 
       // Automatically detect and set AGENT_BROWSER_EXECUTABLE_PATH if not already set
-      let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+      let browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
       if (browserPath === undefined) {
         browserPath = detectPlaywrightBinarySync();
       }
@@ -321,12 +324,12 @@ function buildBaseAgentConfig(
         // unloadable specifier.
         const trustedExtensionPath = resolve(resolveOmpExtensionPath());
         try {
-          Deno.statSync(trustedExtensionPath);
+          fs.statSync(trustedExtensionPath);
         } catch {
           throw new Error(
             `Missing trusted extension module at "${trustedExtensionPath}" — ` +
               `build it first from canonical source and locked dependencies with ` +
-              `deno task bundle:omp-extension`,
+              `bun run bundle:omp-extension`,
           );
         }
         args.push("--trusted-extension", trustedExtensionPath);
@@ -336,12 +339,12 @@ function buildBaseAgentConfig(
       const env: Record<string, string> = {};
 
       // Provider credentials: GEMINI_API_KEY, OPENROUTER_API_KEY only
-      const geminiApiKey = appConfig.agent.geminiApiKey ?? Deno.env.get("GEMINI_API_KEY");
+      const geminiApiKey = appConfig.agent.geminiApiKey ?? process.env["GEMINI_API_KEY"];
       if (geminiApiKey) {
         env["GEMINI_API_KEY"] = geminiApiKey;
       }
       const openRouterApiKey = appConfig.agent.openRouterApiKey ??
-        Deno.env.get("OPENROUTER_API_KEY");
+        process.env["OPENROUTER_API_KEY"];
       if (openRouterApiKey) {
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
@@ -349,9 +352,9 @@ function buildBaseAgentConfig(
       // System essentials inheritance. HOME IS inherited normally: native OMP
       // reads its model configuration from the deployment HOME
       // (`~/.omp/agent/models.yml`) and there is no daemon-owned home anymore.
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      const inheritVars = ["PATH", "HOME", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
-        const value = Deno.env.get(varName);
+        const value = process.env[varName];
         if (value !== undefined) {
           env[varName] = value;
         }
@@ -384,7 +387,7 @@ function buildBaseAgentConfig(
       }
 
       // Browser binary
-      let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+      let browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
       if (browserPath === undefined) {
         browserPath = detectPlaywrightBinarySync();
       }
@@ -632,7 +635,7 @@ export function getRetryPromptStrategy(
   // made an installed image (or any relocated tree) read the wrong tree.
   const readSkillDocument = (skill: string): string => {
     try {
-      return Deno.readTextFileSync(join(ctx.skillsDir, skill, "SKILL.md"));
+      return fs.readFileSync(join(ctx.skillsDir, skill, "SKILL.md"), "utf8");
     } catch (error) {
       throw new Error(
         `Retry prompt cannot read the trusted skill document ` +
@@ -714,30 +717,30 @@ export function getRetryPromptStrategy(
  */
 export function detectPlaywrightBinarySync(): string | undefined {
   const searchDirs: string[] = [];
-  const customBrowsersPath = Deno.env.get("PLAYWRIGHT_BROWSERS_PATH");
+  const customBrowsersPath = process.env["PLAYWRIGHT_BROWSERS_PATH"];
   if (customBrowsersPath && customBrowsersPath !== "0") {
     searchDirs.push(customBrowsersPath);
   }
 
-  const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE");
+  const home = process.env["HOME"] || process.env["USERPROFILE"];
   if (home) {
-    if (Deno.build.os === "darwin") {
+    if (runtimeOs() === "darwin") {
       searchDirs.push(join(home, "Library", "Caches", "ms-playwright"));
-    } else if (Deno.build.os === "windows") {
+    } else if (runtimeOs() === "windows") {
       searchDirs.push(join(home, "AppData", "Local", "ms-playwright"));
     } else {
       searchDirs.push(join(home, ".cache", "ms-playwright"));
     }
   }
-  const defaultPath = "/home/deno/.cache/ms-playwright";
+  const defaultPath = "/home/air/.cache/ms-playwright";
   if (!searchDirs.includes(defaultPath)) {
     searchDirs.push(defaultPath);
   }
 
   for (const cacheDir of searchDirs) {
     try {
-      const stat = Deno.statSync(cacheDir);
-      if (!stat.isDirectory) continue;
+      const stat = fs.statSync(cacheDir);
+      if (!stat.isDirectory()) continue;
 
       const found = findBinaryInDirSync(cacheDir);
       if (found) {
@@ -757,7 +760,7 @@ interface PlaywrightDirEntry {
 }
 
 function findBinaryInDirSync(dirPath: string): string | undefined {
-  const isWindows = Deno.build.os === "windows";
+  const isWindows = runtimeOs() === "windows";
   const shellBinaryName = isWindows ? "chrome-headless-shell.exe" : "chrome-headless-shell";
   const chromeBinaryName = isWindows ? "chrome.exe" : "chrome";
 
@@ -767,11 +770,11 @@ function findBinaryInDirSync(dirPath: string): string | undefined {
   const candidates: PlaywrightDirEntry[] = [];
 
   try {
-    for (const entry of Deno.readDirSync(dirPath)) {
-      let isDir = entry.isDirectory;
-      if (!isDir && entry.isSymlink) {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      let isDir = entry.isDirectory();
+      if (!isDir && entry.isSymbolicLink()) {
         try {
-          isDir = Deno.statSync(join(dirPath, entry.name)).isDirectory;
+          isDir = fs.statSync(join(dirPath, entry.name)).isDirectory();
         } catch {
           isDir = false;
         }
@@ -825,15 +828,15 @@ function findFileRecursiveSync(
 
   try {
     const subdirs: string[] = [];
-    for (const entry of Deno.readDirSync(dirPath)) {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
       const fullPath = join(dirPath, entry.name);
-      let isFile = entry.isFile;
-      let isDir = entry.isDirectory;
-      if (entry.isSymlink) {
+      let isFile = entry.isFile();
+      let isDir = entry.isDirectory();
+      if (entry.isSymbolicLink()) {
         try {
-          const stat = Deno.statSync(fullPath);
-          isFile = stat.isFile;
-          isDir = stat.isDirectory;
+          const stat = fs.statSync(fullPath);
+          isFile = stat.isFile();
+          isDir = stat.isDirectory();
         } catch {
           continue;
         }
@@ -988,7 +991,7 @@ export interface EmailIntentTemporaryRoots {
 export interface EmailIntentProfileOptions {
   /** Injectable existence probe; defaults to the real filesystem. */
   readonly exists?: (path: string) => boolean;
-  /** Injectable whole-document reader; defaults to `Deno.readTextFileSync`. */
+  /** Injectable whole-document reader; defaults to `fs.readFileSync`. */
   readonly readFile?: (path: string) => string;
   /**
    * Injectable environment accessor; defaults to the process environment.
@@ -1061,7 +1064,6 @@ const PROFILE_RESERVED_ENV: Record<string, true> = {
   PWD: true,
   LANG: true,
   LC_ALL: true,
-  DENO_DIR: true,
   OPENCODE_CONFIG_CONTENT: true,
 };
 
@@ -1120,7 +1122,7 @@ function isProfileObject(value: unknown): value is ProfileObject {
 /** Real-filesystem existence probe used by the path resolvers. */
 function profileFileExists(path: string): boolean {
   try {
-    return Deno.statSync(path).isFile;
+    return fs.statSync(path).isFile();
   } catch {
     return false;
   }
@@ -1462,7 +1464,7 @@ function repositoryAncestor(path: string): string | undefined {
   let current = path;
   while (true) {
     try {
-      Deno.lstatSync(join(current, ".git"));
+      fs.lstatSync(join(current, ".git"));
       return current;
     } catch {
       const parent = dirname(current);
@@ -1481,7 +1483,7 @@ function assertNoSymlinkRedirect(
   let existing = path;
   while (true) {
     try {
-      const physical = Deno.realPathSync(existing);
+      const physical = fs.realpathSync(existing);
       if (physical !== existing) {
         refuseEmailIntentProfile(
           `the private ${label} "${path}" resolves through a symlink to "${physical}"`,
@@ -1507,31 +1509,31 @@ function prepareFreshPrivateDirectory(
   label: string,
   prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
 ): void {
-  let info: Deno.FileInfo | undefined;
+  let info: Stats | undefined;
   try {
-    info = Deno.lstatSync(path);
+    info = fs.lstatSync(path);
   } catch {
     info = undefined;
   }
   if (info !== undefined) {
-    if (info.isSymlink) {
+    if (info.isSymbolicLink()) {
       refuseEmailIntentProfile(`the private ${label} "${path}" must not be a symlink`, prefix);
     }
-    if (!info.isDirectory) {
+    if (!info.isDirectory()) {
       refuseEmailIntentProfile(
         `the private ${label} "${path}" exists and is not a directory`,
         prefix,
       );
     }
-    if (Deno.readDirSync(path).next().done !== true) {
+    if (fs.readdirSync(path, { withFileTypes: true }).length !== 0) {
       refuseEmailIntentProfile(
         `the private ${label} "${path}" is not fresh: it already contains entries`,
         prefix,
       );
     }
   }
-  Deno.mkdirSync(path, { recursive: true, mode: 0o700 });
-  Deno.chmodSync(path, 0o700);
+  fs.mkdirSync(path, { recursive: true, mode: 0o700 });
+  fs.chmodSync(path, 0o700);
 }
 
 /**
@@ -1587,9 +1589,9 @@ function buildEmailIntentOpencodeConfig(
   temporaryRoots: EmailIntentTemporaryRoots,
   options: EmailIntentProfileOptions,
 ): AgentConfig {
-  const env = options.env ?? ((name: string) => Deno.env.get(name));
+  const env = options.env ?? ((name: string) => process.env[name]);
   const exists = options.exists ?? profileFileExists;
-  const readFile = options.readFile ?? ((path: string) => Deno.readTextFileSync(path));
+  const readFile = options.readFile ?? ((path: string) => fs.readFileSync(path, "utf8"));
 
   if (selection.providerID === "" || !/^[A-Za-z0-9._-]+$/.test(selection.providerID)) {
     refuseEmailIntentProfile(
@@ -2059,9 +2061,9 @@ function writeEmailIntentOmpModels(home: string, bytes: string): string {
   prepareFreshPrivateDirectory(join(home, ".omp"), "HOME/.omp", prefix);
   prepareFreshPrivateDirectory(join(home, ".omp", "agent"), "HOME/.omp/agent", prefix);
   const target = ompHomeModelsPath(home);
-  Deno.writeTextFileSync(target, bytes, { mode: 0o600 });
-  Deno.chmodSync(target, 0o600);
-  if (Deno.readTextFileSync(target) !== bytes) {
+  fs.writeFileSync(target, bytes, { mode: 0o600 });
+  fs.chmodSync(target, 0o600);
+  if (fs.readFileSync(target, "utf8") !== bytes) {
     refuseEmailIntentProfile(
       `the private model configuration "${target}" does not carry the authored bytes`,
       prefix,
@@ -2071,9 +2073,9 @@ function writeEmailIntentOmpModels(home: string, bytes: string): string {
 }
 
 /** The reserved `natives` entry of one private native data root, or `undefined`. */
-function readPathEntry(path: string): Deno.FileInfo | undefined {
+function readPathEntry(path: string): Stats | undefined {
   try {
-    return Deno.lstatSync(path);
+    return fs.lstatSync(path);
   } catch {
     return undefined;
   }
@@ -2099,9 +2101,9 @@ function installEmailIntentOmpNativesLink(home: string, payloadDir: string): str
   const linkPath = ompIntentNativesLinkPath(home);
   const existing = readPathEntry(linkPath);
   if (existing !== undefined) {
-    const held = existing.isSymlink
-      ? `a symbolic link to "${Deno.readLinkSync(linkPath)}"`
-      : existing.isDirectory
+    const held = existing.isSymbolicLink()
+      ? `a symbolic link to "${fs.readlinkSync(linkPath)}"`
+      : existing.isDirectory()
       ? "a real directory"
       : "a non-symlink file";
     refuseEmailIntentProfile(
@@ -2111,11 +2113,11 @@ function installEmailIntentOmpNativesLink(home: string, payloadDir: string): str
       prefix,
     );
   }
-  const temporary = `${linkPath}.link-${Deno.pid}-${crypto.randomUUID()}`;
-  Deno.symlinkSync(payloadDir, temporary);
-  Deno.renameSync(temporary, linkPath);
+  const temporary = `${linkPath}.link-${process.pid}-${crypto.randomUUID()}`;
+  fs.symlinkSync(payloadDir, temporary);
+  fs.renameSync(temporary, linkPath);
   const installed = readPathEntry(linkPath);
-  const installedTarget = installed?.isSymlink ? Deno.readLinkSync(linkPath) : null;
+  const installedTarget = installed?.isSymbolicLink() ? fs.readlinkSync(linkPath) : null;
   if (installedTarget !== payloadDir) {
     refuseEmailIntentProfile(
       `Refusing the native runtime cache entry "${linkPath}": it holds ` +
@@ -2155,8 +2157,8 @@ function prepareEmailIntentOmpNativeData(
   // entry, so the installer below is the single owner of what may live at that
   // entry — the same split the ordinary mode root uses.
   const appDir = ompIntentNativeDataDir(home);
-  Deno.mkdirSync(appDir, { recursive: true, mode: 0o700 });
-  Deno.chmodSync(appDir, 0o700);
+  fs.mkdirSync(appDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(appDir, 0o700);
   installEmailIntentOmpNativesLink(home, cache.payloadDir);
   return cache;
 }
@@ -2192,9 +2194,9 @@ function buildEmailIntentOmpConfig(
   options: EmailIntentProfileOptions,
 ): AgentConfig {
   const prefix = EMAIL_INTENT_OMP_PREFIX;
-  const env = options.env ?? ((name: string) => Deno.env.get(name));
+  const env = options.env ?? ((name: string) => process.env[name]);
   const exists = options.exists ?? profileFileExists;
-  const readFile = options.readFile ?? ((path: string) => Deno.readTextFileSync(path));
+  const readFile = options.readFile ?? ((path: string) => fs.readFileSync(path, "utf8"));
 
   assertEmailIntentOmpSelection(selection);
 
@@ -2237,7 +2239,7 @@ function buildEmailIntentOmpConfig(
   if (!exists(extensionPath)) {
     refuseEmailIntentProfile(
       `Missing trusted extension module at "${extensionPath}" — build it first from canonical ` +
-        `source and locked dependencies with deno task bundle:omp-extension`,
+        `source and locked dependencies with bun run bundle:omp-extension`,
       prefix,
     );
   }

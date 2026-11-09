@@ -17,7 +17,7 @@
 // and a repeated call in the same tick produces no second DATA transaction.
 
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { ChannelConfig, Config, EmailConfig } from "../../src/types/config.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import { buildMailboxFingerprint, MailboxStore } from "../../src/platforms/email/mailbox-store.ts";
@@ -50,6 +50,9 @@ import { dispatchEmailSpontaneousOccurrence } from "@core/spontaneous-target.ts"
 import type { EmailSpontaneousTarget } from "@core/spontaneous-target.ts";
 import { EmailImapTestService } from "../helpers/email-imap-service.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const BOT = "bot@smoke.example";
 const SENDER = "alice@allowed-domain.org";
@@ -125,8 +128,8 @@ async function waitFor(
   }
 }
 
-Deno.test("email spontaneous smoke - one tick reaches live SMTP with one new-thread message", async () => {
-  const base = await Deno.makeTempDir({ prefix: "email-spontaneous-smoke-" });
+test("email spontaneous smoke - one tick reaches live SMTP with one new-thread message", async () => {
+  const base = await makeTempDir({ prefix: "email-spontaneous-smoke-" });
   const smtp = new EmailSmtpTestService({
     tlsMode: "tls",
     username: BOT,
@@ -263,18 +266,18 @@ Deno.test("email spontaneous smoke - one tick reaches live SMTP with one new-thr
     await imap.stop();
     await smtp.stop();
     _resetSharedRegistryForTesting();
-    await Deno.remove(base, { recursive: true }).catch(() => {});
+    await fsp.rm(base, { recursive: true }).catch(() => {});
   }
 });
 
 async function readSmokeSnapshot(emailRoot: string) {
   return JSON.parse(
-    await Deno.readTextFile(join(emailRoot, "spontaneous.json")),
+    await fsp.readFile(join(emailRoot, "spontaneous.json"), "utf8"),
   );
 }
 
-Deno.test("email spontaneous smoke - restart after live SMTP acceptance before successor persistence produces zero replacement target selection or additional DATA", async () => {
-  const base = await Deno.makeTempDir({ prefix: "email-spontaneous-smoke-restart-acc-" });
+test("email spontaneous smoke - restart after live SMTP acceptance before successor persistence produces zero replacement target selection or additional DATA", async () => {
+  const base = await makeTempDir({ prefix: "email-spontaneous-smoke-restart-acc-" });
   const smtp = new EmailSmtpTestService({
     tlsMode: "tls",
     username: BOT,
@@ -395,12 +398,12 @@ Deno.test("email spontaneous smoke - restart after live SMTP acceptance before s
     await imap.stop();
     await smtp.stop();
     _resetSharedRegistryForTesting();
-    await Deno.remove(base, { recursive: true }).catch(() => {});
+    await fsp.rm(base, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("email spontaneous smoke - restart after live SMTP failure/uncertainty produces zero replacement target selection or additional DATA", async () => {
-  const base = await Deno.makeTempDir({ prefix: "email-spontaneous-smoke-restart-unc-" });
+test("email spontaneous smoke - restart after live SMTP failure/uncertainty produces zero replacement target selection or additional DATA", async () => {
+  const base = await makeTempDir({ prefix: "email-spontaneous-smoke-restart-unc-" });
   const emailRoot = join(base, "email");
   const submissionStore = new SubmissionStore(emailRoot);
   await submissionStore.recover();
@@ -519,5 +522,5 @@ Deno.test("email spontaneous smoke - restart after live SMTP failure/uncertainty
     await imap.stop();
     await smtp.stop();
   }
-  await Deno.remove(base, { recursive: true }).catch(() => {});
+  await fsp.rm(base, { recursive: true }).catch(() => {});
 });

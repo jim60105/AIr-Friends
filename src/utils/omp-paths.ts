@@ -7,9 +7,10 @@
 // data root is derived deterministically per approval mode so restricted and
 // native-yolo OMP processes never share a mutable native data directory.
 
-import { basename, join, resolve } from "@std/path";
+import { basename, join, resolve } from "node:path";
 import type { OmpPermissionMode } from "../acp/types.ts";
 import { OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME } from "./omp-native-cache.ts";
+import fs from "node:fs";
 
 /**
  * Canonical SOURCE origin of the deployment-owned trusted extension. Shared with
@@ -27,7 +28,7 @@ export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
 /**
  * Deterministic GENERATED development entry for the trusted extension (C3 D2): the
  * single ESM bundle `scripts/omp/bundle-omp-extension.sh` emits from canonical
- * source plus locked dependencies (frozen lock; `deno task bundle:omp-extension`
+ * source plus locked dependencies (frozen lock; `bun run bundle:omp-extension`
  * builds it). Development launch and the image consume the SAME artifact contract;
  * a missing generated development entry fails the launch preflight with the build
  * remedy — the resolver NEVER falls back to the raw Deno-only source tree.
@@ -140,8 +141,8 @@ export function resolveOmpSystemPromptPath(options: {
 /** Real-filesystem existence probe used by the resolvers above. */
 function defaultExists(path: string): boolean {
   try {
-    const info = Deno.statSync(path);
-    return info.isFile;
+    const info = fs.statSync(path);
+    return info.isFile();
   } catch {
     return false;
   }

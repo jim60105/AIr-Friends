@@ -2,8 +2,9 @@
 
 import { assertEquals, assertExists } from "@std/assert";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
+import { test } from "bun:test";
 
-Deno.test("SessionRegistry - generates unique session IDs", () => {
+test("SessionRegistry - generates unique session IDs", () => {
   const registry = new SessionRegistry();
 
   const id1 = registry.generateSessionId();
@@ -18,7 +19,7 @@ Deno.test("SessionRegistry - generates unique session IDs", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - registers and retrieves sessions", () => {
+test("SessionRegistry - registers and retrieves sessions", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -34,7 +35,7 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
 
   const mockAdapter = {
     platform: "discord",
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 
   const mockEvent = {
@@ -46,7 +47,7 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
     guildId: "",
     content: "test",
     timestamp: new Date(),
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 
   const sessionId = registry.register({
@@ -71,7 +72,7 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - tracks reply sent status", () => {
+test("SessionRegistry - tracks reply sent status", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -91,9 +92,9 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -110,7 +111,7 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - removes sessions", () => {
+test("SessionRegistry - removes sessions", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -130,9 +131,9 @@ Deno.test("SessionRegistry - removes sessions", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -147,7 +148,7 @@ Deno.test("SessionRegistry - removes sessions", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - sessions do not expire by time (only removed explicitly)", async () => {
+test("SessionRegistry - sessions do not expire by time (only removed explicitly)", async () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -168,9 +169,9 @@ Deno.test("SessionRegistry - sessions do not expire by time (only removed explic
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -191,7 +192,7 @@ Deno.test("SessionRegistry - sessions do not expire by time (only removed explic
   registry.stop();
 });
 
-Deno.test("SessionRegistry - replyCount initializes to 0", () => {
+test("SessionRegistry - replyCount initializes to 0", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -208,9 +209,9 @@ Deno.test("SessionRegistry - replyCount initializes to 0", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -218,7 +219,7 @@ Deno.test("SessionRegistry - replyCount initializes to 0", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - incrementReplyCount increments correctly", () => {
+test("SessionRegistry - incrementReplyCount increments correctly", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -235,9 +236,9 @@ Deno.test("SessionRegistry - incrementReplyCount increments correctly", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -248,19 +249,19 @@ Deno.test("SessionRegistry - incrementReplyCount increments correctly", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - incrementReplyCount returns -1 for unknown session", () => {
+test("SessionRegistry - incrementReplyCount returns -1 for unknown session", () => {
   const registry = new SessionRegistry();
   assertEquals(registry.incrementReplyCount("nonexistent"), -1);
   registry.stop();
 });
 
-Deno.test("SessionRegistry - getReplyCount returns 0 for unknown session", () => {
+test("SessionRegistry - getReplyCount returns 0 for unknown session", () => {
   const registry = new SessionRegistry();
   assertEquals(registry.getReplyCount("nonexistent"), 0);
   registry.stop();
 });
 
-Deno.test("SessionRegistry - tracks file sent status per session", () => {
+test("SessionRegistry - tracks file sent status per session", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -277,9 +278,9 @@ Deno.test("SessionRegistry - tracks file sent status per session", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -297,7 +298,7 @@ Deno.test("SessionRegistry - tracks file sent status per session", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - fileSendCount increments, rolls back, and defaults", () => {
+test("SessionRegistry - fileSendCount increments, rolls back, and defaults", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -314,9 +315,9 @@ Deno.test("SessionRegistry - fileSendCount increments, rolls back, and defaults"
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -344,7 +345,7 @@ Deno.test("SessionRegistry - fileSendCount increments, rolls back, and defaults"
   registry.stop();
 });
 
-Deno.test("SessionRegistry - register session without triggerEvent", () => {
+test("SessionRegistry - register session without triggerEvent", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -364,7 +365,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
     userId: "b1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
     // triggerEvent is omitted
   });
@@ -377,7 +378,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setTerminateCallback stores callback", async () => {
+test("SessionRegistry - setTerminateCallback stores callback", async () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -394,9 +395,9 @@ Deno.test("SessionRegistry - setTerminateCallback stores callback", async () => 
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -415,7 +416,7 @@ Deno.test("SessionRegistry - setTerminateCallback stores callback", async () => 
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setTerminateCallback ignores unknown session", () => {
+test("SessionRegistry - setTerminateCallback ignores unknown session", () => {
   const registry = new SessionRegistry();
 
   // Should not throw
@@ -424,7 +425,7 @@ Deno.test("SessionRegistry - setTerminateCallback ignores unknown session", () =
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () => {
+test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -441,9 +442,9 @@ Deno.test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () 
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -457,13 +458,13 @@ Deno.test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () 
   registry.stop();
 });
 
-Deno.test("SessionRegistry - getLastSentMessageId returns undefined for non-existent session", () => {
+test("SessionRegistry - getLastSentMessageId returns undefined for non-existent session", () => {
   const registry = new SessionRegistry();
   assertEquals(registry.getLastSentMessageId("nonexistent"), undefined);
   registry.stop();
 });
 
-Deno.test("SessionRegistry - getLastSentMessageId returns undefined when not set", () => {
+test("SessionRegistry - getLastSentMessageId returns undefined when not set", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -480,9 +481,9 @@ Deno.test("SessionRegistry - getLastSentMessageId returns undefined when not set
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -491,7 +492,7 @@ Deno.test("SessionRegistry - getLastSentMessageId returns undefined when not set
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setLastSentMessageId ignores unknown session", () => {
+test("SessionRegistry - setLastSentMessageId ignores unknown session", () => {
   const registry = new SessionRegistry();
 
   // Should not throw
@@ -501,7 +502,7 @@ Deno.test("SessionRegistry - setLastSentMessageId ignores unknown session", () =
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setLastFileMessageId and getLastFileMessageId", () => {
+test("SessionRegistry - setLastFileMessageId and getLastFileMessageId", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -518,9 +519,9 @@ Deno.test("SessionRegistry - setLastFileMessageId and getLastFileMessageId", () 
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -539,7 +540,7 @@ Deno.test("SessionRegistry - setLastFileMessageId and getLastFileMessageId", () 
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setLastFileMessageId ignores unknown session", () => {
+test("SessionRegistry - setLastFileMessageId ignores unknown session", () => {
   const registry = new SessionRegistry();
 
   // Should not throw
@@ -549,7 +550,7 @@ Deno.test("SessionRegistry - setLastFileMessageId ignores unknown session", () =
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setLastReplyAnchorMessageId and getLastReplyAnchorMessageId", () => {
+test("SessionRegistry - setLastReplyAnchorMessageId and getLastReplyAnchorMessageId", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -566,9 +567,9 @@ Deno.test("SessionRegistry - setLastReplyAnchorMessageId and getLastReplyAnchorM
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -584,7 +585,7 @@ Deno.test("SessionRegistry - setLastReplyAnchorMessageId and getLastReplyAnchorM
   registry.stop();
 });
 
-Deno.test("SessionRegistry - message ID roles are stored per session (isolation)", () => {
+test("SessionRegistry - message ID roles are stored per session (isolation)", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -601,9 +602,9 @@ Deno.test("SessionRegistry - message ID roles are stored per session (isolation)
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
   const sessionB = registry.register({
@@ -612,9 +613,9 @@ Deno.test("SessionRegistry - message ID roles are stored per session (isolation)
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -628,7 +629,7 @@ Deno.test("SessionRegistry - message ID roles are stored per session (isolation)
   registry.stop();
 });
 
-Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback", async () => {
+test("SessionRegistry - setTerminateCallback overwrites previous callback", async () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -645,9 +646,9 @@ Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback",
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -672,7 +673,7 @@ Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback",
   registry.stop();
 });
 
-Deno.test("SessionRegistry - editCount initializes to 0", () => {
+test("SessionRegistry - editCount initializes to 0", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -689,9 +690,9 @@ Deno.test("SessionRegistry - editCount initializes to 0", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -699,7 +700,7 @@ Deno.test("SessionRegistry - editCount initializes to 0", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - incrementEditCount increments correctly", () => {
+test("SessionRegistry - incrementEditCount increments correctly", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -716,9 +717,9 @@ Deno.test("SessionRegistry - incrementEditCount increments correctly", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -729,19 +730,19 @@ Deno.test("SessionRegistry - incrementEditCount increments correctly", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - incrementEditCount returns -1 for unknown session", () => {
+test("SessionRegistry - incrementEditCount returns -1 for unknown session", () => {
   const registry = new SessionRegistry();
   assertEquals(registry.incrementEditCount("nonexistent"), -1);
   registry.stop();
 });
 
-Deno.test("SessionRegistry - getEditCount returns 0 for unknown session", () => {
+test("SessionRegistry - getEditCount returns 0 for unknown session", () => {
   const registry = new SessionRegistry();
   assertEquals(registry.getEditCount("nonexistent"), 0);
   registry.stop();
 });
 
-Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
+test("SessionRegistry - editCount and replyCount are independent", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -758,9 +759,9 @@ Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
     userId: "123",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -776,7 +777,7 @@ Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when active sessions exist", () => {
+test("SessionRegistry - hasActiveSessionsForWorkspace returns true when active sessions exist", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -793,9 +794,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -805,9 +806,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -818,7 +819,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
   registry.stop();
 });
 
-Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no active sessions", () => {
+test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no active sessions", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -835,9 +836,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -848,7 +849,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
   registry.stop();
 });
 
-Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after remove", () => {
+test("SessionRegistry - hasActiveSessionsForWorkspace returns false after remove", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -865,9 +866,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after r
     userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -880,7 +881,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after r
   registry.stop();
 });
 
-Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces are independent", () => {
+test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces are independent", () => {
   const registry = new SessionRegistry();
 
   const workspaceA = {
@@ -905,9 +906,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
     userId: "ua",
     isDm: false,
     workspace: workspaceA,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -917,9 +918,9 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
     userId: "ub",
     isDm: false,
     workspace: workspaceB,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     platformAdapter: {} as any,
-    // deno-lint-ignore no-explicit-any
+    // oxlint-disable-next-line typescript/no-explicit-any
     triggerEvent: {} as any,
   });
 
@@ -931,7 +932,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
   registry.stop();
 });
 
-// deno-lint-ignore no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 const registrationBase: any = {
   platform: "discord",
   channelId: "456",
@@ -947,7 +948,7 @@ const registrationBase: any = {
   platformAdapter: {},
 };
 
-Deno.test("SessionRegistry - register mints a unique caller token distinct from the session ID (F13)", () => {
+test("SessionRegistry - register mints a unique caller token distinct from the session ID (F13)", () => {
   const registry = new SessionRegistry();
 
   const id1 = registry.register(registrationBase);
@@ -965,7 +966,7 @@ Deno.test("SessionRegistry - register mints a unique caller token distinct from 
   registry.stop();
 });
 
-Deno.test("SessionRegistry - get() treats an idle-expired session as absent (F13)", async () => {
+test("SessionRegistry - get() treats an idle-expired session as absent (F13)", async () => {
   const registry = new SessionRegistry(80); // 80ms idle timeout
 
   const id = registry.register(registrationBase);
@@ -977,7 +978,7 @@ Deno.test("SessionRegistry - get() treats an idle-expired session as absent (F13
   registry.stop();
 });
 
-Deno.test("SessionRegistry - touch() refreshes the idle timer (F13)", async () => {
+test("SessionRegistry - touch() refreshes the idle timer (F13)", async () => {
   const registry = new SessionRegistry(120);
 
   const id = registry.register(registrationBase);
@@ -990,7 +991,7 @@ Deno.test("SessionRegistry - touch() refreshes the idle timer (F13)", async () =
   registry.stop();
 });
 
-Deno.test("SessionRegistry - recordOwnership write-once immutable semantics", () => {
+test("SessionRegistry - recordOwnership write-once immutable semantics", () => {
   const registry = new SessionRegistry();
   const mockWorkspace = {
     key: "test/123",

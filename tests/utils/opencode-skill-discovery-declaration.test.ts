@@ -27,20 +27,24 @@ import {
   type JsonSourceObject,
   parseJsonSource,
 } from "@utils/json-source.ts";
+import fs from "node:fs";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDirSync, removePathSync } from "../../src/utils/fs-compat.ts";
 
 /** The document the image installs as the deployed OpenCode configuration. */
-const DEPLOYED_TEMPLATE = Deno.readTextFileSync(
+const DEPLOYED_TEMPLATE = fs.readFileSync(
   new URL("../../agent-config/opencode.json", import.meta.url).pathname,
+  "utf8",
 );
 
 /** A resolved root that is NOT the container default. */
 const OTHER_ROOT = "/srv/deployment/shared-skills";
 
 /** The container default: the stock image's declared `AGENT_SKILLS_DIR`. */
-const CONTAINER_ROOT = "/home/deno/.agents/skills";
+const CONTAINER_ROOT = "/home/air/.agents/skills";
 
 /** The daemon home the shipped template's `~` spellings resolve against. */
-const CONTAINER_HOME = "/home/deno";
+const CONTAINER_HOME = "/home/air";
 
 /** Raw source text of every member of `object` except the named keys. */
 function rawSpansOfOtherMembers(
@@ -74,7 +78,7 @@ interface Deployment {
 }
 
 function makeDeployment(): Deployment {
-  const home = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-decl-home-" }));
+  const home = fs.realpathSync(makeTempDirSync({ prefix: "air-decl-home-" }));
   return {
     home,
     path: `${home}/.config/opencode/opencode.json`,
@@ -82,7 +86,7 @@ function makeDeployment(): Deployment {
   };
 }
 
-Deno.test("declaration - the deployed document names the resolved root and nothing else changes", () => {
+test("declaration - the deployed document names the resolved root and nothing else changes", () => {
   const updated = applyOpencodeSkillDiscoveryDeclaration(
     DEPLOYED_TEMPLATE,
     OTHER_ROOT,
@@ -127,12 +131,13 @@ Deno.test("declaration - the deployed document names the resolved root and nothi
     updated.indexOf('"bash": {'),
     updated.indexOf('"external_directory"'),
   );
-  assertStringIncludes(routing, '"deno run *": "ask"');
+  assertStringIncludes(routing, '"bun *": "ask"');
+  assertStringIncludes(routing, '"bunx *": "deny"');
   assertStringIncludes(routing, '"*.ts*": "ask"');
   assert(!updated.includes('"/app/data/workspaces/*/tmp/**": "deny"'));
 });
 
-Deno.test("declaration - the container default root is already allowed, so only the path list is added", () => {
+test("declaration - the container default root is already allowed, so only the path list is added", () => {
   const updated = applyOpencodeSkillDiscoveryDeclaration(
     DEPLOYED_TEMPLATE,
     CONTAINER_ROOT,
@@ -151,7 +156,7 @@ Deno.test("declaration - the container default root is already allowed, so only 
   );
 });
 
-Deno.test("declaration - an already-correct document is left byte-identical", () => {
+test("declaration - an already-correct document is left byte-identical", () => {
   const rendered = renderOpencodeSkillDiscoveryDeclaration(CONTAINER_ROOT);
   const verdict = inspectOpencodeSkillDiscoveryDeclaration(
     rendered,
@@ -205,9 +210,9 @@ Deno.test("declaration - an already-correct document is left byte-identical", ()
   // The deployment writes NOTHING for such a document: the reader is asked and
   // the writer would fail the test if it were ever called.
   const deployment = makeDeployment();
-  Deno.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
-  Deno.writeTextFileSync(deployment.path, rendered);
-  const before = Deno.lstatSync(deployment.path).mtime?.getTime();
+  fs.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
+  fs.writeFileSync(deployment.path, rendered);
+  const before = fs.lstatSync(deployment.path).mtime?.getTime();
   const result = ensureOpencodeSkillDiscoveryDeclaration(CONTAINER_ROOT, {
     env: deployment.env,
     writeFile: () => {
@@ -216,11 +221,11 @@ Deno.test("declaration - an already-correct document is left byte-identical", ()
   });
   assertEquals(result.action, "unchanged");
   assertEquals(result.path, deployment.path);
-  assertEquals(Deno.readTextFileSync(deployment.path), rendered);
-  assertEquals(Deno.lstatSync(deployment.path).mtime?.getTime(), before);
+  assertEquals(fs.readFileSync(deployment.path, "utf8"), rendered);
+  assertEquals(fs.lstatSync(deployment.path).mtime?.getTime(), before);
 });
 
-Deno.test("declaration - a document that names the root without the allowance is rewritten", () => {
+test("declaration - a document that names the root without the allowance is rewritten", () => {
   const named = `{
   "skills": {
     "paths": [
@@ -239,30 +244,30 @@ Deno.test("declaration - a document that names the root without the allowance is
   assertStringIncludes(updated, '"~/.agents/skills"');
 });
 
-Deno.test("declaration - an absent configuration is created with exactly the declaration entries", () => {
+test("declaration - an absent configuration is created with exactly the declaration entries", () => {
   const deployment = makeDeployment();
   // No configuration directory exists yet either.
   const result = ensureOpencodeSkillDiscoveryDeclaration(OTHER_ROOT, { env: deployment.env });
   assertEquals(result.action, "created");
   assertEquals(result.path, deployment.path);
   assertEquals(result.root, OTHER_ROOT);
-  const created = Deno.readTextFileSync(deployment.path);
+  const created = fs.readFileSync(deployment.path, "utf8");
   assertEquals(created, renderOpencodeSkillDiscoveryDeclaration(OTHER_ROOT));
   assertEquals(Object.keys(JSON.parse(created) as Record<string, unknown>), ["skills", "agent"]);
-  assertEquals(((Deno.lstatSync(deployment.path).mode ?? 0) & 0o777).toString(8), "644");
+  assertEquals(((fs.lstatSync(deployment.path).mode ?? 0) & 0o777).toString(8), "644");
   // The created document is accepted on the next run, and nothing is written.
   assertEquals(
     ensureOpencodeSkillDiscoveryDeclaration(OTHER_ROOT, { env: deployment.env }).action,
     "unchanged",
   );
-  assertEquals(Deno.readTextFileSync(deployment.path), created);
+  assertEquals(fs.readFileSync(deployment.path, "utf8"), created);
 });
 
-Deno.test("declaration - a document that must change but cannot be written fails explicitly", () => {
+test("declaration - a document that must change but cannot be written fails explicitly", () => {
   const deployment = makeDeployment();
-  Deno.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
-  Deno.writeTextFileSync(deployment.path, `{ "skills": { "paths": ["/somewhere-else"] } }`);
-  Deno.chmodSync(deployment.path, 0o444);
+  fs.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
+  fs.writeFileSync(deployment.path, `{ "skills": { "paths": ["/somewhere-else"] } }`);
+  fs.chmodSync(deployment.path, 0o444);
   // A read-only document (the shape a `:ro` operator mount presents) names both
   // the file and the resolved root, and leaves the document untouched.
   const error = assertThrows(
@@ -272,51 +277,52 @@ Deno.test("declaration - a document that must change but cannot be written fails
   assertStringIncludes(error.message, deployment.path);
   assertStringIncludes(error.message, OTHER_ROOT);
   assertEquals(
-    Deno.readTextFileSync(deployment.path),
+    fs.readFileSync(deployment.path, "utf8"),
     `{ "skills": { "paths": ["/somewhere-else"] } }`,
   );
-  Deno.chmodSync(deployment.path, 0o644);
+  fs.chmodSync(deployment.path, 0o644);
 
   // The same posture when the directory itself refuses the write (an absent
   // document in an unwritable directory).
-  Deno.removeSync(deployment.path);
-  Deno.chmodSync(`${deployment.home}/.config/opencode`, 0o555);
+  removePathSync(deployment.path);
+  fs.chmodSync(`${deployment.home}/.config/opencode`, 0o555);
   const directoryError = assertThrows(
     () => ensureOpencodeSkillDiscoveryDeclaration(OTHER_ROOT, { env: deployment.env }),
     Error,
   );
   assertStringIncludes(directoryError.message, deployment.path);
   assertStringIncludes(directoryError.message, OTHER_ROOT);
-  Deno.chmodSync(`${deployment.home}/.config/opencode`, 0o755);
-  assertThrows(
-    () => Deno.lstatSync(deployment.path),
-    Deno.errors.NotFound,
+  fs.chmodSync(`${deployment.home}/.config/opencode`, 0o755);
+  const noDocument = assertThrows(
+    () => fs.lstatSync(deployment.path),
+    Error,
     undefined,
     "the unwritable directory left no document behind",
   );
+  assert(isNotFoundError(noDocument));
 });
 
-Deno.test("declaration - a planted link at the document path refuses instead of being followed", () => {
+test("declaration - a planted link at the document path refuses instead of being followed", () => {
   const deployment = makeDeployment();
-  Deno.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
+  fs.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
   const planted = `${deployment.home}/planted.json`;
-  Deno.writeTextFileSync(planted, "{}");
-  Deno.symlinkSync(planted, deployment.path);
+  fs.writeFileSync(planted, "{}");
+  fs.symlinkSync(planted, deployment.path);
   const error = assertThrows(
     () => ensureOpencodeSkillDiscoveryDeclaration(OTHER_ROOT, { env: deployment.env }),
     Error,
   );
   assertStringIncludes(error.message, deployment.path);
-  assertEquals(Deno.readTextFileSync(planted), "{}", "the link target is never written");
+  assertEquals(fs.readFileSync(planted, "utf8"), "{}", "the link target is never written");
 });
 
-Deno.test("declaration - an over-broad root is refused", () => {
+test("declaration - an over-broad root is refused", () => {
   for (
     const root of [
       CONTAINER_HOME,
       "/",
       "/home",
-      "/home/deno/.agents/skills/..",
+      "/home/air/.agents/skills/..",
       "/srv/skills*",
       "relative/skills",
       "",
@@ -334,9 +340,9 @@ Deno.test("declaration - an over-broad root is refused", () => {
 
   // A home that is itself a link does not make the bounded check miss the real
   // home boundary: the resolved root is already physical.
-  const realHome = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-real-home-" }));
+  const realHome = fs.realpathSync(makeTempDirSync({ prefix: "air-real-home-" }));
   const linkedHome = `${realHome}-alias`;
-  Deno.symlinkSync(realHome, linkedHome);
+  fs.symlinkSync(realHome, linkedHome);
   assertThrows(
     () => assertOpencodeSkillRootIsDeclarable(realHome, linkedHome),
     Error,
@@ -350,15 +356,16 @@ Deno.test("declaration - an over-broad root is refused", () => {
     Error,
     "ancestor",
   );
-  assertThrows(
-    () => Deno.lstatSync(deployment.path),
-    Deno.errors.NotFound,
+  const refusedDocument = assertThrows(
+    () => fs.lstatSync(deployment.path),
+    Error,
     undefined,
     "no document is written for a refused root",
   );
+  assert(isNotFoundError(refusedDocument));
 });
 
-Deno.test("declaration - the generated content is no execution authority and out-ranks no authored pin", () => {
+test("declaration - the generated content is no execution authority and out-ranks no authored pin", () => {
   // A tampered, agent-writable document: another discovery root, a script grant
   // widened to allow, and a global allow. The step's own content must add no
   // grant, must never adopt the file's root, and must leave every authored byte
@@ -422,19 +429,21 @@ Deno.test("declaration - the generated content is no execution authority and out
   // deployed one (the load order is config.json → opencode.json →
   // opencode.jsonc, so a generated sibling would out-rank the operator's pins).
   const deployment = makeDeployment();
-  Deno.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
-  Deno.writeTextFileSync(deployment.path, tampered);
+  fs.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
+  fs.writeFileSync(deployment.path, tampered);
   assertEquals(
     ensureOpencodeSkillDiscoveryDeclaration(OTHER_ROOT, { env: deployment.env }).action,
     "updated",
   );
-  const siblings = Array.from(Deno.readDirSync(`${deployment.home}/.config/opencode`))
+  const siblings = Array.from(
+    fs.readdirSync(`${deployment.home}/.config/opencode`, { withFileTypes: true }),
+  )
     .map((entry) => entry.name)
     .sort();
   assertEquals(siblings.join(","), "opencode.json");
 });
 
-Deno.test("declaration - the allowance is judged by the engine's ordered rules", () => {
+test("declaration - the allowance is judged by the engine's ordered rules", () => {
   const allowanceFor = (external: string) =>
     `{
   "skills": { "paths": ["${OTHER_ROOT}"] },
@@ -497,7 +506,7 @@ Deno.test("declaration - the allowance is judged by the engine's ordered rules",
   );
 });
 
-Deno.test("declaration - an authored rule inside the root is never out-ranked", () => {
+test("declaration - an authored rule inside the root is never out-ranked", () => {
   const allowanceFor = (external: string) =>
     `{
   "skills": { "paths": ["${OTHER_ROOT}"] },
@@ -541,7 +550,7 @@ Deno.test("declaration - an authored rule inside the root is never out-ranked", 
   );
 });
 
-Deno.test("declaration - a home spelling the consumer does not expand names no root", () => {
+test("declaration - a home spelling the consumer does not expand names no root", () => {
   const document = (pathEntry: string, key: string) =>
     `{
   "skills": { "paths": ["${pathEntry}"] },
@@ -573,7 +582,7 @@ Deno.test("declaration - a home spelling the consumer does not expand names no r
   }
 });
 
-Deno.test("declaration - an authored note inside an empty object survives the splice", () => {
+test("declaration - an authored note inside an empty object survives the splice", () => {
   const source = `{
   "skills": {
     // the operator's note: no paths declared yet
@@ -600,10 +609,10 @@ Deno.test("declaration - an authored note inside an empty object survives the sp
   );
 });
 
-Deno.test("declaration - the deployed document is the agent's own, whatever the daemon selectors say", () => {
+test("declaration - the deployed document is the agent's own, whatever the daemon selectors say", () => {
   const selectors = (name: string) =>
     name === "HOME"
-      ? "/home/deno"
+      ? "/home/air"
       : name === "XDG_CONFIG_HOME"
       ? "/srv/config"
       : name === "OPENCODE_CONFIG_DIR"
@@ -618,7 +627,7 @@ Deno.test("declaration - the deployed document is the agent's own, whatever the 
   );
   assertEquals(opencodeDaemonHome({ env: selectors }), CONTAINER_HOME);
   assertEquals(
-    opencodeDaemonHome({ env: (name) => name === "HOME" ? "/home/deno/" : undefined }),
+    opencodeDaemonHome({ env: (name) => name === "HOME" ? "/home/air/" : undefined }),
     CONTAINER_HOME,
     "the observed home is canonicalized",
   );
@@ -631,7 +640,7 @@ Deno.test("declaration - the deployed document is the agent's own, whatever the 
   assertStringIncludes(noHome.message, "HOME");
 });
 
-Deno.test("declaration - a document the declaration cannot be stated in fails explicitly", () => {
+test("declaration - a document the declaration cannot be stated in fails explicitly", () => {
   const uninterpretable: Array<[string, string]> = [
     [`{ "skills": { "paths": ["/x"] }`, "offset"],
     [`["/srv/skills"]`, "not a JSON object"],
@@ -657,18 +666,18 @@ Deno.test("declaration - a document the declaration cannot be stated in fails ex
   // Through the filesystem step the failure names the document AND the
   // resolved root, so a broken operator configuration is actionable.
   const deployment = makeDeployment();
-  Deno.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
-  Deno.writeTextFileSync(deployment.path, `{ "skills": ["/srv/skills"] }`);
+  fs.mkdirSync(`${deployment.home}/.config/opencode`, { recursive: true });
+  fs.writeFileSync(deployment.path, `{ "skills": ["/srv/skills"] }`);
   const wrapped = assertThrows(
     () => ensureOpencodeSkillDiscoveryDeclaration(OTHER_ROOT, { env: deployment.env }),
     Error,
   );
   assertStringIncludes(wrapped.message, deployment.path);
   assertStringIncludes(wrapped.message, OTHER_ROOT);
-  assertEquals(Deno.readTextFileSync(deployment.path), `{ "skills": ["/srv/skills"] }`);
+  assertEquals(fs.readFileSync(deployment.path, "utf8"), `{ "skills": ["/srv/skills"] }`);
 });
 
-Deno.test("declaration - a JSONC document keeps its comments and trailing comma", () => {
+test("declaration - a JSONC document keeps its comments and trailing comma", () => {
   const jsonc = `{
   // the deployed provider block
   "autoupdate": false/* kept */,
@@ -691,8 +700,8 @@ Deno.test("declaration - a JSONC document keeps its comments and trailing comma"
   assertStringIncludes(updated, `"${OTHER_ROOT}/**": "allow"`);
 });
 
-Deno.test("declaration - the declared value is the root the inventory and prompts resolve", () => {
-  const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-decl-root-" }));
+test("declaration - the declared value is the root the inventory and prompts resolve", () => {
+  const root = fs.realpathSync(makeTempDirSync({ prefix: "air-decl-root-" }));
   const deployment = makeDeployment();
   try {
     const declared = ensureOpencodeSkillDiscoveryDeclaration(root, { env: deployment.env });
@@ -701,20 +710,21 @@ Deno.test("declaration - the declared value is the root the inventory and prompt
     assertEquals(declared.root, resolveTrustedSkillsRoot("omp", root));
     assertEquals(declared.root, observeTrustedSkillsRoot("opencode", root).root);
     assertEquals(
-      Deno.readTextFileSync(declared.path),
+      fs.readFileSync(declared.path, "utf8"),
       renderOpencodeSkillDiscoveryDeclaration(resolveTrustedSkillsRoot("omp", root)),
     );
   } finally {
-    Deno.removeSync(root, { recursive: true });
+    fs.rmSync(root, { recursive: true });
   }
 });
 
-Deno.test("declaration - bootstrap declares the resolved root before agent construction", () => {
+test("declaration - bootstrap declares the resolved root before agent construction", () => {
   // A static ordering assertion over the entry point: the awaited external-skill
   // publication precedes the declaration, which precedes `new AgentCore(...)`,
   // and every consumer takes the ONE resolved value observed above them.
-  const source = Deno.readTextFileSync(
+  const source = fs.readFileSync(
     new URL("../../src/bootstrap.ts", import.meta.url).pathname,
+    "utf8",
   );
   const resolved = source.indexOf("const deploymentSkillsRoot = resolveTrustedSkillsRoot(");
   const installed = source.indexOf("await installExternalSkills(deploymentSkillsRoot");

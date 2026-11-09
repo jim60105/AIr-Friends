@@ -17,7 +17,7 @@
 // says nothing about the native OMP binary, which needs the pinned harness.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "@acp/client.ts";
 import type { TrustedSkillsSource } from "@acp/filesystem-policy.ts";
@@ -29,6 +29,10 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
 import { emptySkillList } from "./skill-inventory-fixture.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const NATIVE_UUID = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
 const SIBLING_UUID = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c";
@@ -49,7 +53,7 @@ function writeJournal(path: string, uuid: string, cwd: string): void {
     updatedAt: TIMESTAMP_A,
     pad: " ".repeat(24),
   });
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     path,
     `${titleSlot}\n${JSON.stringify({ type: "session", version: 3, id: uuid, cwd })}\n`,
   );
@@ -98,16 +102,16 @@ async function artifactFixture(params: {
   /** Register reservation-only provenance, as a failed discovery would. */
   discoveryFails?: boolean;
 }): Promise<ArtifactFixture> {
-  const base = Deno.makeTempDirSync();
+  const base = makeTempDirSync();
   const workspace = join(base, "workspace");
   const siblingWorkspace = join(base, "workspace-sibling");
   const shared = join(workspace, "shared");
   const staging = join(workspace, "tmp", SKILL_API_ID);
   const skills = join(base, "trusted-skills");
   for (const path of [workspace, siblingWorkspace, shared, staging, skills]) {
-    Deno.mkdirSync(path, { recursive: true });
+    fs.mkdirSync(path, { recursive: true });
   }
-  Deno.writeTextFileSync(join(skills, "helper.ts"), "owned helper");
+  fs.writeFileSync(join(skills, "helper.ts"), "owned helper");
 
   // The factory shape: pooled native state lives under the pool key, per-spawn
   // state under the session workspace's own tmp tree.
@@ -133,30 +137,30 @@ async function artifactFixture(params: {
   const siblingBucket = join(sessionsRoot, "-tmp-workspace-2");
   const otherModeBucket = join(otherModeRoot, "omp", "sessions", "-tmp-workspace");
   for (const path of [bucket, siblingBucket, otherModeBucket]) {
-    Deno.mkdirSync(path, { recursive: true });
+    fs.mkdirSync(path, { recursive: true });
   }
   if (params.nativeStateLink === true) {
     // The factory's configured data root is reached through a link inside the
     // workspace; the real tree lives at `{workspace}/native-state`.
-    Deno.mkdirSync(join(workspace, "tmp"), { recursive: true });
-    Deno.symlinkSync(join(baseRoot, "omp-agent"), join(workspace, "tmp", "omp-agent"));
+    fs.mkdirSync(join(workspace, "tmp"), { recursive: true });
+    fs.symlinkSync(join(baseRoot, "omp-agent"), join(workspace, "tmp", "omp-agent"));
   }
 
   const journalPath = join(bucket, journalName(TIMESTAMP_A, NATIVE_UUID));
   writeJournal(journalPath, NATIVE_UUID, workspace);
   const artifactDir = journalPath.slice(0, -".jsonl".length);
-  Deno.mkdirSync(artifactDir, { recursive: true });
-  Deno.writeTextFileSync(join(artifactDir, "17.bash.log"), SPILL);
-  Deno.writeTextFileSync(join(artifactDir, "17.read.log"), "read spill");
-  Deno.writeTextFileSync(join(artifactDir, "other.log"), "other");
-  Deno.writeTextFileSync(join(artifactDir, "17.bash.log.tmp"), "temp");
-  Deno.writeTextFileSync(join(artifactDir, "state.jsonl"), "state sentinel");
+  fs.mkdirSync(artifactDir, { recursive: true });
+  fs.writeFileSync(join(artifactDir, "17.bash.log"), SPILL);
+  fs.writeFileSync(join(artifactDir, "17.read.log"), "read spill");
+  fs.writeFileSync(join(artifactDir, "other.log"), "other");
+  fs.writeFileSync(join(artifactDir, "17.bash.log.tmp"), "temp");
+  fs.writeFileSync(join(artifactDir, "state.jsonl"), "state sentinel");
 
   const siblingJournalPath = join(siblingBucket, journalName(TIMESTAMP_B, SIBLING_UUID));
   writeJournal(siblingJournalPath, SIBLING_UUID, siblingWorkspace);
   const siblingArtifactDir = siblingJournalPath.slice(0, -".jsonl".length);
-  Deno.mkdirSync(siblingArtifactDir, { recursive: true });
-  Deno.writeTextFileSync(join(siblingArtifactDir, "17.bash.log"), "sibling spill");
+  fs.mkdirSync(siblingArtifactDir, { recursive: true });
+  fs.writeFileSync(join(siblingArtifactDir, "17.bash.log"), "sibling spill");
 
   // Sibling mode state and the native non-artifact state.
   writeJournal(
@@ -166,13 +170,13 @@ async function artifactFixture(params: {
   );
   const nativeAuth = join(dataRoot, "omp", "auth.json");
   const nativeDatabase = join(dataRoot, "omp", "database.db");
-  Deno.writeTextFileSync(nativeAuth, '{"credential":"sentinel"}');
-  Deno.writeTextFileSync(nativeDatabase, "database sentinel");
+  fs.writeFileSync(nativeAuth, '{"credential":"sentinel"}');
+  fs.writeFileSync(nativeDatabase, "database sentinel");
   // A directory named after the Skill API id must never become readable.
-  Deno.mkdirSync(join(sessionsRoot, SKILL_API_ID), { recursive: true });
-  Deno.writeTextFileSync(join(sessionsRoot, SKILL_API_ID, "17.bash.log"), "skill-id spill");
+  fs.mkdirSync(join(sessionsRoot, SKILL_API_ID), { recursive: true });
+  fs.writeFileSync(join(sessionsRoot, SKILL_API_ID, "17.bash.log"), "skill-id spill");
 
-  const dataInfo = Deno.lstatSync(configuredDataRoot);
+  const dataInfo = fs.lstatSync(configuredDataRoot);
   const resolution = await resolveOmpSessionArtifacts({
     agentType: "omp",
     xdgDataHome: configuredDataRoot,
@@ -216,7 +220,7 @@ async function artifactFixture(params: {
       },
     },
   }, emptySkillList());
-  const skillsInfo = Deno.lstatSync(skills);
+  const skillsInfo = fs.lstatSync(skills);
 
   const fixture: ArtifactFixture = {
     base,
@@ -339,7 +343,7 @@ async function deniedWithReasons(
   assertEquals(f.contentCalls.length, before, "denial must precede all content IO");
 }
 
-Deno.test("OMP artifacts: pooled and per-spawn × restricted and YOLO read the current spill", async () => {
+test("OMP artifacts: pooled and per-spawn × restricted and YOLO read the current spill", async () => {
   for (const pooled of [false, true]) {
     for (const mode of ["restricted", "native-yolo"] as const) {
       const label = `${pooled ? "pooled" : "per-spawn"}/${mode}`;
@@ -364,7 +368,7 @@ Deno.test("OMP artifacts: pooled and per-spawn × restricted and YOLO read the c
         });
         assertEquals(windowed.content, SPILL, label);
         // Reading is non-destructive.
-        assertEquals(Deno.readTextFileSync(join(f.artifactDir, "17.bash.log")), SPILL, label);
+        assertEquals(fs.readFileSync(join(f.artifactDir, "17.bash.log"), "utf8"), SPILL, label);
 
         // The exception is read-only in BOTH modes.
         await denied(f, "rejected_omp_native_state", () =>
@@ -373,18 +377,18 @@ Deno.test("OMP artifacts: pooled and per-spawn × restricted and YOLO read the c
             path: join(f.artifactDir, "17.bash.log"),
             content: "mutated",
           }));
-        assertEquals(Deno.readTextFileSync(join(f.artifactDir, "17.bash.log")), SPILL, label);
+        assertEquals(fs.readFileSync(join(f.artifactDir, "17.bash.log"), "utf8"), SPILL, label);
 
         // Ordinary non-state outcomes stay exactly as before.
         const ordinary = join(f.workspace, "notes.log");
-        Deno.writeTextFileSync(ordinary, "ordinary");
+        fs.writeFileSync(ordinary, "ordinary");
         await denied(
           f,
           "rejected_read_extension",
           () => f.client.readTextFile({ sessionId: NATIVE_UUID, path: ordinary }),
         );
         const ordinaryMd = join(f.workspace, "notes.md");
-        Deno.writeTextFileSync(ordinaryMd, "ordinary md");
+        fs.writeFileSync(ordinaryMd, "ordinary md");
         assertEquals(
           (await f.client.readTextFile({ sessionId: NATIVE_UUID, path: ordinaryMd })).content,
           "ordinary md",
@@ -397,17 +401,17 @@ Deno.test("OMP artifacts: pooled and per-spawn × restricted and YOLO read the c
           content: "staged",
         });
         assertEquals(
-          Deno.readTextFileSync(join(f.workspace, "tmp", SKILL_API_ID, "reply.md")),
+          fs.readFileSync(join(f.workspace, "tmp", SKILL_API_ID, "reply.md"), "utf8"),
           "staged",
         );
       } finally {
-        Deno.removeSync(f.base, { recursive: true });
+        fs.rmSync(f.base, { recursive: true });
       }
     }
   }
 });
 
-Deno.test("OMP artifacts: the exception stays exact and never widens", async () => {
+test("OMP artifacts: the exception stays exact and never widens", async () => {
   const f = await artifactFixture({ pooled: false, mode: "native-yolo", yolo: true });
   try {
     f.register();
@@ -420,8 +424,8 @@ Deno.test("OMP artifacts: the exception stays exact and never widens", async () 
     // filename rule is consulted.
     await denied(f, "rejected_filesystem_path_unavailable", () => read(f.artifactDir));
     // A nested child is not a direct child even when the leaf name matches.
-    Deno.mkdirSync(join(f.artifactDir, "nested"), { recursive: true });
-    Deno.writeTextFileSync(join(f.artifactDir, "nested", "18.bash.log"), "nested");
+    fs.mkdirSync(join(f.artifactDir, "nested"), { recursive: true });
+    fs.writeFileSync(join(f.artifactDir, "nested", "18.bash.log"), "nested");
     await denied(
       f,
       "rejected_filesystem_path_unavailable",
@@ -429,17 +433,20 @@ Deno.test("OMP artifacts: the exception stays exact and never widens", async () 
     );
     // A same-named symlink inside the artifact directory is rejected.
     const alias = join(f.artifactDir, "99.bash.log");
-    Deno.symlinkSync(join(f.siblingArtifactDir, "17.bash.log"), alias);
+    fs.symlinkSync(join(f.siblingArtifactDir, "17.bash.log"), alias);
     await denied(f, "rejected_omp_native_state", () => read(alias));
-    assertEquals(Deno.readTextFileSync(join(f.siblingArtifactDir, "17.bash.log")), "sibling spill");
+    assertEquals(
+      fs.readFileSync(join(f.siblingArtifactDir, "17.bash.log"), "utf8"),
+      "sibling spill",
+    );
     // Every case above denied before any content IO.
     assertEquals(f.contentCalls.length, 0);
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: sibling sessions, sibling modes and native non-artifact state stay private", async () => {
+test("OMP artifacts: sibling sessions, sibling modes and native non-artifact state stay private", async () => {
   for (const pooled of [false, true]) {
     const label = pooled ? "pooled" : "per-spawn";
     const f = await artifactFixture({ pooled, mode: "native-yolo", yolo: true });
@@ -478,7 +485,7 @@ Deno.test("OMP artifacts: sibling sessions, sibling modes and native non-artifac
       // reserved per-spawn tree for the per-spawn shape; both deny, with the
       // mapped bounded reason for each shape.
       const siblingMode = join(f.otherModeRoot, "omp", "sessions", "-tmp-workspace");
-      const siblingModeJournal = [...Deno.readDirSync(siblingMode)]
+      const siblingModeJournal = [...fs.readdirSync(siblingMode, { withFileTypes: true })]
         .map((entry) => entry.name)
         .filter((name) => name.endsWith(".jsonl"))[0];
       await denied(
@@ -493,25 +500,29 @@ Deno.test("OMP artifacts: sibling sessions, sibling modes and native non-artifac
       );
       // Sentinels survived every denied attempt.
       assertEquals(
-        Deno.readTextFileSync(join(f.siblingArtifactDir, "17.bash.log")),
+        fs.readFileSync(join(f.siblingArtifactDir, "17.bash.log"), "utf8"),
         "sibling spill",
         label,
       );
-      assertEquals(Deno.readTextFileSync(f.nativeAuth), '{"credential":"sentinel"}', label);
-      assertEquals(Deno.readTextFileSync(f.nativeDatabase), "database sentinel", label);
+      assertEquals(fs.readFileSync(f.nativeAuth, "utf8"), '{"credential":"sentinel"}', label);
+      assertEquals(fs.readFileSync(f.nativeDatabase, "utf8"), "database sentinel", label);
       assertEquals(
-        Deno.readTextFileSync(join(f.dataRoot, "omp", "sessions", SKILL_API_ID, "17.bash.log")),
+        fs.readFileSync(join(f.dataRoot, "omp", "sessions", SKILL_API_ID, "17.bash.log"), "utf8"),
         "skill-id spill",
         label,
       );
-      assertEquals(Deno.readTextFileSync(f.journalPath).includes('"type":"session"'), true, label);
+      assertEquals(
+        fs.readFileSync(f.journalPath, "utf8").includes('"type":"session"'),
+        true,
+        label,
+      );
     } finally {
-      Deno.removeSync(f.base, { recursive: true });
+      fs.rmSync(f.base, { recursive: true });
     }
   }
 });
 
-Deno.test("OMP artifacts: writes, edit permission and destructive requests deny before mutation", async () => {
+test("OMP artifacts: writes, edit permission and destructive requests deny before mutation", async () => {
   const f = await artifactFixture({ pooled: false, mode: "native-yolo", yolo: true });
   try {
     f.register();
@@ -576,7 +587,7 @@ Deno.test("OMP artifacts: writes, edit permission and destructive requests deny 
     // Native command execution and ordinary YOLO writes are unchanged.
     const ordinary = join(f.workspace, "yolo.md");
     await f.client.writeTextFile({ sessionId: NATIVE_UUID, path: ordinary, content: "yolo" });
-    assertEquals(Deno.readTextFileSync(ordinary), "yolo");
+    assertEquals(fs.readFileSync(ordinary, "utf8"), "yolo");
     const edit = await f.client.requestPermission(permission(ordinary));
     assertEquals(edit.outcome, { outcome: "selected", optionId: "allow" });
     const shell = await f.client.requestPermission({
@@ -591,14 +602,17 @@ Deno.test("OMP artifacts: writes, edit permission and destructive requests deny 
     });
     assertEquals(shell.outcome.outcome, "selected");
     // Sentinels untouched.
-    assertEquals(Deno.readTextFileSync(join(f.artifactDir, "17.bash.log")), SPILL);
-    assertEquals(Deno.readTextFileSync(join(f.siblingArtifactDir, "17.bash.log")), "sibling spill");
+    assertEquals(fs.readFileSync(join(f.artifactDir, "17.bash.log"), "utf8"), SPILL);
+    assertEquals(
+      fs.readFileSync(join(f.siblingArtifactDir, "17.bash.log"), "utf8"),
+      "sibling spill",
+    );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: an unavailable or revoked capability denies without a broad fallback", async () => {
+test("OMP artifacts: an unavailable or revoked capability denies without a broad fallback", async () => {
   const f = await artifactFixture({ pooled: false, mode: "restricted", yolo: false });
   try {
     // Reservation without proven artifacts (a replay after reconnect, or a
@@ -618,7 +632,7 @@ Deno.test("OMP artifacts: an unavailable or revoked capability denies without a 
       }));
     // Unrelated workspace reads still work.
     const memory = join(f.workspace, "memory.public.jsonl");
-    Deno.writeTextFileSync(memory, "memory");
+    fs.writeFileSync(memory, "memory");
     assertEquals(
       (await f.client.readTextFile({ sessionId: NATIVE_UUID, path: memory })).content,
       "memory",
@@ -637,14 +651,14 @@ Deno.test("OMP artifacts: an unavailable or revoked capability denies without a 
       "memory",
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: a lazy directory binds on first use and a later replacement denies", async () => {
+test("OMP artifacts: a lazy directory binds on first use and a later replacement denies", async () => {
   const f = await artifactFixture({ pooled: false, mode: "restricted", yolo: false });
   try {
-    Deno.removeSync(f.artifactDir, { recursive: true });
+    fs.rmSync(f.artifactDir, { recursive: true });
     // Re-discover with the directory absent: the capability is prospective and
     // carries no bound identity yet.
     await f.refreshArtifacts();
@@ -655,11 +669,11 @@ Deno.test("OMP artifacts: a lazy directory binds on first use and a later replac
         path: join(f.artifactDir, "17.bash.log"),
       }));
     // The client never creates the directory for the agent.
-    assertEquals(await Deno.lstat(f.artifactDir).catch(() => null), null);
+    assertEquals(await fsp.lstat(f.artifactDir).catch(() => null), null);
     // Once the native runtime creates it, a later valid read is eligible and
     // binds the identity to this registration.
-    Deno.mkdirSync(f.artifactDir, { recursive: true });
-    Deno.writeTextFileSync(join(f.artifactDir, "17.bash.log"), SPILL);
+    fs.mkdirSync(f.artifactDir, { recursive: true });
+    fs.writeFileSync(join(f.artifactDir, "17.bash.log"), SPILL);
     assertEquals(
       (await f.client.readTextFile({
         sessionId: NATIVE_UUID,
@@ -669,31 +683,31 @@ Deno.test("OMP artifacts: a lazy directory binds on first use and a later replac
     );
     // Any later replacement of that directory denies, even though the path,
     // owner and journal are unchanged.
-    Deno.renameSync(f.artifactDir, `${f.artifactDir}.old`);
-    Deno.mkdirSync(f.artifactDir, { recursive: true });
-    Deno.writeTextFileSync(join(f.artifactDir, "17.bash.log"), "replacement spill");
+    fs.renameSync(f.artifactDir, `${f.artifactDir}.old`);
+    fs.mkdirSync(f.artifactDir, { recursive: true });
+    fs.writeFileSync(join(f.artifactDir, "17.bash.log"), "replacement spill");
     await denied(f, "rejected_omp_native_state", () =>
       f.client.readTextFile({
         sessionId: NATIVE_UUID,
         path: join(f.artifactDir, "17.bash.log"),
       }));
     assertEquals(
-      Deno.readTextFileSync(join(f.artifactDir, "17.bash.log")),
+      fs.readFileSync(join(f.artifactDir, "17.bash.log"), "utf8"),
       "replacement spill",
     );
-    assertEquals(Deno.readTextFileSync(join(`${f.artifactDir}.old`, "17.bash.log")), SPILL);
+    assertEquals(fs.readFileSync(join(`${f.artifactDir}.old`, "17.bash.log"), "utf8"), SPILL);
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fail closed", async () => {
+test("OMP artifacts: escaping links and journal/anchor/final replacement fail closed", async () => {
   // A workspace symlink aliased into reserved state never inherits authority.
   const linked = await artifactFixture({ pooled: false, mode: "native-yolo", yolo: true });
   try {
     linked.register();
     const escape = join(linked.workspace, "escape.log");
-    Deno.symlinkSync(join(linked.siblingArtifactDir, "17.bash.log"), escape);
+    fs.symlinkSync(join(linked.siblingArtifactDir, "17.bash.log"), escape);
     await denied(
       linked,
       "rejected_omp_native_state",
@@ -706,11 +720,11 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
         linked.client.writeTextFile({ sessionId: NATIVE_UUID, path: escape, content: "mutated" }),
     );
     assertEquals(
-      Deno.readTextFileSync(join(linked.siblingArtifactDir, "17.bash.log")),
+      fs.readFileSync(join(linked.siblingArtifactDir, "17.bash.log"), "utf8"),
       "sibling spill",
     );
   } finally {
-    Deno.removeSync(linked.base, { recursive: true });
+    fs.rmSync(linked.base, { recursive: true });
   }
 
   // The journal replaced between observation and the protected open denies.
@@ -723,8 +737,8 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
     beforeOpen: (path) => {
       if (replacedJournal || path !== journalTarget) return;
       replacedJournal = true;
-      Deno.renameSync(path, `${path}.old`);
-      Deno.writeTextFileSync(path, "replacement journal\n");
+      fs.renameSync(path, `${path}.old`);
+      fs.writeFileSync(path, "replacement journal\n");
     },
   });
   try {
@@ -745,11 +759,11 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
     );
     assertEquals(replacedJournal, true);
     assertEquals(
-      Deno.readTextFileSync(`${journalSwap.journalPath}.old`).includes('"type":"title"'),
+      fs.readFileSync(`${journalSwap.journalPath}.old`, "utf8").includes('"type":"title"'),
       true,
     );
   } finally {
-    Deno.removeSync(journalSwap.base, { recursive: true });
+    fs.rmSync(journalSwap.base, { recursive: true });
   }
 
   // The journal's parent (anchor) replaced before the protected open denies.
@@ -762,8 +776,8 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
     beforeOpen: (path) => {
       if (replacedAnchor || path !== anchorTarget) return;
       replacedAnchor = true;
-      Deno.renameSync(path, `${path}-moved`);
-      Deno.mkdirSync(path);
+      fs.renameSync(path, `${path}-moved`);
+      fs.mkdirSync(path);
     },
   });
   try {
@@ -781,7 +795,7 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
     );
     assertEquals(replacedAnchor, true);
   } finally {
-    Deno.removeSync(anchorSwap.base, { recursive: true });
+    fs.rmSync(anchorSwap.base, { recursive: true });
   }
 
   // The artifact root replaced before the protected open denies.
@@ -794,8 +808,8 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
     beforeOpen: (path) => {
       if (replacedRoot || path !== rootTarget) return;
       replacedRoot = true;
-      Deno.renameSync(path, `${path}-moved`);
-      Deno.mkdirSync(path);
+      fs.renameSync(path, `${path}-moved`);
+      fs.mkdirSync(path);
     },
   });
   try {
@@ -808,7 +822,7 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
       }));
     assertEquals(replacedRoot, true);
   } finally {
-    Deno.removeSync(rootSwap.base, { recursive: true });
+    fs.rmSync(rootSwap.base, { recursive: true });
   }
 
   // The final artifact file replaced between observation and the protected open.
@@ -821,8 +835,8 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
     beforeOpen: (path) => {
       if (replacedFinal || path !== finalTarget) return;
       replacedFinal = true;
-      Deno.renameSync(path, `${path}.old`);
-      Deno.writeTextFileSync(path, "replacement spill");
+      fs.renameSync(path, `${path}.old`);
+      fs.writeFileSync(path, "replacement spill");
     },
   });
   try {
@@ -834,27 +848,27 @@ Deno.test("OMP artifacts: escaping links and journal/anchor/final replacement fa
       () => finalSwap.client.readTextFile({ sessionId: NATIVE_UUID, path: finalTarget }),
     );
     assertEquals(replacedFinal, true);
-    assertEquals(Deno.readTextFileSync(finalTarget), "replacement spill");
-    assertEquals(Deno.readTextFileSync(`${finalTarget}.old`), SPILL);
+    assertEquals(fs.readFileSync(finalTarget, "utf8"), "replacement spill");
+    assertEquals(fs.readFileSync(`${finalTarget}.old`, "utf8"), SPILL);
   } finally {
-    Deno.removeSync(finalSwap.base, { recursive: true });
+    fs.rmSync(finalSwap.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: a registration that replaces the context mid-observation denies", async () => {
+test("OMP artifacts: a registration that replaces the context mid-observation denies", async () => {
   const f = await artifactFixture({ pooled: false, mode: "restricted", yolo: false });
-  const originalRealPath = Deno.realPath;
+  const originalRealPath = fsp.realpath;
   try {
     f.register();
     let revoked = false;
-    Deno.realPath = async (value) => {
+    fsp.realpath = (async (value: string) => {
       const result = await originalRealPath(value);
       if (!revoked) {
         revoked = true;
         f.register({ yolo: true });
       }
       return result;
-    };
+    }) as typeof fsp.realpath;
     await denied(f, "rejected_trusted_skills_identity", () =>
       f.client.readTextFile({
         sessionId: NATIVE_UUID,
@@ -870,12 +884,12 @@ Deno.test("OMP artifacts: a registration that replaces the context mid-observati
       SPILL,
     );
   } finally {
-    Deno.realPath = originalRealPath;
-    Deno.removeSync(f.base, { recursive: true });
+    fsp.realpath = originalRealPath;
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: a linked native-state path reserves its real destination", async () => {
+test("OMP artifacts: a linked native-state path reserves its real destination", async () => {
   const f = await artifactFixture({
     pooled: false,
     mode: "restricted",
@@ -920,8 +934,8 @@ Deno.test("OMP artifacts: a linked native-state path reserves its real destinati
       () =>
         f.client.writeTextFile({ sessionId: NATIVE_UUID, path: realArtifact, content: "mutated" }),
     );
-    assertEquals(Deno.readTextFileSync(realArtifact), SPILL);
-    assertEquals(Deno.readTextFileSync(realJournal).includes('"type":"session"'), true);
+    assertEquals(fs.readFileSync(realArtifact, "utf8"), SPILL);
+    assertEquals(fs.readFileSync(realJournal, "utf8").includes('"type":"session"'), true);
     // A mutating permission request for the same path denies without approval.
     f.client.clearPermissionRejections();
     const response = await f.client.requestPermission(permission(realJournal));
@@ -931,17 +945,17 @@ Deno.test("OMP artifacts: a linked native-state path reserves its real destinati
       ["rejected_omp_native_state"],
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: an unevaluable reservation denies instead of approving", async () => {
+test("OMP artifacts: an unevaluable reservation denies instead of approving", async () => {
   const f = await artifactFixture({ pooled: false, mode: "native-yolo", yolo: true });
   try {
     f.register();
     // Make an unrelated configured root unavailable, so the physical
     // reservation evaluation cannot complete.
-    Deno.renameSync(f.shared, `${f.shared}-moved`);
+    fs.renameSync(f.shared, `${f.shared}-moved`);
     // The trusted lexical reservation still decides first: the journal is
     // plainly inside the session's native state.
     f.client.clearPermissionRejections();
@@ -963,18 +977,18 @@ Deno.test("OMP artifacts: an unevaluable reservation denies instead of approving
       ["rejected_omp_native_state"],
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: re-registration keeps a committed directory binding", async () => {
+test("OMP artifacts: re-registration keeps a committed directory binding", async () => {
   const f = await artifactFixture({ pooled: false, mode: "restricted", yolo: false });
   try {
-    Deno.removeSync(f.artifactDir, { recursive: true });
+    fs.rmSync(f.artifactDir, { recursive: true });
     await f.refreshArtifacts();
     f.register();
-    Deno.mkdirSync(f.artifactDir, { recursive: true });
-    Deno.writeTextFileSync(join(f.artifactDir, "17.bash.log"), SPILL);
+    fs.mkdirSync(f.artifactDir, { recursive: true });
+    fs.writeFileSync(join(f.artifactDir, "17.bash.log"), SPILL);
     assertEquals(
       (await f.client.readTextFile({
         sessionId: NATIVE_UUID,
@@ -993,24 +1007,24 @@ Deno.test("OMP artifacts: re-registration keeps a committed directory binding", 
       SPILL,
     );
     // The binding survived, so a replacement after that re-registration denies.
-    Deno.renameSync(f.artifactDir, `${f.artifactDir}.old`);
-    Deno.mkdirSync(f.artifactDir, { recursive: true });
-    Deno.writeTextFileSync(join(f.artifactDir, "17.bash.log"), "replacement spill");
+    fs.renameSync(f.artifactDir, `${f.artifactDir}.old`);
+    fs.mkdirSync(f.artifactDir, { recursive: true });
+    fs.writeFileSync(join(f.artifactDir, "17.bash.log"), "replacement spill");
     await denied(f, "rejected_omp_native_state", () =>
       f.client.readTextFile({
         sessionId: NATIVE_UUID,
         path: join(f.artifactDir, "17.bash.log"),
       }));
     assertEquals(
-      Deno.readTextFileSync(join(f.artifactDir, "17.bash.log")),
+      fs.readFileSync(join(f.artifactDir, "17.bash.log"), "utf8"),
       "replacement spill",
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });
 
-Deno.test("OMP artifacts: a reserved-state request without a reject option cancels", async () => {
+test("OMP artifacts: a reserved-state request without a reject option cancels", async () => {
   const f = await artifactFixture({ pooled: false, mode: "native-yolo", yolo: true });
   try {
     f.register();
@@ -1036,6 +1050,6 @@ Deno.test("OMP artifacts: a reserved-state request without a reject option cance
     );
     assertEquals(f.contentCalls.length, 0);
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
+    fs.rmSync(f.base, { recursive: true });
   }
 });

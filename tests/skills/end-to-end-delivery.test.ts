@@ -13,7 +13,7 @@
 // delivery, no duplicate reply accounting.
 
 import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { SkillAPIServer } from "../../src/skill-api/server.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { SkillRegistry } from "../../src/skills/registry.ts";
@@ -22,12 +22,19 @@ import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { sessionStagingDir } from "../../src/core/session-staging.ts";
 import type { PlatformAdapter } from "../../src/platforms/platform-adapter.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { fileURLToPath } from "node:url";
 
 const TEST_SKILL_SECRET = "0123456789abcdef0123456789abcdef01"; // 36 bytes (>= 32)
-const SCRIPT_URL = new URL("../../skills/send-reply/scripts/send-reply.ts", import.meta.url);
+const SCRIPT_PATH = fileURLToPath(
+  new URL("../../skills/send-reply/scripts/send-reply.ts", import.meta.url),
+);
 
 // Integration exception to the no-test-timers guideline: SkillAPIServer wraps
-// a real Deno.serve bind, so readiness is awaited by polling the real socket
+// a real Bun.serve bind, so readiness is awaited by polling the real socket
 // (deterministic time control cannot observe an OS-level listen).
 async function waitForServer(port: number, deadlineMs = 5000): Promise<void> {
   const deadline = Date.now() + deadlineMs;
@@ -44,7 +51,7 @@ async function waitForServer(port: number, deadlineMs = 5000): Promise<void> {
 }
 
 async function runShape(opts: { label: string; shared: boolean; port: number }): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
     const workspaceManager = new WorkspaceManager({
@@ -94,19 +101,19 @@ async function runShape(opts: { label: string; shared: boolean; port: number }):
     // The prompt-rendered absolute staging dir (helper = what every payload-
     // staging render now supplies as `{{ tmpDir }}`).
     const stagingDir = sessionStagingDir(workspace, sessionId);
-    Deno.mkdirSync(stagingDir, { recursive: true });
+    fs.mkdirSync(stagingDir, { recursive: true });
 
     // JWT material: per-session token file (both shapes present it; the pool
     // writes it at lease acquisition).
     const jwtDir = join(tempDir, "jwt");
-    Deno.mkdirSync(jwtDir, { mode: 0o700 });
+    fs.mkdirSync(jwtDir, { mode: 0o700 });
     const callerToken = sessionRegistry.getCallerToken(sessionId) ?? "";
     const jwt = await createSkillJwt(TEST_SKILL_SECRET, {
       sub: sessionId,
       channel: "chan_1",
       jti: callerToken,
     });
-    Deno.writeTextFileSync(join(jwtDir, `${sessionId}.jwt`), jwt);
+    fs.writeFileSync(join(jwtDir, `${sessionId}.jwt`), jwt);
 
     const server = new SkillAPIServer(
       sessionRegistry,
@@ -119,18 +126,18 @@ async function runShape(opts: { label: string; shared: boolean; port: number }):
 
     // The agent writes the payload to the prompt-rendered absolute path...
     const payloadFile = join(stagingDir, "reply.md");
-    Deno.writeTextFileSync(payloadFile, "造好的回复 $HOME 內容 verbatim\n第二行");
+    fs.writeFileSync(payloadFile, "造好的回复 $HOME 內容 verbatim\n第二行");
 
     // ...then invokes the script with the literal session id + absolute path.
     const env: Record<string, string> = {
-      PATH: Deno.env.get("PATH") ?? "",
-      HOME: Deno.env.get("HOME") ?? "/tmp",
+      PATH: process.env["PATH"] ?? "",
+      HOME: process.env["HOME"] ?? "/tmp",
       SKILL_JWT_DIR: jwtDir,
     };
     if (opts.shared) {
       // Pooled process: pointer is the sole identity source; NO SESSION_ID.
       env.SKILL_SHARED_PROCESS = "1";
-      Deno.writeTextFileSync(
+      fs.writeFileSync(
         join(jwtDir, "active.json"),
         JSON.stringify({ sessionId, staging: workspace.tmpPath }),
       );
@@ -139,28 +146,26 @@ async function runShape(opts: { label: string; shared: boolean; port: number }):
       env.SESSION_ID = sessionId;
     }
 
-    const run = await new Deno.Command(Deno.execPath(), {
-      args: [
-        "run",
-        "--allow-net",
-        "--allow-env",
-        "--allow-read",
-        "--allow-write",
-        SCRIPT_URL.href,
-        "--session-id",
-        sessionId, // literal rendered in the prompt
-        "--api-url",
-        `http://localhost:${opts.port}`,
-        "--message-file",
-        payloadFile, // absolute staging path rendered in the prompt
-      ],
+    const run = Bun.spawn([
+      SCRIPT_PATH,
+      "--session-id",
+      sessionId, // literal rendered in the prompt
+      "--api-url",
+      `http://localhost:${opts.port}`,
+      "--message-file",
+      payloadFile, // absolute staging path rendered in the prompt
+    ], {
       cwd: tempDir,
       env,
-      clearEnv: true,
-    }).output();
-    const stdout = new TextDecoder().decode(run.stdout);
-    const stderr = new TextDecoder().decode(run.stderr);
-    assertEquals(run.code, 0, `${opts.label}: script failed: ${stdout}${stderr}`);
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(run.stdout).text(),
+      new Response(run.stderr).text(),
+      run.exited,
+    ]);
+    assertEquals(code, 0, `${opts.label}: script failed: ${stdout}${stderr}`);
 
     // Exactly one intended reply reached the mock platform.
     assertEquals(deliveries.length, 1, `${opts.label}: exactly one platform delivery`);
@@ -173,7 +178,7 @@ async function runShape(opts: { label: string; shared: boolean; port: number }):
     // The payload file was consumed.
     let consumed = false;
     try {
-      Deno.statSync(payloadFile);
+      fs.statSync(payloadFile);
     } catch {
       consumed = true;
     }
@@ -182,14 +187,14 @@ async function runShape(opts: { label: string; shared: boolean; port: number }):
     await server.stop();
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("e2e delivery - per-spawn env: literal staging path -> send-reply -> exactly one reply", async () => {
+test("e2e delivery - per-spawn env: literal staging path -> send-reply -> exactly one reply", async () => {
   await runShape({ label: "per-spawn", shared: false, port: 3181 });
 });
 
-Deno.test("e2e delivery - pooled env: no SESSION_ID, pointer + literals -> exactly one reply", async () => {
+test("e2e delivery - pooled env: no SESSION_ID, pointer + literals -> exactly one reply", async () => {
   await runShape({ label: "pooled", shared: true, port: 3182 });
 });

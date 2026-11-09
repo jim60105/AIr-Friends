@@ -40,12 +40,18 @@ import {
   resolveOmpExtensionPath,
   resolveOmpSystemPromptPath,
 } from "@utils/omp-paths.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { runtimeArch } from "../../src/utils/runtime-platform.ts";
 
 const repoRoot = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 
 // --- dev→image resolver behavior on fixture filesystems ---------------------
 
-Deno.test("omp-paths resolvers - image-first when the installed tree exists", () => {
+test("omp-paths resolvers - image-first when the installed tree exists", () => {
   const exists = (path: string) =>
     path === `${OMP_IMAGE_EXTENSION_ROOT}/index.js` ||
     path === `${OMP_IMAGE_CONFIG_ROOT}/restricted.yml` ||
@@ -59,7 +65,7 @@ Deno.test("omp-paths resolvers - image-first when the installed tree exists", ()
   );
 });
 
-Deno.test("omp-paths resolvers - dev fallback selects the generated bundle when absent", () => {
+test("omp-paths resolvers - dev fallback selects the generated bundle when absent", () => {
   const exists = (_path: string) => false;
   // The dev face is the deterministic GENERATED entry, never the raw
   // Deno-only source tree (OMP_TRUSTED_EXTENSION_PATH stays the canonical
@@ -78,7 +84,7 @@ Deno.test("omp-paths resolvers - dev fallback selects the generated bundle when 
   assertEquals(resolveOmpSystemPromptPath({ exists }), OMP_SYSTEM_PROMPT_MOUNT_PATH);
 });
 
-Deno.test("omp-paths resolvers - operator prompt mount honored over the installed artifact", () => {
+test("omp-paths resolvers - operator prompt mount honored over the installed artifact", () => {
   // Mount exists, installed artifact exists: the mount wins.
   const both = (_path: string) => true;
   assertEquals(resolveOmpSystemPromptPath({ exists: both }), OMP_SYSTEM_PROMPT_MOUNT_PATH);
@@ -87,18 +93,18 @@ Deno.test("omp-paths resolvers - operator prompt mount honored over the installe
   assertEquals(resolveOmpSystemPromptPath({ exists: onlyImage }), OMP_IMAGE_PROMPT_PATH);
 });
 
-Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end", async () => {
-  const root = await Deno.makeTempDir({ prefix: "omp-paths-fixture-" });
+test("omp-paths resolvers - fixture roots exercise both branches end-to-end", async () => {
+  const root = await makeTempDir({ prefix: "omp-paths-fixture-" });
   try {
     const imageExt = `${root}/opt/air/omp/extension`;
     const imageCfg = `${root}/opt/air/omp/config`;
-    await Deno.mkdir(imageExt, { recursive: true });
-    await Deno.mkdir(imageCfg, { recursive: true });
-    await Deno.writeTextFile(`${imageExt}/index.js`, "// fixture generated entry");
-    await Deno.writeTextFile(`${imageCfg}/restricted.yml`, "# fixture overlay");
+    await fsp.mkdir(imageExt, { recursive: true });
+    await fsp.mkdir(imageCfg, { recursive: true });
+    await fsp.writeFile(`${imageExt}/index.js`, "// fixture generated entry");
+    await fsp.writeFile(`${imageCfg}/restricted.yml`, "# fixture overlay");
     const real = (path: string) => {
       try {
-        return Deno.statSync(path).isFile;
+        return fs.statSync(path).isFile();
       } catch {
         return false;
       }
@@ -130,7 +136,7 @@ Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end
       "agent-config/omp/native-yolo.yml",
     );
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });
 
@@ -154,7 +160,7 @@ const WRONG_EXECUTABLE_SHA256 = "0".repeat(64);
 // The unpacker selects the per-architecture digest, so the deliberately wrong
 // value must be injected through the ARCH-SPECIFIC build argument; on arm64 the
 // x64 argument is inert and the build would wrongly succeed.
-const EXECUTABLE_SHA256_ARG = Deno.build.arch === "aarch64" ? "OMP_SHA256_ARM64" : "OMP_SHA256_X64";
+const EXECUTABLE_SHA256_ARG = runtimeArch() === "aarch64" ? "OMP_SHA256_ARM64" : "OMP_SHA256_X64";
 const ACP_INITIALIZE_REQUEST = JSON.stringify({
   jsonrpc: "2.0",
   id: 1,
@@ -176,13 +182,22 @@ async function podman(
   args: string[],
   options: { stdin?: string; timeoutMs?: number } = {},
 ): Promise<CommandOutcome> {
-  const child = new Deno.Command("podman", {
-    args,
+  const child = spawn("podman", args, {
     cwd: repoRoot,
-    stdin: options.stdin === undefined ? "null" : "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
+    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  if (childStdout === null || childStderr === null) {
+    throw new Error("podman stdio was not piped");
+  }
+  childStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+  childStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+  // Podman may exit before consuming stdin (bad args, build failure); that
+  // must surface as the captured exit code, never an unhandled EPIPE.
+  child.stdin?.on("error", () => {});
   // A kill deadline, not a duration guess: `podman build`/`run` have no
   // deterministic time control and an unresponsive container must not hang the
   // suite forever. The awaited condition is still the child's own exit.
@@ -195,37 +210,34 @@ async function podman(
   }, options.timeoutMs ?? 30 * 60_000);
   try {
     if (options.stdin !== undefined) {
-      const writer = child.stdin.getWriter();
-      await writer.write(new TextEncoder().encode(options.stdin));
-      await writer.close();
+      child.stdin?.end(options.stdin);
     }
-    const output = await child.output();
-    const decoder = new TextDecoder();
+    const exited = Promise.withResolvers<number>();
+    child.on("error", exited.reject);
+    child.on("close", (exitCode) => exited.resolve(exitCode ?? 1));
+    const code = await exited.promise;
     return {
-      code: output.code,
-      stdout: decoder.decode(output.stdout),
-      stderr: decoder.decode(output.stderr),
+      code,
+      stdout: Buffer.concat(stdout).toString(),
+      stderr: Buffer.concat(stderr).toString(),
     };
   } finally {
     clearTimeout(killer);
   }
 }
 
-async function havePodman(): Promise<boolean> {
-  try {
-    const probe = await new Deno.Command("podman", {
-      args: ["--version"],
-      stdout: "null",
-      stderr: "null",
-    }).output();
-    return probe.code === 0;
-  } catch {
-    return false;
-  }
+function havePodman(): boolean {
+  const probe = spawnSync("podman", ["--version"], { stdio: "ignore" });
+  return probe.error === undefined && probe.status === 0;
+}
+
+/** A Node binary is available (the generated bundle's passive-loader host). */
+function nodeAvailable(): boolean {
+  return spawnSync("node", ["--version"], { stdio: "ignore" }).error === undefined;
 }
 
 // Opt-in (`OMP_PACKAGING_BUILD=1`) AND a usable podman, both required.
-const RUN_IMAGE_SCENARIO = Deno.env.get("OMP_PACKAGING_BUILD") === "1" && await havePodman();
+const RUN_IMAGE_SCENARIO = process.env["OMP_PACKAGING_BUILD"] === "1" && havePodman();
 
 /** The JSON-RPC `initialize` result the pinned ACP server returns, if any. */
 function acpInitializeResult(stdout: string): Record<string, unknown> | null {
@@ -247,13 +259,9 @@ function acpInitializeResult(stdout: string): Record<string, unknown> | null {
   return null;
 }
 
-Deno.test({
-  name:
-    "omp image packaging - the built image installs a runnable native runtime with its authored assets",
-  ignore: !RUN_IMAGE_SCENARIO,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!RUN_IMAGE_SCENARIO)(
+  "omp image packaging - the built image installs a runnable native runtime with its authored assets",
+  async function () {
     const build = await podman(["build", "-f", "Containerfile", "-t", IMAGE_TAG, "."]);
     assertEquals(build.code, 0, `image build failed:\n${build.stderr}\n${build.stdout}`);
 
@@ -324,7 +332,7 @@ Deno.test({
         " /opt/air/omp/config/native-yolo.yml" +
         " /opt/air/omp/prompt/SYSTEM.md" +
         " /opt/air/omp/extension/index.js" +
-        " /home/deno/.omp/agent/models.yml" +
+        " /home/air/.omp/agent/models.yml" +
         " /licenses/omp/LICENSE" +
         " /licenses/omp/THIRD-PARTY-NOTICES.txt; do",
         '  test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }',
@@ -353,7 +361,7 @@ Deno.test({
       [
         "set -e",
         "files='/opt/air/omp/config/restricted.yml /opt/air/omp/config/native-yolo.yml" +
-        " /opt/air/omp/prompt/SYSTEM.md /home/deno/.omp/agent/models.yml'",
+        " /opt/air/omp/prompt/SYSTEM.md /home/air/.omp/agent/models.yml'",
         'before="$(sha256sum $files)"',
         "omp config list >/dev/null",
         "printf '%s\\n' \"$ACP_INIT\" | omp acp" +
@@ -367,15 +375,11 @@ Deno.test({
     assertEquals(authored.code, 0, `authored inputs changed:\n${authored.stderr}`);
     assertStringIncludes(authored.stdout, "authored-inputs-unchanged");
   },
-});
+);
 
-Deno.test({
-  name:
-    "omp image packaging - a wrong executable checksum fails the build before installing an image",
-  ignore: !RUN_IMAGE_SCENARIO,
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
+test.skipIf(!RUN_IMAGE_SCENARIO)(
+  "omp image packaging - a wrong executable checksum fails the build before installing an image",
+  async function () {
     const build = await podman([
       "build",
       "--build-arg",
@@ -402,14 +406,14 @@ Deno.test({
       "no image may be installed from a build that failed checksum verification",
     );
   },
-});
+);
 
 // --- Config-trio documentation (version-health observability) ---------------
 
-Deno.test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all three", async () => {
-  const configExample = await Deno.readTextFile(`${repoRoot}/config.example.yaml`);
-  const envExample = await Deno.readTextFile(`${repoRoot}/.env.example`);
-  const helmValues = await Deno.readTextFile(`${repoRoot}/helm/values.yaml`);
+test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all three", async () => {
+  const configExample = await fsp.readFile(`${repoRoot}/config.example.yaml`, "utf8");
+  const envExample = await fsp.readFile(`${repoRoot}/.env.example`, "utf8");
+  const helmValues = await fsp.readFile(`${repoRoot}/helm/values.yaml`, "utf8");
 
   // Commented in all three (documentation only — no loader key, no chart field).
   for (
@@ -445,7 +449,7 @@ Deno.test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all thr
 // --- Generated native-loadable bundle (no docker, no download, no omp) -------
 //
 // `package-bun-compatible-omp-extension` REPLACED the mirror-copy + generated
-// deno.json import-map packaging with ONE generated ESM bundle: the single
+// import-map packaging with ONE generated ESM bundle: the single
 // <target>/index.js cut from canonical source and frozen-lock dependencies.
 // The packaging contract asserted here is the generated file set, the emitted-
 // dependency-edge audit (the cutover closure is fully inlined — zero
@@ -455,38 +459,37 @@ Deno.test("config trio - AGENT_OMP_MIN_VERSION documented (commented) in all thr
 
 async function listFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
+  for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) out.push(...await listFiles(path));
+    if (entry.isDirectory()) out.push(...await listFiles(path));
     else out.push(path);
   }
   return out;
 }
 
-async function buildBundle(target: string): Promise<void> {
-  const command = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
-    args: [repoRoot, target, `${repoRoot}/deno.lock`],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const output = await command.output();
-  assertEquals(output.code, 0, new TextDecoder().decode(output.stderr));
+function buildBundle(target: string): void {
+  const output = spawnSync(
+    `${repoRoot}/scripts/omp/bundle-omp-extension.sh`,
+    [repoRoot, target],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  assertEquals(output.status, 0, output.stderr);
 }
 
-Deno.test("extension bundle - replay produces the single generated native-loadable entry", async () => {
-  const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
+test("extension bundle - replay produces the single generated native-loadable entry", async () => {
+  const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
-    await buildBundle(`${target}/extension`);
+    buildBundle(`${target}/extension`);
     const files = (await listFiles(`${target}/extension`)).map((f) =>
       f.slice(`${target}/extension/`.length)
     ).sort();
-    // ONE generated artifact: no mirror tree, no sidecar deno.json import map,
+    // ONE generated artifact: no mirror tree, no sidecar import map,
     // no generated adapter — the scaffolding removal IS the file-set equality.
     assertEquals(files, ["index.js"]);
     // The artifact is exactly the bundler's ESM output: no build-owned
     // deployment declaration placeholder survives, and no synthetic
     // input-digest header is prepended.
-    const bundle = await Deno.readTextFile(`${target}/extension/index.js`);
+    const bundle = await fsp.readFile(`${target}/extension/index.js`, "utf8");
     assertEquals(
       bundle.includes("@@OMP_CANONICAL_SOURCE_ROOT@@"),
       false,
@@ -498,15 +501,15 @@ Deno.test("extension bundle - replay produces the single generated native-loadab
       "no digest-inventory header is prepended",
     );
   } finally {
-    await Deno.remove(target, { recursive: true });
+    await fsp.rm(target, { recursive: true });
   }
 });
 
-Deno.test("extension bundle - the extension closure is fully inlined (zero externals)", async () => {
-  const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
+test("extension bundle - the extension closure is fully inlined (zero externals)", async () => {
+  const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
-    await buildBundle(`${target}/extension`);
-    const bundle = await Deno.readTextFile(`${target}/extension/index.js`);
+    buildBundle(`${target}/extension`);
+    const bundle = await fsp.readFile(`${target}/extension/index.js`, "utf8");
     // The capability-admission closure imports nothing external: no jsr:/npm:/
     // https edge, no import-map alias, no unapproved bare package, no
     // non-inlined path edge, and no runtime `require` edge survives bundling.
@@ -526,11 +529,11 @@ Deno.test("extension bundle - the extension closure is fully inlined (zero exter
       "loose cross-line scan agrees with the strict set",
     );
   } finally {
-    await Deno.remove(target, { recursive: true });
+    await fsp.rm(target, { recursive: true });
   }
 });
 
-Deno.test("bundle audit - production predicate fails every edge class outside the boundary", () => {
+test("bundle audit - production predicate fails every edge class outside the boundary", () => {
   // The audit is exercised deterministically on synthetic bundle text (zero
   // network): every class the container-packaging requirement names SHALL
   // fail packaging BEFORE installation, and only documented native builtins
@@ -607,79 +610,70 @@ Deno.test("bundle audit - production predicate fails every edge class outside th
   );
 });
 
-Deno.test("extension bundle - load parity: generated entry and dev source load identically", async () => {
+test("extension bundle - load parity: generated entry and dev source load identically", async () => {
   // The cutover extension is the small capability-admission closure with no
   // module-load bootstrap, discovery guard or host-facade edge: the dev
   // canonical source and the generated bundle evaluate to the SAME default
   // registration callback, without ever executing `omp`.
-  const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
+  // The dev source is TypeScript, so this host needs Node's type stripping
+  // (>=22.7 with --experimental-strip-types, >=23.6 by default; the image pins
+  // Node 24). Without a node binary the scenario SKIP-PASSES like the
+  // standalone loader test below; leaving it unguarded would fail on
+  // environment, not on the artifact.
+  if (!nodeAvailable()) {
+    console.warn("SKIP: no node binary — load parity is user-owned");
+    return;
+  }
+  const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
-    await buildBundle(`${target}/extension`);
-    const loadDev = new Deno.Command(Deno.execPath(), {
-      args: [
-        "eval",
-        `const r = await import("${repoRoot}/src/acp/omp/extension/index.ts").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
-      ],
-      stdout: "piped",
-      stderr: "piped",
-      cwd: repoRoot,
-    });
-    const loadBundle = new Deno.Command(Deno.execPath(), {
-      args: [
-        "eval",
-        `const r = await import("${target}/extension/index.js").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
-      ],
-      stdout: "piped",
-      stderr: "piped",
-      cwd: repoRoot,
-    });
-    const [dev, bundled] = await Promise.all([loadDev.output(), loadBundle.output()]);
-    assertEquals(dev.code, 0, new TextDecoder().decode(dev.stderr));
-    assertEquals(bundled.code, 0, new TextDecoder().decode(bundled.stderr));
-    const devText = new TextDecoder().decode(dev.stdout).trim();
-    const bundleText = new TextDecoder().decode(bundled.stdout).trim();
+    buildBundle(`${target}/extension`);
+    const dev = spawnSync("node", [
+      "--eval",
+      `const r = await import("${repoRoot}/src/acp/omp/extension/index.ts").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
+    ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    const bundled = spawnSync("node", [
+      "--eval",
+      `const r = await import("${target}/extension/index.js").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
+    ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    assertEquals(dev.status, 0, dev.stderr);
+    assertEquals(bundled.status, 0, bundled.stderr);
+    const devText = dev.stdout.trim();
+    const bundleText = bundled.stdout.trim();
 
     // Identical successful-load parity: both expose the default registration
     // function, so the deterministic transformation is behavior-preserving.
     assertEquals(devText, "loaded:function");
     assertEquals(bundleText, "loaded:function");
   } finally {
-    await Deno.remove(target, { recursive: true });
+    await fsp.rm(target, { recursive: true });
   }
 });
 
-Deno.test("extension bundle - loads standalone under node with NO Deno import map", async () => {
+test("extension bundle - loads standalone under node with NO Deno import map", async () => {
   // The bundle is fully self-contained: no bare host facade, no import-map
   // alias, no Deno global. Node loads the copied artifact from an isolated
   // tree with no node_modules and no repo config, proving native-loadability
   // without the pinned host's resolution rules. Node availability is
   // environment-dependent; the test SKIP-PASSES with a notice when no node
   // binary exists (the image build never runs the unit suite).
-  let haveNode = true;
-  try {
-    await new Deno.Command("node", { args: ["--version"], stdout: "null", stderr: "null" })
-      .output();
-  } catch {
-    haveNode = false;
-  }
-  if (!haveNode) {
+  if (!nodeAvailable()) {
     console.warn("SKIP: no node binary — native-loader smoke is user-owned");
     return;
   }
-  const fixture = await Deno.makeTempDir({ prefix: "omp-standalone-" });
-  const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
+  const fixture = await makeTempDir({ prefix: "omp-standalone-" });
+  const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
     // The generated bundle is COPIED into the fixture tree and loaded there:
     // no node_modules, no import map, no Deno — resolution has nowhere to go
     // but the bundle's own inlined closure.
-    await buildBundle(`${target}/extension`);
-    await Deno.mkdir(`${fixture}/ext`, { recursive: true });
-    await Deno.copyFile(`${target}/extension/index.js`, `${fixture}/ext/index.js`);
-    await Deno.writeTextFile(
+    buildBundle(`${target}/extension`);
+    await fsp.mkdir(`${fixture}/ext`, { recursive: true });
+    await fsp.copyFile(`${target}/extension/index.js`, `${fixture}/ext/index.js`);
+    await fsp.writeFile(
       `${fixture}/package.json`,
       JSON.stringify({ name: "omp-standalone-fixture", type: "module", private: true }) + "\n",
     );
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       `${fixture}/load.mjs`,
       `
 const r = await import("./ext/index.js")
@@ -688,14 +682,9 @@ const r = await import("./ext/index.js")
 console.log(r);
 `,
     );
-    const load = await new Deno.Command("node", {
-      args: ["load.mjs"],
-      cwd: fixture,
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-    const out = new TextDecoder().decode(load.stdout);
-    const err = new TextDecoder().decode(load.stderr);
+    const load = spawnSync("node", ["load.mjs"], { cwd: fixture, encoding: "utf8" });
+    const out = load.stdout;
+    const err = load.stderr;
     // The bundle evaluated with no Deno global, no repo import map and no
     // download: its default registration callback is live under a plain host.
     assert(
@@ -709,7 +698,7 @@ console.log(r);
       "no bare specifier was left unresolved",
     );
   } finally {
-    await Deno.remove(fixture, { recursive: true });
-    await Deno.remove(target, { recursive: true });
+    await fsp.rm(fixture, { recursive: true });
+    await fsp.rm(target, { recursive: true });
   }
 });

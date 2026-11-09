@@ -1,7 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { basename, resolve, SEPARATOR } from "@std/path";
+import { basename, resolve, sep as SEPARATOR } from "node:path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";
@@ -133,7 +133,7 @@ export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|captio
  * Rejects absolute paths (`/etc/...`), home-anchored paths (`~/...`, `$HOME/...`),
  * and parent-traversal (`../`). Workspace-relative paths and non-path flags/values
  * are allowed. Used to keep a whitelisted command prefix from being used to read
- * sensitive files (e.g. `agent-browser /home/deno/.git-credentials`).
+ * sensitive files (e.g. `agent-browser /home/air/.git-credentials`).
  */
 export function referencesOutOfWorkspacePath(token: string): boolean {
   // F12 D5: an unquoted non-harness `$VAR` reference or unquoted brace token could
@@ -229,6 +229,7 @@ export const MAX_PERMISSION_REJECTION_FIELD_LENGTH = 200;
  * Applies to `toolName`, `kind`, and `commandOrPath` at record time.
  */
 const CONTROL_CHARS_PATTERN = new RegExp(
+  // oxlint-disable-next-line no-control-regex
   `[\\u0000-\\u001f\\u007f]`,
   "g",
 );
@@ -379,7 +380,7 @@ export class ChatbotClient implements acp.Client {
     // MANDATORY internal input (`unify-skill-root-and-inventory` D2): the
     // connector derives the inventory from the deployment's ONE explicitly
     // resolved trusted root, shared by BOTH agent types. The historical
-    // `Deno.cwd()/skills` constructor default is removed — a caller can no
+    // `process.cwd()/skills` constructor default is removed — a caller can no
     // longer silently authorize a daemon- or session-relative tree.
     this.skillAutoApproveList = skillAutoApproveList;
   }
@@ -1306,7 +1307,7 @@ export class ChatbotClient implements acp.Client {
         sessionContextGeneration: registered?.generation ?? "",
         processTmpDir: this.config.processTmpDir,
         xdgDataHome: this.config.xdgDataHome,
-        home: Deno.env.get("HOME") ?? "/home/deno",
+        home: process.env["HOME"] ?? "/home/air",
         runtimeEnv: {
           tmpDir: this.config.processTmpDir ?? resolve(sessionCwd, "tmp"),
           agentWorkspace: this.config.agentWorkspacePath,

@@ -7,34 +7,37 @@ import {
   normalizeReasoningEffort,
 } from "@core/config-loader.ts";
 import { KNOWN_REASONING_EFFORT_TOKENS } from "@acp/session-config.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // --- normalizeReasoningEffort (pure function) ---
 
-Deno.test("normalizeReasoningEffort - undefined stays undefined", () => {
+test("normalizeReasoningEffort - undefined stays undefined", () => {
   assertEquals(normalizeReasoningEffort(undefined, "f"), undefined);
 });
 
-Deno.test("normalizeReasoningEffort - null stays undefined", () => {
+test("normalizeReasoningEffort - null stays undefined", () => {
   assertEquals(normalizeReasoningEffort(null, "f"), undefined);
 });
 
-Deno.test("normalizeReasoningEffort - trims and lowercases known value", () => {
+test("normalizeReasoningEffort - trims and lowercases known value", () => {
   assertEquals(normalizeReasoningEffort("  Medium  ", "f"), "medium");
 });
 
-Deno.test("normalizeReasoningEffort - empty/whitespace becomes default", () => {
+test("normalizeReasoningEffort - empty/whitespace becomes default", () => {
   assertEquals(normalizeReasoningEffort("", "f"), "default");
   assertEquals(normalizeReasoningEffort("   ", "f"), "default");
 });
 
-Deno.test("normalizeReasoningEffort - all known values accepted", () => {
+test("normalizeReasoningEffort - all known values accepted", () => {
   for (const v of ["none", "low", "medium", "high", "xhigh", "max", "default"]) {
     assertEquals(normalizeReasoningEffort(v, "f"), v);
     assertEquals(normalizeReasoningEffort(v.toUpperCase(), "f"), v);
   }
 });
 
-Deno.test("normalizeReasoningEffort - extended levels accepted without warning", () => {
+test("normalizeReasoningEffort - extended levels accepted without warning", () => {
   // No warning is emitted; values normalize to lowercase. (Warnings would surface
   // as unhandled log calls only in integration tests; pure-function equality is the gate here.)
   assertEquals(normalizeReasoningEffort("xhigh", "f"), "xhigh");
@@ -43,11 +46,11 @@ Deno.test("normalizeReasoningEffort - extended levels accepted without warning",
   assertEquals(normalizeReasoningEffort("  MAX  ", "f"), "max");
 });
 
-Deno.test("normalizeReasoningEffort - unknown token passthrough preserves trimmed", () => {
+test("normalizeReasoningEffort - unknown token passthrough preserves trimmed", () => {
   assertEquals(normalizeReasoningEffort("  Ultra  ", "f"), "Ultra");
 });
 
-Deno.test("known reasoning-effort lists stay consistent (no drift)", () => {
+test("known reasoning-effort lists stay consistent (no drift)", () => {
   // KNOWN_REASONING_EFFORT_TOKENS (application gate) must equal
   // KNOWN_REASONING_EFFORTS (config normalization) minus the "default" sentinel,
   // which short-circuits earlier in setReasoningEffort().
@@ -55,7 +58,7 @@ Deno.test("known reasoning-effort lists stay consistent (no drift)", () => {
   assertEquals([...KNOWN_REASONING_EFFORT_TOKENS].sort(), [...expected].sort());
 });
 
-Deno.test("normalizeReasoningEffort - non-string coerced to default", () => {
+test("normalizeReasoningEffort - non-string coerced to default", () => {
   assertEquals(normalizeReasoningEffort(42, "f"), "default");
 });
 
@@ -95,25 +98,25 @@ async function withTestConfig(
   configContent: string,
   fn: (dir: string) => Promise<void>,
 ): Promise<void> {
-  const dir = await Deno.makeTempDir();
+  const dir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${dir}/config.yaml`, configContent);
-    await Deno.mkdir(`${dir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(`${dir}/prompts/system_reply.md`, "test");
+    await fsp.writeFile(`${dir}/config.yaml`, configContent);
+    await fsp.mkdir(`${dir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${dir}/prompts/system_reply.md`, "test");
     await fn(dir);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 }
 
-Deno.test("loadConfig - global reasoningEffort defaults to 'default'", async () => {
+test("loadConfig - global reasoningEffort defaults to 'default'", async () => {
   await withTestConfig(baseConfig, async (dir) => {
     const config = await loadConfig(dir);
     assertEquals(config.agent.reasoningEffort, "default");
   });
 });
 
-Deno.test("loadConfig - global reasoningEffort normalized", async () => {
+test("loadConfig - global reasoningEffort normalized", async () => {
   await withTestConfig(
     configWithAgentExtra(`  reasoningEffort: "  High  "`),
     async (dir) => {
@@ -123,22 +126,22 @@ Deno.test("loadConfig - global reasoningEffort normalized", async () => {
   );
 });
 
-Deno.test("loadConfig - AGENT_REASONING_EFFORT env overrides global", async () => {
+test("loadConfig - AGENT_REASONING_EFFORT env overrides global", async () => {
   await withTestConfig(
     configWithAgentExtra(`  reasoningEffort: "high"`),
     async (dir) => {
-      Deno.env.set("AGENT_REASONING_EFFORT", "low");
+      process.env["AGENT_REASONING_EFFORT"] = "low";
       try {
         const config = await loadConfig(dir);
         assertEquals(config.agent.reasoningEffort, "low");
       } finally {
-        Deno.env.delete("AGENT_REASONING_EFFORT");
+        delete process.env["AGENT_REASONING_EFFORT"];
       }
     },
   );
 });
 
-Deno.test("loadConfig - per-section reasoningEffort normalized; omitted stays undefined", async () => {
+test("loadConfig - per-section reasoningEffort normalized; omitted stays undefined", async () => {
   await withTestConfig(
     baseConfig + `
 selfResearch:
@@ -162,7 +165,7 @@ conversationSummary:
   );
 });
 
-Deno.test("loadConfig - extended levels normalized at global, section, and rule levels", async () => {
+test("loadConfig - extended levels normalized at global, section, and rule levels", async () => {
   await withTestConfig(
     configWithAgentExtra(`  reasoningEffort: "  XHigh  "
   modelRouting:
@@ -194,7 +197,7 @@ memoryMaintenance:
   );
 });
 
-Deno.test("loadConfig - per-rule reasoningEffort normalized and rule kept", async () => {
+test("loadConfig - per-rule reasoningEffort normalized and rule kept", async () => {
   await withTestConfig(
     configWithAgentExtra(`  modelRouting:
     enabled: true
@@ -215,7 +218,7 @@ Deno.test("loadConfig - per-rule reasoningEffort normalized and rule kept", asyn
   );
 });
 
-Deno.test("loadConfig - non-standard per-rule reasoningEffort keeps rule (passthrough)", async () => {
+test("loadConfig - non-standard per-rule reasoningEffort keeps rule (passthrough)", async () => {
   await withTestConfig(
     configWithAgentExtra(`  modelRouting:
     enabled: true
@@ -232,37 +235,31 @@ Deno.test("loadConfig - non-standard per-rule reasoningEffort keeps rule (passth
   );
 });
 
-Deno.test("loadConfig - per-rule reasoningEffort survives MODEL_ROUTING_RULES JSON", async () => {
+test("loadConfig - per-rule reasoningEffort survives MODEL_ROUTING_RULES JSON", async () => {
   await withTestConfig(baseConfig, async (dir) => {
-    Deno.env.set("MODEL_ROUTING_ENABLED", "true");
-    Deno.env.set(
-      "MODEL_ROUTING_RULES",
-      JSON.stringify([
-        { match: { sessionType: "message" }, model: "m1", reasoningEffort: "ultra" },
-      ]),
-    );
+    process.env["MODEL_ROUTING_ENABLED"] = "true";
+    process.env["MODEL_ROUTING_RULES"] = JSON.stringify([
+      { match: { sessionType: "message" }, model: "m1", reasoningEffort: "ultra" },
+    ]);
     try {
       const config = await loadConfig(dir);
       const rules = config.agent.modelRouting?.rules ?? [];
       assertEquals(rules.length, 1);
       assertEquals(rules[0].reasoningEffort, "ultra");
     } finally {
-      Deno.env.delete("MODEL_ROUTING_ENABLED");
-      Deno.env.delete("MODEL_ROUTING_RULES");
+      delete process.env["MODEL_ROUTING_ENABLED"];
+      delete process.env["MODEL_ROUTING_RULES"];
     }
   });
 });
 
-Deno.test("loadConfig - extended levels survive MODEL_ROUTING_RULES JSON normalized lowercase", async () => {
+test("loadConfig - extended levels survive MODEL_ROUTING_RULES JSON normalized lowercase", async () => {
   await withTestConfig(baseConfig, async (dir) => {
-    Deno.env.set("MODEL_ROUTING_ENABLED", "true");
-    Deno.env.set(
-      "MODEL_ROUTING_RULES",
-      JSON.stringify([
-        { match: { sessionType: "message" }, model: "m1", reasoningEffort: "XHigh" },
-        { match: { sessionType: "spontaneous" }, model: "m2", reasoningEffort: "MAX" },
-      ]),
-    );
+    process.env["MODEL_ROUTING_ENABLED"] = "true";
+    process.env["MODEL_ROUTING_RULES"] = JSON.stringify([
+      { match: { sessionType: "message" }, model: "m1", reasoningEffort: "XHigh" },
+      { match: { sessionType: "spontaneous" }, model: "m2", reasoningEffort: "MAX" },
+    ]);
     try {
       const config = await loadConfig(dir);
       const rules = config.agent.modelRouting?.rules ?? [];
@@ -271,8 +268,8 @@ Deno.test("loadConfig - extended levels survive MODEL_ROUTING_RULES JSON normali
       assertEquals(rules[0].reasoningEffort, "xhigh");
       assertEquals(rules[1].reasoningEffort, "max");
     } finally {
-      Deno.env.delete("MODEL_ROUTING_ENABLED");
-      Deno.env.delete("MODEL_ROUTING_RULES");
+      delete process.env["MODEL_ROUTING_ENABLED"];
+      delete process.env["MODEL_ROUTING_RULES"];
     }
   });
 });

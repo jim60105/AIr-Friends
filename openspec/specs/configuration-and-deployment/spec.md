@@ -2,44 +2,9 @@
 
 ## Purpose
 
-Defines the Deno 2.x runtime environment, YAML configuration system with environment variable overrides, container deployment strategy, project structure conventions, and external skill auto-installation.
+Defines the Bun runtime environment, YAML configuration system with environment variable overrides, container deployment strategy, project structure conventions, and external skill auto-installation.
 
 ## Requirements
-
-### Requirement: Deno Runtime with Explicit Permissions
-
-The system SHALL use Deno 2.x as the runtime environment with explicit permission flags. The system SHALL NOT use `--allow-all`.
-
-#### Scenario: Required Permission Flags
-
-- **GIVEN** the application is started via `deno run` or `deno task start`
-- **WHEN** the process launches
-- **THEN** the following permission flags SHALL be declared: `--allow-net`, `--allow-read`, `--allow-write`, `--allow-env`, `--allow-run`, `--allow-ffi`, `--allow-sys`
-
-#### Scenario: Eagerly loaded dependency requires its OS permission
-
-- **GIVEN** a module reached by a static import from the application entry point calls an OS API that Deno gates behind system permission at module initialization, such as `os.hostname()`
-- **WHEN** the process launches
-- **THEN** `--allow-sys` SHALL be declared even when the platform that owns that dependency is disabled
-
-#### Scenario: Development Mode with Hot Reload
-
-- **GIVEN** a developer runs `deno task dev`
-- **WHEN** the task executes
-- **THEN** the process SHALL start with `--watch` flag and all required permissions
-
-#### Scenario: Tests run with native module permission
-
-- **GIVEN** a developer or CI runs any `deno task` that executes tests
-- **WHEN** the task executes
-- **THEN** the process SHALL include `--allow-ffi` so native modules used by the application can load
-
-#### Scenario: Container image can load the segmenter
-
-- **GIVEN** the container image is built from `Containerfile`
-- **WHEN** the container starts with its default command
-- **THEN** the command SHALL include `--allow-ffi`
-- **AND** the vendored `assets/` directory SHALL be present in the image
 
 ### Requirement: YAML Configuration Loading
 
@@ -53,10 +18,10 @@ The system SHALL load configuration from YAML files with a defined merge order: 
 
 #### Scenario: Environment-Specific Config Override
 
-- **GIVEN** `DENO_ENV` or `ENV` is set to `"production"`
+- **GIVEN** `ENV` is set to `"production"`
 - **WHEN** the config is loaded
 - **THEN** the system SHALL load `config.yaml` first, then deep-merge `config.production.yaml` on top if it exists
-- **AND** the environment SHALL default to `"development"` when neither `DENO_ENV` nor `ENV` is set
+- **AND** the environment SHALL default to `"development"` when `ENV` is not set, and `DENO_ENV` SHALL be ignored
 
 #### Scenario: Environment Variable Syntax in Config Values
 
@@ -217,19 +182,19 @@ The system SHALL validate external MCP server configurations during config loadi
 
 ### Requirement: Multi-Stage Container Build
 
-The container image SHALL use multi-stage builds with the Deno official Debian image as base.
+The container image SHALL use multi-stage builds with the official Bun Debian image, pinned by digest, as base.
 
 #### Scenario: Build Stages
 
 - **GIVEN** the Containerfile is built
 - **WHEN** the build executes
-- **THEN** it SHALL use separate stages: `base` (system packages), `opencode-unpacker` (OpenCode CLI binary), `cache` (Deno dependency cache), and `final` (runtime image)
+- **THEN** it SHALL use separate stages: `base` (system packages), `opencode-unpacker` (OpenCode CLI binary), `deps` (frozen production dependency install), `build` (frozen full dependency install used to bundle the OMP extension and prepare the OMP native cache), and `final` (runtime image)
 
 #### Scenario: Dependency Caching
 
-- **GIVEN** the `cache` stage runs
-- **WHEN** `deno cache --lock=deno.lock src/main.ts` executes
-- **THEN** all Deno dependencies SHALL be pre-cached for layer reuse
+- **GIVEN** the `deps` stage runs
+- **WHEN** `bun install --frozen-lockfile --production` executes against `package.json` and `bun.lock`
+- **THEN** the production dependencies SHALL be installed for layer reuse, and a lock mismatch SHALL fail the build
 
 ### Requirement: Non-Root Container Execution
 
@@ -240,7 +205,7 @@ The container SHALL run as a non-root user for security.
 - **GIVEN** the container is built with default `UID=1000`
 - **WHEN** the final stage runs
 - **THEN** the `USER $UID` directive SHALL switch to the non-privileged user
-- **AND** directories `/app`, `/app/data`, `/deno-dir/`, `/home/deno/` SHALL be owned by that UID with group 0 (OpenShift compatibility)
+- **AND** directories `/app`, `/app/data`, `/home/air/` SHALL be owned by that UID with group 0 (OpenShift compatibility)
 
 ### Requirement: Persistent Volumes
 
@@ -268,7 +233,7 @@ The container SHALL use `dumb-init` as PID 1 for proper signal handling.
 
 - **GIVEN** the container is running
 - **WHEN** a `SIGTERM` signal is sent
-- **THEN** `dumb-init` SHALL forward the signal to the Deno process
+- **THEN** `dumb-init` SHALL forward the signal to the Bun process
 - **AND** the `STOPSIGNAL` SHALL be `SIGTERM`
 - **AND** the entrypoint SHALL be `["dumb-init", "--"]`
 
@@ -280,9 +245,9 @@ The container SHALL include pre-installed agent binaries and tools.
 
 - **GIVEN** the container is built
 - **WHEN** the final image is produced
-- **THEN** it SHALL contain: `opencode` (OpenCode CLI), `rg` (ripgrep), and `dumb-init`
-- **AND** skills SHALL be copied to `/home/deno/.agents/skills/`
-- **AND** OpenCode config SHALL be at `/home/deno/.config/opencode/opencode.json`
+- **THEN** it SHALL contain: `bun`, `opencode` (OpenCode CLI), `omp`, `node`, `rg` (ripgrep), and `dumb-init`
+- **AND** skills SHALL be copied to `/home/air/.agents/skills/`
+- **AND** OpenCode config SHALL be at `/home/air/.config/opencode/opencode.json`
 
 ### Requirement: OCI Labels
 
@@ -293,43 +258,6 @@ The container image SHALL include OCI-compliant labels for metadata.
 - **GIVEN** the Containerfile is built with `VERSION` and `RELEASE` args
 - **WHEN** the image is produced
 - **THEN** it SHALL include labels: `name`, `vendor`, `maintainer`, `url`, `version`, `release`, `io.k8s.display-name`, `summary`, and `description`
-
-### Requirement: Deno Project Structure
-
-The project SHALL use `deno.json` as the central configuration file with import aliases and task definitions.
-
-#### Scenario: Import Aliases
-
-- **GIVEN** `deno.json` defines import aliases
-- **WHEN** source code imports modules
-- **THEN** the following aliases SHALL be available: `@core/` → `./src/core/`, `@platforms/` → `./src/platforms/`, `@skills/` → `./src/skills/`, `@types/` → `./src/types/`, `@utils/` → `./src/utils/`, `@acp/` → `./src/acp/`
-
-#### Scenario: Task Definitions
-
-- **GIVEN** `deno.json` defines tasks
-- **WHEN** a developer runs `deno task <name>`
-- **THEN** the following tasks SHALL be available: `dev` (watch mode), `start` (production), `test` (all tests, one module at a time), `fmt` (format), `lint` (lint), `check` (type check), `ci` (fmt check + lint + type check + test)
-- **AND** the `test` and `test:unit` tasks SHALL NOT pass `--parallel`: Deno runs parallel test modules in one process, so `Deno.env` mutations leak between concurrently running modules and the environment-override tests fail on unrelated assertions
-- **AND** the `ci` task's fmt-check and lint steps SHALL be scoped to `src/` and `tests/` — the same scopes as `fmt:check` and `lint`, matching the GitHub Actions workflow — so the task passes on a repository whose non-code assets (vendored data, docs, archives) are not format-managed and whose TypeScript outside `src/` and `tests/` (skill scripts, benchmark scripts) is not lint-managed
-
-#### Scenario: Formatting Rules
-
-- **GIVEN** `deno.json` defines `fmt` settings
-- **WHEN** `deno fmt` runs
-- **THEN** it SHALL enforce: `lineWidth: 100`, `indentWidth: 2`, `useTabs: false`, `singleQuote: false`, `proseWrap: "preserve"`
-
-#### Scenario: Compiler Options
-
-- **GIVEN** `deno.json` defines `compilerOptions`
-- **WHEN** `deno check` runs
-- **THEN** it SHALL enforce: `strict: true`, `noImplicitAny: true`, `noImplicitReturns: true`, `noFallthroughCasesInSwitch: true`
-
-#### Scenario: Lock File
-
-- **GIVEN** `deno.lock` exists in the repository
-- **WHEN** dependencies are resolved
-- **THEN** the lock file SHALL be committed to version control
-- **AND** CI/container builds SHALL use `--lock=deno.lock` for reproducibility
 
 ### Requirement: Dashboard Configuration Section
 
@@ -774,13 +702,13 @@ The final documentation pass SHALL consolidate the batch's change-history entrie
 
 ### Requirement: Stock Image Declares the Shared Skill Install Root
 
-The stock container deployment SHALL explicitly set the single skill-directory configuration to `/home/deno/.agents/skills`, matching both built-in COPY and external publication for every agent type. Helm and deployment examples SHALL document this same installation contract. Repository development SHALL retain relative `skills` resolved against the deployment working directory. Ambient HOME SHALL NOT supply this configuration.
+The stock container deployment SHALL explicitly set the single skill-directory configuration to `/home/air/.agents/skills`, matching both built-in COPY and external publication for every agent type. Helm and deployment examples SHALL document this same installation contract. Repository development SHALL retain relative `skills` resolved against the deployment working directory. Ambient HOME SHALL NOT supply this configuration.
 
 #### Scenario: Stock image requires no missing cwd skill tree
 
 - **GIVEN** the stock image runs from `/app` without an operator skill-directory override
 - **WHEN** its existing configuration is loaded
-- **THEN** both agent types SHALL select `/home/deno/.agents/skills` from that one configured value
+- **THEN** both agent types SHALL select `/home/air/.agents/skills` from that one configured value
 - **AND** neither agent type SHALL select a separately packaged image tree
 
 ### Requirement: Container Health and Skill Readiness Endpoints
@@ -862,7 +790,7 @@ The system SHALL support automatic installation of external agent skills at star
 
 #### Scenario: Container and development destinations agree with the gate
 
-- **GIVEN** a container's root is `/home/deno/.agents/skills`, or a development deployment's configured root resolves to its repository `skills/`
+- **GIVEN** a container's root is `/home/air/.agents/skills`, or a development deployment's configured root resolves to its repository `skills/`
 - **WHEN** an external skill is successfully published
 - **THEN** its final path SHALL be contained in that exact deployment's script-root inventory for either agent type
 - **AND** changing daemon HOME SHALL change neither the publication destination nor the script grant

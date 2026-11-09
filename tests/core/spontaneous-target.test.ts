@@ -5,6 +5,7 @@ import type { Config } from "../../src/types/config.ts";
 import { MockPlatformAdapter } from "../mocks/mock-platform-adapter.ts";
 import { extractChannelLurkIds } from "@platforms/discord/index.ts";
 import type { ChannelConfig } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 function createConfig(whitelist: string[]): Config {
   return {
@@ -25,20 +26,20 @@ function createConfig(whitelist: string[]): Config {
   };
 }
 
-Deno.test("MockPlatformAdapter.determineSpontaneousTarget - returns mock channel", async () => {
+test("MockPlatformAdapter.determineSpontaneousTarget - returns mock channel", async () => {
   const adapter = new MockPlatformAdapter();
   const config = createConfig([]);
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target?.channelId, "mock-channel");
 });
 
-Deno.test("PlatformAdapter.getSearchGuildId - default returns empty string", () => {
+test("PlatformAdapter.getSearchGuildId - default returns empty string", () => {
   const adapter = new MockPlatformAdapter();
   assertEquals(adapter.getSearchGuildId("channel123", false), "");
   assertEquals(adapter.getSearchGuildId("channel123", true), "");
 });
 
-Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
+test("extractDiscordChannelIds - filters discord channel entries", () => {
   const whitelist = [
     "discord/channel/11100000000000000",
     "discord/account/22200000000000000",
@@ -52,7 +53,7 @@ Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
   assertEquals(result, ["11100000000000000", "44400000000000000"]);
 });
 
-Deno.test("extractDiscordChannelIds - returns empty for no matches", () => {
+test("extractDiscordChannelIds - returns empty for no matches", () => {
   const channels: ChannelConfig[] = [
     { id: "discord/account/12345678901234567" },
     { id: "misskey/account/456" },

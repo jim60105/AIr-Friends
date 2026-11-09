@@ -3,9 +3,10 @@
 import { assertEquals } from "@std/assert";
 import type { AuditPhase, EmailOperationAuditData } from "../../src/types/audit.ts";
 import { EMAIL_OPERATION_AUDIT_FIELDS } from "../../src/types/audit.ts";
+import { test } from "bun:test";
 
 // 8.1: Verify all 22 AuditPhase literals are valid
-Deno.test("AuditPhase - all 22 phase literals are assignable", () => {
+test("AuditPhase - all 22 phase literals are assignable", () => {
   const phases: AuditPhase[] = [
     "trigger_received",
     "session_start",
@@ -37,7 +38,7 @@ Deno.test("AuditPhase - all 22 phase literals are assignable", () => {
   }
 });
 
-Deno.test("AuditPhase - phase literals are distinct", () => {
+test("AuditPhase - phase literals are distinct", () => {
   const phases: AuditPhase[] = [
     "trigger_received",
     "session_start",
@@ -67,7 +68,7 @@ Deno.test("AuditPhase - phase literals are distinct", () => {
 });
 
 // email_operation data accepts exactly the six-field metadata allowlist
-Deno.test("Audit - email_operation entry data carries the metadata allowlist", () => {
+test("Audit - email_operation entry data carries the metadata allowlist", () => {
   const data: EmailOperationAuditData = {
     operationId: `op_${"a".repeat(24)}`,
     workId: "11111111-2222-3333-4444-555555555555",
@@ -96,7 +97,7 @@ Deno.test("Audit - email_operation entry data carries the metadata allowlist", (
 });
 
 // file_sent data accepts the delivered message IDs (verbatim, not user content)
-Deno.test("Audit - file_sent entry data accepts messageId/messageIds", () => {
+test("Audit - file_sent entry data accepts messageId/messageIds", () => {
   const entry: {
     phase: AuditPhase;
     data: {
@@ -118,7 +119,7 @@ Deno.test("Audit - file_sent entry data accepts messageId/messageIds", () => {
   assertEquals(entry.data.messageIds, ["file-1", "file-2"]);
 });
 
-Deno.test("Audit - process_acquired entry data accepts ownership payload", () => {
+test("Audit - process_acquired entry data accepts ownership payload", () => {
   const entry: {
     phase: AuditPhase;
     data: {

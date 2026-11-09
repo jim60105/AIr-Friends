@@ -18,7 +18,7 @@
 // No model and no production credential is involved.
 
 import { assert, assertEquals } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import { reminderOperationKey, ReminderStore } from "@core/reminder-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -69,7 +69,11 @@ import type { SkillContext } from "../../src/skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { AgentConnector, AgentProcessEvidence } from "../../src/acp/agent-connector.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const BOT = "bot@example.com";
 const SENDER = "alice@allowed-domain.org";
@@ -249,7 +253,7 @@ async function buildReminderEnv(base: string, smtp: SmtpTransport): Promise<Remi
     tmpPath: join(workspacesRoot, "email", OWNER, "tmp"),
     isDm: true,
   };
-  await Deno.mkdir(workspace.path, { recursive: true });
+  await fsp.mkdir(workspace.path, { recursive: true });
 
   return {
     config,
@@ -296,9 +300,7 @@ async function persistAndReplayReminder(env: ReminderEnv): Promise<ResolvedRemin
 // ---------------------------------------------------------------------------
 
 /** Deployment-resolved trusted skill-script root (same literal the prompts render). */
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
-  resolve(import.meta.dirname ?? ".", "../../skills"),
-);
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 const SKILL_SECRET = "0123456789abcdef0123456789abcdef01";
 /** Distinct from the ports owned by `tests/skill-api/server.test.ts`. */
 const SKILL_PORT = 3982;
@@ -388,12 +390,12 @@ async function buildReminderOrchestrator(
   skillRegistry: SkillRegistry;
   config: Config;
 }> {
-  await Deno.mkdir(`${base}/prompts`, { recursive: true });
-  await Deno.writeTextFile(
+  await fsp.mkdir(`${base}/prompts`, { recursive: true });
+  await fsp.writeFile(
     `${base}/prompts/system_reply.md`,
     "You are a helper.\nSkill root: {{ skillsDir }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     `${base}/prompts/system_reminder.md`,
     "Reminder: {{ reminderMessage }}\nPlatform: {{ platform }}\nSkill root: {{ skillsDir }}",
   );
@@ -468,8 +470,8 @@ async function waitForSkillApi(port: number, maxAttempts = 100): Promise<void> {
   throw new Error("Skill API fixture did not start");
 }
 
-Deno.test("email reminder - restart-preserved thread, one signed submission, no replay", async () => {
-  const base = await Deno.makeTempDir();
+test("email reminder - restart-preserved thread, one signed submission, no replay", async () => {
+  const base = await makeTempDir();
   try {
     const smtp = new ScriptedSmtp();
     const env = await buildReminderEnv(base, smtp);
@@ -516,18 +518,18 @@ Deno.test("email reminder - restart-preserved thread, one signed submission, no 
     assert(await env.adapter.fetchMessage(origin.channelId, origin.replyAnchorRecordId));
     assertEquals(await env.adapter.fetchMessage(origin.channelId, crypto.randomUUID()), null);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("email reminder - smoke: a live SMTP fixture carries the threaded reminder once", async () => {
+test("email reminder - smoke: a live SMTP fixture carries the threaded reminder once", async () => {
   const smtpService = new EmailSmtpTestService({
     tlsMode: "tls",
     username: BOT,
     password: PASSWORD,
   });
   await smtpService.start();
-  const base = await Deno.makeTempDir();
+  const base = await makeTempDir();
   try {
     // The SMTP transport is the real client over a live socket/TLS handshake against the local
     // fixture; only the model and ACP layers are absent from this boundary.
@@ -562,7 +564,7 @@ Deno.test("email reminder - smoke: a live SMTP fixture carries the threaded remi
     assert(replay.success, replay.error);
     assertEquals(smtpService.dataTransactionCount, 1);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
     await smtpService.stop();
   }
 });
@@ -609,8 +611,8 @@ function inboundWithoutWireIds(): string {
   ].join("\r\n");
 }
 
-Deno.test("email reminder - a retained anchor outside 200 newer records delivers once through the host path and never replays", async () => {
-  const base = await Deno.makeTempDir();
+test("email reminder - a retained anchor outside 200 newer records delivers once through the host path and never replays", async () => {
+  const base = await makeTempDir();
   const smtp = new ScriptedSmtp();
   try {
     const env = await buildReminderEnv(base, smtp);
@@ -734,12 +736,12 @@ Deno.test("email reminder - a retained anchor outside 200 newer records delivers
     );
     secondRun.sessionRegistry.stop();
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("email reminder - a retained but unthreadable anchor is disabled before generation or SMTP", async () => {
-  const base = await Deno.makeTempDir();
+test("email reminder - a retained but unthreadable anchor is disabled before generation or SMTP", async () => {
+  const base = await makeTempDir();
   const smtp = new ScriptedSmtp();
   try {
     const env = await buildReminderEnv(base, smtp);
@@ -779,14 +781,14 @@ Deno.test("email reminder - a retained but unthreadable anchor is disabled befor
     const [persisted] = await reopened.loadReminders(env.workspace);
     assertEquals(persisted.enabled, false);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("email reminder - completed or uncertain retained-anchor operations never replay across ticks", async () => {
+test("email reminder - completed or uncertain retained-anchor operations never replay across ticks", async () => {
   const phases = ["submitted", "unknown", "submitting"] as const;
   for (const phase of phases) {
-    const base = await Deno.makeTempDir();
+    const base = await makeTempDir();
     const smtp = new ScriptedSmtp();
     try {
       const env = await buildReminderEnv(base, smtp);
@@ -863,13 +865,13 @@ Deno.test("email reminder - completed or uncertain retained-anchor operations ne
       assertEquals(restartedSmtp.submissions.length, 0);
       restartedRun.sessionRegistry.stop();
     } finally {
-      await Deno.remove(base, { recursive: true });
+      await fsp.rm(base, { recursive: true });
     }
   }
 });
 
-Deno.test("email reminder - a revoked allowlist prevents submission with a retained anchor", async () => {
-  const base = await Deno.makeTempDir();
+test("email reminder - a revoked allowlist prevents submission with a retained anchor", async () => {
+  const base = await makeTempDir();
   const smtp = new ScriptedSmtp();
   try {
     const env = await buildReminderEnv(base, smtp);
@@ -892,6 +894,6 @@ Deno.test("email reminder - a revoked allowlist prevents submission with a retai
     );
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });

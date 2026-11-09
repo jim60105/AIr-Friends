@@ -24,6 +24,7 @@ import type { EmailSendContext, EmailSubmissionMetadata } from "../types/platfor
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
 import { verifySkillJwt } from "@utils/skill-jwt.ts";
+import type { Server } from "bun";
 
 const logger = createLogger("SkillAPIServer");
 
@@ -96,7 +97,7 @@ interface RequestCacheEntry {
 }
 
 export class SkillAPIServer {
-  private server: Deno.HttpServer | null = null;
+  private server: Server<undefined> | null = null;
   private sessionRegistry: SessionRegistry;
   private skillRegistry: SkillRegistry;
   private config: SkillAPIConfig;
@@ -279,22 +280,32 @@ export class SkillAPIServer {
   /**
    * Start the HTTP server
    */
-  start(): void {
-    this.server = Deno.serve(
-      {
-        port: this.config.port,
-        hostname: this.config.host,
-        onListen: ({ hostname, port }) => {
-          logger.info("Skill API server started on {hostname}:{port}", { hostname, port });
-        },
-      },
-      (request) => this.handleRequest(request),
-    );
+  start(): number {
+    this.server = Bun.serve({
+      port: this.config.port,
+      hostname: this.config.host,
+      // Deno had no idle timeout; a skill may run past Bun's 10s default.
+      idleTimeout: 0,
+      fetch: (request) => this.handleRequest(request),
+    });
+    logger.info("Skill API server started on {hostname}:{port}", {
+      hostname: this.server.hostname,
+      port: this.server.port,
+    });
+
+    // `port: 0` asks the OS for an ephemeral port; return what was bound so
+    // tests (and any future caller) can address the live listener.
+    const boundPort = this.server.port;
+    if (boundPort === undefined) {
+      throw new Error("Skill API server did not bind a TCP port");
+    }
 
     // Start cleanup interval for request cache
     this.cleanupInterval = setInterval(() => {
       this.cleanupRequestCache();
     }, this.CACHE_TTL_MS);
+
+    return boundPort;
   }
 
   /**
@@ -311,7 +322,7 @@ export class SkillAPIServer {
     this.requestCache.clear();
 
     if (this.server) {
-      await this.server.shutdown();
+      await this.server.stop();
       this.server = null;
       logger.info("Skill API server stopped");
     }

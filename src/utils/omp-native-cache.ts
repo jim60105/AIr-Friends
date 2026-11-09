@@ -24,11 +24,15 @@
 // The payload bytes are made immutable to the confined agent by the launch mount policy
 // (a hard read-only bind), not by file permissions here.
 
-import { dirname, join, resolve } from "@std/path";
+import { dirname, join, resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { getMemoizedOmpVersionProbe } from "@utils/omp-version.ts";
 import { parseOmpSemver } from "@utils/omp-version.ts";
 import type { OmpPermissionMode } from "../acp/types.ts";
+import fs from "node:fs";
+import type { Stats } from "node:fs";
+import { removePathSync } from "./fs-compat.ts";
+import { runtimeArch, runtimeOs } from "./runtime-platform.ts";
 
 const logger = createLogger("OmpNativeCache");
 
@@ -97,8 +101,8 @@ export const OMP_NATIVE_CACHE_EXECUTABLE_SHA256: Readonly<Record<OmpNativeCacheP
 
 /** Resolve the supported cache identity for the running target. */
 export function ompNativeCachePlatform(
-  arch: string = Deno.build.arch,
-  os: string = Deno.build.os,
+  arch: string = runtimeArch(),
+  os: string = runtimeOs(),
 ): OmpNativeCachePlatform {
   if (os === "linux" && arch === "x86_64") return "linux-x64";
   if (os === "linux" && arch === "aarch64") return "linux-arm64";
@@ -106,7 +110,7 @@ export function ompNativeCachePlatform(
     `Unsupported OMP native runtime cache identity "${os}-${arch}" — the supported identities ` +
       `are ${OMP_NATIVE_CACHE_PLATFORMS.join(", ")} for the pinned OMP executable ` +
       `${OMP_NATIVE_CACHE_VERSION}. Install the supported pinned executable on a supported ` +
-      `platform, or run \`deno task prepare:omp-natives\` on one.`,
+      `platform, or run \`bun run prepare:omp-natives\` on one.`,
   );
 }
 
@@ -193,7 +197,9 @@ export function ompNativeCacheDescriptor(
 
 /** Development cache base: `${XDG_CACHE_HOME:-$HOME/.cache}/air-friends/omp`. */
 export function ompDevelopmentNativeCacheBase(
-  env: { get(key: string): string | undefined } = Deno.env,
+  env: { get(key: string): string | undefined } = {
+    get: (key) => process.env[key],
+  },
 ): string {
   const cacheHome = env.get("XDG_CACHE_HOME")?.trim();
   if (cacheHome) return resolve(join(cacheHome, OMP_DEVELOPMENT_NATIVE_CACHE_RELATIVE));
@@ -211,7 +217,7 @@ export function ompDevelopmentNativeCacheBase(
 /** Real-filesystem existence probe used by the resolvers below. */
 function defaultExists(path: string): boolean {
   try {
-    Deno.lstatSync(path);
+    fs.lstatSync(path);
     return true;
   } catch {
     return false;
@@ -313,7 +319,7 @@ export function ompNativeCacheForbiddenRoots(
 export function readOmpNativeCacheManifest(manifestPath: string): OmpNativeCacheManifest | null {
   let text: string;
   try {
-    text = Deno.readTextFileSync(manifestPath);
+    text = fs.readFileSync(manifestPath, "utf8");
   } catch {
     return null;
   }
@@ -376,7 +382,7 @@ export function serializeOmpNativeCacheManifest(manifest: OmpNativeCacheManifest
 
 /** The preparation remedy every native-cache failure names. */
 export function ompNativeCachePrepareRemedy(): string {
-  return "Run `deno task prepare:omp-natives` (optionally `--executable <path>`) with the " +
+  return "Run `bun run prepare:omp-natives` (optionally `--executable <path>`) with the " +
     `pinned OMP ${OMP_NATIVE_CACHE_VERSION} executable for this platform, then restart.`;
 }
 
@@ -387,18 +393,18 @@ export function ompNativeCachePrepareRemedy(): string {
  */
 export function assertOmpNativeCacheComplete(
   cache: OmpNativeCache,
-  options: { stat?: (path: string) => Deno.FileInfo | undefined } = {},
+  options: { stat?: (path: string) => Stats | undefined } = {},
 ): OmpNativeCacheManifest {
   const stat = options.stat ?? ((path: string) => {
     try {
-      return Deno.lstatSync(path);
+      return fs.lstatSync(path);
     } catch {
       return undefined;
     }
   });
 
   const payloadInfo = stat(cache.payloadDir);
-  if (payloadInfo === undefined || !payloadInfo.isDirectory) {
+  if (payloadInfo === undefined || !payloadInfo.isDirectory()) {
     throw new Error(
       `OMP native runtime cache payload directory "${cache.payloadDir}" is missing. ` +
         `${ompNativeCachePrepareRemedy()}`,
@@ -440,7 +446,7 @@ export function assertOmpNativeCacheComplete(
 
   for (const file of manifest.files) {
     const info = stat(resolve(join(cache.versionDir, file.name)));
-    if (info === undefined || !info.isFile || info.size !== file.size) {
+    if (info === undefined || !info.isFile() || info.size !== file.size) {
       throw new Error(
         `OMP native runtime cache file "${file.name}" is missing or has the wrong size in ` +
           `"${cache.versionDir}" (expected ${file.size} bytes). ${ompNativeCachePrepareRemedy()}`,
@@ -549,9 +555,9 @@ export function ompNativeCacheExclusionPathspecs(): string[] {
 }
 
 /** A stat result that never throws. */
-function lstatOrNull(path: string): Deno.FileInfo | undefined {
+function lstatOrNull(path: string): Stats | undefined {
   try {
-    return Deno.lstatSync(path);
+    return fs.lstatSync(path);
   } catch {
     return undefined;
   }
@@ -569,17 +575,17 @@ function ensureModeApplicationDirectory(baseRoot: string, mode: OmpPermissionMod
     current = join(current, component);
     const info = lstatOrNull(current);
     if (info === undefined) {
-      Deno.mkdirSync(current, { recursive: true });
+      fs.mkdirSync(current, { recursive: true });
       continue;
     }
-    if (info.isSymlink) {
+    if (info.isSymbolicLink()) {
       throw new Error(
         `Refusing the OMP native runtime cache entry: managed parent "${current}" is a ` +
           `symbolic link, so the reserved "natives" entry could escape the selected native ` +
           `data root. Replace it with a real directory, then restart.`,
       );
     }
-    if (!info.isDirectory) {
+    if (!info.isDirectory()) {
       throw new Error(
         `Refusing the OMP native runtime cache entry: managed parent "${current}" is not a ` +
           `directory. Remove or rename it, then restart.`,
@@ -607,8 +613,8 @@ export function installOmpNativeCacheLink(options: {
 
   const existing = lstatOrNull(linkPath);
   if (existing !== undefined) {
-    if (existing.isSymlink) {
-      const current = Deno.readLinkSync(linkPath);
+    if (existing.isSymbolicLink()) {
+      const current = fs.readlinkSync(linkPath);
       if (current === target) return linkPath;
       throw new Error(
         `Refusing the OMP native runtime cache entry "${linkPath}": it is a symbolic link to ` +
@@ -617,7 +623,7 @@ export function installOmpNativeCacheLink(options: {
           `linked.`,
       );
     }
-    if (existing.isDirectory) {
+    if (existing.isDirectory()) {
       throw new Error(
         `OMP native runtime cache entry "${linkPath}" is an existing directory — a previous ` +
           `OMP release extracted channel-local native copies there, so this root stays ` +
@@ -636,22 +642,22 @@ export function installOmpNativeCacheLink(options: {
 
   // Atomic: create the link under a temporary name in the SAME directory, then rename it
   // over the reserved entry. A concurrent creator installing the identical link is success.
-  const temporary = join(appDir, `.natives.link-${Deno.pid}-${crypto.randomUUID()}`);
-  Deno.symlinkSync(target, temporary);
+  const temporary = join(appDir, `.natives.link-${process.pid}-${crypto.randomUUID()}`);
+  fs.symlinkSync(target, temporary);
   try {
-    Deno.renameSync(temporary, linkPath);
+    fs.renameSync(temporary, linkPath);
   } catch (error) {
     const racer = lstatOrNull(linkPath);
-    if (racer?.isSymlink && Deno.readLinkSync(linkPath) === target) {
+    if (racer?.isSymbolicLink() && fs.readlinkSync(linkPath) === target) {
       try {
-        Deno.removeSync(temporary);
+        removePathSync(temporary);
       } catch {
         // Already gone — ignore.
       }
       return linkPath;
     }
     try {
-      Deno.removeSync(temporary);
+      removePathSync(temporary);
     } catch {
       // Already gone — ignore.
     }
@@ -660,7 +666,7 @@ export function installOmpNativeCacheLink(options: {
   // A rename replaces whatever it lands on, so re-read the survivor: a different-target link
   // created in the race window must be refused, never silently adopted.
   const installed = lstatOrNull(linkPath);
-  const installedTarget = installed?.isSymlink ? Deno.readLinkSync(linkPath) : null;
+  const installedTarget = installed?.isSymbolicLink() ? fs.readlinkSync(linkPath) : null;
   if (installedTarget !== target) {
     throw new Error(
       `Refusing the OMP native runtime cache entry "${linkPath}": it holds ` +

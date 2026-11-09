@@ -31,7 +31,7 @@ function fixtureDns(v4: string[] | Error, v6: string[] | Error): DnsFace {
 
 const ENOTFOUND = new Error("ENOTFOUND public.example");
 
-Deno.test("resolveHostAnswers - dual-stack keeps both families", async () => {
+test("resolveHostAnswers - dual-stack keeps both families", async () => {
   const answers = await resolveHostAnswers(
     "public.example",
     fixtureDns(["93.184.216.34"], ["2606:2800:220:1:248:1893:25c8:1942"]),
@@ -39,7 +39,7 @@ Deno.test("resolveHostAnswers - dual-stack keeps both families", async () => {
   assertEquals(answers, ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1942"]);
 });
 
-Deno.test("resolveHostAnswers - one family no-record never discards the other", async () => {
+test("resolveHostAnswers - one family no-record never discards the other", async () => {
   // A exists, AAAA has no records: the v4 answer survives (and vice versa).
   const onlyV4 = await resolveHostAnswers(
     "v4only.example",
@@ -53,7 +53,7 @@ Deno.test("resolveHostAnswers - one family no-record never discards the other", 
   assertEquals(emptyV6, ["203.0.113.7"]);
 });
 
-Deno.test("resolveHostAnswers - all-family failure yields the empty set (fail closed)", async () => {
+test("resolveHostAnswers - all-family failure yields the empty set (fail closed)", async () => {
   const answers = await resolveHostAnswers("dead.example", fixtureDns(ENOTFOUND, ENOTFOUND));
   // The rule itself fabricates nothing: empty means "nothing resolved" and
   // each consumer's fail-closed rule (validateFetchUrl throws
@@ -61,7 +61,7 @@ Deno.test("resolveHostAnswers - all-family failure yields the empty set (fail cl
   assertEquals(answers, []);
 });
 
-Deno.test("resolveHostAnswers - records normalize and deduplicate", async () => {
+test("resolveHostAnswers - records normalize and deduplicate", async () => {
   const answers = await resolveHostAnswers(
     "dup.example",
     fixtureDns(["203.0.113.9", "203.0.113.9"], ["[2606::9%eth0]", "2606::9"]),
@@ -71,7 +71,7 @@ Deno.test("resolveHostAnswers - records normalize and deduplicate", async () => 
   assertEquals(answers, ["203.0.113.9", "2606::9"]);
 });
 
-Deno.test("resolveHostAnswers - collected answers reach the single classifier unchanged", async () => {
+test("resolveHostAnswers - collected answers reach the single classifier unchanged", async () => {
   // Private/loopback answers are NOT filtered here — the SAME
   // isDisallowedAddress classifies them at every consumer (this function
   // adds no policy of its own).
@@ -83,49 +83,49 @@ Deno.test("resolveHostAnswers - collected answers reach the single classifier un
   assertEquals(answers.map((a) => isDisallowedAddress(a)), [true, true]);
 });
 
-Deno.test("validateFetchUrl - rejects loopback literal", async () => {
+test("validateFetchUrl - rejects loopback literal", async () => {
   await assertRejects(() => validateFetchUrl("http://127.0.0.1/x"), SsrfValidationError);
 });
 
-Deno.test("validateFetchUrl - rejects link-local metadata IP", async () => {
+test("validateFetchUrl - rejects link-local metadata IP", async () => {
   await assertRejects(
     () => validateFetchUrl("http://169.254.169.254/latest/meta-data"),
     SsrfValidationError,
   );
 });
 
-Deno.test("validateFetchUrl - rejects private RFC1918 literals", async () => {
+test("validateFetchUrl - rejects private RFC1918 literals", async () => {
   await assertRejects(() => validateFetchUrl("http://10.0.0.5/"), SsrfValidationError);
   await assertRejects(() => validateFetchUrl("http://172.16.3.4/"), SsrfValidationError);
   await assertRejects(() => validateFetchUrl("http://192.168.1.1/"), SsrfValidationError);
 });
 
-Deno.test("validateFetchUrl - rejects IPv6 loopback and link-local", async () => {
+test("validateFetchUrl - rejects IPv6 loopback and link-local", async () => {
   await assertRejects(() => validateFetchUrl("http://[::1]/"), SsrfValidationError);
   await assertRejects(() => validateFetchUrl("http://[fe80::1]/"), SsrfValidationError);
   await assertRejects(() => validateFetchUrl("http://[fc00::1]/"), SsrfValidationError);
 });
 
-Deno.test("validateFetchUrl - rejects IPv4-mapped loopback", async () => {
+test("validateFetchUrl - rejects IPv4-mapped loopback", async () => {
   await assertRejects(() => validateFetchUrl("http://[::ffff:127.0.0.1]/"), SsrfValidationError);
 });
 
-Deno.test("validateFetchUrl - rejects non-http scheme", async () => {
+test("validateFetchUrl - rejects non-http scheme", async () => {
   await assertRejects(() => validateFetchUrl("file:///etc/passwd"), SsrfValidationError);
   await assertRejects(() => validateFetchUrl("gopher://example.com/"), SsrfValidationError);
 });
 
-Deno.test("validateFetchUrl - rejects unspecified and multicast", async () => {
+test("validateFetchUrl - rejects unspecified and multicast", async () => {
   await assertRejects(() => validateFetchUrl("http://0.0.0.0/"), SsrfValidationError);
   await assertRejects(() => validateFetchUrl("http://224.0.0.1/"), SsrfValidationError);
 });
 
-Deno.test("validateFetchUrl - accepts a public IPv4 literal", async () => {
+test("validateFetchUrl - accepts a public IPv4 literal", async () => {
   const parsed = await validateFetchUrl("https://8.8.8.8/x");
   assertEquals(parsed.hostname, "8.8.8.8");
 });
 
-Deno.test("isDisallowedAddress - classifies literals", () => {
+test("isDisallowedAddress - classifies literals", () => {
   assertEquals(isDisallowedAddress("127.0.0.1"), true);
   assertEquals(isDisallowedAddress("169.254.169.254"), true);
   assertEquals(isDisallowedAddress("10.1.2.3"), true);
@@ -134,7 +134,7 @@ Deno.test("isDisallowedAddress - classifies literals", () => {
   assertEquals(isDisallowedAddress("1.1.1.1"), false);
 });
 
-Deno.test("safeFetch - rejects an internal initial URL at the sink", async () => {
+test("safeFetch - rejects an internal initial URL at the sink", async () => {
   // The sink validates before every request; a loopback initial URL is rejected at hop 0.
   await assertRejects(
     () => safeFetch("http://127.0.0.1:9/"),
@@ -159,11 +159,11 @@ function allowOnlyOrigin(allowedOrigin: string) {
   };
 }
 
-Deno.test("safeFetch - follows a redirect to a public target then validates it", async () => {
-  const ac = new AbortController();
-  const server = Deno.serve(
-    { port: 0, signal: ac.signal, onListen: () => {} },
-    (req) => {
+test("safeFetch - follows a redirect to a public target then validates it", async () => {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) => {
       const url = new URL(req.url);
       if (url.pathname === "/redirect-internal") {
         return new Response(null, {
@@ -173,9 +173,8 @@ Deno.test("safeFetch - follows a redirect to a public target then validates it",
       }
       return new Response("ok", { status: 200 });
     },
-  );
-  const { port } = server.addr as Deno.NetAddr;
-  const origin = `http://127.0.0.1:${port}`;
+  });
+  const origin = `http://127.0.0.1:${server.port}`;
   try {
     // A redirect whose Location is an internal metadata IP is rejected by the shared guard.
     await assertRejects(
@@ -193,26 +192,24 @@ Deno.test("safeFetch - follows a redirect to a public target then validates it",
     assertEquals(ok.status, 200);
     await ok.body?.cancel();
   } finally {
-    ac.abort();
-    await server.finished;
+    await server.stop(true);
   }
 });
 
-Deno.test("safeFetch - aborts after exceeding MAX_REDIRECT_HOPS", async () => {
-  const ac = new AbortController();
+test("safeFetch - aborts after exceeding MAX_REDIRECT_HOPS", async () => {
   // Server that always redirects to itself, forming an infinite loop.
-  const server = Deno.serve(
-    { port: 0, signal: ac.signal, onListen: () => {} },
-    (req) => {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) => {
       const url = new URL(req.url);
       return new Response(null, {
         status: 302,
         headers: { location: `${url.origin}/loop` },
       });
     },
-  );
-  const { port } = server.addr as Deno.NetAddr;
-  const origin = `http://127.0.0.1:${port}`;
+  });
+  const origin = `http://127.0.0.1:${server.port}`;
   try {
     await assertRejects(
       () => safeFetch(`${origin}/loop`, undefined, { validate: allowOnlyOrigin(origin) }),
@@ -220,20 +217,20 @@ Deno.test("safeFetch - aborts after exceeding MAX_REDIRECT_HOPS", async () => {
       "redirect hops",
     );
   } finally {
-    ac.abort();
-    await server.finished;
+    await server.stop(true);
   }
 });
 
-Deno.test("MAX_REDIRECT_HOPS - documented bound is 5", () => {
+test("MAX_REDIRECT_HOPS - documented bound is 5", () => {
   assertEquals(MAX_REDIRECT_HOPS, 5);
 });
 
 // --- F14 D3: DNS-rebinding mitigation via connect-time IP pinning ---
 
 import { pinValidatedUrl } from "@utils/ssrf.ts";
+import { test } from "bun:test";
 
-Deno.test("pinValidatedUrl - pins http hostname to the validated IP with Host preserved", () => {
+test("pinValidatedUrl - pins http hostname to the validated IP with Host preserved", () => {
   const { requestUrl, hostHeader } = pinValidatedUrl("http://example.test/path?q=1", [
     "93.184.216.34",
   ]);
@@ -241,7 +238,7 @@ Deno.test("pinValidatedUrl - pins http hostname to the validated IP with Host pr
   assertEquals(hostHeader, "example.test");
 });
 
-Deno.test("pinValidatedUrl - leaves https hostnames unchanged (TLS SNI limitation)", () => {
+test("pinValidatedUrl - leaves https hostnames unchanged (TLS SNI limitation)", () => {
   const { requestUrl, hostHeader } = pinValidatedUrl("https://example.test/x", [
     "93.184.216.34",
   ]);
@@ -249,12 +246,12 @@ Deno.test("pinValidatedUrl - leaves https hostnames unchanged (TLS SNI limitatio
   assertEquals(hostHeader, undefined);
 });
 
-Deno.test("pinValidatedUrl - leaves literal-IP hosts unchanged", () => {
+test("pinValidatedUrl - leaves literal-IP hosts unchanged", () => {
   const { requestUrl } = pinValidatedUrl("http://93.184.216.34/x", ["93.184.216.34"]);
   assertEquals(requestUrl, "http://93.184.216.34/x");
 });
 
-Deno.test("safeFetch - connects to the validated address, not a re-resolution (D3)", async () => {
+test("safeFetch - connects to the validated address, not a re-resolution (D3)", async () => {
   const contacted: string[] = [];
   // First (and only) resolution yields a public address; a second resolution WOULD yield
   // loopback, but safeFetch must never re-resolve — it connects to the pinned address.
@@ -273,7 +270,7 @@ Deno.test("safeFetch - connects to the validated address, not a re-resolution (D
   assertEquals(contacted, ["93.184.216.34"]);
 });
 
-Deno.test("safeFetch - rejects when the resolved address is internal", async () => {
+test("safeFetch - rejects when the resolved address is internal", async () => {
   const resolve = (_host: string): Promise<string[]> => Promise.resolve(["127.0.0.1"]);
   const fetchImpl = (): Promise<Response> => Promise.resolve(new Response("ok"));
   await assertRejects(

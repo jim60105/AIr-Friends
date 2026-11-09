@@ -80,7 +80,7 @@ import type {
   MCPServerConfig,
   PermissionRejection,
 } from "@acp/types.ts";
-import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafePath, canonicalizeRoot } from "../platforms/email/durable-files.ts";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
@@ -110,8 +110,41 @@ import {
   producedResearchOutput,
   snapshotAgentWorkspaceNotes,
 } from "./research-output.ts";
+import fsp from "node:fs/promises";
+import { removePath } from "../utils/fs-compat.ts";
+import { execFile } from "node:child_process";
 
 const logger = createLogger("SessionOrchestrator");
+
+/** Output ceiling for one converter run; ImageMagick writes its bytes to the target file. */
+const MAX_CONVERTER_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`: an absent
+ * converter (a string error code such as `ENOENT`) rejects like the original throw, and a
+ * signal-terminated child reports `-1` rather than reading as success.
+ */
+function runConverter(args: string[]): Promise<{ code: number; success: boolean }> {
+  const pending = Promise.withResolvers<{ code: number; success: boolean }>();
+  execFile("convert", args, {
+    encoding: "buffer",
+    maxBuffer: MAX_CONVERTER_OUTPUT_BYTES,
+  }, (error) => {
+    if (error === null) {
+      pending.resolve({ code: 0, success: true });
+      return;
+    }
+    if (typeof error.code === "string") {
+      pending.reject(error);
+      return;
+    }
+    pending.resolve({
+      code: typeof error.code === "number" ? error.code : -1,
+      success: false,
+    });
+  });
+  return pending.promise;
+}
 
 /** Bounded machine-readable reason vocabulary for a row-11 recovery abort. */
 type RecoveryAbortReason =
@@ -794,7 +827,7 @@ export class SessionOrchestrator {
     sessionLogger.warn("🧪 Dry run mode — skipping Agent execution");
 
     // Ensure output directory exists
-    await Deno.mkdir(dryRunConfig.outputPath, { recursive: true });
+    await fsp.mkdir(dryRunConfig.outputPath, { recursive: true });
 
     // Generate output filename with timestamp and session type
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -805,7 +838,7 @@ export class SessionOrchestrator {
     );
 
     // Write the full prompt to file
-    await Deno.writeTextFile(outputFile, fullPrompt);
+    await fsp.writeFile(outputFile, fullPrompt);
     sessionLogger.info("Dry run prompt written to {outputFile}", { outputFile });
 
     // Optionally send mock reply via platform adapter
@@ -5424,6 +5457,7 @@ export class SessionOrchestrator {
       if (session) session.recoveryFenced = false;
       try {
         return await connector.prompt(sessionId, finalContent);
+        // oxlint-disable-next-line no-unused-vars
       } catch (_resumeError) {
         logger.error(
           "Resumed session {sessionId} also timed out. Giving up.",
@@ -6209,7 +6243,7 @@ export class SessionOrchestrator {
             join(params.workspace.tmpPath, shellSessionId),
           );
         }
-        await Deno.mkdir(join(params.workspace.tmpPath, shellSessionId), { recursive: true });
+        await fsp.mkdir(join(params.workspace.tmpPath, shellSessionId), { recursive: true });
       } catch (error) {
         // Registration precedes staging provisioning; the caller never receives
         // this id on failure, so roll the entry back here. Otherwise a leaked
@@ -6345,7 +6379,7 @@ export class SessionOrchestrator {
             continue;
           }
           const safeSessionPath = await assertSafePath(canonicalStaging, sessionRel);
-          const fileBytes = await Deno.readFile(safeSessionPath);
+          const fileBytes = await fsp.readFile(safeSessionPath);
           if (fileBytes.byteLength > MAX_IMAGE_SIZE_BYTES) {
             sessionLogger.warn(
               "Local email image exceeds size limit, skipping ContentBlock::Image",
@@ -6476,7 +6510,7 @@ export class SessionOrchestrator {
     let produced = false;
     try {
       const canonicalStaging = await canonicalizeRoot(tmpPath);
-      await Deno.mkdir(canonicalStaging, { recursive: true, mode: 0o700 });
+      await fsp.mkdir(canonicalStaging, { recursive: true, mode: 0o700 });
       // A random base avoids every name collision (concurrent sessions, same
       // source attachment) and never derives a path from untrusted metadata.
       const scratchBase = crypto.randomUUID();
@@ -6484,22 +6518,17 @@ export class SessionOrchestrator {
       webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
       // `createNew` refuses a pre-existing target, so a symlink planted at the
       // scratch name can never be followed by the host's own write.
-      await Deno.writeFile(gifPath, gifData, { mode: 0o600, createNew: true });
+      await fsp.writeFile(gifPath, gifData, { flag: "wx", mode: 0o600 });
       // Reserve the output as a regular file BEFORE the converter runs, so the
       // converter cannot follow a planted symlink either.
-      await Deno.writeFile(webpPath, new Uint8Array(), { mode: 0o600, createNew: true });
+      await fsp.writeFile(webpPath, new Uint8Array(), { flag: "wx", mode: 0o600 });
 
       // Re-validate both paths IMMEDIATELY before the converter opens them: a
       // component replaced after reservation is refused rather than followed.
       gifPath = await assertSafePath(canonicalStaging, `${scratchBase}.gif`);
       webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
 
-      const command = new Deno.Command("convert", {
-        args: [`${gifPath}[0]`, webpPath],
-        stdout: "null",
-        stderr: "piped",
-      });
-      const result = await command.output();
+      const result = await runConverter([`${gifPath}[0]`, webpPath]);
 
       if (!result.success) {
         sessionLogger.warn("ImageMagick GIF-to-WebP conversion failed", {
@@ -6512,7 +6541,7 @@ export class SessionOrchestrator {
       // Re-validate after the converter ran: a component replaced during
       // conversion is refused instead of reading outside the boundary.
       webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
-      const webpData = await Deno.readFile(webpPath);
+      const webpData = await fsp.readFile(webpPath);
       produced = true;
       sessionLogger.debug("GIF converted to WebP", {
         gifSize: gifData.length,
@@ -6530,13 +6559,13 @@ export class SessionOrchestrator {
       // temporary removed with the rest of tmp.
       if (gifPath) {
         try {
-          await Deno.remove(gifPath);
+          await removePath(gifPath);
         } catch { /* ignore */ }
       }
       // A failed conversion leaves no empty placeholder behind.
       if (!produced && webpPath) {
         try {
-          await Deno.remove(webpPath);
+          await removePath(webpPath);
         } catch { /* ignore */ }
       }
     }

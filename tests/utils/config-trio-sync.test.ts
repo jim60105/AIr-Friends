@@ -18,7 +18,9 @@
  * is exercised with a fixture-driven negative case without touching the repo.
  */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { parse } from "@std/yaml";
+import { parse } from "yaml";
+import fs from "node:fs";
+import { test } from "bun:test";
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname;
 
@@ -161,7 +163,7 @@ export function auditConfigTrio(
 // ---------------------------------------------------------------------------
 
 function readRepoFile(rel: string): string {
-  return Deno.readTextFileSync(REPO_ROOT + rel);
+  return fs.readFileSync(REPO_ROOT + rel, "utf8");
 }
 
 function readTrio(): Record<TrioFile, string> {
@@ -172,7 +174,7 @@ function readTrio(): Record<TrioFile, string> {
   };
 }
 
-Deno.test("config trio audit - AGENTS.md table carries the minimum audited field set", () => {
+test("config trio audit - AGENTS.md table carries the minimum audited field set", () => {
   const table = parseAuditTable(readRepoFile("AGENTS.md"));
   const names = new Set(table.flatMap((r) => r.names));
   // Minimum set mandated by the delta spec.
@@ -181,7 +183,7 @@ Deno.test("config trio audit - AGENTS.md table carries the minimum audited field
   assertStringIncludes([...names].join(" "), "AGENT_OMP_MIN_VERSION");
 });
 
-Deno.test("config trio audit - every audited field is present in all three files", () => {
+test("config trio audit - every audited field is present in all three files", () => {
   const table = parseAuditTable(readRepoFile("AGENTS.md"));
   const files = readTrio();
   const missing = auditConfigTrio(table, files).filter((v) => v.kind === "missing-audited-field");
@@ -192,7 +194,7 @@ Deno.test("config trio audit - every audited field is present in all three files
   );
 });
 
-Deno.test("config trio audit - defaultAgentType documentation describes both values with opencode default", () => {
+test("config trio audit - defaultAgentType documentation describes both values with opencode default", () => {
   const files = readTrio();
   // Pinned verbatim per file (row 24's shared-contract lines): the trio docs
   // must say EXACTLY this — opencode is the shipped default (getDefaultAgentType
@@ -224,7 +226,7 @@ Deno.test("config trio audit - defaultAgentType documentation describes both val
   }
 });
 
-Deno.test("config trio audit - no undocumented OMP-related name in the live trio (fail closed)", () => {
+test("config trio audit - no undocumented OMP-related name in the live trio (fail closed)", () => {
   const table = parseAuditTable(readRepoFile("AGENTS.md"));
   const files = readTrio();
   const undocumented = auditConfigTrio(table, files).filter((v) =>
@@ -237,7 +239,7 @@ Deno.test("config trio audit - no undocumented OMP-related name in the live trio
   );
 });
 
-Deno.test("config trio audit - negative fixture: undocumented OMP name fails the audit, naming field and file", () => {
+test("config trio audit - negative fixture: undocumented OMP name fails the audit, naming field and file", () => {
   const table = parseAuditTable(readRepoFile("AGENTS.md"));
   const files = readTrio();
   const poisoned: Record<TrioFile, string> = {
@@ -269,7 +271,7 @@ Deno.test("config trio audit - negative fixture: undocumented OMP name fails the
   assert(missingHit !== undefined, "removed audited field must fail the audit");
 });
 
-Deno.test("config trio audit - the trio parses as valid data (yaml) / env syntax spot check", () => {
+test("config trio audit - the trio parses as valid data (yaml) / env syntax spot check", () => {
   // helm/values.yaml and config.example.yaml are YAML (comments carry the
   // env-expanded values; parse proves structure, the field-presistence checks
   // above carry the semantic audit).

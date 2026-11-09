@@ -1,0 +1,8 @@
+[install]
+exact = true
+
+[install.scopes]
+"@jsr" = "https://npm.jsr.io"
+
+[test]
+root = "tests"

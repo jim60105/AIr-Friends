@@ -7,6 +7,9 @@ import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SendFilePayload } from "../../src/types/platform.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDir } from "../../src/utils/fs-compat.ts";
 
 interface CapturedSendFile {
   channelId: string;
@@ -82,39 +85,39 @@ const makeTempWorkspace = async (): Promise<{
   dir: string;
   workspace: WorkspaceInfo;
 }> => {
-  const dir = await Deno.makeTempDir();
+  const dir = await makeTempDir();
   return { dir, workspace: createWorkspace(dir) };
 };
 
-Deno.test("FileHandler - returns error when skill is disabled", async () => {
+test("FileHandler - returns error when skill is disabled", async () => {
   const handler = new FileHandler({ enabled: false });
   const result = await handler.handleSendFile({ filePaths: ["test.png"] }, createContext());
   assertEquals(result.success, false);
   assertEquals(result.error, "send-file skill is disabled");
 });
 
-Deno.test("FileHandler - returns error when filePaths is missing", async () => {
+test("FileHandler - returns error when filePaths is missing", async () => {
   const handler = new FileHandler({ enabled: true });
   const result = await handler.handleSendFile({}, createContext());
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("filePaths"), true);
 });
 
-Deno.test("FileHandler - returns error when filePaths is empty array", async () => {
+test("FileHandler - returns error when filePaths is empty array", async () => {
   const handler = new FileHandler({ enabled: true });
   const result = await handler.handleSendFile({ filePaths: [] }, createContext());
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("filePaths"), true);
 });
 
-Deno.test("FileHandler - returns error when filePaths contains an empty string", async () => {
+test("FileHandler - returns error when filePaths contains an empty string", async () => {
   const handler = new FileHandler({ enabled: true });
   const result = await handler.handleSendFile({ filePaths: ["ok.png", "  "] }, createContext());
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("non-empty string"), true);
 });
 
-Deno.test("FileHandler - throws SkillError on path traversal", async () => {
+test("FileHandler - throws SkillError on path traversal", async () => {
   const handler = new FileHandler({ enabled: true });
   await assertRejects(
     () => handler.handleSendFile({ filePaths: ["../../../etc/passwd"] }, createContext()),
@@ -123,7 +126,7 @@ Deno.test("FileHandler - throws SkillError on path traversal", async () => {
   );
 });
 
-Deno.test("FileHandler - throws SkillError when path is outside workspace", async () => {
+test("FileHandler - throws SkillError when path is outside workspace", async () => {
   const handler = new FileHandler({ enabled: true });
   await assertRejects(
     () => handler.handleSendFile({ filePaths: ["/etc/passwd"] }, createContext()),
@@ -132,13 +135,13 @@ Deno.test("FileHandler - throws SkillError when path is outside workspace", asyn
   );
 });
 
-Deno.test("FileHandler - allows path within agent-workspace", async () => {
+test("FileHandler - allows path within agent-workspace", async () => {
   // Create a temporary workspace and agent-workspace
-  const tmpDir = await Deno.makeTempDir();
+  const tmpDir = await makeTempDir();
   const agentDir = `${tmpDir}/agent-workspace`;
   const notesDir = `${agentDir}/notes`;
-  await Deno.mkdir(notesDir, { recursive: true });
-  await Deno.writeTextFile(`${notesDir}/test.md`, "test content");
+  await fsp.mkdir(notesDir, { recursive: true });
+  await fsp.writeFile(`${notesDir}/test.md`, "test content");
 
   const workspace: WorkspaceInfo = {
     key: "discord/123",
@@ -160,13 +163,13 @@ Deno.test("FileHandler - allows path within agent-workspace", async () => {
   const result = await handler.handleSendFile({ filePaths: ["notes/test.md"] }, context);
   assertEquals(result.success, true);
 
-  await Deno.remove(tmpDir, { recursive: true });
+  await fsp.rm(tmpDir, { recursive: true });
 });
 
-Deno.test("FileHandler - returns error when file exceeds size limit", async () => {
+test("FileHandler - returns error when file exceeds size limit", async () => {
   // Create a temp file larger than limit
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeFile(`${dir}/big.bin`, new Uint8Array(2 * 1024 * 1024));
+  await fsp.writeFile(`${dir}/big.bin`, new Uint8Array(2 * 1024 * 1024));
 
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true, maxFileSizeMb: 1 });
@@ -174,12 +177,12 @@ Deno.test("FileHandler - returns error when file exceeds size limit", async () =
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("exceeds limit"), true);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - returns error when extension not in whitelist", async () => {
+test("FileHandler - returns error when extension not in whitelist", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/secret.jsonl`, "data");
+  await fsp.writeFile(`${dir}/secret.jsonl`, "data");
 
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({
@@ -190,25 +193,25 @@ Deno.test("FileHandler - returns error when extension not in whitelist", async (
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("not allowed"), true);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - allows any extension when whitelist is empty", async () => {
+test("FileHandler - allows any extension when whitelist is empty", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/report.pdf`, "pdf content");
+  await fsp.writeFile(`${dir}/report.pdf`, "pdf content");
 
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true, allowedExtensions: [] });
   const result = await handler.handleSendFile({ filePaths: ["report.pdf"] }, context);
   assertEquals(result.success, true);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - multi-file success captures files array passed to adapter", async () => {
+test("FileHandler - multi-file success captures files array passed to adapter", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/a.png`, "aaa");
-  await Deno.writeTextFile(`${dir}/b.png`, "bbb");
+  await fsp.writeFile(`${dir}/a.png`, "aaa");
+  await fsp.writeFile(`${dir}/b.png`, "bbb");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -241,12 +244,12 @@ Deno.test("FileHandler - multi-file success captures files array passed to adapt
     "If your text reply is still pending, send it now with send-reply — then EXIT IMMEDIATELY.",
   );
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - preflight all-or-nothing: one invalid path rejects the whole call with no send", async () => {
+test("FileHandler - preflight all-or-nothing: one invalid path rejects the whole call with no send", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/ok.png`, "ok");
+  await fsp.writeFile(`${dir}/ok.png`, "ok");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -265,14 +268,14 @@ Deno.test("FileHandler - preflight all-or-nothing: one invalid path rejects the 
   // No platform call happened at all
   assertEquals(capture.length, 0);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - batch exceeding file-count limit rejected before any read", async () => {
+test("FileHandler - batch exceeding file-count limit rejected before any read", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/1.png`, "1");
-  await Deno.writeTextFile(`${dir}/2.png`, "2");
-  await Deno.writeTextFile(`${dir}/3.png`, "3");
+  await fsp.writeFile(`${dir}/1.png`, "1");
+  await fsp.writeFile(`${dir}/2.png`, "2");
+  await fsp.writeFile(`${dir}/3.png`, "3");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -290,13 +293,13 @@ Deno.test("FileHandler - batch exceeding file-count limit rejected before any re
   assertEquals(result.error?.includes("Too many files"), true);
   assertEquals(capture.length, 0);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - batch exceeding aggregate size limit rejected before any read", async () => {
+test("FileHandler - batch exceeding aggregate size limit rejected before any read", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeFile(`${dir}/1.bin`, new Uint8Array(3 * 1024 * 1024));
-  await Deno.writeFile(`${dir}/2.bin`, new Uint8Array(3 * 1024 * 1024));
+  await fsp.writeFile(`${dir}/1.bin`, new Uint8Array(3 * 1024 * 1024));
+  await fsp.writeFile(`${dir}/2.bin`, new Uint8Array(3 * 1024 * 1024));
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -311,12 +314,12 @@ Deno.test("FileHandler - batch exceeding aggregate size limit rejected before an
   assertEquals(result.error?.includes("batch limit"), true);
   assertEquals(capture.length, 0);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - caption pipeline strips XML tags and unescapes newlines", async () => {
+test("FileHandler - caption pipeline strips XML tags and unescapes newlines", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/img.png`, "fake image");
+  await fsp.writeFile(`${dir}/img.png`, "fake image");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -333,15 +336,15 @@ Deno.test("FileHandler - caption pipeline strips XML tags and unescapes newlines
   assertEquals(result.success, true);
   assertEquals(capture[0].options?.comment, "done\nLine1\nLine2");
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - rejects symlink escaping the workspace boundary", async () => {
+test("FileHandler - rejects symlink escaping the workspace boundary", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   // Symlink inside the workspace pointing outside it
-  const outside = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${outside}/secret.pdf`, "outside secret");
-  await Deno.symlink(`${outside}/secret.pdf`, `${dir}/leak.pdf`);
+  const outside = await makeTempDir();
+  await fsp.writeFile(`${outside}/secret.pdf`, "outside secret");
+  await fsp.symlink(`${outside}/secret.pdf`, `${dir}/leak.pdf`);
 
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true });
@@ -351,13 +354,13 @@ Deno.test("FileHandler - rejects symlink escaping the workspace boundary", async
     "File path must be within workspace or agent-workspace boundary",
   );
 
-  await Deno.remove(dir, { recursive: true });
-  await Deno.remove(outside, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
+  await fsp.rm(outside, { recursive: true });
 });
 
-Deno.test("FileHandler - allows real path within workspace (no symlink escape)", async () => {
+test("FileHandler - allows real path within workspace (no symlink escape)", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/ok.txt`, "ok");
+  await fsp.writeFile(`${dir}/ok.txt`, "ok");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -371,12 +374,12 @@ Deno.test("FileHandler - allows real path within workspace (no symlink escape)",
   assertEquals(result.success, true);
   assertEquals(capture.length, 1);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - returns error when platform sendFile fails with no delivery", async () => {
+test("FileHandler - returns error when platform sendFile fails with no delivery", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/test.txt`, "content");
+  await fsp.writeFile(`${dir}/test.txt`, "content");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -392,13 +395,13 @@ Deno.test("FileHandler - returns error when platform sendFile fails with no deli
   // No delivery → no data
   assertEquals(result.data, undefined);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - partial delivery (1 of 2) reports delivered IDs and filesCount", async () => {
+test("FileHandler - partial delivery (1 of 2) reports delivered IDs and filesCount", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/a.png`, "a");
-  await Deno.writeTextFile(`${dir}/b.png`, "b");
+  await fsp.writeFile(`${dir}/a.png`, "a");
+  await fsp.writeFile(`${dir}/b.png`, "b");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -420,13 +423,13 @@ Deno.test("FileHandler - partial delivery (1 of 2) reports delivered IDs and fil
   assertEquals(data.messageIds, ["chat_1"]);
   assertEquals(data.filesCount, 1);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - metrics incremented once per delivered file", async () => {
+test("FileHandler - metrics incremented once per delivered file", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/a.png`, "a");
-  await Deno.writeTextFile(`${dir}/b.png`, "b");
+  await fsp.writeFile(`${dir}/a.png`, "a");
+  await fsp.writeFile(`${dir}/b.png`, "b");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -443,13 +446,13 @@ Deno.test("FileHandler - metrics incremented once per delivered file", async () 
   assertEquals(result.success, true);
   assertEquals((result.data as { filesCount: number }).filesCount, 2);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - workspace-prefixed missing path with existing candidate gets corrected example", async () => {
+test("FileHandler - workspace-prefixed missing path with existing candidate gets corrected example", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   // The de-prefixed candidate EXISTS at the workspace root
-  await Deno.writeTextFile(`${dir}/out.png`, "candidate");
+  await fsp.writeFile(`${dir}/out.png`, "candidate");
 
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true });
@@ -467,14 +470,14 @@ Deno.test("FileHandler - workspace-prefixed missing path with existing candidate
   assertEquals(error.includes('--file-paths "out.png"'), true);
   assertEquals(error.includes(`(${dir})`), true);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - candidate is extracted from the boundary-valid key occurrence", async () => {
+test("FileHandler - candidate is extracted from the boundary-valid key occurrence", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   // The candidate "out.png" exists at the root; the earlier "discord/123/"
   // occurrence is embedded inside the "xxxdiscord" segment (NOT boundary-valid)
-  await Deno.writeTextFile(`${dir}/out.png`, "candidate");
+  await fsp.writeFile(`${dir}/out.png`, "candidate");
 
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true });
@@ -490,10 +493,10 @@ Deno.test("FileHandler - candidate is extracted from the boundary-valid key occu
   assertEquals(error.includes('--file-paths "out.png"'), true);
   assertEquals(error.includes('--file-paths "x/discord/123/out.png"'), false);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - workspace-prefixed missing path with missing candidate does not guess", async () => {
+test("FileHandler - workspace-prefixed missing path with missing candidate does not guess", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   // No candidate file exists anywhere
   const context = createContext(undefined, undefined, workspace);
@@ -512,10 +515,10 @@ Deno.test("FileHandler - workspace-prefixed missing path with missing candidate 
   // the only --file-paths mention echoes the ORIGINAL argument, never a candidate
   assertEquals(error.includes('--file-paths "gone.png"'), false);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - plain missing file keeps the original error without code", async () => {
+test("FileHandler - plain missing file keeps the original error without code", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true });
@@ -525,12 +528,12 @@ Deno.test("FileHandler - plain missing file keeps the original error without cod
   assertEquals(result.code, undefined);
   assertEquals(result.error?.startsWith("Failed to read file"), true);
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - absolute path inside workspace still delivers", async () => {
+test("FileHandler - absolute path inside workspace still delivers", async () => {
   const { dir, workspace } = await makeTempWorkspace();
-  await Deno.writeTextFile(`${dir}/abs.png`, "abs content");
+  await fsp.writeFile(`${dir}/abs.png`, "abs content");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -549,14 +552,14 @@ Deno.test("FileHandler - absolute path inside workspace still delivers", async (
   assertEquals(capture.length, 1);
   assertEquals(capture[0].files[0].fileName, "abs.png");
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - existing legit relative path containing workspace-key segments still delivers", async () => {
+test("FileHandler - existing legit relative path containing workspace-key segments still delivers", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   // A legitimate nested path that happens to contain the "discord/123/" segments
-  await Deno.mkdir(`${dir}/discord/123/exports`, { recursive: true });
-  await Deno.writeTextFile(`${dir}/discord/123/exports/report.pdf`, "report");
+  await fsp.mkdir(`${dir}/discord/123/exports`, { recursive: true });
+  await fsp.writeFile(`${dir}/discord/123/exports/report.pdf`, "report");
 
   const capture: CapturedSendFile[] = [];
   const context = createContext(
@@ -577,17 +580,17 @@ Deno.test("FileHandler - existing legit relative path containing workspace-key s
   assertEquals(capture.length, 1);
   assertEquals(capture[0].files[0].fileName, "report.pdf");
 
-  await Deno.remove(dir, { recursive: true });
+  await fsp.rm(dir, { recursive: true });
 });
 
 // The documented session-staged recipe (clarify-platform-skill-recipes): an
 // existing `tmp/<sessionId>/file.png` is sent in place, relative to the
 // workspace root, with no root-level copy.
-Deno.test("FileHandler - existing nested session-staged file delivers in place without a root copy", async () => {
+test("FileHandler - existing nested session-staged file delivers in place without a root copy", async () => {
   const { dir, workspace } = await makeTempWorkspace();
   try {
-    await Deno.mkdir(`${dir}/tmp/sess_42`, { recursive: true });
-    await Deno.writeTextFile(`${dir}/tmp/sess_42/file.png`, "nested png bytes");
+    await fsp.mkdir(`${dir}/tmp/sess_42`, { recursive: true });
+    await fsp.writeFile(`${dir}/tmp/sess_42/file.png`, "nested png bytes");
 
     const capture: CapturedSendFile[] = [];
     const context = createContext(
@@ -609,9 +612,10 @@ Deno.test("FileHandler - existing nested session-staged file delivers in place w
     assertEquals(new TextDecoder().decode(capture[0].files[0].content), "nested png bytes");
 
     // Sent in place: the nested file is untouched, and no root-level copy exists.
-    assertEquals(await Deno.readTextFile(`${dir}/tmp/sess_42/file.png`), "nested png bytes");
-    await assertRejects(() => Deno.stat(`${dir}/file.png`), Deno.errors.NotFound);
+    assertEquals(await fsp.readFile(`${dir}/tmp/sess_42/file.png`, "utf8"), "nested png bytes");
+    const missingRootCopy = await assertRejects(() => fsp.stat(`${dir}/file.png`));
+    assertEquals(isNotFoundError(missingRootCopy), true);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });

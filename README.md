@@ -240,8 +240,10 @@ OMP's own discovery/config errors stay upstream-owned — see [ACP Engine Integr
 Honest status: automated unit and mock evidence certifies this repository's
 client-side decisions only. Real native tool dispatch is additionally observed by
 the pinned `omp` **18.6.1** smoke and integration suites
-([ACP Engine Integration](docs/agent/acp-engine.md)); native runtime enforcement beyond
-those exercised paths, the image build's other architecture, and platform delivery remain user-owned and unverified in [Security & Sandbox](docs/agent/security-and-sandbox.md).
+([ACP Engine Integration](docs/agent/acp-engine.md)), and CI builds and smokes the
+image on both `linux/amd64` and `linux/arm64`. Native runtime enforcement beyond
+those exercised paths and platform delivery remain user-owned and unverified in
+[Security & Sandbox](docs/agent/security-and-sandbox.md).
 
 ## 🛠️ Development
 

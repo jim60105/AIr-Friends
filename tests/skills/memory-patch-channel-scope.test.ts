@@ -8,6 +8,9 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const mockAdapter = { platform: "discord" } as unknown as PlatformAdapter;
 
@@ -19,7 +22,7 @@ async function withHandler(
     baseContext: Omit<SkillContext, "canWriteChannelMemory">,
   ) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -32,10 +35,10 @@ async function withHandler(
       tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
       isDm: false,
     };
-    await Deno.mkdir(workspace.path, { recursive: true });
+    await fsp.mkdir(workspace.path, { recursive: true });
     // Write empty user memory files so user-scope lookups don't fail with file read error
-    await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-    await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+    await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
+    await fsp.writeFile(`${workspace.path}/memory.private.jsonl`, "");
 
     const baseContext: Omit<SkillContext, "canWriteChannelMemory"> = {
       workspace,
@@ -47,11 +50,11 @@ async function withHandler(
 
     await fn(handler, store, manager, baseContext);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("3.1 - Incident scenario: patch channel memory decay (0.8 -> 0.4)", async () => {
+test("3.1 - Incident scenario: patch channel memory decay (0.8 -> 0.4)", async () => {
   await withHandler(async (handler, store, manager, baseContext) => {
     // Save channel memory with working tier (decay 0.8)
     const saveResult = await handler.handleMemorySave(
@@ -70,7 +73,7 @@ Deno.test("3.1 - Incident scenario: patch channel memory decay (0.8 -> 0.4)", as
 
     const cw = await manager.getOrCreateChannelWorkspace("discord", "chan_789");
     const channelFilePath = manager.getChannelMemoryFilePath(cw);
-    const contentBefore = await Deno.readTextFile(channelFilePath);
+    const contentBefore = await fsp.readFile(channelFilePath, "utf8");
     const linesBefore = contentBefore.trim().split("\n");
     assertEquals(linesBefore.length, 1);
 
@@ -101,7 +104,7 @@ Deno.test("3.1 - Incident scenario: patch channel memory decay (0.8 -> 0.4)", as
     assertEquals(loaded[0].decay, 0.4);
 
     // Assert JSONL append-only: original line byte-unchanged, patch event appended
-    const contentAfter = await Deno.readTextFile(channelFilePath);
+    const contentAfter = await fsp.readFile(channelFilePath, "utf8");
     const linesAfter = contentAfter.trim().split("\n");
     assertEquals(linesAfter.length, 2);
     assertEquals(linesAfter[0], linesBefore[0]);
@@ -112,7 +115,7 @@ Deno.test("3.1 - Incident scenario: patch channel memory decay (0.8 -> 0.4)", as
   });
 });
 
-Deno.test("3.1b - Core-pin interaction on channel path: patch to core tier pins decay at 1.0", async () => {
+test("3.1b - Core-pin interaction on channel path: patch to core tier pins decay at 1.0", async () => {
   await withHandler(async (handler, store, manager, baseContext) => {
     // Save working-tier channel memory (decay 0.8)
     const saveResult = await handler.handleMemorySave(
@@ -144,7 +147,7 @@ Deno.test("3.1b - Core-pin interaction on channel path: patch to core tier pins 
   });
 });
 
-Deno.test("3.2 - Authorization rejection: unauthorized channel patch is rejected", async () => {
+test("3.2 - Authorization rejection: unauthorized channel patch is rejected", async () => {
   await withHandler(async (handler, _store, manager, baseContext) => {
     // Save initial channel memory (authorized)
     const saveResult = await handler.handleMemorySave(
@@ -163,7 +166,7 @@ Deno.test("3.2 - Authorization rejection: unauthorized channel patch is rejected
 
     const cw = await manager.getOrCreateChannelWorkspace("discord", "chan_789");
     const channelFilePath = manager.getChannelMemoryFilePath(cw);
-    const contentBefore = await Deno.readTextFile(channelFilePath);
+    const contentBefore = await fsp.readFile(channelFilePath, "utf8");
 
     // Patch unauthorized
     const patchResult = await handler.handleMemoryPatch(
@@ -174,12 +177,12 @@ Deno.test("3.2 - Authorization rejection: unauthorized channel patch is rejected
     assertEquals(patchResult.error, "Not authorized to write channel memory in this session");
 
     // File content unchanged
-    const contentAfter = await Deno.readTextFile(channelFilePath);
+    const contentAfter = await fsp.readFile(channelFilePath, "utf8");
     assertEquals(contentAfter, contentBefore);
   });
 });
 
-Deno.test("3.3 - Visibility rejection: channel scope with visibility is rejected", async () => {
+test("3.3 - Visibility rejection: channel scope with visibility is rejected", async () => {
   await withHandler(async (handler, _store, manager, baseContext) => {
     // Save initial channel memory (authorized)
     const saveResult = await handler.handleMemorySave(
@@ -198,7 +201,7 @@ Deno.test("3.3 - Visibility rejection: channel scope with visibility is rejected
 
     const cw = await manager.getOrCreateChannelWorkspace("discord", "chan_789");
     const channelFilePath = manager.getChannelMemoryFilePath(cw);
-    const contentBefore = await Deno.readTextFile(channelFilePath);
+    const contentBefore = await fsp.readFile(channelFilePath, "utf8");
 
     // Patch with visibility on channel scope
     const patchResult = await handler.handleMemoryPatch(
@@ -212,12 +215,12 @@ Deno.test("3.3 - Visibility rejection: channel scope with visibility is rejected
     );
 
     // File content unchanged
-    const contentAfter = await Deno.readTextFile(channelFilePath);
+    const contentAfter = await fsp.readFile(channelFilePath, "utf8");
     assertEquals(contentAfter, contentBefore);
   });
 });
 
-Deno.test("3.4 - User-scope not-found hint: error hints at --scope channel", async () => {
+test("3.4 - User-scope not-found hint: error hints at --scope channel", async () => {
   await withHandler(async (handler, _store, _manager, baseContext) => {
     const patchResult = await handler.handleMemoryPatch(
       { memory_id: "mem_nonexistent_123", decay: 0.4 },
@@ -229,7 +232,7 @@ Deno.test("3.4 - User-scope not-found hint: error hints at --scope channel", asy
   });
 });
 
-Deno.test("3.5 - Channel-scope not-found: absent channel memory returns store error", async () => {
+test("3.5 - Channel-scope not-found: absent channel memory returns store error", async () => {
   await withHandler(async (handler, _store, manager, baseContext) => {
     await manager.getOrCreateChannelWorkspace("discord", "chan_789");
 

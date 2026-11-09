@@ -12,7 +12,7 @@
 // threaded reply smoke, explicit unsupported actions, and complete file delivery results.
 
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { ChannelConfig, Config, EmailConfig } from "../../../src/types/config.ts";
 import type { NormalizedEvent } from "../../../src/types/events.ts";
 import type { WorkspaceInfo } from "../../../src/types/workspace.ts";
@@ -58,6 +58,9 @@ import {
 } from "../../../src/platforms/email/smtp-client.ts";
 import { EmailImapTestService } from "../../helpers/email-imap-service.ts";
 import { EmailSmtpTestService } from "../../helpers/email-smtp-service.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const BOT = "bot@example.com";
 const AUTHSERV = "mx.example.com";
@@ -323,12 +326,12 @@ async function seedOutbound(
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "email-adapter-test-" });
+  const dir = await makeTempDir({ prefix: "email-adapter-test-" });
   try {
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
+    await fsp.rm(dir, { recursive: true }).catch(() => {});
   }
 }
 
@@ -341,7 +344,7 @@ function fixtureImapConfig(service: EmailImapTestService): EmailConfig["imap"] {
   return { ...emailConfig().imap, port: service.port };
 }
 
-Deno.test("EmailAdapter - connect/recover/poll emits one private event with the durable receipt", async () => {
+test("EmailAdapter - connect/recover/poll emits one private event with the durable receipt", async () => {
   await withTempDir(async (base) => {
     const service = new EmailImapTestService({
       tlsMode: "tls",
@@ -445,7 +448,7 @@ Deno.test("EmailAdapter - connect/recover/poll emits one private event with the 
   });
 });
 
-Deno.test("EmailAdapter - restart resumes downtime mail once and never replays it", async () => {
+test("EmailAdapter - restart resumes downtime mail once and never replays it", async () => {
   await withTempDir(async (base) => {
     const service = new EmailImapTestService({
       tlsMode: "tls",
@@ -499,7 +502,7 @@ Deno.test("EmailAdapter - restart resumes downtime mail once and never replays i
   });
 });
 
-Deno.test("EmailAdapter - history and single-message fetch are owner+thread gated", async () => {
+test("EmailAdapter - history and single-message fetch are owner+thread gated", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const first = await seedInbound(harness.messageStore, rawMessage({ messageId: "<a-1@x>" }), {
@@ -559,7 +562,7 @@ Deno.test("EmailAdapter - history and single-message fetch are owner+thread gate
   });
 });
 
-Deno.test("EmailAdapter - threaded reply goes only to the verified sender", async () => {
+test("EmailAdapter - threaded reply goes only to the verified sender", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -599,7 +602,7 @@ Deno.test("EmailAdapter - threaded reply goes only to the verified sender", asyn
   });
 });
 
-Deno.test("EmailAdapter - a reply and a file delivery in one work use distinct operation slots", async () => {
+test("EmailAdapter - a reply and a file delivery in one work use distinct operation slots", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -651,7 +654,7 @@ Deno.test("EmailAdapter - a reply and a file delivery in one work use distinct o
   });
 });
 
-Deno.test("EmailAdapter - sending without a host operation context is refused, never guessed", async () => {
+test("EmailAdapter - sending without a host operation context is refused, never guessed", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -708,7 +711,7 @@ Deno.test("EmailAdapter - sending without a host operation context is refused, n
   });
 });
 
-Deno.test("EmailAdapter - a source without wire identifiers is refused instead of unthreaded", async () => {
+test("EmailAdapter - a source without wire identifiers is refused instead of unthreaded", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     // An inbound record whose source carries neither Message-ID nor References.
@@ -728,7 +731,7 @@ Deno.test("EmailAdapter - a source without wire identifiers is refused instead o
   });
 });
 
-Deno.test("EmailAdapter - stored sender that does not match the thread owner is not a recipient", async () => {
+test("EmailAdapter - stored sender that does not match the thread owner is not a recipient", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     // Seed a record whose stored `from` is NOT the owner's verified address.
@@ -756,7 +759,7 @@ Deno.test("EmailAdapter - stored sender that does not match the thread owner is 
   });
 });
 
-Deno.test("EmailAdapter - an explicit anchor older than 200 records resolves durably", async () => {
+test("EmailAdapter - an explicit anchor older than 200 records resolves durably", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const anchor = await seedInbound(
@@ -805,7 +808,7 @@ Deno.test("EmailAdapter - an explicit anchor older than 200 records resolves dur
   });
 });
 
-Deno.test("EmailAdapter - an explicit outbound anchor threads to it and uses the thread's inbound source", async () => {
+test("EmailAdapter - an explicit outbound anchor threads to it and uses the thread's inbound source", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const root = await seedInbound(
@@ -845,7 +848,7 @@ Deno.test("EmailAdapter - an explicit outbound anchor threads to it and uses the
   });
 });
 
-Deno.test("EmailAdapter - an outbound anchor with no same-thread inbound source is refused", async () => {
+test("EmailAdapter - an outbound anchor with no same-thread inbound source is refused", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     // A verified inbound source exists for this owner, but in ANOTHER thread. It
@@ -883,7 +886,7 @@ Deno.test("EmailAdapter - an outbound anchor with no same-thread inbound source 
   });
 });
 
-Deno.test("EmailAdapter - the implicit latest anchor keeps its bounded behavior", async () => {
+test("EmailAdapter - the implicit latest anchor keeps its bounded behavior", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const anchor = await seedInbound(
@@ -931,7 +934,7 @@ Deno.test("EmailAdapter - the implicit latest anchor keeps its bounded behavior"
   });
 });
 
-Deno.test("EmailAdapter - missing, malformed, cross-thread, cross-owner and unthreadable anchors are refused", async () => {
+test("EmailAdapter - missing, malformed, cross-thread, cross-owner and unthreadable anchors are refused", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const first = await seedInbound(
@@ -1001,7 +1004,7 @@ Deno.test("EmailAdapter - missing, malformed, cross-thread, cross-owner and unth
   });
 });
 
-Deno.test("EmailAdapter - an unreadable archive refuses an explicit anchor instead of guessing", async () => {
+test("EmailAdapter - an unreadable archive refuses an explicit anchor instead of guessing", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const anchor = await seedInbound(
@@ -1025,7 +1028,7 @@ Deno.test("EmailAdapter - an unreadable archive refuses an explicit anchor inste
   });
 });
 
-Deno.test("EmailAdapter - unknown submission is reported as not delivered and never retried blindly", async () => {
+test("EmailAdapter - unknown submission is reported as not delivered and never retried blindly", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -1058,7 +1061,7 @@ Deno.test("EmailAdapter - unknown submission is reported as not delivered and ne
   });
 });
 
-Deno.test("EmailAdapter - unsupported edit, reaction and typing are explicit and silent", async () => {
+test("EmailAdapter - unsupported edit, reaction and typing are explicit and silent", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -1092,7 +1095,7 @@ Deno.test("EmailAdapter - unsupported edit, reaction and typing are explicit and
   });
 });
 
-Deno.test("EmailAdapter - an oversized file batch fails entirely before construction", async () => {
+test("EmailAdapter - an oversized file batch fails entirely before construction", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, {
       pollTransport: new SentCopyImap(),
@@ -1121,7 +1124,7 @@ Deno.test("EmailAdapter - an oversized file batch fails entirely before construc
   });
 });
 
-Deno.test("EmailAdapter - file delivery reports one submitted message, never partial delivery", async () => {
+test("EmailAdapter - file delivery reports one submitted message, never partial delivery", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -1157,7 +1160,7 @@ Deno.test("EmailAdapter - file delivery reports one submitted message, never par
   });
 });
 
-Deno.test("EmailAdapter - integration: a received message is answered in its own thread", async () => {
+test("EmailAdapter - integration: a received message is answered in its own thread", async () => {
   await withTempDir(async (base) => {
     const service = new EmailImapTestService({
       tlsMode: "tls",
@@ -1208,7 +1211,7 @@ Deno.test("EmailAdapter - integration: a received message is answered in its own
   });
 });
 
-Deno.test("EmailAdapter - FileHandler and ReplyHandler forward email submission metadata", async () => {
+test("EmailAdapter - FileHandler and ReplyHandler forward email submission metadata", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const seeded = await seedInbound(
@@ -1219,8 +1222,8 @@ Deno.test("EmailAdapter - FileHandler and ReplyHandler forward email submission 
     const channel = formatEmailChannelId(OWNER, seeded.threadId);
 
     const workspacePath = join(base, "workspace");
-    await Deno.mkdir(workspacePath, { recursive: true });
-    await Deno.writeTextFile(join(workspacePath, "note.txt"), "workspace file");
+    await fsp.mkdir(workspacePath, { recursive: true });
+    await fsp.writeFile(join(workspacePath, "note.txt"), "workspace file");
 
     const workspace: WorkspaceInfo = {
       key: `email/${OWNER}`,
@@ -1274,7 +1277,7 @@ Deno.test("EmailAdapter - FileHandler and ReplyHandler forward email submission 
   });
 });
 
-Deno.test("EmailAdapter - getDmChannelId and spontaneous targets stay inside enabled accounts", async () => {
+test("EmailAdapter - getDmChannelId and spontaneous targets stay inside enabled accounts", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
 
@@ -1305,7 +1308,7 @@ Deno.test("EmailAdapter - getDmChannelId and spontaneous targets stay inside ena
   });
 });
 
-Deno.test("EmailAdapter - a disconnect during the first round stops the poller instead of orphaning it", async () => {
+test("EmailAdapter - a disconnect during the first round stops the poller instead of orphaning it", async () => {
   await withTempDir(async (base) => {
     // The first round blocks inside the transport, so the disconnect provably lands while
     // `connect()` is still running.
@@ -1336,7 +1339,7 @@ Deno.test("EmailAdapter - a disconnect during the first round stops the poller i
   });
 });
 
-Deno.test("EmailAdapter - concurrent connects start the poller exactly once", async () => {
+test("EmailAdapter - concurrent connects start the poller exactly once", async () => {
   await withTempDir(async (base) => {
     const gate = Promise.withResolvers<void>();
     let connectCalls = 0;
@@ -1363,7 +1366,7 @@ Deno.test("EmailAdapter - concurrent connects start the poller exactly once", as
   });
 });
 
-Deno.test("EmailAdapter - a fresh thread has no reply source and a reused operation is visible", async () => {
+test("EmailAdapter - a fresh thread has no reply source and a reused operation is visible", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
 
@@ -1407,11 +1410,11 @@ Deno.test("EmailAdapter - a fresh thread has no reply source and a reused operat
   });
 });
 
-Deno.test("EmailAdapter - edit-reply reports the platform limitation before the session state", async () => {
+test("EmailAdapter - edit-reply reports the platform limitation before the session state", async () => {
   await withTempDir(async (base) => {
     const harness = buildHarness(base, { pollTransport: new SentCopyImap() });
     const workspacePath = join(base, "workspace-edit");
-    await Deno.mkdir(workspacePath, { recursive: true });
+    await fsp.mkdir(workspacePath, { recursive: true });
 
     const context: SkillContext = {
       workspace: {
@@ -1438,7 +1441,7 @@ Deno.test("EmailAdapter - edit-reply reports the platform limitation before the 
   });
 });
 
-Deno.test("EmailAdapter - smoke: real IMAP and SMTP services carry a threaded answer end to end", async () => {
+test("EmailAdapter - smoke: real IMAP and SMTP services carry a threaded answer end to end", async () => {
   await withTempDir(async (base) => {
     const imapService = new EmailImapTestService({
       tlsMode: "tls",

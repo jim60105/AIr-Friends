@@ -7,6 +7,7 @@ import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform } from "../../src/types/events.ts";
 import type { ReactionResult } from "../../src/types/platform.ts";
+import { test } from "bun:test";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (
@@ -53,7 +54,7 @@ function createTestWorkspace(key = "discord/123"): WorkspaceInfo {
   };
 }
 
-Deno.test("ReactionHandler - handleReactMessage succeeds with valid emoji", async () => {
+test("ReactionHandler - handleReactMessage succeeds with valid emoji", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -72,7 +73,7 @@ Deno.test("ReactionHandler - handleReactMessage succeeds with valid emoji", asyn
   assertEquals(typeof result.data, "object");
 });
 
-Deno.test("ReactionHandler - reports the requested emoji when the stored reaction matches", async () => {
+test("ReactionHandler - reports the requested emoji when the stored reaction matches", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -100,7 +101,7 @@ Deno.test("ReactionHandler - reports the requested emoji when the stored reactio
   assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
 });
 
-Deno.test("ReactionHandler - reports the stored reaction when the server downgraded it", async () => {
+test("ReactionHandler - reports the stored reaction when the server downgraded it", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -129,7 +130,7 @@ Deno.test("ReactionHandler - reports the stored reaction when the server downgra
   assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
 });
 
-Deno.test("ReactionHandler - reports an unconfirmed reaction when the readback failed", async () => {
+test("ReactionHandler - reports an unconfirmed reaction when the readback failed", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -153,7 +154,7 @@ Deno.test("ReactionHandler - reports an unconfirmed reaction when the readback f
   assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
 });
 
-Deno.test("ReactionHandler - handleReactMessage fails with missing emoji", async () => {
+test("ReactionHandler - handleReactMessage fails with missing emoji", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -172,7 +173,7 @@ Deno.test("ReactionHandler - handleReactMessage fails with missing emoji", async
   assertEquals(result.error, "Missing or invalid 'emoji' parameter");
 });
 
-Deno.test("ReactionHandler - handleReactMessage fails with empty emoji", async () => {
+test("ReactionHandler - handleReactMessage fails with empty emoji", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -191,7 +192,7 @@ Deno.test("ReactionHandler - handleReactMessage fails with empty emoji", async (
   assertEquals(result.error, "Emoji cannot be empty");
 });
 
-Deno.test("ReactionHandler - handleReactMessage fails without trigger message", async () => {
+test("ReactionHandler - handleReactMessage fails without trigger message", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -209,7 +210,7 @@ Deno.test("ReactionHandler - handleReactMessage fails without trigger message", 
   assertEquals(result.error, "No trigger message to react to");
 });
 
-Deno.test("ReactionHandler - handleReactMessage fails when platform returns error", async () => {
+test("ReactionHandler - handleReactMessage fails when platform returns error", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -231,7 +232,7 @@ Deno.test("ReactionHandler - handleReactMessage fails when platform returns erro
   assertEquals(result.error, "Permission denied");
 });
 
-Deno.test("ReactionHandler - hasReactionSent tracks state correctly", async () => {
+test("ReactionHandler - hasReactionSent tracks state correctly", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -252,7 +253,7 @@ Deno.test("ReactionHandler - hasReactionSent tracks state correctly", async () =
   assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
 });
 
-Deno.test("ReactionHandler - clearReactionState resets tracking", async () => {
+test("ReactionHandler - clearReactionState resets tracking", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -274,7 +275,7 @@ Deno.test("ReactionHandler - clearReactionState resets tracking", async () => {
   assertEquals(handler.hasReactionSent(workspace.key, "456"), false);
 });
 
-Deno.test("ReactionHandler - reaction targets triggerMessageId even after a file send", async () => {
+test("ReactionHandler - reaction targets triggerMessageId even after a file send", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 
@@ -302,7 +303,7 @@ Deno.test("ReactionHandler - reaction targets triggerMessageId even after a file
   assertEquals(reactedMessageId, "trigger_msg_1");
 });
 
-Deno.test("ReactionHandler - fails without triggerMessageId even when a file anchor exists", async () => {
+test("ReactionHandler - fails without triggerMessageId even when a file anchor exists", async () => {
   const handler = new ReactionHandler();
   const workspace = createTestWorkspace();
 

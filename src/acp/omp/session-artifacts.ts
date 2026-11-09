@@ -20,7 +20,7 @@
  * a legacy journal starts with the header directly.
  */
 
-import { basename, dirname, isAbsolute, join, normalize } from "@std/path";
+import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import type { LinuxNativeCalls } from "../filesystem-access-linux.ts";
 import { readOmpSessionHeaderPrefix } from "../filesystem-access.ts";
 import type {
@@ -29,6 +29,9 @@ import type {
   OmpArtifactProvenance,
 } from "../filesystem-roots.ts";
 import { defaultMetadataReader, isWithinRoot } from "../filesystem-roots.ts";
+import fsp from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { isNotFoundError } from "../../utils/fs-compat.ts";
 
 /**
  * Discovery bounds (D1). A larger native index loses this optional capability
@@ -150,7 +153,7 @@ export async function resolveOmpSessionArtifacts(
   let dataRootIdentity: ObservedIdentity | undefined;
   try {
     const dataInfo = await reader.lstat(dataRoot);
-    if (!dataInfo.isDirectory || dataInfo.isSymlink) {
+    if (!dataInfo.isDirectory() || dataInfo.isSymbolicLink()) {
       return unavailable("sessions_root_unavailable", "Native data root is not a plain directory");
     }
     if ((await reader.realPath(dataRoot)) !== dataRoot) {
@@ -168,11 +171,11 @@ export async function resolveOmpSessionArtifacts(
   let sessionsRootIdentity: ObservedIdentity;
   try {
     const ompInfo = await reader.lstat(join(dataRoot, "omp"));
-    if (!ompInfo.isDirectory || ompInfo.isSymlink) {
+    if (!ompInfo.isDirectory() || ompInfo.isSymbolicLink()) {
       return unavailable("sessions_root_unavailable", "Native OMP data directory is not plain");
     }
     const sessionsInfo = await reader.lstat(sessionsRoot);
-    if (!sessionsInfo.isDirectory || sessionsInfo.isSymlink) {
+    if (!sessionsInfo.isDirectory() || sessionsInfo.isSymbolicLink()) {
       return unavailable("sessions_root_unavailable", "Native sessions root is not plain");
     }
     if ((await reader.realPath(sessionsRoot)) !== sessionsRoot) {
@@ -192,12 +195,12 @@ export async function resolveOmpSessionArtifacts(
   let totalEntries = 0;
   const buckets: string[] = [];
   try {
-    for await (const entry of Deno.readDir(sessionsRoot)) {
+    for await (const entry of await fsp.opendir(sessionsRoot)) {
       totalEntries += 1;
       if (totalEntries > entryLimit) {
         return unavailable("bounds_exceeded", "Native sessions index exceeds the entry bound");
       }
-      if (!entry.isDirectory || entry.isSymlink) continue;
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
       buckets.push(join(sessionsRoot, entry.name));
       if (buckets.length > bucketLimit) {
         return unavailable("bounds_exceeded", "Native sessions index exceeds the bucket bound");
@@ -213,7 +216,7 @@ export async function resolveOmpSessionArtifacts(
     let realBucket: string;
     try {
       const bucketInfo = await reader.lstat(bucket);
-      if (!bucketInfo.isDirectory || bucketInfo.isSymlink) continue;
+      if (!bucketInfo.isDirectory() || bucketInfo.isSymbolicLink()) continue;
       realBucket = await reader.realPath(bucket);
     } catch {
       continue;
@@ -222,12 +225,12 @@ export async function resolveOmpSessionArtifacts(
 
     const names: string[] = [];
     try {
-      for await (const entry of Deno.readDir(bucket)) {
+      for await (const entry of await fsp.opendir(bucket)) {
         totalEntries += 1;
         if (totalEntries > entryLimit) {
           return unavailable("bounds_exceeded", "Native sessions index exceeds the entry bound");
         }
-        if (!entry.isFile || entry.isSymlink) continue;
+        if (!entry.isFile() || entry.isSymbolicLink()) continue;
         const match = JOURNAL_NAME_PATTERN.exec(entry.name);
         if (match === null) continue;
         if (match[2].toLowerCase() !== wantedId.toLowerCase()) continue;
@@ -250,14 +253,14 @@ export async function resolveOmpSessionArtifacts(
   const candidate = candidates[0];
   const candidateName = basename(candidate.path);
 
-  let journalInfo: Deno.FileInfo;
+  let journalInfo: Stats;
   try {
     journalInfo = await reader.lstat(candidate.path);
   } catch {
     return unavailable("no_match", "Candidate journal is no longer present");
   }
   if (
-    !journalInfo.isFile || journalInfo.isSymlink ||
+    !journalInfo.isFile() || journalInfo.isSymbolicLink() ||
     journalInfo.dev === null || journalInfo.ino === null
   ) {
     return unavailable("unsafe_component", "Candidate journal is not a plain regular file");
@@ -270,7 +273,7 @@ export async function resolveOmpSessionArtifacts(
   try {
     const anchorInfo = await reader.lstat(candidate.bucket);
     if (
-      !anchorInfo.isDirectory || anchorInfo.isSymlink ||
+      !anchorInfo.isDirectory() || anchorInfo.isSymbolicLink() ||
       anchorInfo.dev === null || anchorInfo.ino === null
     ) {
       return unavailable("unsafe_component", "Journal parent is not a plain directory");
@@ -327,7 +330,7 @@ export async function resolveOmpSessionArtifacts(
   let artifactDirectoryIdentity: ObservedIdentity | undefined;
   try {
     const artifactInfo = await reader.lstat(artifactDirectory);
-    if (artifactInfo.isSymlink || !artifactInfo.isDirectory) {
+    if (artifactInfo.isSymbolicLink() || !artifactInfo.isDirectory()) {
       return unavailable("unsafe_component", "Artifact directory is not a plain directory");
     }
     if ((await reader.realPath(artifactDirectory)) !== artifactDirectory) {
@@ -338,7 +341,7 @@ export async function resolveOmpSessionArtifacts(
     }
     artifactDirectoryIdentity = { dev: artifactInfo.dev, ino: artifactInfo.ino };
   } catch (error) {
-    const isNotFound = error instanceof Deno.errors.NotFound ||
+    const isNotFound = isNotFoundError(error) ||
       (error instanceof Error && error.message.toLowerCase().includes("no such file"));
     if (!isNotFound) {
       return unavailable("unsafe_component", "Artifact directory is unusable");

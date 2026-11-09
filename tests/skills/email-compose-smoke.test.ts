@@ -12,7 +12,7 @@
 // address is contacted: this is the "one successful local SMTP compose" evidence of the change.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { EmailComposeHandler } from "../../src/skills/email-handler.ts";
 import type { SkillContext } from "../../src/skills/types.ts";
 import type { DestinationGrant } from "../../src/core/email-intent-preflight.ts";
@@ -38,6 +38,10 @@ import type {
   ImapTransport,
 } from "../../src/platforms/email/imap-client.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const SELF_ADDRESS = "user@example.org";
 const OWNER = normalizeEmailMailbox(SELF_ADDRESS).userId;
@@ -161,13 +165,13 @@ async function withSmtpService(
   }
 }
 
-Deno.test("smoke - a granted compose reaches a real local SMTP peer with its exact envelope", async () => {
+test("smoke - a granted compose reaches a real local SMTP peer with its exact envelope", async () => {
   await withSmtpService({}, async (smtpService) => {
-    const base = await Deno.makeTempDir();
+    const base = await makeTempDir();
     try {
       const stagingDir = join(base, "tmp", SESSION_ID);
-      Deno.mkdirSync(stagingDir, { recursive: true });
-      Deno.writeTextFileSync(join(stagingDir, ATTACHMENT_NAME), ATTACHMENT_BYTES);
+      fs.mkdirSync(stagingDir, { recursive: true });
+      fs.writeFileSync(join(stagingDir, ATTACHMENT_NAME), ATTACHMENT_BYTES);
 
       const imap = new RecordingImap();
       const emailRoot = join(base, "email");
@@ -243,14 +247,14 @@ Deno.test("smoke - a granted compose reaches a real local SMTP peer with its exa
       // The accepted bytes are the ones copied to the sent folder.
       assertEquals(imap.appended.length, 1);
     } finally {
-      await Deno.remove(base, { recursive: true });
+      await fsp.rm(base, { recursive: true });
     }
   });
 });
 
-Deno.test("smoke - a rejected SMTP peer yields an explicit failure with no second transaction", async () => {
+test("smoke - a rejected SMTP peer yields an explicit failure with no second transaction", async () => {
   await withSmtpService({ rejectFinal: true }, async (smtpService) => {
-    const base = await Deno.makeTempDir();
+    const base = await makeTempDir();
     try {
       const imap = new RecordingImap();
       const emailRoot = join(base, "email");
@@ -293,11 +297,11 @@ Deno.test("smoke - a rejected SMTP peer yields an explicit failure with no secon
       assertEquals(smtpService.dataTransactions.length, 1);
       assertEquals(imap.appended.length, 0);
       assert(
-        await Deno.stat(emailRoot).then(() => true, () => false),
+        await fsp.stat(emailRoot).then(() => true, () => false),
         "the submission journal is still durable evidence",
       );
     } finally {
-      await Deno.remove(base, { recursive: true });
+      await fsp.rm(base, { recursive: true });
     }
   });
 });

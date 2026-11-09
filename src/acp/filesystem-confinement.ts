@@ -24,6 +24,7 @@
 // probe fails, rather than spawning the agent unconfined.
 
 /** Runtime paths the agent needs to READ (interpreters, binaries, config, CA certs). */
+import fs from "node:fs";
 export const DEFAULT_CONFINEMENT_READONLY_PATHS: readonly string[] = [
   "/usr",
   "/bin",
@@ -39,14 +40,12 @@ export const DEFAULT_CONFINEMENT_READONLY_PATHS: readonly string[] = [
   "/etc/passwd",
   "/etc/group",
   "/etc/localtime",
-  "/deno-dir",
   "/usr/local/bin",
   "/app/src",
   "/app/prompts",
-  "/app/deno.json",
-  "/app/deno.lock",
-  "/home/deno/.config",
-  "/home/deno/.agents",
+  "/opt/air/skill-bunfig.toml",
+  "/home/air/.config",
+  "/home/air/.agents",
 ];
 
 /**
@@ -57,8 +56,8 @@ export const DEFAULT_CONFINEMENT_READONLY_PATHS: readonly string[] = [
  * and the shared home-rooted dir is never written or visible to the confined process.
  */
 export const DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS: readonly string[] = [
-  "/home/deno/.cache",
-  "/home/deno/.agent-browser",
+  "/home/air/.cache",
+  "/home/air/.agent-browser",
 ];
 
 export interface BwrapConfinementOptions {
@@ -136,7 +135,7 @@ function containsPath(root: string, path: string): boolean {
  * bwrap `--bind-try` would create/mount it at that path. */
 function canonicalSource(path: string): string {
   try {
-    return Deno.realPathSync(path);
+    return fs.realpathSync(path);
   } catch {
     return path;
   }

@@ -12,20 +12,21 @@ import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
-import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import type { PromptResponse } from "@agentclientprotocol/sdk";
 import type { ResolvedReminder } from "../../src/types/reminder.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
-import { exists } from "@std/fs";
-import { join, resolve } from "@std/path";
+import { makeTempDir, pathExists as exists } from "../../src/utils/fs-compat.ts";
+import { join, resolve } from "node:path";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
 
 /**
  * The ONE deployment-resolved skill-script root
  * (`unify-skill-root-and-inventory`): the repository `skills/` tree — what
  * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types.
  */
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
-  resolve(import.meta.dirname ?? ".", "../../skills"),
-);
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 class MockAgentConnector {
   connected = false;
@@ -183,26 +184,26 @@ async function createOrchestrator(
     sendFileEnabled ? { enabled: true, allowedExtensions: [] } : undefined,
   );
 
-  await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-  await Deno.writeTextFile(
+  await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+  await fsp.writeFile(
     `${tempDir}/prompts/system_reply.md`,
     "You are a helper.\n{{ if sessionId }}\nSession: {{ sessionId }}\n{{ /if }}\n" +
       "Skill root: {{ skillsDir }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     `${tempDir}/prompts/system_spontaneous.md`,
     "Spontaneous post prompt.\nSkill root: {{ skillsDir }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     `${tempDir}/prompts/system_self_research.md`,
     "Self research prompt. RSS: {{ rssItems }}\nSkill root: {{ skillsDir }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     `${tempDir}/prompts/system_memory_maintenance.md`,
     "Memory maintenance for {{ workspaceKey }}. Threshold: {{ minMemoryCount }}. Dump: {{ memoriesDump }}\n" +
       "Skill root: {{ skillsDir }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     `${tempDir}/prompts/system_reminder.md`,
     "Reminder: {{ reminderMessage }}\nSkill root: {{ skillsDir }}",
   );
@@ -228,8 +229,8 @@ async function createOrchestrator(
 
 // --- Tests ---
 
-Deno.test("Dry run disabled — normal flow proceeds (connector.prompt is called)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run disabled — normal flow proceeds (connector.prompt is called)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createOrchestrator(tempDir, false);
     const event = createTestEvent();
@@ -244,12 +245,12 @@ Deno.test("Dry run disabled — normal flow proceeds (connector.prompt is called
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run enabled — prompt written to file, connector.prompt NOT called", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run enabled — prompt written to file, connector.prompt NOT called", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
     const event = createTestEvent();
@@ -268,11 +269,11 @@ Deno.test("Dry run enabled — prompt written to file, connector.prompt NOT call
 
     // Check there's at least one .md file in the output dir
     let foundFile = false;
-    for await (const entry of Deno.readDir(outputDir)) {
+    for (const entry of await fsp.readdir(outputDir, { withFileTypes: true })) {
       if (entry.name.startsWith("message_") && entry.name.endsWith(".md")) {
         foundFile = true;
         // Read file and check it contains prompt content
-        const content = await Deno.readTextFile(join(outputDir, entry.name));
+        const content = await fsp.readFile(join(outputDir, entry.name), "utf8");
         assertStringIncludes(content, "You are a helper.");
         break;
       }
@@ -281,12 +282,12 @@ Deno.test("Dry run enabled — prompt written to file, connector.prompt NOT call
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run enabled — output directory auto-created", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run enabled — output directory auto-created", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
     // Set a non-existent output path
@@ -302,12 +303,12 @@ Deno.test("Dry run enabled — output directory auto-created", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run enabled — mock reply sent when configured", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run enabled — mock reply sent when configured", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createOrchestrator(tempDir);
     const event = createTestEvent();
@@ -323,12 +324,12 @@ Deno.test("Dry run enabled — mock reply sent when configured", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run enabled — no reply when mockReply is empty", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run enabled — no reply when mockReply is empty", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
     config.agent.dryRun!.mockReply = "";
@@ -346,12 +347,12 @@ Deno.test("Dry run enabled — no reply when mockReply is empty", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run enabled — produces no file-send response state even with send-file skill enabled", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run enabled — produces no file-send response state even with send-file skill enabled", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(
       tempDir,
@@ -373,12 +374,12 @@ Deno.test("Dry run enabled — produces no file-send response state even with se
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run enabled — shell session cleaned up properly", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run enabled — shell session cleaned up properly", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createOrchestrator(tempDir);
     const event = createTestEvent();
@@ -394,12 +395,12 @@ Deno.test("Dry run enabled — shell session cleaned up properly", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — works for spontaneous post session type", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — works for spontaneous post session type", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
     const mockAdapter = new MockPlatformAdapter();
@@ -418,7 +419,7 @@ Deno.test("Dry run — works for spontaneous post session type", async () => {
     // Verify output file exists with "spontaneous" in the name
     const outputDir = config.agent.dryRun!.outputPath;
     let foundFile = false;
-    for await (const entry of Deno.readDir(outputDir)) {
+    for (const entry of await fsp.readdir(outputDir, { withFileTypes: true })) {
       if (entry.name.startsWith("spontaneous_") && entry.name.endsWith(".md")) {
         foundFile = true;
         break;
@@ -428,12 +429,12 @@ Deno.test("Dry run — works for spontaneous post session type", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — works for self-research session type", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — works for self-research session type", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
 
@@ -456,7 +457,7 @@ Deno.test("Dry run — works for self-research session type", async () => {
     // Verify output file with "self_research" in the name
     const outputDir = config.agent.dryRun!.outputPath;
     let foundFile = false;
-    for await (const entry of Deno.readDir(outputDir)) {
+    for (const entry of await fsp.readdir(outputDir, { withFileTypes: true })) {
       if (entry.name.startsWith("self_research_") && entry.name.endsWith(".md")) {
         foundFile = true;
         break;
@@ -466,12 +467,12 @@ Deno.test("Dry run — works for self-research session type", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — works for memory-maintenance session type", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — works for memory-maintenance session type", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
 
@@ -488,7 +489,7 @@ Deno.test("Dry run — works for memory-maintenance session type", async () => {
     // Verify output file with "memory_maintenance" in the name
     const outputDir = config.agent.dryRun!.outputPath;
     let foundFile = false;
-    for await (const entry of Deno.readDir(outputDir)) {
+    for (const entry of await fsp.readdir(outputDir, { withFileTypes: true })) {
       if (entry.name.startsWith("memory_maintenance_") && entry.name.endsWith(".md")) {
         foundFile = true;
         break;
@@ -498,12 +499,12 @@ Deno.test("Dry run — works for memory-maintenance session type", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — file naming includes timestamp and session type", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — file naming includes timestamp and session type", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
     const event = createTestEvent();
@@ -512,7 +513,7 @@ Deno.test("Dry run — file naming includes timestamp and session type", async (
     await orchestrator.processMessage(event, platformAdapter);
 
     const outputDir = config.agent.dryRun!.outputPath;
-    for await (const entry of Deno.readDir(outputDir)) {
+    for (const entry of await fsp.readdir(outputDir, { withFileTypes: true })) {
       // Pattern: message_YYYY-MM-DDTHH-MM-SS-MMMZ_XXXXXXXX.md
       const pattern = /^message_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/;
       assertEquals(pattern.test(entry.name), true, `Filename should match pattern: ${entry.name}`);
@@ -521,12 +522,12 @@ Deno.test("Dry run — file naming includes timestamp and session type", async (
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — lurk and channel maintenance release their ownership exactly once", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — lurk and channel maintenance release their ownership exactly once", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new RecordingWorkspaceManager({
       repoPath: tempDir,
@@ -587,18 +588,18 @@ Deno.test("Dry run — lurk and channel maintenance release their ownership exac
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("CLI --dry-run flag overrides config (bootstrap behavior)", async () => {
+test("CLI --dry-run flag overrides config (bootstrap behavior)", async () => {
   // This test verifies the config merging logic without full bootstrap
   const { loadConfig } = await import("@core/config-loader.ts");
 
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     // Create minimal config
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       join(tempDir, "config.yaml"),
       `
 platforms:
@@ -638,12 +639,12 @@ workspace:
     assertEquals(config.agent.dryRun.enabled, true);
     assertEquals(config.agent.dryRun.outputPath, "./data/dry-run/");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — metrics recorded correctly (activeSessionsGauge incremented/decremented)", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — metrics recorded correctly (activeSessionsGauge incremented/decremented)", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry } = await createOrchestrator(tempDir);
     const event = createTestEvent();
@@ -656,12 +657,12 @@ Deno.test("Dry run — metrics recorded correctly (activeSessionsGauge increment
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("Dry run — works for reminder session type", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("Dry run — works for reminder session type", async () => {
+  const tempDir = await makeTempDir();
   try {
     const { orchestrator, sessionRegistry, config } = await createOrchestrator(tempDir);
     const mockAdapter = {
@@ -696,7 +697,7 @@ Deno.test("Dry run — works for reminder session type", async () => {
     // Verify output file with "reminder" in the name
     const outputDir = config.agent.dryRun!.outputPath;
     let foundFile = false;
-    for await (const entry of Deno.readDir(outputDir)) {
+    for (const entry of await fsp.readdir(outputDir, { withFileTypes: true })) {
       if (entry.name.startsWith("reminder_") && entry.name.endsWith(".md")) {
         foundFile = true;
         break;
@@ -706,6 +707,6 @@ Deno.test("Dry run — works for reminder session type", async () => {
 
     sessionRegistry.stop();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
