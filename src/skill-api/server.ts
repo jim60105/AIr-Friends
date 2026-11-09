@@ -280,7 +280,7 @@ export class SkillAPIServer {
   /**
    * Start the HTTP server
    */
-  start(): void {
+  start(): number {
     this.server = Bun.serve({
       port: this.config.port,
       hostname: this.config.host,
@@ -293,10 +293,19 @@ export class SkillAPIServer {
       port: this.server.port,
     });
 
+    // `port: 0` asks the OS for an ephemeral port; return what was bound so
+    // tests (and any future caller) can address the live listener.
+    const boundPort = this.server.port;
+    if (boundPort === undefined) {
+      throw new Error("Skill API server did not bind a TCP port");
+    }
+
     // Start cleanup interval for request cache
     this.cleanupInterval = setInterval(() => {
       this.cleanupRequestCache();
     }, this.CACHE_TTL_MS);
+
+    return boundPort;
   }
 
   /**
