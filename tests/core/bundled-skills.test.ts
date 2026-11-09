@@ -114,7 +114,7 @@ test("Containerfile - installs exactly one skill tree, at the personal skill roo
   );
   // Exactly ONE instruction installs a skill tree, and it is the personal
   // root every agent type resolves and external runtime installs publish into.
-  assertEquals(skillsTreeInstalls(containerfile), ["/home/deno/.agents/skills/"]);
+  assertEquals(skillsTreeInstalls(containerfile), ["/home/air/.agents/skills/"]);
   // The retired owned skill tree, its packaging stage and its stager script
   // are gone from the image definition.
   assert(!containerfile.includes("/opt/air/skills"));
@@ -168,7 +168,7 @@ test("Containerfile and Helm declare the same shared installed root; development
     "utf8",
   );
   // Stock image declares the SAME tree the COPY installs.
-  assert(containerfile.includes("ENV AGENT_SKILLS_DIR=/home/deno/.agents/skills"));
+  assert(containerfile.includes("ENV AGENT_SKILLS_DIR=/home/air/.agents/skills"));
   // Helm default matches the stock image (the drift this task removed).
   assert(/AGENT_SKILLS_DIR: '\/home\/air\/\.agents\/skills'/.test(helm), helm.slice(0, 400));
   // Development default (`skills`) is unchanged in the example env.

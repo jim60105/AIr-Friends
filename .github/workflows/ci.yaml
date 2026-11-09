@@ -22,154 +22,204 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          deno-version: v2.x
+          bun-version: 1.4.2
 
-      - name: Cache Deno dependencies
+      - name: Cache Bun dependencies
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cache/deno
-            ~/.deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
+          path: ~/.bun/install/cache
+          key: "${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}"
           restore-keys: |
-            ${{ runner.os }}-deno-
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Verify formatting
-        run: deno task fmt:check
+        run: bun run fmt:check
 
       - name: Run linter
-        run: deno task lint
+        run: bun run lint
 
       - name: Type check
-        run: deno task check
+        run: bun run check
 
   test:
-    name: Run Tests
-    runs-on: ubuntu-latest
+    name: Run Tests (${{ matrix.runner }}, userns ${{ matrix.userns }})
     needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            userns: open
+          - runner: ubuntu-latest
+            userns: restricted
+          - runner: ubuntu-24.04-arm
+            userns: open
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          deno-version: v2.x
+          bun-version: 1.4.2
 
-      - name: Cache Deno dependencies
+      - name: Cache Bun dependencies
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cache/deno
-            ~/.deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
+          path: ~/.bun/install/cache
+          key: "${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}"
           restore-keys: |
-            ${{ runner.os }}-deno-
+            ${{ runner.os }}-bun-
 
-      - name: Install ImageMagick
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap
+
+      - name: Enable unprivileged user namespaces
+        if: matrix.userns == 'open'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Restrict unprivileged user namespaces
+        if: matrix.userns == 'restricted'
+        run: |
+          if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1; then
+            echo "::warning::kernel.apparmor_restrict_unprivileged_userns is unavailable; the probes below prove the incapable path without kernel help."
+            echo "USERNS_FALLBACK=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prove the restricted environment is incapable
+        if: matrix.userns == 'restricted' && env.USERNS_FALLBACK != '1'
+        run: |
+          bun --no-env-file -e 'import { probeFilesystemConfinement, probeNetworkNamespace } from "./src/acp/sandbox-capabilities.ts";
+          const network = probeNetworkNamespace();
+          const filesystem = probeFilesystemConfinement();
+          console.log("network namespace probe:", network, "filesystem confinement probe:", filesystem);
+          if (network || filesystem) {
+            console.error("::error::the restricted runner still grants sandbox capabilities");
+            process.exit(1);
+          }'
+
+      - name: Prove the incapable path without kernel support
+        if: matrix.userns == 'restricted' && env.USERNS_FALLBACK == '1'
+        run: |
+          empty="$RUNNER_TEMP/empty-path"
+          mkdir -p "$empty"
+          PATH="$empty" "$(command -v bun)" --no-env-file -e 'import { probeFilesystemConfinement, probeNetworkNamespace } from "./src/acp/sandbox-capabilities.ts";
+          const network = probeNetworkNamespace();
+          const filesystem = probeFilesystemConfinement();
+          console.log("Tool missing probe:", network, filesystem);
+          if (network || filesystem) {
+            console.error("::error::the missing-tool probe still reports a sandbox capability");
+            process.exit(1);
+          }'
+
+      - name: Install trusted skill config
+        run: sudo sh scripts/install-skill-bunfig.sh
 
       - name: Run unit tests
-        run: deno task test:unit
+        run: bun run test:unit
 
       - name: Run integration tests
-        run: deno task test:integration
+        run: bun run test:integration
 
   coverage:
     name: Test Coverage
-    runs-on: ubuntu-latest
     needs: check
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          deno-version: v2.x
+          bun-version: 1.4.2
 
-      - name: Cache Deno dependencies
+      - name: Cache Bun dependencies
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cache/deno
-            ~/.deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
+          path: ~/.bun/install/cache
+          key: "${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}"
           restore-keys: |
-            ${{ runner.os }}-deno-
+            ${{ runner.os }}-bun-
 
-      - name: Install ImageMagick
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y imagemagick dumb-init bubblewrap
+
+      - name: Enable unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Install trusted skill config
+        run: sudo sh scripts/install-skill-bunfig.sh
 
       - name: Run tests with coverage
-        run: deno task test:coverage
+        run: bun run test:coverage
 
-      - name: Generate coverage report
-        run: deno task coverage:report
-
-      - name: Check coverage threshold
-        run: |
-          COVERAGE=$(deno coverage coverage --exclude='tests/' 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep 'All files' | awk -F'|' '{gsub(/[[:space:]]/, "", $3); print $3}')
-          echo "Coverage: ${COVERAGE}%"
-          if [ -z "$COVERAGE" ]; then
-            echo "::error::Failed to extract coverage percentage"
-            exit 1
-          fi
-          if [ "$(echo "$COVERAGE < 75" | bc -l)" -eq 1 ]; then
-            echo "::error::Test coverage ${COVERAGE}% is below the required 75% threshold"
-            exit 1
-          fi
-
-      - name: Generate LCOV report
-        run: deno coverage coverage --lcov --output=coverage.lcov --exclude='tests/'
+      - name: Check coverage floor
+        run: bun run --no-env-file scripts/coverage-floor.ts coverage/lcov.info 75
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage.lcov
+          files: ./coverage/lcov.info
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  build:
-    name: Build Check
-    runs-on: ubuntu-latest
+  image:
+    name: Image Smoke (${{ matrix.runner }})
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          # Pinned: Deno 2.9.x has a denort stack-overflow regression during
-          # `deno compile` for this module graph. 2.8.3 is the last known-good.
-          deno-version: v2.8.3
+          bun-version: 1.4.2
 
-      - name: Cache Deno dependencies
+      - name: Cache Bun dependencies
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cache/deno
-            ~/.deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
+          path: ~/.bun/install/cache
+          key: "${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}"
           restore-keys: |
-            ${{ runner.os }}-deno-
+            ${{ runner.os }}-bun-
 
-      - name: Compile check
-        env:
-          RUST_MIN_STACK: 16777216
-        run: >-
-          deno compile --check
-          --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys
-          --output /tmp/air-friends src/main.ts
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
-      - name: Verify executable
+      - name: Prepare rootless podman
         run: |
-          chmod +x /tmp/air-friends
-          /tmp/air-friends --help
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          command -v podman || { sudo apt-get update && sudo apt-get install -y podman; }
+
+      - name: Build runtime image
+        run: podman build --target final -t air-friends:ci .
+
+      - name: Build test image
+        run: podman build -f tests/image/Containerfile --build-arg IMAGE=localhost/air-friends:ci -t air-friends:ci-test .
+
+      - name: Run image smoke test
+        run: sh scripts/image-smoke.sh localhost/air-friends:ci localhost/air-friends:ci-test

@@ -725,13 +725,13 @@ test("profile - resolves the installed image document and the Containerfile inst
   // merges that directory, so the deny-all agent must never land beside it.
   assert(
     containerfile.includes(
-      "agent-config/opencode.json /home/deno/.config/opencode/opencode.json",
+      "agent-config/opencode.json /home/air/.config/opencode/opencode.json",
     ),
     "the ordinary OpenCode install must stay unchanged",
   );
   assert(
     !containerfile.includes(
-      "agent-config/email-intent-opencode.json /home/deno/.config/opencode/",
+      "agent-config/email-intent-opencode.json /home/air/.config/opencode/",
     ),
     "the deny-all document must never be installed into the ordinary config directory",
   );
