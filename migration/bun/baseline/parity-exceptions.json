@@ -48,6 +48,18 @@
       "name": "AgentConnector - MCP config conversion",
       "disposition": "removed",
       "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 3 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/omp-pool-modes.test.ts",
+      "name": "OMP acquisition matrix: entry points, resolved modes, ownership, audit and summary",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 224 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    },
+    {
+      "file": "tests/core/omp-pool-modes.test.ts",
+      "name": "OMP recovery-context matrix: all nine helper callers thread their own recorded context",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 48 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
     }
   ]
 }
