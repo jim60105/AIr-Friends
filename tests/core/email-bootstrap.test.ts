@@ -14,7 +14,7 @@
 // asserted on the source.
 
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { ChannelConfig, Config, EmailConfig } from "../../src/types/config.ts";
 import { ConfigError } from "../../src/types/errors.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
@@ -32,6 +32,10 @@ import {
 } from "../../src/platforms/platform-registry.ts";
 import { EmailImapTestService } from "../helpers/email-imap-service.ts";
 import { EmailSmtpTestService } from "../helpers/email-smtp-service.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const BOT = "bot@example.com";
 const AUTHSERV = "mx.example.com";
@@ -43,14 +47,14 @@ const SIGNATURE = "AIr-Friends Bot";
 
 const CHANNELS: ChannelConfig[] = [{ id: `email/account/${OWNER}`, enabled: true }];
 
-const BOOTSTRAP_SOURCE = Deno.readTextFileSync(
+const BOOTSTRAP_SOURCE = fs.readFileSync(
   new URL("../../src/bootstrap.ts", import.meta.url),
+  "utf8",
 );
-const SHUTDOWN_SOURCE = Deno.readTextFileSync(
-  new URL("../../src/shutdown.ts", import.meta.url),
-);
-const ACTIVATION_SOURCE = Deno.readTextFileSync(
+const SHUTDOWN_SOURCE = fs.readFileSync(new URL("../../src/shutdown.ts", import.meta.url), "utf8");
+const ACTIVATION_SOURCE = fs.readFileSync(
   new URL("../../src/platforms/email/activation.ts", import.meta.url),
+  "utf8",
 );
 
 /** Locate one ordering anchor, failing loudly when it is refactored away. */
@@ -157,7 +161,7 @@ async function withFixtures(
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "email-bootstrap-test-" });
+  const dir = await makeTempDir({ prefix: "email-bootstrap-test-" });
   try {
     _resetSharedRegistryForTesting();
     resetPlatformRegistry();
@@ -165,7 +169,7 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   } finally {
     resetPlatformRegistry();
     _resetSharedRegistryForTesting();
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
+    await fsp.rm(dir, { recursive: true }).catch(() => {});
   }
 }
 
@@ -197,7 +201,7 @@ async function composeFixtureRuntime(
   });
 }
 
-Deno.test("bootstrap wiring - recover, reclaim, compose, install and register precede every ingress", () => {
+test("bootstrap wiring - recover, reclaim, compose, install and register precede every ingress", () => {
   const reclamation = anchor(
     BOOTSTRAP_SOURCE,
     "await agentCore.getWorkspaceManager().reclaimOrphanTmpDirs(",
@@ -237,7 +241,7 @@ Deno.test("bootstrap wiring - recover, reclaim, compose, install and register pr
   assert(recovery < adapterConstruction, "submission recovery must precede adapter construction");
 });
 
-Deno.test("shutdown wiring - poll admission, drain and client close precede platform disconnect", () => {
+test("shutdown wiring - poll admission, drain and client close precede platform disconnect", () => {
   const schedulersStopped = anchor(SHUTDOWN_SOURCE, "this.context.reminderScheduler.stop();");
   const emailShutdown = anchor(SHUTDOWN_SOURCE, "await this.context.emailPlatform.shutdown();");
   const coreShutdown = anchor(SHUTDOWN_SOURCE, "await agentCore.shutdown();");
@@ -255,7 +259,7 @@ Deno.test("shutdown wiring - poll admission, drain and client close precede plat
   assert(drain < closeCopy, "in-flight journals drain before protocol clients close");
 });
 
-Deno.test("composition - registration status, preexisting-mail exclusion and shutdown", async () => {
+test("composition - registration status, preexisting-mail exclusion and shutdown", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (imap, smtp) => {
       const runtime = await composeFixtureRuntime(base, imap, smtp);
@@ -315,13 +319,13 @@ Deno.test("composition - registration status, preexisting-mail exclusion and shu
   });
 });
 
-Deno.test("composition - a corrupt submission journal blocks email instead of enabling ingress", async () => {
+test("composition - a corrupt submission journal blocks email instead of enabling ingress", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (imap, smtp) => {
       // A torn/corrupt submission journal is not evidence of absence.
       const emailRoot = join(base, "email");
-      await Deno.mkdir(emailRoot, { recursive: true, mode: 0o700 });
-      await Deno.writeTextFile(join(emailRoot, "submissions.jsonl"), "not-a-journal-record\n");
+      await fsp.mkdir(emailRoot, { recursive: true, mode: 0o700 });
+      await fsp.writeFile(join(emailRoot, "submissions.jsonl"), "not-a-journal-record\n");
 
       const config = deploymentConfig(base, emailConfig(imap, smtp));
       await assertRejects(
@@ -340,8 +344,8 @@ Deno.test("composition - a corrupt submission journal blocks email instead of en
   });
 });
 
-Deno.test("activation config - insecure transport and missing authority fail closed", async () => {
-  const base = await Deno.makeTempDir({ prefix: "email-bootstrap-config-" });
+test("activation config - insecure transport and missing authority fail closed", async () => {
+  const base = await makeTempDir({ prefix: "email-bootstrap-config-" });
   try {
     const valid = fixtureEmailConfig(993, 465);
 
@@ -414,16 +418,16 @@ Deno.test("activation config - insecure transport and missing authority fail clo
       "platforms.email.enabled",
     );
   } finally {
-    await Deno.remove(base, { recursive: true }).catch(() => {});
+    await fsp.rm(base, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("composition - damaged mailbox evidence refuses activation before protocol authentication", async () => {
+test("composition - damaged mailbox evidence refuses activation before protocol authentication", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (imap, smtp) => {
       const root = join(base, "email");
-      await Deno.mkdir(root, { recursive: true });
-      await Deno.writeTextFile(join(root, "mailbox.json"), "corrupt");
+      await fsp.mkdir(root, { recursive: true });
+      await fsp.writeFile(join(root, "mailbox.json"), "corrupt");
       await assertRejects(() => composeFixtureRuntime(base, imap, smtp));
       assertEquals(imap.authAttempts.length, 0);
       assertEquals(smtp.dataTransactionCount, 0);

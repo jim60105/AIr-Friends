@@ -19,7 +19,7 @@
 // is not re-tested here.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import {
   projectEmailAuditData,
@@ -52,6 +52,9 @@ import { ReminderStore } from "../../src/core/reminder-store.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { metricsRegistry } from "../../src/utils/metrics.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDir, makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 // Sentinel private material: an address, a subject, a body, credentials and a
 // staged attachment name. NONE of them may appear in a log, an audit entry or a
@@ -107,7 +110,7 @@ function auditConfig(hashContent: boolean): AuditConfig {
 }
 
 async function readEntries(path: string): Promise<SessionAuditEntry[]> {
-  const content = await Deno.readTextFile(path);
+  const content = await fsp.readFile(path, "utf8");
   return content.trim().split("\n").filter((line) => line.length > 0).map((line) =>
     JSON.parse(line) as SessionAuditEntry
   );
@@ -127,7 +130,7 @@ async function readEntriesWhenReady(
     try {
       entries = await readEntries(path);
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      if (!(isNotFoundError(error))) throw error;
     }
     if (isComplete(entries)) return entries;
   }
@@ -231,8 +234,8 @@ function phasePayloads(): Array<[AuditPhase, Record<string, unknown>]> {
   ];
 }
 
-Deno.test("email audit - no sentinel reaches any phase entry and digests replace content", async () => {
-  const dir = await Deno.makeTempDir();
+test("email audit - no sentinel reaches any phase entry and digests replace content", async () => {
+  const dir = await makeTempDir();
   try {
     const writer = new SessionAuditWriter(dir, "email", OWNER, SESSION_ID, auditConfig(false));
     for (const [phase, data] of phasePayloads()) await writer.write(phase, data);
@@ -251,7 +254,7 @@ Deno.test("email audit - no sentinel reaches any phase entry and digests replace
     });
 
     const file = join(dir, "email", OWNER, `${SESSION_ID}.jsonl`);
-    const raw = await Deno.readTextFile(file);
+    const raw = await fsp.readFile(file, "utf8");
     assertNoSentinel(raw, "the email audit file");
 
     const entries = await readEntries(file);
@@ -297,12 +300,12 @@ Deno.test("email audit - no sentinel reaches any phase entry and digests replace
     assertEquals(operation.sentCopy, "failed");
     assertEquals(operation.targetKind, "third-party");
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
-Deno.test("email audit - non-email entries remain byte-compatible", async () => {
-  const dir = await Deno.makeTempDir();
+test("email audit - non-email entries remain byte-compatible", async () => {
+  const dir = await makeTempDir();
   try {
     const writer = new SessionAuditWriter(dir, "discord", "123", "sess_plain", auditConfig(false));
     const payloads = phasePayloads();
@@ -319,11 +322,11 @@ Deno.test("email audit - non-email entries remain byte-compatible", async () => 
       `Inbound request ${BODY_SENTINEL} ${PASSWORD_SENTINEL}`,
     );
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
-Deno.test("email audit - projection is idempotent and a canonical digest always wins", async () => {
+test("email audit - projection is idempotent and a canonical digest always wins", async () => {
   const canonical = `sha256:${await sha256Hash("canonical")}`;
   const first = await projectEmailAuditData({
     message: "raw body",
@@ -371,7 +374,7 @@ Deno.test("email audit - projection is idempotent and a canonical digest always 
   assertEquals(reversed.messageHash, canonical);
 });
 
-Deno.test("email audit - agent payloads cannot impersonate host metadata", async () => {
+test("email audit - agent payloads cannot impersonate host metadata", async () => {
   // A model may name any key it likes; only the narrow param allowlist and the
   // observable counters survive, so a recognized-looking name is not enough.
   const projected = await projectEmailAuditData({
@@ -421,7 +424,7 @@ Deno.test("email audit - agent payloads cannot impersonate host metadata", async
   assertEquals(operation.safeCode, "APPEND_FAILED");
 });
 
-Deno.test("email audit - a failing private write reports a code, never the exception text", async () => {
+test("email audit - a failing private write reports a code, never the exception text", async () => {
   const writer = new SessionAuditWriter(
     "/nonexistent/private-audit-root",
     "email",
@@ -437,7 +440,7 @@ Deno.test("email audit - a failing private write reports a code, never the excep
   assertStringIncludes(logs.join("\n"), "AUDIT_WRITE_FAILED");
 });
 
-Deno.test("email audit - the forward projection keeps only opaque ids and digests", async () => {
+test("email audit - the forward projection keeps only opaque ids and digests", async () => {
   const projected = await emailComposeAuditParams({
     grantId: "grant-1",
     request: {
@@ -464,7 +467,7 @@ Deno.test("email audit - the forward projection keeps only opaque ids and digest
 // Logger privacy
 // ---------------------------------------------------------------------------
 
-Deno.test("logger - email module loggers and email session loggers are private", async () => {
+test("logger - email module loggers and email session loggers are private", async () => {
   const { logs } = await capturingLogs(() => {
     const compose = new Logger("EmailComposeHandler", { level: LogLevel.DEBUG });
     compose.info("Email submitted ({TargetKind}, {Attachments} attachments)", {
@@ -529,7 +532,7 @@ Deno.test("logger - email module loggers and email session loggers are private",
   assertEquals(entries[4].context, undefined);
 });
 
-Deno.test("logger - GELF receives the projected entry, not the raw context", async () => {
+test("logger - GELF receives the projected entry, not the raw context", async () => {
   const sent: Record<string, unknown>[] = [];
   const logger = new Logger("EmailMailService", {
     level: LogLevel.DEBUG,
@@ -554,7 +557,7 @@ Deno.test("logger - GELF receives the projected entry, not the raw context", asy
   assertEquals((sent[0].context as Record<string, unknown>).error, undefined);
 });
 
-Deno.test("logger - concurrent email and non-email executions cannot leak into each other", async () => {
+test("logger - concurrent email and non-email executions cannot leak into each other", async () => {
   const { logs } = await capturingLogs(async () => {
     const emailLogger = new Logger("SkillRegistry", { level: LogLevel.DEBUG });
     const discordLogger = new Logger("SkillRegistry", { level: LogLevel.DEBUG });
@@ -587,7 +590,7 @@ Deno.test("logger - concurrent email and non-email executions cannot leak into e
   assertEquals(discordEntry?.context?.error, PASSWORD_SENTINEL);
 });
 
-Deno.test("logger - a non-email logger keeps its ordinary context", async () => {
+test("logger - a non-email logger keeps its ordinary context", async () => {
   const { logs } = await capturingLogs(() => {
     new Logger("SkillAPIServer", { level: LogLevel.DEBUG })
       .info("ordinary context", { message: BODY_SENTINEL, sessionId: SESSION_ID });
@@ -598,7 +601,7 @@ Deno.test("logger - a non-email logger keeps its ordinary context", async () => 
   assertEquals(entry.context?.message, BODY_SENTINEL);
 });
 
-Deno.test("logger - the ambient private scope covers an unrelated module logger", async () => {
+test("logger - the ambient private scope covers an unrelated module logger", async () => {
   const { logs } = await capturingLogs(async () => {
     const registry = new Logger("SkillRegistry", { level: LogLevel.DEBUG });
     registry.error("Skill {skillName} execution error", {
@@ -635,7 +638,7 @@ Deno.test("logger - the ambient private scope covers an unrelated module logger"
 // ---------------------------------------------------------------------------
 
 function allowList() {
-  const root = Deno.makeTempDirSync({ prefix: "air-privacy-skills-" });
+  const root = makeTempDirSync({ prefix: "air-privacy-skills-" });
   return buildSkillAutoApproveList({
     rootObservation: observeTrustedSkillsRoot("opencode", root),
   });
@@ -665,8 +668,8 @@ function acpClient(
   return client;
 }
 
-Deno.test("acp client - an email session logs metadata only and hashes agent text", async () => {
-  const dir = await Deno.makeTempDir();
+test("acp client - an email session logs metadata only and hashes agent text", async () => {
+  const dir = await makeTempDir();
   try {
     const writer = new SessionAuditWriter(dir, "email", OWNER, SESSION_ID, auditConfig(false));
     const client = acpClient(
@@ -734,12 +737,12 @@ Deno.test("acp client - an email session logs metadata only and hashes agent tex
     assertEquals(complete.data.chunkCount, 2);
     assertNoSentinel(JSON.stringify(entries), "the email ACP audit entries");
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
-Deno.test("acp client - a discord session keeps its raw content and command", async () => {
-  const dir = await Deno.makeTempDir();
+test("acp client - a discord session keeps its raw content and command", async () => {
+  const dir = await makeTempDir();
   try {
     const writer = new SessionAuditWriter(dir, "discord", "123", "sess_d", auditConfig(false));
     const client = acpClient(
@@ -768,7 +771,7 @@ Deno.test("acp client - a discord session keeps its raw content and command", as
     const complete = entries.find((entry) => entry.phase === "agent_complete_message");
     assertEquals(complete?.data.messageContentHash, BODY_SENTINEL);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
@@ -797,10 +800,10 @@ function fileContext(platform: "email" | "discord", workspacePath: string): Skil
   } as SkillContext;
 }
 
-Deno.test("file handler - an email attachment name never reaches a diagnostic", async () => {
-  const dir = await Deno.makeTempDir();
+test("file handler - an email attachment name never reaches a diagnostic", async () => {
+  const dir = await makeTempDir();
   try {
-    await Deno.writeTextFile(join(dir, FILENAME_SENTINEL), "bytes");
+    await fsp.writeFile(join(dir, FILENAME_SENTINEL), "bytes");
     const handler = new FileHandler({ enabled: true, allowedExtensions: [".pdf"] });
     const context = fileContext("email", dir);
 
@@ -814,7 +817,7 @@ Deno.test("file handler - an email attachment name never reaches a diagnostic", 
 
     assertNoSentinel(logs.join("\n"), "the email file-handler log stream");
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });
 
@@ -859,7 +862,7 @@ async function withEmailEndpoint(
   },
   body: (harness: EmailHarness) => Promise<void>,
 ): Promise<void> {
-  const dir = await Deno.makeTempDir();
+  const dir = await makeTempDir();
   const platform = options.platform ?? "email";
   const isEmail = platform === "email";
   const userId = isEmail ? OWNER : "123";
@@ -938,10 +941,10 @@ async function withEmailEndpoint(
     },
   });
 
-  await Deno.writeTextFile(join(dir, FILENAME_SENTINEL), "attachment bytes");
+  await fsp.writeFile(join(dir, FILENAME_SENTINEL), "attachment bytes");
   const attachmentPath = join("tmp", sessionId, FILENAME_SENTINEL);
-  await Deno.mkdir(join(dir, "tmp", sessionId), { recursive: true });
-  await Deno.writeTextFile(join(dir, attachmentPath), "staged attachment bytes");
+  await fsp.mkdir(join(dir, "tmp", sessionId), { recursive: true });
+  await fsp.writeFile(join(dir, attachmentPath), "staged attachment bytes");
 
   const server = new SkillAPIServer(
     registry,
@@ -963,7 +966,7 @@ async function withEmailEndpoint(
   } finally {
     await server.stop();
     registry.stop();
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 }
 
@@ -1005,7 +1008,7 @@ async function postSkill(
   return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
 
-Deno.test("skill API - every email phase stays content-free under hashContent=false", async () => {
+test("skill API - every email phase stays content-free under hashContent=false", async () => {
   const port = 34771;
   await withEmailEndpoint(
     port,
@@ -1051,7 +1054,7 @@ Deno.test("skill API - every email phase stays content-free under hashContent=fa
       assertNoSentinel(logs.join("\n"), "the email skill-API log stream");
 
       const auditFile = join(h.auditPath, "email", OWNER, `${SESSION_ID}.jsonl`);
-      const raw = await Deno.readTextFile(auditFile);
+      const raw = await fsp.readFile(auditFile, "utf8");
       assertNoSentinel(raw, "the email skill-API audit file");
       const entries = await readEntries(auditFile);
 
@@ -1108,7 +1111,7 @@ Deno.test("skill API - every email phase stays content-free under hashContent=fa
   );
 });
 
-Deno.test("skill API - a malformed email request body is reported without its content", async () => {
+test("skill API - a malformed email request body is reported without its content", async () => {
   const port = 34772;
   await withEmailEndpoint(port, { mailService: mailServiceDouble() }, async (h) => {
     const { logs } = await capturingLogs(async () => {
@@ -1126,7 +1129,7 @@ Deno.test("skill API - a malformed email request body is reported without its co
   });
 });
 
-Deno.test("skill API - a valid null body keeps the structured error response", async () => {
+test("skill API - a valid null body keeps the structured error response", async () => {
   const port = 34773;
   await withEmailEndpoint(port, { mailService: mailServiceDouble() }, async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/skill/send-email`, {
@@ -1139,7 +1142,7 @@ Deno.test("skill API - a valid null body keeps the structured error response", a
   });
 });
 
-Deno.test("skill API - durable evidence recovered for a lost response is audited", async () => {
+test("skill API - durable evidence recovered for a lost response is audited", async () => {
   const port = 34774;
   await withEmailEndpoint(port, {
     mailService: mailServiceDouble(),
@@ -1179,7 +1182,7 @@ Deno.test("skill API - durable evidence recovered for a lost response is audited
   });
 });
 
-Deno.test("skill API - a successful email file send audits counts, not names", async () => {
+test("skill API - a successful email file send audits counts, not names", async () => {
   const port = 34775;
   await withEmailEndpoint(port, { mailService: mailServiceDouble() }, async (h) => {
     const files = await postSkill(port, h.registry, h.sessionId, "send-file", {
@@ -1206,13 +1209,13 @@ Deno.test("skill API - a successful email file send audits counts, not names", a
   });
 });
 
-Deno.test("skill API - non-email skill results stay byte-compatible", async () => {
+test("skill API - non-email skill results stay byte-compatible", async () => {
   const port = 34776;
   await withEmailEndpoint(port, { platform: "discord" }, async (h) => {
     // A workspace-prefixed path that exists only as the redundant spelling
     // yields the typed guidance code on top of the error text; the audit must
     // keep the pre-change `{success, error}` shape.
-    await Deno.mkdir(join(h.auditPath, "..", "data", "workspaces", "discord", "123"), {
+    await fsp.mkdir(join(h.auditPath, "..", "data", "workspaces", "discord", "123"), {
       recursive: true,
     });
 
@@ -1240,13 +1243,13 @@ Deno.test("skill API - non-email skill results stay byte-compatible", async () =
 // Pre-session reminder replay (due-reminder enumeration)
 // ---------------------------------------------------------------------------
 
-Deno.test("reminder replay - a malformed email line logs a position, never content", async () => {
-  const dir = await Deno.makeTempDir();
+test("reminder replay - a malformed email line logs a position, never content", async () => {
+  const dir = await makeTempDir();
   try {
     const store = new ReminderStore("reminders.jsonl");
     // Line 1 parses (and holds the private body); line 2 is malformed AND carries
     // every other sentinel. The parser's own message would quote it verbatim.
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       join(dir, "reminders.jsonl"),
       [
         `{"type":"reminder","id":"rem_1","message":"${BODY_SENTINEL}","enabled":false}`,
@@ -1290,6 +1293,6 @@ Deno.test("reminder replay - a malformed email line logs a position, never conte
     assertStringIncludes(controlLog, PASSWORD_SENTINEL);
     assertStringIncludes(controlLog, "SyntaxError");
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await fsp.rm(dir, { recursive: true });
   }
 });

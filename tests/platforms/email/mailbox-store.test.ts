@@ -6,7 +6,7 @@
 // and monotonic cursor advancement.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import {
   buildMailboxFingerprint,
   MailboxEntryRecord,
@@ -18,14 +18,17 @@ import {
   appendDurable,
   DurableDiagnosticCode,
 } from "../../../src/platforms/email/durable-files.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "mailbox-store-test-" });
+  const dir = await makeTempDir({ prefix: "mailbox-store-test-" });
   try {
     await fn(dir);
   } finally {
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
@@ -43,7 +46,7 @@ function makeKey(
   return { fingerprint, uidValidity, uid };
 }
 
-Deno.test("MailboxStore - 1.1 First activation boundary and initial cursor", async () => {
+test("MailboxStore - 1.1 First activation boundary and initial cursor", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -94,7 +97,7 @@ Deno.test("MailboxStore - 1.1 First activation boundary and initial cursor", asy
   });
 });
 
-Deno.test("MailboxStore - 4.1 Fingerprint preserves account case and escapes delimiters", () => {
+test("MailboxStore - 4.1 Fingerprint preserves account case and escapes delimiters", () => {
   const fp1 = buildMailboxFingerprint("imap.example.com", "Bot@example.com", "INBOX");
   const fp2 = buildMailboxFingerprint("imap.example.com", "bot@example.com", "INBOX");
   assertEquals(fp1 === fp2, false); // case sensitivity preserved
@@ -103,7 +106,7 @@ Deno.test("MailboxStore - 4.1 Fingerprint preserves account case and escapes del
   assertEquals(fpColons.includes("%3A"), true);
 });
 
-Deno.test("MailboxStore - 4.2 Queued mutations fail closed when prior mutation poisons store", async () => {
+test("MailboxStore - 4.2 Queued mutations fail closed when prior mutation poisons store", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -128,7 +131,7 @@ Deno.test("MailboxStore - 4.2 Queued mutations fail closed when prior mutation p
   });
 });
 
-Deno.test("MailboxStore - 4.3 Direct initialize with orphaned journal fails closed", async () => {
+test("MailboxStore - 4.3 Direct initialize with orphaned journal fails closed", async () => {
   await withTempDir(async (root) => {
     const record: MailboxEntryRecord = {
       key: makeKey(101),
@@ -152,7 +155,7 @@ Deno.test("MailboxStore - 4.3 Direct initialize with orphaned journal fails clos
   });
 });
 
-Deno.test("MailboxStore - 4.4 recover() is startup-only and rejects calls on active store", async () => {
+test("MailboxStore - 4.4 recover() is startup-only and rejects calls on active store", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -168,7 +171,7 @@ Deno.test("MailboxStore - 4.4 recover() is startup-only and rejects calls on act
   });
 });
 
-Deno.test("MailboxStore - 1.2 Changed fingerprint fails closed", async () => {
+test("MailboxStore - 1.2 Changed fingerprint fails closed", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -195,7 +198,7 @@ Deno.test("MailboxStore - 1.2 Changed fingerprint fails closed", async () => {
   });
 });
 
-Deno.test("MailboxStore - 1.3 Missing snapshot with existing journal fails closed", async () => {
+test("MailboxStore - 1.3 Missing snapshot with existing journal fails closed", async () => {
   await withTempDir(async (root) => {
     // Append a record directly to processing.jsonl without mailbox.json
     const record: MailboxEntryRecord = {
@@ -219,7 +222,7 @@ Deno.test("MailboxStore - 1.3 Missing snapshot with existing journal fails close
   });
 });
 
-Deno.test("MailboxStore - 2.1 State machine: discovered -> accepted -> started -> completed", async () => {
+test("MailboxStore - 2.1 State machine: discovered -> accepted -> started -> completed", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -292,7 +295,7 @@ Deno.test("MailboxStore - 2.1 State machine: discovered -> accepted -> started -
   });
 });
 
-Deno.test("MailboxStore - 2.2 Pre-acceptance terminal failures isolate malformed entries", async () => {
+test("MailboxStore - 2.2 Pre-acceptance terminal failures isolate malformed entries", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -319,7 +322,7 @@ Deno.test("MailboxStore - 2.2 Pre-acceptance terminal failures isolate malformed
   });
 });
 
-Deno.test("MailboxStore - 2.3 Checkpoint refuses to advance past discovered entries", async () => {
+test("MailboxStore - 2.3 Checkpoint refuses to advance past discovered entries", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -350,7 +353,7 @@ Deno.test("MailboxStore - 2.3 Checkpoint refuses to advance past discovered entr
   });
 });
 
-Deno.test("MailboxStore - 2.4 Monotonic cursor enforcement rejects regressions", async () => {
+test("MailboxStore - 2.4 Monotonic cursor enforcement rejects regressions", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -370,7 +373,7 @@ Deno.test("MailboxStore - 2.4 Monotonic cursor enforcement rejects regressions",
   });
 });
 
-Deno.test("MailboxStore - 3.1 Crash recovery: unstarted accepted resumes; started work quarantined to review-required", async () => {
+test("MailboxStore - 3.1 Crash recovery: unstarted accepted resumes; started work quarantined to review-required", async () => {
   await withTempDir(async (root) => {
     // Session 1: process several items then simulate crash
     const store1 = new MailboxStore({
@@ -440,7 +443,7 @@ Deno.test("MailboxStore - 3.1 Crash recovery: unstarted accepted resumes; starte
   });
 });
 
-Deno.test("MailboxStore - 3.2 Corrupt or torn-tail journal halts recovery without erasing evidence", async () => {
+test("MailboxStore - 3.2 Corrupt or torn-tail journal halts recovery without erasing evidence", async () => {
   await withTempDir(async (root) => {
     const store1 = new MailboxStore({
       emailRoot: root,
@@ -455,9 +458,9 @@ Deno.test("MailboxStore - 3.2 Corrupt or torn-tail journal halts recovery withou
     // Append torn line to processing.jsonl
     const journalPath = resolve(root, "processing.jsonl");
     const tornBytes = new TextEncoder().encode('{"v":1,"seq":3,"data":{"key":{"fingerprint');
-    const f = await Deno.open(journalPath, { append: true });
+    const f = await fsp.open(journalPath, "a");
     await f.write(tornBytes);
-    f.close();
+    await f.close();
 
     const store2 = new MailboxStore({
       emailRoot: root,
@@ -473,7 +476,7 @@ Deno.test("MailboxStore - 3.2 Corrupt or torn-tail journal halts recovery withou
     assertEquals(err.durableCode, DurableDiagnosticCode.TORN_TAIL_MISSING_NEWLINE);
 
     // Verify torn evidence is preserved on disk
-    const rawContent = await Deno.readTextFile(journalPath);
+    const rawContent = await fsp.readFile(journalPath, "utf8");
     assertEquals(rawContent.includes('{"key":{"fingerprint'), true);
 
     // Further mutation on damaged store is rejected
@@ -485,7 +488,7 @@ Deno.test("MailboxStore - 3.2 Corrupt or torn-tail journal halts recovery withou
   });
 });
 
-Deno.test("MailboxStore - 3.3 Unknown UIDVALIDITY or mismatched key rejected", async () => {
+test("MailboxStore - 3.3 Unknown UIDVALIDITY or mismatched key rejected", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,

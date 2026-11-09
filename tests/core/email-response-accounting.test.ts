@@ -27,7 +27,7 @@
 //   * Discord/Misskey sessions keep their existing response fields.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
@@ -71,8 +71,12 @@ import {
 } from "../../src/types/events.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 const WORK_ID = "11111111-2222-3333-4444-555555555555";
 const OTHER_WORK_ID = "99999999-8888-7777-6666-555555555555";
@@ -93,7 +97,7 @@ function submission(
   return { operationId, phase, ...(targetKind === undefined ? {} : { targetKind }) };
 }
 
-Deno.test("Accounting: a submitted third-party send responds without a user anchor", () => {
+test("Accounting: a submitted third-party send responds without a user anchor", () => {
   const accounting = recordEmailSubmission(
     undefined,
     submission("submitted", "third-party"),
@@ -108,7 +112,7 @@ Deno.test("Accounting: a submitted third-party send responds without a user anch
   assertEquals(accounting.operations[0].actionSlot, "third-party:g1");
 });
 
-Deno.test("Accounting: the third-party slot classifies a send whose producer omitted targetKind", () => {
+test("Accounting: the third-party slot classifies a send whose producer omitted targetKind", () => {
   const accounting = recordEmailSubmission(
     undefined,
     submission("submitted"),
@@ -118,7 +122,7 @@ Deno.test("Accounting: the third-party slot classifies a send whose producer omi
   assertEquals(accounting.submittedToUser, false);
 });
 
-Deno.test("Accounting: unknown and an unclosed submitting slot are unresolved evidence", () => {
+test("Accounting: unknown and an unclosed submitting slot are unresolved evidence", () => {
   for (const phase of ["unknown", "submitting"] as const) {
     const accounting = recordEmailSubmission(undefined, submission(phase), "reply");
     assertEquals(accounting.unknown, true);
@@ -128,7 +132,7 @@ Deno.test("Accounting: unknown and an unclosed submitting slot are unresolved ev
   }
 });
 
-Deno.test("Accounting: a recorded non-delivery neither responds nor suppresses the retry", () => {
+test("Accounting: a recorded non-delivery neither responds nor suppresses the retry", () => {
   for (const phase of ["failed", "prepared"] as const) {
     const accounting = recordEmailSubmission(undefined, submission(phase), "reply");
     assertEquals(hasEmailSubmitted(accounting), false);
@@ -137,7 +141,7 @@ Deno.test("Accounting: a recorded non-delivery neither responds nor suppresses t
   }
 });
 
-Deno.test("Accounting: a completed or unresolved slot is never downgraded or duplicated", () => {
+test("Accounting: a completed or unresolved slot is never downgraded or duplicated", () => {
   const submitted = recordEmailSubmission(
     undefined,
     submission("submitted", "user", "op1"),
@@ -171,7 +175,7 @@ Deno.test("Accounting: a completed or unresolved slot is never downgraded or dup
   assertEquals(upgraded.submittedToUser, false);
 });
 
-Deno.test("Accounting: a later observation enriches a slot-less entry, never duplicates it", () => {
+test("Accounting: a later observation enriches a slot-less entry, never duplicates it", () => {
   const first = recordEmailSubmission(undefined, submission("submitted", "third-party", "opX"));
   assertEquals(first.operations[0].actionSlot, undefined);
   const enriched = recordEmailSubmission(
@@ -183,7 +187,7 @@ Deno.test("Accounting: a later observation enriches a slot-less entry, never dup
   assertEquals(enriched.operations[0].actionSlot, "third-party:g2");
 });
 
-Deno.test("Accounting: uncertainty latches without inventing an operation", () => {
+test("Accounting: uncertainty latches without inventing an operation", () => {
   const latched = recordEmailUncertainty(undefined);
   assertEquals(latched.unknown, true);
   assertEquals(latched.operations.length, 0);
@@ -193,7 +197,7 @@ Deno.test("Accounting: uncertainty latches without inventing an operation", () =
   assertEquals(recordEmailUncertainty(failed), failed);
 });
 
-Deno.test("Accounting: the durable read merges every recorded logical slot", () => {
+test("Accounting: the durable read merges every recorded logical slot", () => {
   const recorded = new Map<string, EmailSendOutcome>();
   recorded.set("reply", {
     operationId: "op-reply",
@@ -218,7 +222,7 @@ Deno.test("Accounting: the durable read merges every recorded logical slot", () 
   assertEquals(accounting.operations.length, 2);
 });
 
-Deno.test("Accounting: slot enumeration and owner identity", () => {
+test("Accounting: slot enumeration and owner identity", () => {
   assertEquals([...EMAIL_ORDINARY_ACTION_SLOTS], ["reply", "files", "compose"]);
   assertEquals(emailResponseSlots(undefined), ["reply", "files", "compose"]);
   assertEquals(emailResponseSlots([{ grantId: "a" }, { grantId: "b" }]), [
@@ -233,7 +237,7 @@ Deno.test("Accounting: slot enumeration and owner identity", () => {
   assertEquals(emailSessionOwner({ platform: "email", userId: "e_short" }), undefined);
 });
 
-Deno.test("Accounting: an empty accounting is frozen and empty", () => {
+test("Accounting: an empty accounting is frozen and empty", () => {
   assertEquals(EMPTY_EMAIL_RESPONSE.operations.length, 0);
   assertEquals(hasEmailSubmitted(EMPTY_EMAIL_RESPONSE), false);
   assertEquals(hasEmailResponseOrUncertainty(undefined), false);
@@ -259,7 +263,7 @@ function registryWithEmailSession(): { registry: SessionRegistry; id: string } {
   return { registry, id };
 }
 
-Deno.test("Registry: records accounting and exposes the retry-suppression verdict", () => {
+test("Registry: records accounting and exposes the retry-suppression verdict", () => {
   const { registry, id } = registryWithEmailSession();
   try {
     assertEquals(registry.hasEmailSubmitted(id), false);
@@ -282,7 +286,7 @@ Deno.test("Registry: records accounting and exposes the retry-suppression verdic
   }
 });
 
-Deno.test("Registry: an unknown session records nothing and reads empty", () => {
+test("Registry: an unknown session records nothing and reads empty", () => {
   const { registry } = registryWithEmailSession();
   try {
     assertEquals(
@@ -438,13 +442,13 @@ class FakeEmailEvidence {
 }
 
 async function createPrompts(dir: string): Promise<void> {
-  await Deno.mkdir(join(dir, "prompts"), { recursive: true });
-  await Deno.writeTextFile(
+  await fsp.mkdir(join(dir, "prompts"), { recursive: true });
+  await fsp.writeFile(
     join(dir, "prompts", "system_reply.md"),
     "You are a helper.\nSkill root: {{ skillsDir }}\n" +
       "{{ if sessionId }}Session: {{ sessionId }}{{ /if }}",
   );
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     join(dir, "prompts", "system_summary.md"),
     "Summarize the conversation.\nSkill root: {{ skillsDir }}",
   );
@@ -498,7 +502,7 @@ interface Harness {
 async function createHarness(
   options: { script?: PromptScript; evidence?: boolean } = {},
 ): Promise<Harness> {
-  const root = await Deno.makeTempDir({ prefix: "email-response-accounting-test-" });
+  const root = await makeTempDir({ prefix: "email-response-accounting-test-" });
   await createPrompts(root);
   const config = createConfig(root);
 
@@ -563,7 +567,7 @@ async function createHarness(
     },
     dispose: async () => {
       sessionRegistry.stop();
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await fsp.rm(root, { recursive: true }).catch(() => {});
     },
   };
 }
@@ -651,7 +655,7 @@ async function runEmailTurn(
 
 // --- Orchestrator behavior --------------------------------------------------------
 
-Deno.test("Submitted third-party mail responds without a retry, an anchor or a summary", async () => {
+test("Submitted third-party mail responds without a retry, an anchor or a summary", async () => {
   const harness = await createHarness();
   let session: ActiveSession | undefined;
   try {
@@ -684,7 +688,7 @@ Deno.test("Submitted third-party mail responds without a retry, an anchor or a s
   }
 });
 
-Deno.test("A user reply still produces its conversation summary turn", async () => {
+test("A user reply still produces its conversation summary turn", async () => {
   const harness = await createHarness();
   try {
     const event = emailEvent();
@@ -713,7 +717,7 @@ Deno.test("A user reply still produces its conversation summary turn", async () 
   }
 });
 
-Deno.test("Unknown email outcome suppresses the retry and records review-required", async () => {
+test("Unknown email outcome suppresses the retry and records review-required", async () => {
   const harness = await createHarness();
   let sessionId = "";
   try {
@@ -739,7 +743,7 @@ Deno.test("Unknown email outcome suppresses the retry and records review-require
   }
 });
 
-Deno.test("A submitted plus unresolved session is escalated, never reported successful", async () => {
+test("A submitted plus unresolved session is escalated, never reported successful", async () => {
   const harness = await createHarness();
   try {
     const { response, prompts } = await runEmailTurn(harness, (s) => {
@@ -766,7 +770,7 @@ Deno.test("A submitted plus unresolved session is escalated, never reported succ
   }
 });
 
-Deno.test("A recorded pre-submission failure keeps the retry, always on the same logical slot", async () => {
+test("A recorded pre-submission failure keeps the retry, always on the same logical slot", async () => {
   const harness = await createHarness();
   let slots: (string | undefined)[] = [];
   try {
@@ -795,7 +799,7 @@ Deno.test("A recorded pre-submission failure keeps the retry, always on the same
   }
 });
 
-Deno.test("Durable evidence is consulted only after in-flight effects settle", async () => {
+test("Durable evidence is consulted only after in-flight effects settle", async () => {
   const harness = await createHarness();
   const event = emailEvent();
   let session: ActiveSession | undefined;
@@ -856,7 +860,7 @@ Deno.test("Durable evidence is consulted only after in-flight effects settle", a
   }
 });
 
-Deno.test("Another work item's durable evidence never authorizes a response", async () => {
+test("Another work item's durable evidence never authorizes a response", async () => {
   const harness = await createHarness();
   try {
     // Recorded for a DIFFERENT work item: this session's own slots are empty.
@@ -881,7 +885,7 @@ Deno.test("Another work item's durable evidence never authorizes a response", as
   }
 });
 
-Deno.test("An unsettleable drain is itself unresolved: no retry, review-required", async () => {
+test("An unsettleable drain is itself unresolved: no retry, review-required", async () => {
   const harness = await createHarness();
   try {
     // The settle wait reports "not settled" (the bounded-wait seam), which must
@@ -905,7 +909,7 @@ Deno.test("An unsettleable drain is itself unresolved: no retry, review-required
   }
 });
 
-Deno.test("A Discord session keeps its existing response fields and retry behavior", async () => {
+test("A Discord session keeps its existing response fields and retry behavior", async () => {
   const harness = await createHarness();
   try {
     const { response, prompts } = await runEmailTurn(harness, () => {}, { event: discordEvent() });
@@ -922,7 +926,7 @@ Deno.test("A Discord session keeps its existing response fields and retry behavi
   }
 });
 
-Deno.test("With no evidence source wired the accounting still suppresses on recorded metadata", async () => {
+test("With no evidence source wired the accounting still suppresses on recorded metadata", async () => {
   const harness = await createHarness({ evidence: false });
   try {
     const { response, prompts } = await runEmailTurn(harness, (s) => {

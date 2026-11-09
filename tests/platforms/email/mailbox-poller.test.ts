@@ -37,6 +37,9 @@ import {
 import { normalizeEmailMailbox } from "../../../src/platforms/email/email-identity.ts";
 import { EmailImapTestService } from "../../helpers/email-imap-service.ts";
 import type { ChannelConfig, EmailConfig } from "../../../src/types/config.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const BOT_ADDRESS = "bot@example.com";
 const AUTHSERV = "mx.example.com";
@@ -147,19 +150,19 @@ function buildPoller(
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "mailbox-poller-test-" });
+  const dir = await makeTempDir({ prefix: "mailbox-poller-test-" });
   try {
     await fn(dir);
   } finally {
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
   }
 }
 
-Deno.test("EmailMailboxPoller - first activation boundary and restart discovery of Seen mail", async () => {
+test("EmailMailboxPoller - first activation boundary and restart discovery of Seen mail", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -215,7 +218,7 @@ Deno.test("EmailMailboxPoller - first activation boundary and restart discovery 
   });
 });
 
-Deno.test("EmailMailboxPoller - admits source then checkpoint, records ignore/reject without emitting", async () => {
+test("EmailMailboxPoller - admits source then checkpoint, records ignore/reject without emitting", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -283,7 +286,7 @@ Deno.test("EmailMailboxPoller - admits source then checkpoint, records ignore/re
   });
 });
 
-Deno.test("EmailMailboxPoller - malformed message is terminal and does not block later entries", async () => {
+test("EmailMailboxPoller - malformed message is terminal and does not block later entries", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -319,7 +322,7 @@ Deno.test("EmailMailboxPoller - malformed message is terminal and does not block
   });
 });
 
-Deno.test("EmailMailboxPoller - connection failure preserves the checkpoint", async () => {
+test("EmailMailboxPoller - connection failure preserves the checkpoint", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -355,7 +358,7 @@ Deno.test("EmailMailboxPoller - connection failure preserves the checkpoint", as
   });
 });
 
-Deno.test("EmailMailboxPoller - crash recovery resumes unstarted and quarantines started work", async () => {
+test("EmailMailboxPoller - crash recovery resumes unstarted and quarantines started work", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -437,7 +440,7 @@ Deno.test("EmailMailboxPoller - crash recovery resumes unstarted and quarantines
   });
 });
 
-Deno.test("EmailMailboxPoller - duplicate wire Message-ID becomes review-required, not replayed", async () => {
+test("EmailMailboxPoller - duplicate wire Message-ID becomes review-required, not replayed", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -475,7 +478,7 @@ Deno.test("EmailMailboxPoller - duplicate wire Message-ID becomes review-require
   });
 });
 
-Deno.test("EmailMailboxPoller - UIDVALIDITY replacement reconciles without replay", async () => {
+test("EmailMailboxPoller - UIDVALIDITY replacement reconciles without replay", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -542,7 +545,7 @@ Deno.test("EmailMailboxPoller - UIDVALIDITY replacement reconciles without repla
   });
 });
 
-Deno.test("EmailMailboxPoller - start performs a round and stop settles cleanly", async () => {
+test("EmailMailboxPoller - start performs a round and stop settles cleanly", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -622,7 +625,7 @@ class FaultInjectingTransport implements ImapTransport {
   }
 }
 
-Deno.test("EmailMailboxPoller - mid-batch connection drop preserves progress and resumes without duplication", async () => {
+test("EmailMailboxPoller - mid-batch connection drop preserves progress and resumes without duplication", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -682,7 +685,7 @@ Deno.test("EmailMailboxPoller - mid-batch connection drop preserves progress and
   });
 });
 
-Deno.test("EmailMailboxPoller - wire-oversized message is terminal and later mail is admitted", async () => {
+test("EmailMailboxPoller - wire-oversized message is terminal and later mail is admitted", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -720,7 +723,7 @@ Deno.test("EmailMailboxPoller - wire-oversized message is terminal and later mai
   });
 });
 
-Deno.test("EmailMailboxPoller - expunged durable discovery does not block later checkpoints", async () => {
+test("EmailMailboxPoller - expunged durable discovery does not block later checkpoints", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -758,7 +761,7 @@ Deno.test("EmailMailboxPoller - expunged durable discovery does not block later 
   });
 });
 
-Deno.test("EmailMailboxPoller - processes more than one bounded UID batch", async () => {
+test("EmailMailboxPoller - processes more than one bounded UID batch", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;
@@ -794,7 +797,7 @@ Deno.test("EmailMailboxPoller - processes more than one bounded UID batch", asyn
   });
 });
 
-Deno.test("EmailMailboxPoller - replacement requires processing binding, not archived source alone", async () => {
+test("EmailMailboxPoller - replacement requires processing binding, not archived source alone", async () => {
   await withTempDir(async (base) => {
     const mailboxRoot = `${base}/email`;
     const workspacesRoot = `${base}/workspaces`;

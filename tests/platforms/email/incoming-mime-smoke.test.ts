@@ -15,9 +15,12 @@ import {
   toMessageStoreParsedEmail,
 } from "../../../src/platforms/email/incoming-mime.ts";
 import { normalizeEmailMailbox } from "../../../src/platforms/email/email-identity.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
-Deno.test("Smoke: parse incoming MIME with attachment, verify provenance and store into EmailMessageStore", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-mime-smoke-" });
+test("Smoke: parse incoming MIME with attachment, verify provenance and store into EmailMessageStore", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-mime-smoke-" });
 
   try {
     const store = new EmailMessageStore({
@@ -97,15 +100,15 @@ Deno.test("Smoke: parse incoming MIME with attachment, verify provenance and sto
     assertEquals(attPayload!.byteLength > 0, true);
   } finally {
     try {
-      await Deno.remove(tempDir, { recursive: true });
+      await fsp.rm(tempDir, { recursive: true });
     } catch {
       // ignore
     }
   }
 });
 
-Deno.test("Smoke: HTML-only conversion with blockquote yields ambiguous provenance in store", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-mime-smoke-html-" });
+test("Smoke: HTML-only conversion with blockquote yields ambiguous provenance in store", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-mime-smoke-html-" });
 
   try {
     const store = new EmailMessageStore({ workspacesRoot: tempDir });
@@ -130,15 +133,15 @@ Deno.test("Smoke: HTML-only conversion with blockquote yields ambiguous provenan
     assertEquals(retrieved?.provenance?.status, "ambiguous");
   } finally {
     try {
-      await Deno.remove(tempDir, { recursive: true });
+      await fsp.rm(tempDir, { recursive: true });
     } catch {
       // ignore
     }
   }
 });
 
-Deno.test("Smoke: Oversized or excessive attachments reject before creating any store records", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-mime-smoke-oversized-" });
+test("Smoke: Oversized or excessive attachments reject before creating any store records", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-mime-smoke-oversized-" });
 
   try {
     const store = new EmailMessageStore({ workspacesRoot: tempDir });
@@ -164,7 +167,7 @@ Deno.test("Smoke: Oversized or excessive attachments reject before creating any 
     assertEquals(history.length, 0);
   } finally {
     try {
-      await Deno.remove(tempDir, { recursive: true });
+      await fsp.rm(tempDir, { recursive: true });
     } catch {
       // ignore
     }

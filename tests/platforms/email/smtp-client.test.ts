@@ -17,6 +17,7 @@ import {
 import { EmailSmtpTestService } from "../../helpers/email-smtp-service.ts";
 import { getOrCreateFixtureCert } from "../../helpers/email-imap-service.ts";
 import type { EmailSmtpConfig } from "../../../src/types/config.ts";
+import { test } from "bun:test";
 
 const HOST = "127.0.0.1";
 const USERNAME = "bot@example.com";
@@ -81,7 +82,7 @@ async function withService(
   }
 }
 
-Deno.test("EmailSmtpClient - config validation rejects unusable and plaintext configuration", () => {
+test("EmailSmtpClient - config validation rejects unusable and plaintext configuration", () => {
   assertThrows(
     () =>
       new EmailSmtpClient({
@@ -135,7 +136,7 @@ Deno.test("EmailSmtpClient - config validation rejects unusable and plaintext co
   assertEquals(defaults.messageSizeLimit, DEFAULT_MAX_MESSAGE_BYTES);
 });
 
-Deno.test("EmailSmtpClient - direct TLS submission is accepted with one DATA transaction", async () => {
+test("EmailSmtpClient - direct TLS submission is accepted with one DATA transaction", async () => {
   await withService({ tlsMode: "tls", username: USERNAME, password: PASSWORD }, async (service) => {
     const result = await client(service).submit(submission());
 
@@ -163,7 +164,7 @@ Deno.test("EmailSmtpClient - direct TLS submission is accepted with one DATA tra
   });
 });
 
-Deno.test("EmailSmtpClient - mandatory STARTTLS submission authenticates only after the upgrade", async () => {
+test("EmailSmtpClient - mandatory STARTTLS submission authenticates only after the upgrade", async () => {
   await withService(
     {
       tlsMode: "starttls",
@@ -194,7 +195,7 @@ Deno.test("EmailSmtpClient - mandatory STARTTLS submission authenticates only af
   );
 });
 
-Deno.test("EmailSmtpClient - missing and refused STARTTLS fail closed without credentials or bytes", async () => {
+test("EmailSmtpClient - missing and refused STARTTLS fail closed without credentials or bytes", async () => {
   await withService(
     {
       tlsMode: "starttls",
@@ -228,7 +229,7 @@ Deno.test("EmailSmtpClient - missing and refused STARTTLS fail closed without cr
   );
 });
 
-Deno.test("EmailSmtpClient - certificate validation failure fails closed with zero auth attempts", async () => {
+test("EmailSmtpClient - certificate validation failure fails closed with zero auth attempts", async () => {
   await withService({ tlsMode: "tls", username: USERNAME, password: PASSWORD }, async (service) => {
     const bogusCa = getOrCreateFixtureCert().cert.replace("MII", "XXX");
     const result = await client(service, { tlsCa: bogusCa, timeoutMs: 5_000 }).submit(
@@ -248,7 +249,7 @@ Deno.test("EmailSmtpClient - certificate validation failure fails closed with ze
   });
 });
 
-Deno.test("EmailSmtpClient - certificate validation failure during STARTTLS fails closed", async () => {
+test("EmailSmtpClient - certificate validation failure during STARTTLS fails closed", async () => {
   await withService(
     { tlsMode: "starttls", username: USERNAME, password: PASSWORD, supportStartTls: true },
     async (service) => {
@@ -266,7 +267,7 @@ Deno.test("EmailSmtpClient - certificate validation failure during STARTTLS fail
   );
 });
 
-Deno.test("EmailSmtpClient - authentication rejection is a definite failure", async () => {
+test("EmailSmtpClient - authentication rejection is a definite failure", async () => {
   await withService(
     { tlsMode: "tls", username: USERNAME, password: PASSWORD, rejectAuth: true },
     async (service) => {
@@ -280,7 +281,7 @@ Deno.test("EmailSmtpClient - authentication rejection is a definite failure", as
   );
 });
 
-Deno.test("EmailSmtpClient - envelope rejections are failures with zero DATA transactions", async () => {
+test("EmailSmtpClient - envelope rejections are failures with zero DATA transactions", async () => {
   await withService(
     { tlsMode: "tls", username: USERNAME, password: PASSWORD, rejectRecipient: true },
     async (service) => {
@@ -319,7 +320,7 @@ Deno.test("EmailSmtpClient - envelope rejections are failures with zero DATA tra
   );
 });
 
-Deno.test("EmailSmtpClient - explicit final rejections are failures after exactly one DATA", async () => {
+test("EmailSmtpClient - explicit final rejections are failures after exactly one DATA", async () => {
   for (const finalResponseCode of [550, 451]) {
     await withService(
       {
@@ -340,7 +341,7 @@ Deno.test("EmailSmtpClient - explicit final rejections are failures after exactl
   }
 });
 
-Deno.test("EmailSmtpClient - lost acknowledgement after DATA is unknown and never retried", async () => {
+test("EmailSmtpClient - lost acknowledgement after DATA is unknown and never retried", async () => {
   for (
     const options of [
       { closeAfterPayload: true },
@@ -368,7 +369,7 @@ Deno.test("EmailSmtpClient - lost acknowledgement after DATA is unknown and neve
   }
 });
 
-Deno.test("EmailSmtpClient - truncated acknowledgement is unknown, not failure", async () => {
+test("EmailSmtpClient - truncated acknowledgement is unknown, not failure", async () => {
   await withService(
     {
       tlsMode: "tls",
@@ -387,7 +388,7 @@ Deno.test("EmailSmtpClient - truncated acknowledgement is unknown, not failure",
   );
 });
 
-Deno.test("EmailSmtpClient - unparseable final reply is unknown", async () => {
+test("EmailSmtpClient - unparseable final reply is unknown", async () => {
   await withService(
     {
       tlsMode: "tls",
@@ -405,7 +406,7 @@ Deno.test("EmailSmtpClient - unparseable final reply is unknown", async () => {
   );
 });
 
-Deno.test("EmailSmtpClient - unusable positive final replies are unknown, not accepted", async () => {
+test("EmailSmtpClient - unusable positive final replies are unknown, not accepted", async () => {
   for (const finalResponseText of ["2500 2.0.0 Ok", "2 garbage", "25 2.0.0 Ok"]) {
     await withService(
       { tlsMode: "tls", username: USERNAME, password: PASSWORD, finalResponseText },
@@ -420,7 +421,7 @@ Deno.test("EmailSmtpClient - unusable positive final replies are unknown, not ac
   }
 });
 
-Deno.test("EmailSmtpClient - a valid 2xx final reply is accepted", async () => {
+test("EmailSmtpClient - a valid 2xx final reply is accepted", async () => {
   await withService(
     {
       tlsMode: "tls",
@@ -440,7 +441,7 @@ Deno.test("EmailSmtpClient - a valid 2xx final reply is accepted", async () => {
   );
 });
 
-Deno.test("EmailSmtpClient - credentials never appear in emitted diagnostics", async () => {
+test("EmailSmtpClient - credentials never appear in emitted diagnostics", async () => {
   const captured: string[] = [];
   const originalConsole = {
     log: console.log,
@@ -486,7 +487,7 @@ Deno.test("EmailSmtpClient - credentials never appear in emitted diagnostics", a
   );
 });
 
-Deno.test("EmailSmtpClient - a stalled submission is torn down before submit returns", async () => {
+test("EmailSmtpClient - a stalled submission is torn down before submit returns", async () => {
   await withService(
     { tlsMode: "tls", username: USERNAME, password: PASSWORD, stallAfterPayload: true },
     async (service) => {
@@ -502,7 +503,7 @@ Deno.test("EmailSmtpClient - a stalled submission is torn down before submit ret
   );
 });
 
-Deno.test("EmailSmtpClient - greeting refusal is a definite connection failure", async () => {
+test("EmailSmtpClient - greeting refusal is a definite connection failure", async () => {
   await withService(
     { tlsMode: "tls", username: USERNAME, password: PASSWORD, refuseGreeting: true },
     async (service) => {
@@ -522,7 +523,7 @@ Deno.test("EmailSmtpClient - greeting refusal is a definite connection failure",
   );
 });
 
-Deno.test("EmailSmtpClient - unreachable server is a definite failure", async () => {
+test("EmailSmtpClient - unreachable server is a definite failure", async () => {
   const probe = new EmailSmtpTestService({ tlsMode: "tls" });
   await probe.start();
   const deadPort = probe.port;
@@ -539,7 +540,7 @@ Deno.test("EmailSmtpClient - unreachable server is a definite failure", async ()
   assertEquals(result.accepted, []);
 });
 
-Deno.test("EmailSmtpClient - oversize message is refused before any connection", async () => {
+test("EmailSmtpClient - oversize message is refused before any connection", async () => {
   await withService({ tlsMode: "tls", username: USERNAME, password: PASSWORD }, async (service) => {
     const result = await client(service, { maxMessageBytes: 16 }).submit(submission());
 
@@ -551,7 +552,7 @@ Deno.test("EmailSmtpClient - oversize message is refused before any connection",
   });
 });
 
-Deno.test("EmailSmtpClient - stale size metadata cannot bypass the size bound", async () => {
+test("EmailSmtpClient - stale size metadata cannot bypass the size bound", async () => {
   await withService({ tlsMode: "tls", username: USERNAME, password: PASSWORD }, async (service) => {
     const result = await client(service, { maxMessageBytes: 16 }).submit(
       submission({ sizeBytes: 1 }),
@@ -563,7 +564,7 @@ Deno.test("EmailSmtpClient - stale size metadata cannot bypass the size bound", 
   });
 });
 
-Deno.test("EmailSmtpClient - provider SIZE limit rejection is a failure with zero DATA", async () => {
+test("EmailSmtpClient - provider SIZE limit rejection is a failure with zero DATA", async () => {
   await withService(
     {
       tlsMode: "tls",
@@ -581,7 +582,7 @@ Deno.test("EmailSmtpClient - provider SIZE limit rejection is a failure with zer
   );
 });
 
-Deno.test("EmailSmtpClient - invalid envelopes are refused before any connection", async () => {
+test("EmailSmtpClient - invalid envelopes are refused before any connection", async () => {
   await withService({ tlsMode: "tls", username: USERNAME, password: PASSWORD }, async (service) => {
     const invalidEnvelopes = [
       { from: USERNAME, to: [] },
@@ -606,7 +607,7 @@ Deno.test("EmailSmtpClient - invalid envelopes are refused before any connection
   });
 });
 
-Deno.test("EmailSmtpClient - a second submission opens its own connection and DATA transaction", async () => {
+test("EmailSmtpClient - a second submission opens its own connection and DATA transaction", async () => {
   await withService({ tlsMode: "tls", username: USERNAME, password: PASSWORD }, async (service) => {
     const smtp = client(service);
     const first = await smtp.submit(submission());

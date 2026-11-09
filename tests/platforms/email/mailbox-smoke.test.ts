@@ -13,14 +13,17 @@ import {
   MailboxStore,
   MailboxStoreError,
 } from "../../../src/platforms/email/mailbox-store.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "mailbox-smoke-test-" });
+  const dir = await makeTempDir({ prefix: "mailbox-smoke-test-" });
   try {
     await fn(dir);
   } finally {
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
@@ -34,7 +37,7 @@ function makeKey(uid: number): MailboxKey {
   return { fingerprint: SMOKE_FINGERPRINT, uidValidity: SMOKE_UIDVALIDITY, uid };
 }
 
-Deno.test("Smoke Scenario: First activation boundary survives crash and excludes existing inbox entries", async () => {
+test("Smoke Scenario: First activation boundary survives crash and excludes existing inbox entries", async () => {
   await withTempDir(async (root) => {
     // 1. First activation: inbox has existing messages up to UID 250
     const store = new MailboxStore({
@@ -62,7 +65,7 @@ Deno.test("Smoke Scenario: First activation boundary survives crash and excludes
   });
 });
 
-Deno.test("Smoke Scenario: Message failure is terminal or review-required while later work remains processable", async () => {
+test("Smoke Scenario: Message failure is terminal or review-required while later work remains processable", async () => {
   await withTempDir(async (root) => {
     const store = new MailboxStore({
       emailRoot: root,
@@ -101,7 +104,7 @@ Deno.test("Smoke Scenario: Message failure is terminal or review-required while 
   });
 });
 
-Deno.test("Smoke Scenario: Crash after agent start quarantines to review-required without starting a new agent", async () => {
+test("Smoke Scenario: Crash after agent start quarantines to review-required without starting a new agent", async () => {
   await withTempDir(async (root) => {
     const store1 = new MailboxStore({
       emailRoot: root,

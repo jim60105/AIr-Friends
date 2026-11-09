@@ -21,6 +21,7 @@ import {
   authenticateInbound,
   InboundAuthReceiverConfig,
 } from "../../../src/platforms/email/incoming-auth.ts";
+import { test } from "bun:test";
 
 const BOT_OWN_ADDRESS = "bot@example.com";
 const TRUSTED_AUTHSERV = "mail.myorg.internal";
@@ -41,7 +42,7 @@ const CHANNELS: ChannelConfig[] = [
   },
 ];
 
-Deno.test("Smoke Scenario 1: Forged Authentication-Results without attested stripping boundary", async () => {
+test("Smoke Scenario 1: Forged Authentication-Results without attested stripping boundary", async () => {
   // Attacker connects and provides an Authentication-Results header claiming the trusted authserv-id,
   // but the deployment has not attested MTA stripping (attestedStripping = false).
   const rawEmail = [
@@ -67,7 +68,7 @@ Deno.test("Smoke Scenario 1: Forged Authentication-Results without attested stri
   assertEquals(decision.reason, AdmissionReason.REJECTED_UNATTESTED_STRIPPING);
 });
 
-Deno.test("Smoke Scenario 2: Domain vs Mailbox identity - domain passes DMARC but actor not in allowlist", async () => {
+test("Smoke Scenario 2: Domain vs Mailbox identity - domain passes DMARC but actor not in allowlist", async () => {
   // Someone else at the permitted sender domain (attacker@example.com) sends an email.
   // DMARC passes for header.from=example.com, but attacker@example.com is not allowed in channels!
   const rawEmail = [
@@ -87,7 +88,7 @@ Deno.test("Smoke Scenario 2: Domain vs Mailbox identity - domain passes DMARC bu
   assertEquals(decision.reason, AdmissionReason.REJECTED_SENDER_NOT_ALLOWED);
 });
 
-Deno.test("Smoke Scenario 3: Fail-closed on missing, duplicate, or failing DMARC evidence", async () => {
+test("Smoke Scenario 3: Fail-closed on missing, duplicate, or failing DMARC evidence", async () => {
   // 3a. Missing DMARC in header
   const rawMissing = [
     "From: user@example.com",
@@ -135,7 +136,7 @@ Deno.test("Smoke Scenario 3: Fail-closed on missing, duplicate, or failing DMARC
   assertEquals(decFail.reason, AdmissionReason.REJECTED_DMARC_FAILED);
 });
 
-Deno.test("Smoke Scenario 4: Loop and destination protection - Malicious Reply-To & Cc override attempt", async () => {
+test("Smoke Scenario 4: Loop and destination protection - Malicious Reply-To & Cc override attempt", async () => {
   // An allowed user sends a message, but an attacker or header specifies Reply-To: attacker@evil.com
   const rawEmail = [
     "From: user@example.com",
@@ -163,7 +164,7 @@ Deno.test("Smoke Scenario 4: Loop and destination protection - Malicious Reply-T
   }
 });
 
-Deno.test("Smoke Scenario 5: Silent ignore for self, auto-submitted, and bounces", async () => {
+test("Smoke Scenario 5: Silent ignore for self, auto-submitted, and bounces", async () => {
   // 5a. Bot's own address
   const rawSelf = [
     "From: bot@example.com",

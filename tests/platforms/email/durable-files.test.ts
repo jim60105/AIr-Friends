@@ -1,7 +1,7 @@
 // tests/platforms/email/durable-files.test.ts
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import {
   appendDurable,
   assertSafePath,
@@ -14,16 +14,21 @@ import {
   readJournal,
   replaceSnapshot,
 } from "../../../src/platforms/email/durable-files.ts";
+import fsp from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
+import { runtimeOs } from "../../../src/utils/runtime-platform.ts";
 
-Deno.test("computeCrc32Hex - standard IEEE 802.3 CRC32", () => {
+test("computeCrc32Hex - standard IEEE 802.3 CRC32", () => {
   const data = new TextEncoder().encode("Hello World");
   const crc = computeCrc32Hex(data);
   assertEquals(crc.length, 8);
   assertEquals(crc, "4a17b156");
 });
 
-Deno.test("readJournal and appendDurable - private sentinel data never leaks into diagnostics", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal and appendDurable - private sentinel data never leaks into diagnostics", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -42,10 +47,10 @@ Deno.test("readJournal and appendDurable - private sentinel data never leaks int
         crc32: computeCrc32Hex(new TextEncoder().encode(JSON.stringify({ text: "after" }))),
       }) + "\n",
     );
-    const file = await Deno.open(fullPath, { create: true, write: true });
+    const file = await fsp.open(fullPath, "w");
     await file.write(corruptLine);
     await file.write(validLine);
-    file.close();
+    await file.close();
 
     const res = await readJournal(root, relPath);
     assertEquals(res.status, "corrupt");
@@ -65,12 +70,12 @@ Deno.test("readJournal and appendDurable - private sentinel data never leaks int
       }
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - allowMissing option enforcement", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - allowMissing option enforcement", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "missing.jsonl";
@@ -87,12 +92,12 @@ Deno.test("readJournal - allowMissing option enforcement", async () => {
       "[JOURNAL_NOT_FOUND]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("appendDurable - writer limits enforcement (maxRecordBytes and maxJournalBytes)", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("appendDurable - writer limits enforcement (maxRecordBytes and maxJournalBytes)", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "limits.jsonl";
@@ -120,12 +125,12 @@ Deno.test("appendDurable - writer limits enforcement (maxRecordBytes and maxJour
       "[JOURNAL_LIMIT_EXCEEDED]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("replaceSnapshot - rejects undefined/unserializable snapshot before replacing file", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("replaceSnapshot - rejects undefined/unserializable snapshot before replacing file", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "snapshot.json";
@@ -141,20 +146,20 @@ Deno.test("replaceSnapshot - rejects undefined/unserializable snapshot before re
     );
 
     // Original snapshot is untouched
-    const content = JSON.parse(await Deno.readTextFile(resolve(root, relPath)));
+    const content = JSON.parse(await fsp.readFile(resolve(root, relPath), "utf8"));
     assertEquals(content, { initial: true });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("canonicalizeRoot rejects missing root beneath symlink ancestor", async () => {
-  if (Deno.build.os === "windows") return;
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
-  const outsideDir = await Deno.makeTempDir({ prefix: "email-outside-" });
+test("canonicalizeRoot rejects missing root beneath symlink ancestor", async () => {
+  if (runtimeOs() === "windows") return;
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
+  const outsideDir = await makeTempDir({ prefix: "email-outside-" });
   try {
     const symlinkAncestor = resolve(tempDir, "link_ancestor");
-    await Deno.symlink(outsideDir, symlinkAncestor);
+    await fsp.symlink(outsideDir, symlinkAncestor);
 
     // root is a missing directory beneath the symlink ancestor
     const missingRootBeneathSymlink = resolve(symlinkAncestor, "missing-root");
@@ -165,13 +170,13 @@ Deno.test("canonicalizeRoot rejects missing root beneath symlink ancestor", asyn
       "[SYMLINK_NOT_PERMITTED]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
-    await Deno.remove(outsideDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
+    await fsp.rm(outsideDir, { recursive: true });
   }
 });
 
-Deno.test("serialization failure does not leak private contents into context or message", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("serialization failure does not leak private contents into context or message", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const privateSentinel = "SUPER_SECRET_PAYLOAD_LEAK_TEST_999";
@@ -195,12 +200,12 @@ Deno.test("serialization failure does not leak private contents into context or 
       }
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("injected I/O failure - directory sync failure prohibits external side effects", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("injected I/O failure - directory sync failure prohibits external side effects", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     let externalSideEffectExecuted = false;
@@ -208,7 +213,7 @@ Deno.test("injected I/O failure - directory sync failure prohibits external side
     // Pass an invalid path that cannot establish directory durability or fails write
     // (e.g. attempting to append through an existing regular file as a directory)
     const blockerFile = resolve(root, "blocker");
-    await Deno.writeTextFile(blockerFile, "not a directory");
+    await fsp.writeFile(blockerFile, "not a directory");
 
     await assertRejects(
       async () => {
@@ -224,16 +229,16 @@ Deno.test("injected I/O failure - directory sync failure prohibits external side
       "External side effect must not execute when durability cannot be established",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("predecessor integration - canonical normalized mailbox identity with durable journal", async () => {
+test("predecessor integration - canonical normalized mailbox identity with durable journal", async () => {
   // Consume predecessor row 01 normalizeEmailMailbox
   const { normalizeEmailMailbox } = await import(
     "../../../src/platforms/email/email-identity.ts"
   );
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const identity = normalizeEmailMailbox(" Alice.Smith+tag@Example.COM ");
@@ -254,35 +259,33 @@ Deno.test("predecessor integration - canonical normalized mailbox identity with 
     assertEquals(journal.records.length, 1);
     assertEquals(journal.records[0].address, "Alice.Smith+tag@example.com");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("controlled writer crash point - torn record recovery", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-crash-" });
+test("controlled writer crash point - torn record recovery", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-crash-" });
   try {
     const root = tempDir;
     const relPath = "crash.jsonl";
 
     // Subprocess writes valid record 1, then half of record 2 and abruptly exits with SIGKILL
-    const command = new Deno.Command(Deno.execPath(), {
-      args: [
-        "eval",
-        `
-        import { appendDurable } from "./src/platforms/email/durable-files.ts";
-        import { resolve } from "@std/path";
-        await appendDurable(${JSON.stringify(root)}, ${JSON.stringify(relPath)}, { step: 1 });
-        const fullPath = resolve(${JSON.stringify(root)}, ${JSON.stringify(relPath)});
-        const file = await Deno.open(fullPath, { append: true });
-        await file.write(new TextEncoder().encode('{"v":1,"seq":2,"data":{"intent":"smtp_send"'));
-        file.close();
-        Deno.exit(42);
-        `,
-      ],
-      cwd: Deno.cwd(),
-    });
-    const child = await command.output();
-    assertEquals(child.code, 42);
+    const child = spawnSync(process.execPath, [
+      "--no-env-file",
+      "-e",
+      `
+      import { appendDurable } from "./src/platforms/email/durable-files.ts";
+      import { resolve } from "node:path";
+      import fsp from "node:fs/promises";
+      await appendDurable(${JSON.stringify(root)}, ${JSON.stringify(relPath)}, { step: 1 });
+      const fullPath = resolve(${JSON.stringify(root)}, ${JSON.stringify(relPath)});
+      const file = await fsp.open(fullPath, "a");
+      await file.write(new TextEncoder().encode('{"v":1,"seq":2,"data":{"intent":"smtp_send"'));
+      await file.close();
+      process.exit(42);
+      `,
+    ], { cwd: process.cwd(), encoding: "utf8" });
+    assertEquals(child.status, 42);
 
     // Reopen in parent
     const recovery = await readJournal<{ step?: number; intent?: string }>(root, relPath);
@@ -290,12 +293,12 @@ Deno.test("controlled writer crash point - torn record recovery", async () => {
     assertEquals(recovery.records.length, 1);
     assertEquals(recovery.records[0], { step: 1 });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - Unicode multibyte byteOffset accurately counted in raw UTF-8 bytes", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - Unicode multibyte byteOffset accurately counted in raw UTF-8 bytes", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -304,12 +307,12 @@ Deno.test("readJournal - Unicode multibyte byteOffset accurately counted in raw 
     await appendDurable(root, relPath, { text: "你好世界 🚀🌟" });
     const fullPath = resolve(root, relPath);
 
-    const bytesBefore = (await Deno.readFile(fullPath)).length;
+    const bytesBefore = (await fsp.readFile(fullPath)).length;
 
     // Add a torn second record
-    const file = await Deno.open(fullPath, { append: true });
+    const file = await fsp.open(fullPath, "a");
     await file.write(new TextEncoder().encode('{"v":1,"seq":2,"data":{"text":"incompl'));
-    file.close();
+    await file.close();
 
     const res = await readJournal<{ text: string }>(root, relPath);
     assertEquals(res.status, "torn-tail");
@@ -319,32 +322,29 @@ Deno.test("readJournal - Unicode multibyte byteOffset accurately counted in raw 
     assertEquals(res.byteOffset, bytesBefore);
     assertEquals(res.diagnosticCode, DurableDiagnosticCode.TORN_TAIL_MISSING_NEWLINE);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("subprocess writer exit and reopen - verified state", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-subprocess-" });
+test("subprocess writer exit and reopen - verified state", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-subprocess-" });
   try {
     const root = tempDir;
     const relPath = "journals/subprocess-journal.jsonl";
 
     // Run a subprocess that appends a record and exits
-    const command = new Deno.Command(Deno.execPath(), {
-      args: [
-        "eval",
-        `
-        import { appendDurable } from "./src/platforms/email/durable-files.ts";
-        await appendDurable(${JSON.stringify(root)}, ${
-          JSON.stringify(relPath)
-        }, { step: "subprocess_record" });
-        Deno.exit(0);
-        `,
-      ],
-      cwd: Deno.cwd(),
-    });
-    const child = await command.output();
-    assertEquals(child.code, 0);
+    const child = spawnSync(process.execPath, [
+      "--no-env-file",
+      "-e",
+      `
+      import { appendDurable } from "./src/platforms/email/durable-files.ts";
+      await appendDurable(${JSON.stringify(root)}, ${
+        JSON.stringify(relPath)
+      }, { step: "subprocess_record" });
+      process.exit(0);
+      `,
+    ], { cwd: process.cwd(), encoding: "utf8" });
+    assertEquals(child.status, 0);
 
     // Parent process reopens the journal
     const res = await readJournal<{ step: string }>(root, relPath);
@@ -361,12 +361,12 @@ Deno.test("subprocess writer exit and reopen - verified state", async () => {
     assertEquals(res2.records.length, 2);
     assertEquals(res2.records[1], { step: "parent_record" });
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("assertSafePath and path confinement", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("assertSafePath and path confinement", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = await canonicalizeRoot(tempDir);
 
@@ -395,11 +395,11 @@ Deno.test("assertSafePath and path confinement", async () => {
     );
 
     // Symlink escape rejected
-    if (Deno.build.os !== "windows") {
-      const outsideDir = await Deno.makeTempDir({ prefix: "email-outside-" });
+    if (runtimeOs() !== "windows") {
+      const outsideDir = await makeTempDir({ prefix: "email-outside-" });
       try {
         const linkPath = resolve(root, "symlink_dir");
-        await Deno.symlink(outsideDir, linkPath);
+        await fsp.symlink(outsideDir, linkPath);
 
         await assertRejects(
           () => assertSafePath(root, "symlink_dir/secret.jsonl"),
@@ -407,37 +407,37 @@ Deno.test("assertSafePath and path confinement", async () => {
           "[SYMLINK_NOT_PERMITTED]",
         );
       } finally {
-        await Deno.remove(outsideDir, { recursive: true });
+        await fsp.rm(outsideDir, { recursive: true });
       }
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("ensureDurableDir creates directories with mode 0o700", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("ensureDurableDir creates directories with mode 0o700", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = await canonicalizeRoot(tempDir);
     const subDir = resolve(root, "sub1/sub2");
     await ensureDurableDir(root, subDir);
 
-    const stat = await Deno.stat(subDir);
-    assertEquals(stat.isDirectory, true);
-    if (Deno.build.os !== "windows") {
-      const mode = (await Deno.lstat(subDir)).mode;
+    const stat = await fsp.stat(subDir);
+    assertEquals(stat.isDirectory(), true);
+    if (runtimeOs() !== "windows") {
+      const mode = (await fsp.lstat(subDir)).mode;
       if (mode !== null) {
         // Permissions masked with 0o777 should be 0o700
         assertEquals(mode & 0o777, 0o700);
       }
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("appendDurable and readJournal - clean journal progression", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("appendDurable and readJournal - clean journal progression", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journals/mailbox.jsonl";
@@ -465,20 +465,20 @@ Deno.test("appendDurable and readJournal - clean journal progression", async () 
     assertEquals(res.diagnosticCode, DurableDiagnosticCode.CLEAN);
 
     // Check file permissions
-    if (Deno.build.os !== "windows") {
+    if (runtimeOs() !== "windows") {
       const fullPath = resolve(root, relPath);
-      const stat = await Deno.lstat(fullPath);
+      const stat = await fsp.lstat(fullPath);
       if (stat.mode !== null) {
         assertEquals(stat.mode & 0o777, 0o600);
       }
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - torn-tail: missing newline at final record", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - torn-tail: missing newline at final record", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -494,9 +494,9 @@ Deno.test("readJournal - torn-tail: missing newline at final record", async () =
       crc32: computeCrc32Hex(new TextEncoder().encode(JSON.stringify({ step: 2 }))),
     };
     const lineWithoutNewline = new TextEncoder().encode(JSON.stringify(envelope));
-    const file = await Deno.open(fullPath, { append: true });
+    const file = await fsp.open(fullPath, "a");
     await file.write(lineWithoutNewline);
-    file.close();
+    await file.close();
 
     const res = await readJournal<{ step: number }>(root, relPath);
     assertEquals(res.status, "torn-tail");
@@ -515,12 +515,12 @@ Deno.test("readJournal - torn-tail: missing newline at final record", async () =
     const resAfter = await readJournal<{ step: number }>(root, relPath);
     assertEquals(resAfter.records.length, 1);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - torn-tail: truncated final JSON record", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - torn-tail: truncated final JSON record", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -530,9 +530,9 @@ Deno.test("readJournal - torn-tail: truncated final JSON record", async () => {
 
     // Append truncated JSON at end of file (with or without newline)
     const truncated = new TextEncoder().encode('{"v":1,"seq":2,"data":{"intent":"send"\n');
-    const file = await Deno.open(fullPath, { append: true });
+    const file = await fsp.open(fullPath, "a");
     await file.write(truncated);
-    file.close();
+    await file.close();
 
     const res = await readJournal<{ step?: number; intent?: string }>(root, relPath);
     assertEquals(res.status, "torn-tail");
@@ -547,12 +547,12 @@ Deno.test("readJournal - torn-tail: truncated final JSON record", async () => {
       "[DAMAGED_JOURNAL_APPEND_REFUSED]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - torn-tail: final record checksum mismatch", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - torn-tail: final record checksum mismatch", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -567,9 +567,9 @@ Deno.test("readJournal - torn-tail: final record checksum mismatch", async () =>
       crc32: "deadbeef",
     };
     const badLine = new TextEncoder().encode(JSON.stringify(badEnvelope) + "\n");
-    const file = await Deno.open(fullPath, { append: true });
+    const file = await fsp.open(fullPath, "a");
     await file.write(badLine);
-    file.close();
+    await file.close();
 
     const res = await readJournal<{ step: number }>(root, relPath);
     assertEquals(res.status, "torn-tail");
@@ -583,12 +583,12 @@ Deno.test("readJournal - torn-tail: final record checksum mismatch", async () =>
       "[DAMAGED_JOURNAL_APPEND_REFUSED]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - corrupt interior: invalid JSON in non-final record", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - corrupt interior: invalid JSON in non-final record", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -606,10 +606,10 @@ Deno.test("readJournal - corrupt interior: invalid JSON in non-final record", as
     };
     const validLine = new TextEncoder().encode(JSON.stringify(validEnvelope) + "\n");
 
-    const file = await Deno.open(fullPath, { append: true });
+    const file = await fsp.open(fullPath, "a");
     await file.write(corruptLine);
     await file.write(validLine);
-    file.close();
+    await file.close();
 
     const res = await readJournal<{ step: number }>(root, relPath);
     assertEquals(res.status, "corrupt");
@@ -627,12 +627,12 @@ Deno.test("readJournal - corrupt interior: invalid JSON in non-final record", as
       "[DAMAGED_JOURNAL_APPEND_REFUSED]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - corrupt sequence order: gap or duplicate sequence numbers", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - corrupt sequence order: gap or duplicate sequence numbers", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -648,9 +648,9 @@ Deno.test("readJournal - corrupt sequence order: gap or duplicate sequence numbe
       crc32: computeCrc32Hex(new TextEncoder().encode(JSON.stringify({ step: 3 }))),
     };
     const gapLine = new TextEncoder().encode(JSON.stringify(gapEnvelope) + "\n");
-    const file = await Deno.open(fullPath, { append: true });
+    const file = await fsp.open(fullPath, "a");
     await file.write(gapLine);
-    file.close();
+    await file.close();
 
     const res = await readJournal<{ step: number }>(root, relPath);
     assertEquals(res.status, "corrupt");
@@ -663,12 +663,12 @@ Deno.test("readJournal - corrupt sequence order: gap or duplicate sequence numbe
       "[DAMAGED_JOURNAL_APPEND_REFUSED]",
     );
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("readJournal - corrupt: unsupported envelope version", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("readJournal - corrupt: unsupported envelope version", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "journal.jsonl";
@@ -681,18 +681,18 @@ Deno.test("readJournal - corrupt: unsupported envelope version", async () => {
     };
     const line = new TextEncoder().encode(JSON.stringify(unsupportedEnvelope) + "\n");
     const fullPath = resolve(tempDir, relPath);
-    await Deno.writeFile(fullPath, line);
+    await fsp.writeFile(fullPath, line);
 
     const res = await readJournal<{ step: number }>(root, relPath);
     assertEquals(res.status, "corrupt");
     assertEquals(res.diagnosticCode, DurableDiagnosticCode.UNSUPPORTED_ENVELOPE_VERSION);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("replaceSnapshot - atomic sibling replacement", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("replaceSnapshot - atomic sibling replacement", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const relPath = "state/snapshot.json";
@@ -701,12 +701,12 @@ Deno.test("replaceSnapshot - atomic sibling replacement", async () => {
     await replaceSnapshot(root, relPath, { version: 1, count: 10 });
     const fullPath = resolve(root, relPath);
 
-    const text1 = await Deno.readTextFile(fullPath);
+    const text1 = await fsp.readFile(fullPath, "utf8");
     const parsed1 = JSON.parse(text1);
     assertEquals(parsed1, { version: 1, count: 10 });
 
-    if (Deno.build.os !== "windows") {
-      const stat = await Deno.lstat(fullPath);
+    if (runtimeOs() !== "windows") {
+      const stat = await fsp.lstat(fullPath);
       if (stat.mode !== null) {
         assertEquals(stat.mode & 0o777, 0o600);
       }
@@ -714,34 +714,34 @@ Deno.test("replaceSnapshot - atomic sibling replacement", async () => {
 
     // Replace with updated snapshot
     await replaceSnapshot(root, relPath, { version: 2, count: 20 });
-    const text2 = await Deno.readTextFile(fullPath);
+    const text2 = await fsp.readFile(fullPath, "utf8");
     const parsed2 = JSON.parse(text2);
     assertEquals(parsed2, { version: 2, count: 20 });
 
     // No leftover temporary files in directory
     const dirEntries: string[] = [];
-    for await (const entry of Deno.readDir(resolve(root, "state"))) {
+    for (const entry of await fsp.readdir(resolve(root, "state"), { withFileTypes: true })) {
       dirEntries.push(entry.name);
     }
     assertEquals(dirEntries, ["snapshot.json"]);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("replaceSnapshot - refuses to replace symlink target", async () => {
-  if (Deno.build.os === "windows") return;
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
-  const outsideDir = await Deno.makeTempDir({ prefix: "email-outside-" });
+test("replaceSnapshot - refuses to replace symlink target", async () => {
+  if (runtimeOs() === "windows") return;
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
+  const outsideDir = await makeTempDir({ prefix: "email-outside-" });
   try {
     const root = tempDir;
     const targetOutsideFile = resolve(outsideDir, "victim.json");
-    await Deno.writeTextFile(targetOutsideFile, "{}");
+    await fsp.writeFile(targetOutsideFile, "{}");
 
     const relPath = "state/symlink-snapshot.json";
     const fullSymlink = resolve(root, relPath);
     await ensureDurableDir(root, resolve(root, "state"));
-    await Deno.symlink(targetOutsideFile, fullSymlink);
+    await fsp.symlink(targetOutsideFile, fullSymlink);
 
     await assertRejects(
       () => replaceSnapshot(root, relPath, { malicious: true }),
@@ -750,16 +750,16 @@ Deno.test("replaceSnapshot - refuses to replace symlink target", async () => {
     );
 
     // Outside file was untouched
-    const outsideContent = await Deno.readTextFile(targetOutsideFile);
+    const outsideContent = await fsp.readFile(targetOutsideFile, "utf8");
     assertEquals(outsideContent, "{}");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
-    await Deno.remove(outsideDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
+    await fsp.rm(outsideDir, { recursive: true });
   }
 });
 
-Deno.test("serialized concurrency - concurrent appends and snapshots do not corrupt state", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-durable-test-" });
+test("serialized concurrency - concurrent appends and snapshots do not corrupt state", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-durable-test-" });
   try {
     const root = tempDir;
     const journalRel = "data/concurrency.jsonl";
@@ -787,10 +787,10 @@ Deno.test("serialized concurrency - concurrent appends and snapshots do not corr
     }
     assertEquals(seenIndices.size, iterations);
 
-    const snapshotRaw = await Deno.readTextFile(resolve(root, snapshotRel));
+    const snapshotRaw = await fsp.readFile(resolve(root, snapshotRel), "utf8");
     const snapshot = JSON.parse(snapshotRaw);
     assertEquals(typeof snapshot.lastIndex, "number");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
