@@ -1,6 +1,6 @@
 // src/core/memory-recall/snapshot-cache.ts
 
-import { join, relative, resolve } from "@std/path";
+import { join, relative, resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { validatePathWithinBoundary } from "@utils/path-validator.ts";
 import { estimateTokens } from "@utils/token-counter.ts";
@@ -9,6 +9,9 @@ import { parseNote } from "./note-chunker.ts";
 import type { MemoryTokenizer } from "./tokenizer.ts";
 import type { IndexedMemory, IndexedNoteFile } from "./types.ts";
 import type { ResolvedMemory } from "../../types/memory.ts";
+import fsp from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { isNotFoundError } from "../../utils/fs-compat.ts";
 
 const logger = createLogger("MemorySnapshotCache");
 
@@ -101,7 +104,7 @@ export class MemorySnapshotCache {
     const root = resolve(agentWorkspacePath);
     let boundary: string;
     try {
-      boundary = await Deno.realPath(root);
+      boundary = await fsp.realpath(root);
     } catch (error) {
       logger.debug("Agent workspace is not readable", {
         path: root,
@@ -166,9 +169,9 @@ export class MemorySnapshotCache {
     boundary: string,
     out: string[],
   ): Promise<void> {
-    const entries: Deno.DirEntry[] = [];
+    const entries: Dirent[] = [];
     try {
-      for await (const entry of Deno.readDir(dir)) entries.push(entry);
+      for (const entry of await fsp.readdir(dir, { withFileTypes: true })) entries.push(entry);
     } catch (error) {
       logger.warn("Failed to read an agent workspace directory", {
         dir,
@@ -181,14 +184,14 @@ export class MemorySnapshotCache {
     for (const entry of entries) {
       // A link is never followed: the workspace is agent-writable and there is
       // no legitimate need for one (Memory Recall v2 design, D12).
-      if (entry.isSymlink) continue;
+      if (entry.isSymbolicLink()) continue;
       const path = join(dir, entry.name);
       if (!await this.resolvesInside(path, boundary)) continue;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         await this.collectNotePaths(path, root, boundary, out);
         continue;
       }
-      if (!entry.isFile || !entry.name.endsWith(".md")) continue;
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
       const relativePath = relative(root, path);
       if (relativePath === "README.md" || relativePath === "notes/_index.md") continue;
       out.push(path);
@@ -241,7 +244,7 @@ export class MemorySnapshotCache {
         return { stamp, note: null };
       }
       if (!await this.resolvesInside(path, boundary)) return { stamp, note: null };
-      const content = await Deno.readTextFile(path);
+      const content = await fsp.readFile(path, "utf8");
       const parsed = parseNote(content, path);
       return {
         stamp,
@@ -274,7 +277,7 @@ export class MemorySnapshotCache {
   /** Whether `path` resolves, by real path, inside the workspace boundary. */
   private async resolvesInside(path: string, boundary: string): Promise<boolean> {
     try {
-      validatePathWithinBoundary(await Deno.realPath(path), boundary);
+      validatePathWithinBoundary(await fsp.realpath(path), boundary);
       return true;
     } catch (error) {
       logger.debug("Skipping an agent workspace entry outside the workspace", {
@@ -289,10 +292,10 @@ export class MemorySnapshotCache {
 /** Size and modification time of `path`, or `null` when it does not exist. */
 async function statStamp(path: string): Promise<Stamp | null> {
   try {
-    const stat = await Deno.stat(path);
+    const stat = await fsp.stat(path);
     return { size: stat.size, mtimeMs: stat.mtime?.getTime() ?? 0, nlink: stat.nlink ?? 1 };
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return null;
+    if (isNotFoundError(error)) return null;
     throw error;
   }
 }

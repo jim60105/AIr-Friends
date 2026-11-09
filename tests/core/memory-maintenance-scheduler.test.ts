@@ -1,10 +1,14 @@
 import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { isValidPlatform } from "../../src/types/events.ts";
 import type { MemoryMaintenanceConfig } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 function createConfig(overrides?: Partial<MemoryMaintenanceConfig>): MemoryMaintenanceConfig {
   return {
@@ -16,7 +20,7 @@ function createConfig(overrides?: Partial<MemoryMaintenanceConfig>): MemoryMaint
   };
 }
 
-Deno.test("MemoryMaintenanceScheduler - disabled config does not start scheduler", () => {
+test("MemoryMaintenanceScheduler - disabled config does not start scheduler", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ enabled: false }));
   scheduler.setCallback(async () => {});
   scheduler.start();
@@ -25,7 +29,7 @@ Deno.test("MemoryMaintenanceScheduler - disabled config does not start scheduler
   scheduler.stop();
 });
 
-Deno.test("MemoryMaintenanceScheduler - scheduleNext sets correct interval", () => {
+test("MemoryMaintenanceScheduler - scheduleNext sets correct interval", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 100 }));
   scheduler.setCallback(async () => {});
 
@@ -39,7 +43,7 @@ Deno.test("MemoryMaintenanceScheduler - scheduleNext sets correct interval", () 
   scheduler.stop();
 });
 
-Deno.test("MemoryMaintenanceScheduler - prevents concurrent execution", async () => {
+test("MemoryMaintenanceScheduler - prevents concurrent execution", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
   let running = false;
   let overlapDetected = false;
@@ -62,7 +66,7 @@ Deno.test("MemoryMaintenanceScheduler - prevents concurrent execution", async ()
   assertEquals(callCount >= 2, true);
 });
 
-Deno.test("MemoryMaintenanceScheduler - reschedules after error", async () => {
+test("MemoryMaintenanceScheduler - reschedules after error", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
   let callCount = 0;
 
@@ -82,7 +86,7 @@ Deno.test("MemoryMaintenanceScheduler - reschedules after error", async () => {
   assertEquals(callCount >= 2, true);
 });
 
-Deno.test("MemoryMaintenanceScheduler - stop clears timer", () => {
+test("MemoryMaintenanceScheduler - stop clears timer", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig());
   scheduler.setCallback(async () => {});
   scheduler.start();
@@ -92,7 +96,7 @@ Deno.test("MemoryMaintenanceScheduler - stop clears timer", () => {
   assertEquals(scheduler.getStatus().nextScheduledAt, null);
 });
 
-Deno.test("MemoryMaintenanceScheduler - start is no-op when already started", () => {
+test("MemoryMaintenanceScheduler - start is no-op when already started", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 100 }));
   scheduler.setCallback(async () => {});
   scheduler.start();
@@ -106,7 +110,7 @@ Deno.test("MemoryMaintenanceScheduler - start is no-op when already started", ()
   scheduler.stop();
 });
 
-Deno.test("MemoryMaintenanceScheduler - getStatus returns correct running state", async () => {
+test("MemoryMaintenanceScheduler - getStatus returns correct running state", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
   let resolveCallback: () => void;
   const callbackPromise = new Promise<void>((resolve) => {
@@ -128,7 +132,7 @@ Deno.test("MemoryMaintenanceScheduler - getStatus returns correct running state"
   assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
 });
 
-Deno.test("MemoryMaintenanceScheduler - execute without callback", async () => {
+test("MemoryMaintenanceScheduler - execute without callback", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
   // No callback set
   scheduler.start();
@@ -142,7 +146,7 @@ Deno.test("MemoryMaintenanceScheduler - execute without callback", async () => {
 
 // === State Restoration Tests ===
 
-Deno.test("MemoryMaintenanceScheduler - uses restored schedule time within valid range", () => {
+test("MemoryMaintenanceScheduler - uses restored schedule time within valid range", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 5000 }));
   scheduler.setCallback(async () => {});
 
@@ -156,7 +160,7 @@ Deno.test("MemoryMaintenanceScheduler - uses restored schedule time within valid
   scheduler.stop();
 });
 
-Deno.test("MemoryMaintenanceScheduler - executes immediately when restored time is past", async () => {
+test("MemoryMaintenanceScheduler - executes immediately when restored time is past", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 5000 }));
   let executed = false;
   scheduler.setCallback(() => {
@@ -171,7 +175,7 @@ Deno.test("MemoryMaintenanceScheduler - executes immediately when restored time 
   scheduler.stop();
 });
 
-Deno.test("MemoryMaintenanceScheduler - reschedules when restored time exceeds max", () => {
+test("MemoryMaintenanceScheduler - reschedules when restored time exceeds max", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 200 }));
   scheduler.setCallback(async () => {});
 
@@ -182,7 +186,7 @@ Deno.test("MemoryMaintenanceScheduler - reschedules when restored time exceeds m
   scheduler.stop();
 });
 
-Deno.test("MemoryMaintenanceScheduler - persists next time via stateStore", () => {
+test("MemoryMaintenanceScheduler - persists next time via stateStore", () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 100 }));
   const saved: { key: string; nextAt: Date }[] = [];
   scheduler.setStateStore({
@@ -210,8 +214,8 @@ Deno.test("MemoryMaintenanceScheduler - persists next time via stateStore", () =
 /** One canonical email user id (the message store's owner-name shape). */
 const EMAIL_OWNER = `e_${"ef".repeat(32)}`;
 
-Deno.test("memory maintenance enumeration admits the email workspace and counts its memory", async () => {
-  const repoPath = await Deno.makeTempDir();
+test("memory maintenance enumeration admits the email workspace and counts its memory", async () => {
+  const repoPath = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath, workspacesDir: "workspaces" });
     const store = new MemoryStore(manager, {});
@@ -234,8 +238,8 @@ Deno.test("memory maintenance enumeration admits the email workspace and counts 
     // A workspace whose directory name is not a platform: enumerated by the walk, but
     // the platform gate is what must reject it.
     const unknownWorkspace = join(repoPath, "workspaces", "telegram", "u1");
-    await Deno.mkdir(unknownWorkspace, { recursive: true });
-    await Deno.writeTextFile(join(unknownWorkspace, "memory.public.jsonl"), "{}\n");
+    await fsp.mkdir(unknownWorkspace, { recursive: true });
+    await fsp.writeFile(join(unknownWorkspace, "memory.public.jsonl"), "{}\n");
 
     const listed = await manager.listWorkspaces();
     assertEquals(listed.includes(`email/${EMAIL_OWNER}`), true, listed.join(", "));
@@ -276,17 +280,15 @@ Deno.test("memory maintenance enumeration admits the email workspace and counts 
       "a non-platform directory is still rejected by the gate",
     );
   } finally {
-    await Deno.remove(repoPath, { recursive: true });
+    await fsp.rm(repoPath, { recursive: true });
   }
 });
 
-Deno.test("bootstrap - the maintenance callback keeps enumerating through the platform gate", () => {
+test("bootstrap - the maintenance callback keeps enumerating through the platform gate", () => {
   // Static wiring anchors (the house pattern for bootstrap ordering): the maintenance
   // enumeration cannot drift away from the platform gate or drop channel workspaces
   // without failing here.
-  const source = Deno.readTextFileSync(
-    new URL("../../src/bootstrap.ts", import.meta.url),
-  );
+  const source = fs.readFileSync(new URL("../../src/bootstrap.ts", import.meta.url), "utf8");
   for (
     const anchor of [
       "memoryMaintenanceScheduler.setCallback(async () => {",

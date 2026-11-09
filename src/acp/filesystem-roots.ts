@@ -9,7 +9,7 @@
  * grant authorization tokens or guarantee race-free execution across later IO.
  */
 
-import { basename, dirname, isAbsolute, normalize, resolve, SEPARATOR } from "@std/path";
+import { basename, dirname, isAbsolute, normalize, resolve, sep as SEPARATOR } from "node:path";
 
 export type RootRole =
   | "workspace"

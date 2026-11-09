@@ -4,7 +4,7 @@
  * Implements OpenSpec change `secure-acp-filesystem-access`.
  */
 
-import { SEPARATOR } from "@std/path";
+import { sep as SEPARATOR } from "node:path";
 import {
   CanonicalRootInfo,
   CanonicalSessionRoots,

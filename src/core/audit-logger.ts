@@ -2,7 +2,7 @@
 
 import { createLogger, type Logger } from "@utils/logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { AuditConfig } from "../types/config.ts";
 import type { AuditPhase, EmailOperationAuditData, SessionAuditEntry } from "../types/audit.ts";
 import {
@@ -18,6 +18,7 @@ import {
   isSafeEmailAuditScalar,
 } from "../types/audit.ts";
 import { auditEntriesTotal } from "@utils/metrics.ts";
+import fsp from "node:fs/promises";
 
 const logger = createLogger("AuditLogger");
 
@@ -256,12 +257,8 @@ export class SessionAuditWriter {
         };
 
         const dir = this.filePath.substring(0, this.filePath.lastIndexOf("/"));
-        await Deno.mkdir(dir, { recursive: true });
-        await Deno.writeTextFile(
-          this.filePath,
-          JSON.stringify(entry) + "\n",
-          { append: true },
-        );
+        await fsp.mkdir(dir, { recursive: true });
+        await fsp.appendFile(this.filePath, JSON.stringify(entry) + "\n");
       })
       .catch((error) => {
         // The audit path of an email session embeds the owner identity and the

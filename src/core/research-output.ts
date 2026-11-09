@@ -11,8 +11,12 @@
 // treats a null snapshot as output produced) so verification uncertainty can never
 // trigger a retry loop.
 
-import { join } from "@std/path";
+import { join } from "node:path";
 import { sha256Hash } from "@utils/hash.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 /**
  * Fingerprint of a single research output file: size, modification time, and a
@@ -54,21 +58,21 @@ async function collectFiles(
   dir: string,
   relPrefix: string,
 ): Promise<void> {
-  let entries: Deno.DirEntry[];
+  let entries: Dirent[];
   try {
-    entries = [...Deno.readDirSync(dir)];
+    entries = [...fs.readdirSync(dir, { withFileTypes: true })];
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return; // missing dir → empty
+    if (isNotFoundError(error)) return; // missing dir → empty
     throw error;
   }
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
     const relPath = relPrefix === "" ? entry.name : `${relPrefix}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       await collectFiles(snapshot, fullPath, relPath);
-    } else if (entry.isFile) {
-      const stat = await Deno.stat(fullPath);
-      const bytes = await Deno.readFile(fullPath);
+    } else if (entry.isFile()) {
+      const stat = await fsp.stat(fullPath);
+      const bytes = await fsp.readFile(fullPath);
       snapshot.set(relPath, {
         size: stat.size,
         mtimeMs: stat.mtime?.getTime() ?? 0,

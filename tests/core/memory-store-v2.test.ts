@@ -8,6 +8,9 @@ import { MemoryError } from "../../src/types/errors.ts";
 import { NormalizedEvent, Platform } from "../../src/types/events.ts";
 import { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { ChannelWorkspaceInfo } from "../../src/types/workspace.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 function createTestEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -27,7 +30,7 @@ async function withTestMemoryStore(
   isDm: boolean,
   fn: (store: MemoryStore, workspace: WorkspaceInfo, manager: WorkspaceManager) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({
       repoPath: tempDir,
@@ -39,7 +42,7 @@ async function withTestMemoryStore(
 
     await fn(store, workspace, manager);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
@@ -50,7 +53,7 @@ async function withTestChannelStore(
     manager: WorkspaceManager,
   ) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({
       repoPath: tempDir,
@@ -61,13 +64,13 @@ async function withTestChannelStore(
 
     await fn(store, channelWorkspace, manager);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
 // ── 1. addMemory with new fields ──
 
-Deno.test("MemoryStore v2 - addMemory persists tier, category, scope, decay", async () => {
+test("MemoryStore v2 - addMemory persists tier, category, scope, decay", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "Tiered memory", {
       tier: "working",
@@ -92,7 +95,7 @@ Deno.test("MemoryStore v2 - addMemory persists tier, category, scope, decay", as
 
 // ── 2. addMemory defaults ──
 
-Deno.test("MemoryStore v2 - addMemory defaults: tier=archive, category=fact, scope=user, decay=0.5", async () => {
+test("MemoryStore v2 - addMemory defaults: tier=archive, category=fact, scope=user, decay=0.5", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "Default memory");
 
@@ -103,7 +106,7 @@ Deno.test("MemoryStore v2 - addMemory defaults: tier=archive, category=fact, sco
   });
 });
 
-Deno.test("MemoryStore v2 - addMemory with importance=high defaults to tier=core, decay=1.0", async () => {
+test("MemoryStore v2 - addMemory with importance=high defaults to tier=core, decay=1.0", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "High importance", {
       importance: "high",
@@ -114,7 +117,7 @@ Deno.test("MemoryStore v2 - addMemory with importance=high defaults to tier=core
   });
 });
 
-Deno.test("MemoryStore v2 - core tier always pins decay to 1.0 even if custom decay provided", async () => {
+test("MemoryStore v2 - core tier always pins decay to 1.0 even if custom decay provided", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "Core with custom decay", {
       tier: "core",
@@ -126,7 +129,7 @@ Deno.test("MemoryStore v2 - core tier always pins decay to 1.0 even if custom de
   });
 });
 
-Deno.test("MemoryStore v2 - working tier default decay is 0.8", async () => {
+test("MemoryStore v2 - working tier default decay is 0.8", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "Working memory", {
       tier: "working",
@@ -138,7 +141,7 @@ Deno.test("MemoryStore v2 - working tier default decay is 0.8", async () => {
 
 // ── 3. patchMemory with new fields ──
 
-Deno.test("MemoryStore v2 - patchMemory updates tier, category, decay", async () => {
+test("MemoryStore v2 - patchMemory updates tier, category, decay", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "Patchable memory");
 
@@ -158,7 +161,7 @@ Deno.test("MemoryStore v2 - patchMemory updates tier, category, decay", async ()
 
 // ── 4. patchMemory core tier decay pinning ──
 
-Deno.test("MemoryStore v2 - patching to core tier pins decay at 1.0", async () => {
+test("MemoryStore v2 - patching to core tier pins decay at 1.0", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const memory = await store.addMemory(workspace, "Will become core", {
       tier: "archive",
@@ -178,7 +181,7 @@ Deno.test("MemoryStore v2 - patching to core tier pins decay at 1.0", async () =
 
 // ── 5. getCoreTierMemories ──
 
-Deno.test("MemoryStore v2 - getCoreTierMemories returns only core tier", async () => {
+test("MemoryStore v2 - getCoreTierMemories returns only core tier", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     await store.addMemory(workspace, "Core memory", { tier: "core" });
     await store.addMemory(workspace, "Working memory", { tier: "working" });
@@ -190,7 +193,7 @@ Deno.test("MemoryStore v2 - getCoreTierMemories returns only core tier", async (
   });
 });
 
-Deno.test("MemoryStore v2 - getCoreTierMemories excludes disabled", async () => {
+test("MemoryStore v2 - getCoreTierMemories excludes disabled", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const mem = await store.addMemory(workspace, "Disabled core", { tier: "core" });
     await store.disableMemory(workspace, mem.id);
@@ -200,7 +203,7 @@ Deno.test("MemoryStore v2 - getCoreTierMemories excludes disabled", async () => 
   });
 });
 
-Deno.test("MemoryStore v2 - getCoreTierMemories DM includes private", async () => {
+test("MemoryStore v2 - getCoreTierMemories DM includes private", async () => {
   await withTestMemoryStore(true, async (store, workspace) => {
     await store.addMemory(workspace, "Public core", {
       tier: "core",
@@ -218,7 +221,7 @@ Deno.test("MemoryStore v2 - getCoreTierMemories DM includes private", async () =
 
 // ── 6. getRecentWorkingMemories ──
 
-Deno.test("MemoryStore v2 - getRecentWorkingMemories returns working tier sorted newest first", async () => {
+test("MemoryStore v2 - getRecentWorkingMemories returns working tier sorted newest first", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     await store.addMemory(workspace, "Working A", { tier: "working" });
     await new Promise((r) => setTimeout(r, 10));
@@ -232,7 +235,7 @@ Deno.test("MemoryStore v2 - getRecentWorkingMemories returns working tier sorted
   });
 });
 
-Deno.test("MemoryStore v2 - getRecentWorkingMemories respects limit", async () => {
+test("MemoryStore v2 - getRecentWorkingMemories respects limit", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     for (let i = 0; i < 5; i++) {
       await store.addMemory(workspace, `Working ${i}`, { tier: "working" });
@@ -245,7 +248,7 @@ Deno.test("MemoryStore v2 - getRecentWorkingMemories respects limit", async () =
 
 // ── 8. Backward compatibility ──
 
-Deno.test("MemoryStore v2 - entries without tier use importance fallback", async () => {
+test("MemoryStore v2 - entries without tier use importance fallback", async () => {
   await withTestMemoryStore(false, async (store, workspace, manager) => {
     // Write a legacy entry (no tier/category/scope/decay fields) directly to JSONL
     const legacyEntry = JSON.stringify({
@@ -295,7 +298,7 @@ Deno.test("MemoryStore v2 - entries without tier use importance fallback", async
 
 // ── 11. getMemoryStats with tiers ──
 
-Deno.test("MemoryStore v2 - getMemoryStats includes byTier and byCategory", async () => {
+test("MemoryStore v2 - getMemoryStats includes byTier and byCategory", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     await store.addMemory(workspace, "Core fact", { tier: "core", category: "fact" });
     await store.addMemory(workspace, "Working pref", { tier: "working", category: "preference" });
@@ -322,7 +325,7 @@ Deno.test("MemoryStore v2 - getMemoryStats includes byTier and byCategory", asyn
 
 // ── 12. Channel memory operations ──
 
-Deno.test("MemoryStore v2 - addChannelMemory creates memory with scope=channel", async () => {
+test("MemoryStore v2 - addChannelMemory creates memory with scope=channel", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     const memory = await store.addChannelMemory(channelWorkspace, "Channel fact", {
       tier: "core",
@@ -341,7 +344,7 @@ Deno.test("MemoryStore v2 - addChannelMemory creates memory with scope=channel",
   });
 });
 
-Deno.test("MemoryStore v2 - getChannelCoreTierMemories returns only core", async () => {
+test("MemoryStore v2 - getChannelCoreTierMemories returns only core", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     // Durable core entries come from the authorized/curated flow (F15).
     await store.addChannelMemory(channelWorkspace, "Core channel mem", {
@@ -356,7 +359,7 @@ Deno.test("MemoryStore v2 - getChannelCoreTierMemories returns only core", async
   });
 });
 
-Deno.test("MemoryStore v2 - patchChannelMemory updates fields", async () => {
+test("MemoryStore v2 - patchChannelMemory updates fields", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     const mem = await store.addChannelMemory(channelWorkspace, "Patchable channel mem");
 
@@ -372,7 +375,7 @@ Deno.test("MemoryStore v2 - patchChannelMemory updates fields", async () => {
   });
 });
 
-Deno.test("MemoryStore v2 - patchChannelMemory fails for non-existent ID", async () => {
+test("MemoryStore v2 - patchChannelMemory fails for non-existent ID", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     await assertRejects(
       async () => {
@@ -384,7 +387,7 @@ Deno.test("MemoryStore v2 - patchChannelMemory fails for non-existent ID", async
   });
 });
 
-Deno.test("MemoryStore v2 - getChannelMemoryStats includes byTier and byCategory", async () => {
+test("MemoryStore v2 - getChannelMemoryStats includes byTier and byCategory", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     await store.addChannelMemory(channelWorkspace, "Core fact", {
       tier: "core",
@@ -409,7 +412,7 @@ Deno.test("MemoryStore v2 - getChannelMemoryStats includes byTier and byCategory
 
 // ── F15: channel memory de-trusting / non-permanence / bounds / attribution ──
 
-Deno.test("F15 - untrusted channel write requesting core is downgraded to a decaying tier", async () => {
+test("F15 - untrusted channel write requesting core is downgraded to a decaying tier", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     const memory = await store.addChannelMemory(channelWorkspace, "Injected fact", {
       tier: "core",
@@ -425,7 +428,7 @@ Deno.test("F15 - untrusted channel write requesting core is downgraded to a deca
   });
 });
 
-Deno.test("F15 - durable channel write may create a core entry", async () => {
+test("F15 - durable channel write may create a core entry", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     const memory = await store.addChannelMemory(channelWorkspace, "Curated fact", {
       tier: "core",
@@ -436,7 +439,7 @@ Deno.test("F15 - durable channel write may create a core entry", async () => {
   });
 });
 
-Deno.test("F15 - channel write records the author for attribution", async () => {
+test("F15 - channel write records the author for attribution", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     await store.addChannelMemory(channelWorkspace, "From a user", { author: "user_42" });
     const loaded = await store.loadChannelMemories(channelWorkspace);
@@ -445,7 +448,7 @@ Deno.test("F15 - channel write records the author for attribution", async () => 
   });
 });
 
-Deno.test("F15 - a disabled channel entry is excluded from context loading", async () => {
+test("F15 - a disabled channel entry is excluded from context loading", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     const mem = await store.addChannelMemory(channelWorkspace, "planted", {
       tier: "core",
@@ -459,7 +462,7 @@ Deno.test("F15 - a disabled channel entry is excluded from context loading", asy
   });
 });
 
-Deno.test("F15 - durable core channel entries are bounded by the cap", async () => {
+test("F15 - durable core channel entries are bounded by the cap", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
     const { MAX_CHANNEL_CORE_ENTRIES } = await import("../../src/core/memory-store.ts");
     for (let i = 0; i < MAX_CHANNEL_CORE_ENTRIES; i++) {

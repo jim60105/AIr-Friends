@@ -7,7 +7,7 @@ import { ErrorCode } from "../../src/types/errors.ts";
 import { getDefaultAgentType } from "../../src/acp/agent-factory.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import type { TemplateVariables } from "../../src/types/template.ts";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 
 const defaultVars: TemplateVariables = {
   isDm: false,
@@ -18,7 +18,7 @@ const defaultVars: TemplateVariables = {
   // Trusted skill-script root is a mandatory render input; the fixture is the
   // ONE deployment-resolved root (`unify-skill-root-and-inventory`) — the
   // repository `skills/` tree that the default `"skills"` value resolves to.
-  skillsDir: Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills")),
+  skillsDir: fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills")),
 };
 
 // Test with a temporary directory containing test config files
@@ -26,16 +26,16 @@ async function withTestConfig(
   configContent: string,
   fn: (dir: string) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${tempDir}/config.yaml`, configContent);
+    await fsp.writeFile(`${tempDir}/config.yaml`, configContent);
     await fn(tempDir);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("loadConfig - should load valid configuration", async () => {
+test("loadConfig - should load valid configuration", async () => {
   const config = `
 platforms:
   discord:
@@ -62,7 +62,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - email disabled by default and loads without error", async () => {
+test("loadConfig - email disabled by default and loads without error", async () => {
   const config = `
 platforms:
   discord:
@@ -85,7 +85,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - email enabled is a complete platform on its own", async () => {
+test("loadConfig - email enabled is a complete platform on its own", async () => {
   const validEmailConfig = `
 platforms:
   discord:
@@ -144,7 +144,7 @@ workspace:
   }
 });
 
-Deno.test("loadConfig - email enabled rejects plaintext or opportunistic TLS mode", async () => {
+test("loadConfig - email enabled rejects plaintext or opportunistic TLS mode", async () => {
   const invalidTlsConfig = `
 platforms:
   discord:
@@ -182,7 +182,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - email enabled rejects missing receivingAuth trust declaration", async () => {
+test("loadConfig - email enabled rejects missing receivingAuth trust declaration", async () => {
   const unauthenticatedConfig = `
 platforms:
   discord:
@@ -221,7 +221,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - email channels normalized to safe userId", async () => {
+test("loadConfig - email channels normalized to safe userId", async () => {
   const config = `
 platforms:
   discord:
@@ -247,8 +247,8 @@ channels:
   });
 });
 
-Deno.test("loadConfig - email signature containing ${DISCORD_TOKEN} remains literal and unexpanded", () => {
-  Deno.env.set("DISCORD_TOKEN", "real-secret-token");
+test("loadConfig - email signature containing ${DISCORD_TOKEN} remains literal and unexpanded", () => {
+  process.env["DISCORD_TOKEN"] = "real-secret-token";
   const configWithSignature = `
 platforms:
   discord:
@@ -273,7 +273,7 @@ workspace:
     assertEquals(loaded.platforms.email?.signature.includes("${DISCORD_TOKEN}"), true);
     assertEquals(loaded.platforms.email?.signature.includes("real-secret-token"), false);
   }).finally(() => {
-    Deno.env.delete("DISCORD_TOKEN");
+    delete process.env["DISCORD_TOKEN"];
   });
 });
 
@@ -284,19 +284,19 @@ async function withEnv(
   value: string | undefined,
   fn: () => Promise<void>,
 ): Promise<void> {
-  const prev = Deno.env.get(key);
+  const prev = process.env[key];
   if (value === undefined) {
-    Deno.env.delete(key);
+    delete process.env[key];
   } else {
-    Deno.env.set(key, value);
+    process.env[key] = value;
   }
   try {
     await fn();
   } finally {
     if (prev === undefined) {
-      Deno.env.delete(key);
+      delete process.env[key];
     } else {
-      Deno.env.set(key, prev);
+      process.env[key] = prev;
     }
   }
 }
@@ -318,7 +318,7 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-Deno.test("Config - omitted defaultAgentType loads with effective default opencode", async () => {
+test("Config - omitted defaultAgentType loads with effective default opencode", async () => {
   await withTestConfig(agentTypeConfig(""), async (dir) => {
     const result = await loadConfig(dir);
     assertEquals(result.agent.defaultAgentType, undefined);
@@ -326,7 +326,7 @@ Deno.test("Config - omitted defaultAgentType loads with effective default openco
   });
 });
 
-Deno.test("Config - defaultAgentType: 'omp' in YAML loads as omp", async () => {
+test("Config - defaultAgentType: 'omp' in YAML loads as omp", async () => {
   const snippet = `  defaultAgentType: "omp"`;
   await withTestConfig(agentTypeConfig(snippet), async (dir) => {
     const result = await loadConfig(dir);
@@ -335,7 +335,7 @@ Deno.test("Config - defaultAgentType: 'omp' in YAML loads as omp", async () => {
   });
 });
 
-Deno.test("Config - AGENT_DEFAULT_TYPE=omp env override loads as omp", async () => {
+test("Config - AGENT_DEFAULT_TYPE=omp env override loads as omp", async () => {
   await withEnv("AGENT_DEFAULT_TYPE", "omp", async () => {
     await withTestConfig(agentTypeConfig(""), async (dir) => {
       const result = await loadConfig(dir);
@@ -345,7 +345,7 @@ Deno.test("Config - AGENT_DEFAULT_TYPE=omp env override loads as omp", async () 
   });
 });
 
-Deno.test("Config - invalid defaultAgentType values fail startup with ConfigError", async () => {
+test("Config - invalid defaultAgentType values fail startup with ConfigError", async () => {
   const invalidValues = [
     '"pi"',
     '"OpenCode"',
@@ -373,7 +373,7 @@ Deno.test("Config - invalid defaultAgentType values fail startup with ConfigErro
   }
 });
 
-Deno.test("Config - invalid AGENT_DEFAULT_TYPE env overrides fail startup with ConfigError", async () => {
+test("Config - invalid AGENT_DEFAULT_TYPE env overrides fail startup with ConfigError", async () => {
   const invalidEnvValues = [
     "pi",
     "OpenCode",
@@ -402,7 +402,7 @@ Deno.test("Config - invalid AGENT_DEFAULT_TYPE env overrides fail startup with C
   }
 });
 
-Deno.test("Config - unresolved ${AGENT_DEFAULT_TYPE} expansion to empty string fails with ConfigError", async () => {
+test("Config - unresolved ${AGENT_DEFAULT_TYPE} expansion to empty string fails with ConfigError", async () => {
   await withEnv("AGENT_DEFAULT_TYPE", undefined, async () => {
     const snippet = `  defaultAgentType: "\${AGENT_DEFAULT_TYPE}"`;
     await withTestConfig(agentTypeConfig(snippet), async (dir) => {
@@ -421,7 +421,7 @@ Deno.test("Config - unresolved ${AGENT_DEFAULT_TYPE} expansion to empty string f
   });
 });
 
-Deno.test("loadConfig - should apply default values", async () => {
+test("loadConfig - should apply default values", async () => {
   const config = `
 platforms:
   discord:
@@ -446,7 +446,7 @@ workspace:
   });
 });
 
-Deno.test("Config - removed memory.searchLimit/maxChars inject no defaults", async () => {
+test("Config - removed memory.searchLimit/maxChars inject no defaults", async () => {
   await withTestConfig(recallConfig(""), async (dir) => {
     const result = await loadConfig(dir);
     assertEquals(Object.hasOwn(result.memory, "searchLimit"), false);
@@ -456,7 +456,7 @@ Deno.test("Config - removed memory.searchLimit/maxChars inject no defaults", asy
   });
 });
 
-Deno.test("Config - legacy memory.searchLimit/maxChars keys load without error and stay inert", async () => {
+test("Config - legacy memory.searchLimit/maxChars keys load without error and stay inert", async () => {
   const memory = `memory:
   searchLimit: 5
   maxChars: 1000
@@ -478,7 +478,7 @@ Deno.test("Config - legacy memory.searchLimit/maxChars keys load without error a
   });
 });
 
-Deno.test("loadConfig - should override with environment variables", async () => {
+test("loadConfig - should override with environment variables", async () => {
   const config = `
 platforms:
   discord:
@@ -496,7 +496,7 @@ workspace:
 `;
 
   // Set environment variable
-  Deno.env.set("DISCORD_TOKEN", "env-override-token");
+  process.env["DISCORD_TOKEN"] = "env-override-token";
 
   try {
     await withTestConfig(config, async (dir) => {
@@ -504,11 +504,11 @@ workspace:
       assertEquals(result.platforms.discord.token, "env-override-token");
     });
   } finally {
-    Deno.env.delete("DISCORD_TOKEN");
+    delete process.env["DISCORD_TOKEN"];
   }
 });
 
-Deno.test("loadConfig - DISCORD_ENABLED env overrides config file", async () => {
+test("loadConfig - DISCORD_ENABLED env overrides config file", async () => {
   const config = `
 platforms:
   discord:
@@ -525,18 +525,18 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  Deno.env.set("DISCORD_ENABLED", "true");
+  process.env["DISCORD_ENABLED"] = "true";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.platforms.discord.enabled, true);
     });
   } finally {
-    Deno.env.delete("DISCORD_ENABLED");
+    delete process.env["DISCORD_ENABLED"];
   }
 });
 
-Deno.test("loadConfig - MISSKEY_ENABLED env overrides config file", async () => {
+test("loadConfig - MISSKEY_ENABLED env overrides config file", async () => {
   const config = `
 platforms:
   discord:
@@ -555,18 +555,18 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  Deno.env.set("MISSKEY_ENABLED", "true");
+  process.env["MISSKEY_ENABLED"] = "true";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.platforms.misskey.enabled, true);
     });
   } finally {
-    Deno.env.delete("MISSKEY_ENABLED");
+    delete process.env["MISSKEY_ENABLED"];
   }
 });
 
-Deno.test("loadConfig - AGENT_DEFAULT_TYPE env overrides config file", async () => {
+test("loadConfig - AGENT_DEFAULT_TYPE env overrides config file", async () => {
   const config = `
 platforms:
   discord:
@@ -584,18 +584,18 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  Deno.env.set("AGENT_DEFAULT_TYPE", "opencode");
+  process.env["AGENT_DEFAULT_TYPE"] = "opencode";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.agent.defaultAgentType, "opencode");
     });
   } finally {
-    Deno.env.delete("AGENT_DEFAULT_TYPE");
+    delete process.env["AGENT_DEFAULT_TYPE"];
   }
 });
 
-Deno.test("loadConfig - AGENT_SKILLS_DIR env overrides config file", async () => {
+test("loadConfig - AGENT_SKILLS_DIR env overrides config file", async () => {
   const config = `
 platforms:
   discord:
@@ -613,18 +613,18 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  Deno.env.set("AGENT_SKILLS_DIR", "/home/deno/.agents/skills");
+  process.env["AGENT_SKILLS_DIR"] = "/home/deno/.agents/skills";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.agent.skillsDir, "/home/deno/.agents/skills");
     });
   } finally {
-    Deno.env.delete("AGENT_SKILLS_DIR");
+    delete process.env["AGENT_SKILLS_DIR"];
   }
 });
 
-Deno.test("loadConfig - should throw on missing required fields", async () => {
+test("loadConfig - should throw on missing required fields", async () => {
   const config = `
 platforms:
   discord:
@@ -644,7 +644,7 @@ agent:
   });
 });
 
-Deno.test("loadConfig - should throw when no platform is enabled", async () => {
+test("loadConfig - should throw when no platform is enabled", async () => {
   const config = `
 platforms:
   discord:
@@ -676,20 +676,20 @@ async function withPromptDir(
   files: Record<string, string>,
   fn: (systemPromptPath: string) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
     const promptDir = `${tempDir}/prompts`;
-    await Deno.mkdir(promptDir, { recursive: true });
+    await fsp.mkdir(promptDir, { recursive: true });
     for (const [name, content] of Object.entries(files)) {
-      await Deno.writeTextFile(`${promptDir}/${name}`, content);
+      await fsp.writeFile(`${promptDir}/${name}`, content);
     }
     await fn(`${promptDir}/system_reply.md`);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
-Deno.test("loadSystemPrompt - should include fragment file content via Vento include", async () => {
+test("loadSystemPrompt - should include fragment file content via Vento include", async () => {
   await withPromptDir(
     {
       "system_reply.md":
@@ -703,7 +703,7 @@ Deno.test("loadSystemPrompt - should include fragment file content via Vento inc
   );
 });
 
-Deno.test("loadSystemPrompt - should include multiple different fragments", async () => {
+test("loadSystemPrompt - should include multiple different fragments", async () => {
   await withPromptDir(
     {
       "system_reply.md":
@@ -718,7 +718,7 @@ Deno.test("loadSystemPrompt - should include multiple different fragments", asyn
   );
 });
 
-Deno.test("loadSystemPrompt - should reuse set variable appearing multiple times", async () => {
+test("loadSystemPrompt - should reuse set variable appearing multiple times", async () => {
   await withPromptDir(
     {
       "system_reply.md":
@@ -732,7 +732,7 @@ Deno.test("loadSystemPrompt - should reuse set variable appearing multiple times
   );
 });
 
-Deno.test("loadSystemPrompt - should throw error when included file is missing", async () => {
+test("loadSystemPrompt - should throw error when included file is missing", async () => {
   await withPromptDir(
     {
       "system_reply.md": '{{ include "./missing_fragment.md" }}',
@@ -746,7 +746,7 @@ Deno.test("loadSystemPrompt - should throw error when included file is missing",
   );
 });
 
-Deno.test("loadSystemPrompt - include uses explicit file paths", async () => {
+test("loadSystemPrompt - include uses explicit file paths", async () => {
   await withPromptDir(
     {
       "system_reply.md": '{{ include "./character_name.md" }}',
@@ -759,7 +759,7 @@ Deno.test("loadSystemPrompt - include uses explicit file paths", async () => {
   );
 });
 
-Deno.test("loadSystemPrompt - should trim final result", async () => {
+test("loadSystemPrompt - should trim final result", async () => {
   await withPromptDir(
     {
       "system_reply.md": "\n  Hello World  \n",
@@ -771,7 +771,7 @@ Deno.test("loadSystemPrompt - should trim final result", async () => {
   );
 });
 
-Deno.test("loadSystemPrompt - should throw when system prompt file not found", async () => {
+test("loadSystemPrompt - should throw when system prompt file not found", async () => {
   await assertRejects(
     () => loadSystemPrompt("/nonexistent/path/system_reply.md", defaultVars),
     ConfigError,
@@ -779,7 +779,7 @@ Deno.test("loadSystemPrompt - should throw when system prompt file not found", a
   );
 });
 
-Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async () => {
+test("loadSystemPrompt - should handle prompt with no placeholders", async () => {
   await withPromptDir(
     {
       "system_reply.md": "A plain prompt with no placeholders.",
@@ -797,7 +797,7 @@ Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async 
 // every bundled payload-staging render supplies both values in both spawn
 // shapes, and an operator-mounted template must not resurrect the tokens.
 // Renders the REAL prompts/system_summary.md so the example stays copy-pasteable.
-Deno.test("loadSystemPrompt - system_summary Usage example renders the literal session id + tmpDir", async () => {
+test("loadSystemPrompt - system_summary Usage example renders the literal session id + tmpDir", async () => {
   const promptPath = join(import.meta.dirname ?? ".", "..", "..", "prompts", "system_summary.md");
   const withSession = await loadSystemPrompt(promptPath, {
     ...defaultVars,
@@ -826,7 +826,7 @@ Deno.test("loadSystemPrompt - system_summary Usage example renders the literal s
 
 // --- accessControl configuration tests ---
 
-Deno.test("loadConfig - should apply default accessControl values", async () => {
+test("loadConfig - should apply default accessControl values", async () => {
   const config = `
 platforms:
   discord:
@@ -850,7 +850,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should load valid accessControl configuration", async () => {
+test("loadConfig - should load valid accessControl configuration", async () => {
   const config = `
 platforms:
   discord:
@@ -881,7 +881,7 @@ channels:
   });
 });
 
-Deno.test("loadConfig - REPLY_TO env overrides config file", async () => {
+test("loadConfig - REPLY_TO env overrides config file", async () => {
   const config = `
 platforms:
   discord:
@@ -900,18 +900,18 @@ replyPolicy: "channels"
 channels: []
 `;
 
-  Deno.env.set("REPLY_TO", "all");
+  process.env["REPLY_TO"] = "all";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.replyPolicy, "all");
     });
   } finally {
-    Deno.env.delete("REPLY_TO");
+    delete process.env["REPLY_TO"];
   }
 });
 
-Deno.test("loadConfig - CHANNELS env overrides config file with JSON values", async () => {
+test("loadConfig - CHANNELS env overrides config file with JSON values", async () => {
   const config = `
 platforms:
   discord:
@@ -931,10 +931,8 @@ channels:
     - id: "discord/account/111111111111111111"
 `;
 
-  Deno.env.set(
-    "CHANNELS",
-    '[{"id":"discord/account/123456789012345678"},{"id":"discord/channel/987654321098765432"},{"id":"misskey/account/abcdef1234567890"}]',
-  );
+  process.env["CHANNELS"] =
+    '[{"id":"discord/account/123456789012345678"},{"id":"discord/channel/987654321098765432"},{"id":"misskey/account/abcdef1234567890"}]';
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -945,11 +943,11 @@ channels:
       ]);
     });
   } finally {
-    Deno.env.delete("CHANNELS");
+    delete process.env["CHANNELS"];
   }
 });
 
-Deno.test("loadConfig - CHANNELS env trims whitespace handled via JSON", async () => {
+test("loadConfig - CHANNELS env trims whitespace handled via JSON", async () => {
   const config = `
 platforms:
   discord:
@@ -968,10 +966,8 @@ replyPolicy: "channels"
 channels: []
 `;
 
-  Deno.env.set(
-    "CHANNELS",
-    '[{"id":"discord/account/12345678901234567"},{"id":"misskey/channel/456"}]',
-  );
+  process.env["CHANNELS"] =
+    '[{"id":"discord/account/12345678901234567"},{"id":"misskey/channel/456"}]';
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -981,11 +977,11 @@ channels: []
       ]);
     });
   } finally {
-    Deno.env.delete("CHANNELS");
+    delete process.env["CHANNELS"];
   }
 });
 
-Deno.test("loadConfig - empty CHANNELS env does not override config file", async () => {
+test("loadConfig - empty CHANNELS env does not override config file", async () => {
   const config = `
 platforms:
   discord:
@@ -1005,7 +1001,7 @@ channels:
     - id: "discord/account/123456789012345678"
 `;
 
-  Deno.env.set("CHANNELS", "");
+  process.env["CHANNELS"] = "";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -1014,11 +1010,11 @@ channels:
       ]);
     });
   } finally {
-    Deno.env.delete("CHANNELS");
+    delete process.env["CHANNELS"];
   }
 });
 
-Deno.test("loadConfig - should throw on invalid replyTo value", async () => {
+test("loadConfig - should throw on invalid replyTo value", async () => {
   const config = `
 platforms:
   discord:
@@ -1046,7 +1042,7 @@ channels: []
   });
 });
 
-Deno.test("loadConfig - should filter invalid whitelist entries and warn", async () => {
+test("loadConfig - should filter invalid whitelist entries and warn", async () => {
   const config = `
 platforms:
   discord:
@@ -1080,7 +1076,7 @@ channels:
   });
 });
 
-Deno.test("loadConfig - should accept all valid whitelist entry formats", async () => {
+test("loadConfig - should accept all valid whitelist entry formats", async () => {
   const config = `
 platforms:
   discord:
@@ -1116,7 +1112,7 @@ channels:
   });
 });
 
-Deno.test("loadConfig - should reject Discord whitelist entries with non-numeric IDs", async () => {
+test("loadConfig - should reject Discord whitelist entries with non-numeric IDs", async () => {
   const config = `
 platforms:
   discord:
@@ -1146,7 +1142,7 @@ channels:
   });
 });
 
-Deno.test("loadConfig - should reject Discord IDs that are too short or too long", async () => {
+test("loadConfig - should reject Discord IDs that are too short or too long", async () => {
   const config = `
 platforms:
   discord:
@@ -1178,7 +1174,7 @@ channels:
   });
 });
 
-Deno.test("loadConfig - should still accept Misskey IDs with various formats", async () => {
+test("loadConfig - should still accept Misskey IDs with various formats", async () => {
   const config = `
 platforms:
   discord:
@@ -1208,7 +1204,7 @@ channels:
 
 // --- spontaneousPost configuration tests ---
 
-Deno.test("Config - spontaneousPost default values are applied", async () => {
+test("Config - spontaneousPost default values are applied", async () => {
   const config = `
 platforms:
   discord:
@@ -1234,7 +1230,7 @@ workspace:
   });
 });
 
-Deno.test("Config - spontaneousPost.enabled can be set via env var", async () => {
+test("Config - spontaneousPost.enabled can be set via env var", async () => {
   const config = `
 platforms:
   discord:
@@ -1251,18 +1247,18 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  Deno.env.set("DISCORD_SPONTANEOUS_ENABLED", "true");
+  process.env["DISCORD_SPONTANEOUS_ENABLED"] = "true";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.platforms.discord.spontaneousPost?.enabled, true);
     });
   } finally {
-    Deno.env.delete("DISCORD_SPONTANEOUS_ENABLED");
+    delete process.env["DISCORD_SPONTANEOUS_ENABLED"];
   }
 });
 
-Deno.test("Config - spontaneousPost validation swaps min/max interval when reversed", async () => {
+test("Config - spontaneousPost validation swaps min/max interval when reversed", async () => {
   const config = `
 platforms:
   discord:
@@ -1290,7 +1286,7 @@ workspace:
   });
 });
 
-Deno.test("Config - spontaneousPost validation clamps minIntervalMs to 60 seconds", async () => {
+test("Config - spontaneousPost validation clamps minIntervalMs to 60 seconds", async () => {
   const config = `
 platforms:
   discord:
@@ -1317,7 +1313,7 @@ workspace:
   });
 });
 
-Deno.test("Config - spontaneousPost validation clamps contextFetchProbability to [0, 1]", async () => {
+test("Config - spontaneousPost validation clamps contextFetchProbability to [0, 1]", async () => {
   const config = `
 platforms:
   discord:
@@ -1343,7 +1339,7 @@ workspace:
   });
 });
 
-Deno.test("Config - spontaneousPost validation clamps negative contextFetchProbability to 0", async () => {
+test("Config - spontaneousPost validation clamps negative contextFetchProbability to 0", async () => {
   const config = `
 platforms:
   discord:
@@ -1369,7 +1365,7 @@ workspace:
   });
 });
 
-Deno.test("Config - spontaneousPost merges partial config with defaults", async () => {
+test("Config - spontaneousPost merges partial config with defaults", async () => {
   const config = `
 platforms:
   discord:
@@ -1400,7 +1396,7 @@ workspace:
 
 // --- selfResearch configuration tests ---
 
-Deno.test("Config - selfResearch default values are applied", async () => {
+test("Config - selfResearch default values are applied", async () => {
   const config = `
 platforms:
   discord:
@@ -1428,7 +1424,7 @@ workspace:
   });
 });
 
-Deno.test("Config - selfResearch enabled with valid config", async () => {
+test("Config - selfResearch enabled with valid config", async () => {
   const config = `
 platforms:
   discord:
@@ -1461,7 +1457,7 @@ selfResearch:
   });
 });
 
-Deno.test("Config - selfResearch auto-disables when rssFeeds is empty", async () => {
+test("Config - selfResearch auto-disables when rssFeeds is empty", async () => {
   const config = `
 platforms:
   discord:
@@ -1488,7 +1484,7 @@ selfResearch:
   });
 });
 
-Deno.test("Config - selfResearch auto-disables when model is empty", async () => {
+test("Config - selfResearch auto-disables when model is empty", async () => {
   const config = `
 platforms:
   discord:
@@ -1516,7 +1512,7 @@ selfResearch:
   });
 });
 
-Deno.test("Config - selfResearch clamps minIntervalMs to 1 hour", async () => {
+test("Config - selfResearch clamps minIntervalMs to 1 hour", async () => {
   const config = `
 platforms:
   discord:
@@ -1545,7 +1541,7 @@ selfResearch:
   });
 });
 
-Deno.test("Config - selfResearch swaps min/max interval when reversed", async () => {
+test("Config - selfResearch swaps min/max interval when reversed", async () => {
   const config = `
 platforms:
   discord:
@@ -1575,7 +1571,7 @@ selfResearch:
   });
 });
 
-Deno.test("Config - selfResearch merges partial config with defaults", async () => {
+test("Config - selfResearch merges partial config with defaults", async () => {
   const config = `
 platforms:
   discord:
@@ -1605,7 +1601,7 @@ selfResearch:
   });
 });
 
-Deno.test("Config - selfResearch filters out empty url feeds", async () => {
+test("Config - selfResearch filters out empty url feeds", async () => {
   const config = `
 platforms:
   discord:
@@ -1638,7 +1634,7 @@ selfResearch:
 
 // --- memoryMaintenance configuration tests ---
 
-Deno.test("Config - applies memoryMaintenance defaults", async () => {
+test("Config - applies memoryMaintenance defaults", async () => {
   const config = `
 platforms:
   discord:
@@ -1664,7 +1660,7 @@ workspace:
   });
 });
 
-Deno.test("Config - clamps memoryMaintenance intervalMs minimum to 1 hour", async () => {
+test("Config - clamps memoryMaintenance intervalMs minimum to 1 hour", async () => {
   const config = `
 platforms:
   discord:
@@ -1692,7 +1688,7 @@ memoryMaintenance:
   });
 });
 
-Deno.test("Config - clamps memoryMaintenance minMemoryCount minimum to 10", async () => {
+test("Config - clamps memoryMaintenance minMemoryCount minimum to 10", async () => {
   const config = `
 platforms:
   discord:
@@ -1720,7 +1716,7 @@ memoryMaintenance:
   });
 });
 
-Deno.test("Config - memoryMaintenance disables if model is missing", async () => {
+test("Config - memoryMaintenance disables if model is missing", async () => {
   const config = `
 platforms:
   discord:
@@ -1748,7 +1744,7 @@ memoryMaintenance:
   });
 });
 
-Deno.test("Config - metrics defaults when not specified", async () => {
+test("Config - metrics defaults when not specified", async () => {
   const config = `
 platforms:
   discord:
@@ -1772,7 +1768,7 @@ workspace:
   });
 });
 
-Deno.test("Config - metrics respects user values", async () => {
+test("Config - metrics respects user values", async () => {
   const config = `
 platforms:
   discord:
@@ -1801,7 +1797,7 @@ metrics:
 
 // --- gitBackup configuration tests ---
 
-Deno.test("Config - applies gitBackup defaults when not specified", async () => {
+test("Config - applies gitBackup defaults when not specified", async () => {
   const config = `
 platforms:
   discord:
@@ -1828,7 +1824,7 @@ workspace:
   });
 });
 
-Deno.test("Config - merges partial gitBackup config with defaults", async () => {
+test("Config - merges partial gitBackup config with defaults", async () => {
   const config = `
 platforms:
   discord:
@@ -1859,7 +1855,7 @@ gitBackup:
 
 // --- Model Routing validation tests ---
 
-Deno.test("loadConfig - should set default modelRouting when not configured", async () => {
+test("loadConfig - should set default modelRouting when not configured", async () => {
   const config = `
 platforms:
   discord:
@@ -1883,7 +1879,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should skip invalid model routing rules (missing match)", async () => {
+test("loadConfig - should skip invalid model routing rules (missing match)", async () => {
   const config = `
 platforms:
   discord:
@@ -1910,7 +1906,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should skip invalid model routing rules (empty model string)", async () => {
+test("loadConfig - should skip invalid model routing rules (empty model string)", async () => {
   const config = `
 platforms:
   discord:
@@ -1938,7 +1934,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should skip rules with invalid whitelist format", async () => {
+test("loadConfig - should skip rules with invalid whitelist format", async () => {
   const config = `
 platforms:
   discord:
@@ -1966,7 +1962,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should skip rules with invalid sessionType", async () => {
+test("loadConfig - should skip rules with invalid sessionType", async () => {
   const config = `
 platforms:
   discord:
@@ -1994,7 +1990,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should accept rules with multiple match conditions (AND)", async () => {
+test("loadConfig - should accept rules with multiple match conditions (AND)", async () => {
   const config = `
 platforms:
   discord:
@@ -2023,7 +2019,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should preserve valid rules and discard invalid ones", async () => {
+test("loadConfig - should preserve valid rules and discard invalid ones", async () => {
   const config = `
 platforms:
   discord:
@@ -2057,7 +2053,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should validate contentKeywords as array", async () => {
+test("loadConfig - should validate contentKeywords as array", async () => {
   const config = `
 platforms:
   discord:
@@ -2085,7 +2081,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should filter empty contentKeywords entries", async () => {
+test("loadConfig - should filter empty contentKeywords entries", async () => {
   const config = `
 platforms:
   discord:
@@ -2115,7 +2111,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should accept rule with whitelist + contentKeywords", async () => {
+test("loadConfig - should accept rule with whitelist + contentKeywords", async () => {
   const config = `
 platforms:
   discord:
@@ -2151,7 +2147,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should skip rule with empty match object", async () => {
+test("loadConfig - should skip rule with empty match object", async () => {
   const config = `
 platforms:
   discord:
@@ -2182,6 +2178,10 @@ workspace:
 // --- MCP Server config validation tests ---
 
 import { convertUserMCPServerConfigs } from "@core/config-loader.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { describe, test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const baseMCPConfig = `
 platforms:
@@ -2207,8 +2207,8 @@ ${mcpServersYaml}
 `;
 }
 
-Deno.test("config-loader - mcpServers", async (t) => {
-  await t.step("valid stdio server is loaded", async () => {
+describe("config-loader - mcpServers", () => {
+  test("valid stdio server is loaded", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - name: "test-server"
       command: "echo"
@@ -2222,7 +2222,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("valid http server is loaded", async () => {
+  test("valid http server is loaded", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - name: "http-server"
       transport: "http"
@@ -2236,7 +2236,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("server with missing name is skipped", async () => {
+  test("server with missing name is skipped", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - command: "echo"
       args: ["hello"]`);
@@ -2246,7 +2246,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("server with duplicate name is skipped", async () => {
+  test("server with duplicate name is skipped", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - name: "dup"
       command: "echo"
@@ -2261,7 +2261,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("stdio server with missing command is skipped", async () => {
+  test("stdio server with missing command is skipped", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - name: "no-cmd"
       args: ["hello"]`);
@@ -2271,7 +2271,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("http server with missing url is skipped", async () => {
+  test("http server with missing url is skipped", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - name: "no-url"
       transport: "http"`);
@@ -2281,7 +2281,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("unknown transport is skipped", async () => {
+  test("unknown transport is skipped", async () => {
     const config = mcpAgentConfig(`  mcpServers:
     - name: "bad-transport"
       transport: "grpc"
@@ -2292,8 +2292,8 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("${ENV_VAR} in env values is expanded", async () => {
-    Deno.env.set("TEST_MCP_TOKEN", "secret123");
+  test("${ENV_VAR} in env values is expanded", async () => {
+    process.env["TEST_MCP_TOKEN"] = "secret123";
     try {
       const config = mcpAgentConfig(`  mcpServers:
     - name: "env-test"
@@ -2306,12 +2306,12 @@ Deno.test("config-loader - mcpServers", async (t) => {
         assertEquals(result.agent.mcpServers![0].env!["MY_TOKEN"], "secret123");
       });
     } finally {
-      Deno.env.delete("TEST_MCP_TOKEN");
+      delete process.env["TEST_MCP_TOKEN"];
     }
   });
 
-  await t.step("${ENV_VAR} in url is expanded", async () => {
-    Deno.env.set("TEST_MCP_HOST", "myhost.example.com");
+  test("${ENV_VAR} in url is expanded", async () => {
+    process.env["TEST_MCP_HOST"] = "myhost.example.com";
     try {
       const config = mcpAgentConfig(`  mcpServers:
     - name: "url-test"
@@ -2323,12 +2323,12 @@ Deno.test("config-loader - mcpServers", async (t) => {
         assertEquals(result.agent.mcpServers![0].url, "http://myhost.example.com:3002/mcp");
       });
     } finally {
-      Deno.env.delete("TEST_MCP_HOST");
+      delete process.env["TEST_MCP_HOST"];
     }
   });
 
-  await t.step("${ENV_VAR} in headers is expanded", async () => {
-    Deno.env.set("TEST_MCP_BEARER", "bearer-token");
+  test("${ENV_VAR} in headers is expanded", async () => {
+    process.env["TEST_MCP_BEARER"] = "bearer-token";
     try {
       const config = mcpAgentConfig(`  mcpServers:
     - name: "header-test"
@@ -2345,12 +2345,12 @@ Deno.test("config-loader - mcpServers", async (t) => {
         );
       });
     } finally {
-      Deno.env.delete("TEST_MCP_BEARER");
+      delete process.env["TEST_MCP_BEARER"];
     }
   });
 
-  await t.step("unset ${ENV_VAR} expands to empty string", async () => {
-    Deno.env.delete("NONEXISTENT_MCP_VAR_12345");
+  test("unset ${ENV_VAR} expands to empty string", async () => {
+    delete process.env["NONEXISTENT_MCP_VAR_12345"];
     const config = mcpAgentConfig(`  mcpServers:
     - name: "unset-test"
       command: "echo"
@@ -2363,7 +2363,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("empty mcpServers array is valid", async () => {
+  test("empty mcpServers array is valid", async () => {
     const config = mcpAgentConfig("  mcpServers: []");
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -2371,7 +2371,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
     });
   });
 
-  await t.step("missing mcpServers field is valid", async () => {
+  test("missing mcpServers field is valid", async () => {
     const config = mcpAgentConfig("");
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -2380,7 +2380,7 @@ Deno.test("config-loader - mcpServers", async (t) => {
   });
 });
 
-Deno.test("loadConfig - externalSkills validation", async (t) => {
+describe("loadConfig - externalSkills validation", () => {
   const baseConfig = (extra: string) => `
 platforms:
   discord:
@@ -2400,7 +2400,7 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  await t.step("valid externalSkills are preserved", async () => {
+  test("valid externalSkills are preserved", async () => {
     const config = baseConfig(`  externalSkills:
     - repo: "jim60105/copilot-prompt"
       skill: "create-blog-post"`);
@@ -2412,7 +2412,7 @@ workspace:
     });
   });
 
-  await t.step("invalid externalSkills entries are filtered out", async () => {
+  test("invalid externalSkills entries are filtered out", async () => {
     const config = baseConfig(`  externalSkills:
     - repo: ""
       skill: "create-blog-post"
@@ -2424,7 +2424,7 @@ workspace:
     });
   });
 
-  await t.step("missing externalSkills defaults to empty array", async () => {
+  test("missing externalSkills defaults to empty array", async () => {
     const config = baseConfig("");
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -2433,7 +2433,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - autoApproveSkills validation", async (t) => {
+describe("loadConfig - autoApproveSkills validation", () => {
   const baseConfig = (extra: string) => `
 platforms:
   discord:
@@ -2453,7 +2453,7 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  await t.step("valid autoApproveSkills are preserved", async () => {
+  test("valid autoApproveSkills are preserved", async () => {
     const config = baseConfig(`  autoApproveSkills:
     - "memory-save"
     - "send-reply"`);
@@ -2465,7 +2465,7 @@ workspace:
     });
   });
 
-  await t.step("empty strings are filtered out", async () => {
+  test("empty strings are filtered out", async () => {
     const config = baseConfig(`  autoApproveSkills:
     - "memory-save"
     - ""
@@ -2477,7 +2477,7 @@ workspace:
     });
   });
 
-  await t.step("missing autoApproveSkills is undefined", async () => {
+  test("missing autoApproveSkills is undefined", async () => {
     const config = baseConfig("");
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -2485,7 +2485,7 @@ workspace:
     });
   });
 
-  await t.step("empty array results in undefined", async () => {
+  test("empty array results in undefined", async () => {
     const config = baseConfig("  autoApproveSkills: []");
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
@@ -2494,8 +2494,8 @@ workspace:
   });
 });
 
-Deno.test("convertUserMCPServerConfigs", async (t) => {
-  await t.step("converts stdio config correctly", () => {
+describe("convertUserMCPServerConfigs", () => {
+  test("converts stdio config correctly", () => {
     const result = convertUserMCPServerConfigs([{
       name: "stdio-test",
       command: "/usr/bin/echo",
@@ -2512,7 +2512,7 @@ Deno.test("convertUserMCPServerConfigs", async (t) => {
     );
   });
 
-  await t.step("converts http config correctly", () => {
+  test("converts http config correctly", () => {
     const result = convertUserMCPServerConfigs([{
       name: "http-test",
       transport: "http",
@@ -2528,7 +2528,7 @@ Deno.test("convertUserMCPServerConfigs", async (t) => {
     );
   });
 
-  await t.step("converts sse config correctly", () => {
+  test("converts sse config correctly", () => {
     const result = convertUserMCPServerConfigs([{
       name: "sse-test",
       transport: "sse",
@@ -2539,7 +2539,7 @@ Deno.test("convertUserMCPServerConfigs", async (t) => {
     assertEquals((result[0] as { url: string }).url, "https://events.example.com/mcp");
   });
 
-  await t.step("handles missing optional fields", () => {
+  test("handles missing optional fields", () => {
     const result = convertUserMCPServerConfigs([{
       name: "minimal-stdio",
       command: "echo",
@@ -2549,7 +2549,7 @@ Deno.test("convertUserMCPServerConfigs", async (t) => {
     assertEquals((result[0] as { env?: unknown }).env, undefined);
   });
 
-  await t.step("default transport is stdio", () => {
+  test("default transport is stdio", () => {
     const result = convertUserMCPServerConfigs([{
       name: "no-transport",
       command: "echo",
@@ -2563,7 +2563,7 @@ Deno.test("convertUserMCPServerConfigs", async (t) => {
 
 // --- yolo field in channels tests ---
 
-Deno.test("loadChannels - preserves yolo field from object format", async () => {
+test("loadChannels - preserves yolo field from object format", async () => {
   const config = `
 platforms:
   discord:
@@ -2588,7 +2588,7 @@ channels:
   });
 });
 
-Deno.test("loadChannels - yolo defaults to false when not specified", async () => {
+test("loadChannels - yolo defaults to false when not specified", async () => {
   const config = `
 platforms:
   discord:
@@ -2614,7 +2614,7 @@ channels:
 
 // --- allowedWriteExtensions sandbox config tests ---
 
-Deno.test("loadConfig - default sandbox includes allowedWriteExtensions [.md, .txt]", async () => {
+test("loadConfig - default sandbox includes allowedWriteExtensions [.md, .txt]", async () => {
   const config = `
 platforms:
   discord:
@@ -2635,7 +2635,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - custom allowedWriteExtensions from config is preserved", async () => {
+test("loadConfig - custom allowedWriteExtensions from config is preserved", async () => {
   const config = `
 platforms:
   discord:
@@ -2661,7 +2661,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - invalid allowedWriteExtensions entries (non-dot-prefixed) are filtered out", async () => {
+test("loadConfig - invalid allowedWriteExtensions entries (non-dot-prefixed) are filtered out", async () => {
   const config = `
 platforms:
   discord:
@@ -2688,7 +2688,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - non-array allowedWriteExtensions is replaced with default", async () => {
+test("loadConfig - non-array allowedWriteExtensions is replaced with default", async () => {
   const config = `
 platforms:
   discord:
@@ -2713,7 +2713,7 @@ workspace:
 
 // --- egressAllowHosts sandbox config tests ---
 
-Deno.test("loadConfig - egressAllowHosts defaults to an empty list", async () => {
+test("loadConfig - egressAllowHosts defaults to an empty list", async () => {
   const config = `
 platforms:
   discord:
@@ -2734,7 +2734,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - egressAllowHosts from config is preserved, empty entries dropped", async () => {
+test("loadConfig - egressAllowHosts from config is preserved, empty entries dropped", async () => {
   const config = `
 platforms:
   discord:
@@ -2761,7 +2761,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - non-array egressAllowHosts falls back to an empty list", async () => {
+test("loadConfig - non-array egressAllowHosts falls back to an empty list", async () => {
   const config = `
 platforms:
   discord:
@@ -2784,7 +2784,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - default gitCredential config is applied", async () => {
+test("loadConfig - default gitCredential config is applied", async () => {
   const config = `
 platforms:
   discord:
@@ -2808,7 +2808,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - gitCredential config merges with defaults", async () => {
+test("loadConfig - gitCredential config merges with defaults", async () => {
   const config = `
 platforms:
   discord:
@@ -2834,7 +2834,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - connectTimeoutMs defaults to 30000 when unset", async () => {
+test("loadConfig - connectTimeoutMs defaults to 30000 when unset", async () => {
   const config = `
 platforms:
   discord:
@@ -2857,7 +2857,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - AGENT_CONNECT_TIMEOUT_MS env overrides agent.connectTimeoutMs", async () => {
+test("loadConfig - AGENT_CONNECT_TIMEOUT_MS env overrides agent.connectTimeoutMs", async () => {
   const config = `
 platforms:
   discord:
@@ -2875,7 +2875,7 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  Deno.env.set("AGENT_CONNECT_TIMEOUT_MS", "15000");
+  process.env["AGENT_CONNECT_TIMEOUT_MS"] = "15000";
 
   try {
     await withTestConfig(config, async (dir) => {
@@ -2883,7 +2883,7 @@ workspace:
       assertEquals(result.agent.connectTimeoutMs, 15000);
     });
   } finally {
-    Deno.env.delete("AGENT_CONNECT_TIMEOUT_MS");
+    delete process.env["AGENT_CONNECT_TIMEOUT_MS"];
   }
 });
 
@@ -2909,7 +2909,7 @@ ${memory}
 `;
 }
 
-Deno.test("Config - applies memory.recall defaults", async () => {
+test("Config - applies memory.recall defaults", async () => {
   await withTestConfig(recallConfig(""), async (dir) => {
     const result = await loadConfig(dir);
     assertEquals(result.memory.recall?.fastRecallEnabled, true);
@@ -2930,7 +2930,7 @@ Deno.test("Config - applies memory.recall defaults", async () => {
   });
 });
 
-Deno.test("Config - memory.recall keeps every default a partial override does not set", async () => {
+test("Config - memory.recall keeps every default a partial override does not set", async () => {
   const memory = `memory:
   recall:
     fastRecallMaxTokens: 128`;
@@ -2952,7 +2952,7 @@ Deno.test("Config - memory.recall keeps every default a partial override does no
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.coreMaxTokens", async () => {
+test("Config - rejects a negative memory.recall.coreMaxTokens", async () => {
   const memory = `memory:
   recall:
     coreMaxTokens: -1`;
@@ -2962,7 +2962,7 @@ Deno.test("Config - rejects a negative memory.recall.coreMaxTokens", async () =>
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.workingMaxItems", async () => {
+test("Config - rejects a negative memory.recall.workingMaxItems", async () => {
   const memory = `memory:
   recall:
     workingMaxItems: -1`;
@@ -2972,7 +2972,7 @@ Deno.test("Config - rejects a negative memory.recall.workingMaxItems", async () 
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.workingMaxTokens", async () => {
+test("Config - rejects a negative memory.recall.workingMaxTokens", async () => {
   const memory = `memory:
   recall:
     workingMaxTokens: -1`;
@@ -2982,7 +2982,7 @@ Deno.test("Config - rejects a negative memory.recall.workingMaxTokens", async ()
   });
 });
 
-Deno.test("Config - rejects a non-integer memory.recall.workingMaxItems", async () => {
+test("Config - rejects a non-integer memory.recall.workingMaxItems", async () => {
   const memory = `memory:
   recall:
     workingMaxItems: 1.5`;
@@ -2992,7 +2992,7 @@ Deno.test("Config - rejects a non-integer memory.recall.workingMaxItems", async 
   });
 });
 
-Deno.test("Config - rejects a memory.recall.secondResultRatio above 1", async () => {
+test("Config - rejects a memory.recall.secondResultRatio above 1", async () => {
   const memory = `memory:
   recall:
     secondResultRatio: 1.5`;
@@ -3002,7 +3002,7 @@ Deno.test("Config - rejects a memory.recall.secondResultRatio above 1", async ()
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.minRecallScore", async () => {
+test("Config - rejects a negative memory.recall.minRecallScore", async () => {
   const memory = `memory:
   recall:
     minRecallScore: -0.5`;
@@ -3012,7 +3012,7 @@ Deno.test("Config - rejects a negative memory.recall.minRecallScore", async () =
   });
 });
 
-Deno.test("Config - rejects a non-integer memory.recall.fastRecallMaxResults", async () => {
+test("Config - rejects a non-integer memory.recall.fastRecallMaxResults", async () => {
   const memory = `memory:
   recall:
     fastRecallMaxResults: 1.5`;
@@ -3022,7 +3022,7 @@ Deno.test("Config - rejects a non-integer memory.recall.fastRecallMaxResults", a
   });
 });
 
-Deno.test("Config - rejects a memory.recall.deepRecallMaxTokens of zero", async () => {
+test("Config - rejects a memory.recall.deepRecallMaxTokens of zero", async () => {
   const memory = `memory:
   recall:
     deepRecallMaxTokens: 0`;
@@ -3032,7 +3032,7 @@ Deno.test("Config - rejects a memory.recall.deepRecallMaxTokens of zero", async 
   });
 });
 
-Deno.test("Config - rejects a non-numeric memory.recall.minRecallScore", async () => {
+test("Config - rejects a non-numeric memory.recall.minRecallScore", async () => {
   const memory = `memory:
   recall:
     minRecallScore: "3"`;
@@ -3042,7 +3042,7 @@ Deno.test("Config - rejects a non-numeric memory.recall.minRecallScore", async (
   });
 });
 
-Deno.test("Config - rejects a non-boolean memory.recall.fastRecallEnabled", async () => {
+test("Config - rejects a non-boolean memory.recall.fastRecallEnabled", async () => {
   const memory = `memory:
   recall:
     fastRecallEnabled: "yes"`;
@@ -3052,7 +3052,7 @@ Deno.test("Config - rejects a non-boolean memory.recall.fastRecallEnabled", asyn
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.fastRecallNoteMaxResults", async () => {
+test("Config - rejects a negative memory.recall.fastRecallNoteMaxResults", async () => {
   const memory = `memory:
   recall:
     fastRecallNoteMaxResults: -1`;
@@ -3062,7 +3062,7 @@ Deno.test("Config - rejects a negative memory.recall.fastRecallNoteMaxResults", 
   });
 });
 
-Deno.test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxResults", async () => {
+test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxResults", async () => {
   const memory = `memory:
   recall:
     fastRecallNoteMaxResults: 1.5`;
@@ -3072,7 +3072,7 @@ Deno.test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxResults
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.fastRecallNoteMaxTokens", async () => {
+test("Config - rejects a negative memory.recall.fastRecallNoteMaxTokens", async () => {
   const memory = `memory:
   recall:
     fastRecallNoteMaxTokens: -1`;
@@ -3082,7 +3082,7 @@ Deno.test("Config - rejects a negative memory.recall.fastRecallNoteMaxTokens", a
   });
 });
 
-Deno.test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxTokens", async () => {
+test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxTokens", async () => {
   const memory = `memory:
   recall:
     fastRecallNoteMaxTokens: 1.5`;
@@ -3092,7 +3092,7 @@ Deno.test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxTokens"
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.noteMinRecallScore", async () => {
+test("Config - rejects a negative memory.recall.noteMinRecallScore", async () => {
   const memory = `memory:
   recall:
     noteMinRecallScore: -0.5`;
@@ -3102,7 +3102,7 @@ Deno.test("Config - rejects a negative memory.recall.noteMinRecallScore", async 
   });
 });
 
-Deno.test("Config - rejects a non-numeric memory.recall.noteMinRecallScore", async () => {
+test("Config - rejects a non-numeric memory.recall.noteMinRecallScore", async () => {
   const memory = `memory:
   recall:
     noteMinRecallScore: "3"`;
@@ -3112,7 +3112,7 @@ Deno.test("Config - rejects a non-numeric memory.recall.noteMinRecallScore", asy
   });
 });
 
-Deno.test("Config - rejects a negative memory.recall.secondNoteRecallScore", async () => {
+test("Config - rejects a negative memory.recall.secondNoteRecallScore", async () => {
   const memory = `memory:
   recall:
     secondNoteRecallScore: -0.5`;
@@ -3122,7 +3122,7 @@ Deno.test("Config - rejects a negative memory.recall.secondNoteRecallScore", asy
   });
 });
 
-Deno.test("Config - rejects a non-numeric memory.recall.secondNoteRecallScore", async () => {
+test("Config - rejects a non-numeric memory.recall.secondNoteRecallScore", async () => {
   const memory = `memory:
   recall:
     secondNoteRecallScore: "3"`;
@@ -3155,14 +3155,14 @@ function identityError(raw: unknown): ConfigError {
   return assertThrows(() => normalizeIdentities(raw), ConfigError);
 }
 
-Deno.test("identity groups - workspace key kept as-is", () => {
+test("identity groups - workspace key kept as-is", () => {
   assertEquals(
     normalizeIdentities([{ id: "alice", accounts: ["discord/123456789012345678"] }]),
     [{ id: "alice", accounts: ["discord/123456789012345678"] }],
   );
 });
 
-Deno.test("identity groups - channel-style account id collapsed", () => {
+test("identity groups - channel-style account id collapsed", () => {
   assertEquals(
     normalizeIdentities([{ id: "alice", accounts: ["misskey/account/abcdef1234567890"] }])[0]
       .accounts,
@@ -3170,7 +3170,7 @@ Deno.test("identity groups - channel-style account id collapsed", () => {
   );
 });
 
-Deno.test("identity groups - email address forms hashed", () => {
+test("identity groups - email address forms hashed", () => {
   const expected = `email/${normalizeEmailMailbox("Alice@example.com").userId}`;
   const entries = [
     " Alice@Example.COM ",
@@ -3186,7 +3186,7 @@ Deno.test("identity groups - email address forms hashed", () => {
   }
 });
 
-Deno.test("identity groups - email owner id kept as-is", () => {
+test("identity groups - email owner id kept as-is", () => {
   const userId = `e_${"a".repeat(64)}`;
   assertEquals(
     normalizeIdentities([{ id: "alice", accounts: [`email/${userId}`] }])[0].accounts,
@@ -3194,21 +3194,21 @@ Deno.test("identity groups - email owner id kept as-is", () => {
   );
 });
 
-Deno.test("identity groups - omitted identities load as []", async () => {
+test("identity groups - omitted identities load as []", async () => {
   await withTestConfig(identityConfig(""), async (dir) => {
     const result = await loadConfig(dir);
     assertEquals(result.identities, []);
   });
 });
 
-Deno.test("identity groups - empty YAML identities key loads as []", async () => {
+test("identity groups - empty YAML identities key loads as []", async () => {
   await withTestConfig(identityConfig("identities:"), async (dir) => {
     const result = await loadConfig(dir);
     assertEquals(result.identities, []);
   });
 });
 
-Deno.test("identity groups - YAML block is normalized end to end", async () => {
+test("identity groups - YAML block is normalized end to end", async () => {
   const yaml = `identities:
   - id: " alice "
     accounts:
@@ -3229,7 +3229,7 @@ Deno.test("identity groups - YAML block is normalized end to end", async () => {
   });
 });
 
-Deno.test("identity groups - shape errors name the field path", () => {
+test("identity groups - shape errors name the field path", () => {
   const cases: [unknown, string][] = [
     [{}, "identities must be an array"],
     ["not-an-array", "identities must be an array"],
@@ -3252,7 +3252,7 @@ Deno.test("identity groups - shape errors name the field path", () => {
   }
 });
 
-Deno.test("identity groups - duplicate group id rejected at the later group", () => {
+test("identity groups - duplicate group id rejected at the later group", () => {
   const error = identityError([
     { id: "alice", accounts: ["discord/1"] },
     { id: " alice ", accounts: ["discord/2"] },
@@ -3262,7 +3262,7 @@ Deno.test("identity groups - duplicate group id rejected at the later group", ()
   assertEquals(error.context, { field: "identities[1].id" });
 });
 
-Deno.test("identity groups - unsupported account forms rejected", () => {
+test("identity groups - unsupported account forms rejected", () => {
   const entries = [
     "slack/123",
     "slack/account/123",
@@ -3288,7 +3288,7 @@ Deno.test("identity groups - unsupported account forms rejected", () => {
   }
 });
 
-Deno.test("identity groups - errors never echo the account value", () => {
+test("identity groups - errors never echo the account value", () => {
   const raw = "not-an-address@@example.com";
   const error = identityError([{ id: "alice", accounts: [raw] }]);
 
@@ -3296,7 +3296,7 @@ Deno.test("identity groups - errors never echo the account value", () => {
   assertEquals(JSON.stringify(error.context).includes("not-an-address"), false);
 });
 
-Deno.test("identity groups - duplicate account within one group rejected", () => {
+test("identity groups - duplicate account within one group rejected", () => {
   const error = identityError([
     { id: "alice", accounts: ["alice@example.com", "email/alice@example.com"] },
   ]);
@@ -3304,7 +3304,7 @@ Deno.test("identity groups - duplicate account within one group rejected", () =>
   assertEquals(error.message, "identities[0].accounts[1] duplicates identities[0].accounts[0]");
 });
 
-Deno.test("identity groups - duplicate account across groups rejected", () => {
+test("identity groups - duplicate account across groups rejected", () => {
   const error = identityError([
     { id: "alice", accounts: ["discord/123"] },
     { id: "bob", accounts: ["discord/123"] },
@@ -3313,7 +3313,7 @@ Deno.test("identity groups - duplicate account across groups rejected", () => {
   assertEquals(error.message, "identities[1].accounts[0] duplicates identities[0].accounts[0]");
 });
 
-Deno.test("identity groups - IDENTITIES env override replaces the YAML value", async () => {
+test("identity groups - IDENTITIES env override replaces the YAML value", async () => {
   const yaml = `identities:
   - id: "bob"
     accounts:
@@ -3336,7 +3336,7 @@ Deno.test("identity groups - IDENTITIES env override replaces the YAML value", a
   });
 });
 
-Deno.test("identity groups - invalid IDENTITIES override is ignored", async () => {
+test("identity groups - invalid IDENTITIES override is ignored", async () => {
   const yaml = `identities:
   - id: "bob"
     accounts:
@@ -3359,7 +3359,7 @@ Deno.test("identity groups - invalid IDENTITIES override is ignored", async () =
   }
 });
 
-Deno.test("identity groups - invalid group in IDENTITIES override rejected", async () => {
+test("identity groups - invalid group in IDENTITIES override rejected", async () => {
   await withTestConfig(identityConfig(""), async (dir) => {
     const override = JSON.stringify([{ id: "alice", accounts: ["discord/123", "discord/123"] }]);
     await withEnv("IDENTITIES", override, async () => {

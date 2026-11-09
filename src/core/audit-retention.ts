@@ -1,7 +1,9 @@
 // src/core/audit-retention.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { join } from "@std/path";
+import { join } from "node:path";
+import fsp from "node:fs/promises";
+import { isNotFoundError, removePath } from "../utils/fs-compat.ts";
 
 const logger = createLogger("AuditRetention");
 
@@ -17,29 +19,29 @@ export async function cleanupAuditLogs(
   let deletedCount = 0;
 
   try {
-    for await (const entry of Deno.readDir(auditBasePath)) {
-      if (!entry.isDirectory) continue;
+    for (const entry of await fsp.readdir(auditBasePath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       const platformDir = join(auditBasePath, entry.name);
-      for await (const userEntry of Deno.readDir(platformDir)) {
-        if (!userEntry.isDirectory) continue;
+      for (const userEntry of await fsp.readdir(platformDir, { withFileTypes: true })) {
+        if (!userEntry.isDirectory()) continue;
         const userDir = join(platformDir, userEntry.name);
-        for await (const fileEntry of Deno.readDir(userDir)) {
+        for (const fileEntry of await fsp.readdir(userDir, { withFileTypes: true })) {
           if (!fileEntry.name.endsWith(".jsonl")) continue;
           const filePath = join(userDir, fileEntry.name);
-          const stat = await Deno.stat(filePath);
+          const stat = await fsp.stat(filePath);
           if (stat.mtime && stat.mtime.getTime() < cutoff) {
-            await Deno.remove(filePath);
+            await removePath(filePath);
             deletedCount++;
           }
         }
         // Remove empty user directories
         try {
-          await Deno.remove(userDir);
+          await removePath(userDir);
         } catch { /* non-empty directory, skip */ }
       }
     }
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
+    if (!(isNotFoundError(error))) {
       logger.warn("Audit cleanup encountered an error", {
         error: error instanceof Error ? error.message : String(error),
       });

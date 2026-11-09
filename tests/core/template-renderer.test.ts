@@ -7,14 +7,17 @@ import {
   renderTemplateString,
 } from "@core/template-renderer.ts";
 import { ConfigError } from "../../src/types/errors.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
-Deno.test("renderTemplateString - basic variable interpolation", async () => {
+test("renderTemplateString - basic variable interpolation", async () => {
   const env = createTemplateEngine(".");
   const result = await renderTemplateString(env, "Hello {{ name }}", { name: "World" });
   assertEquals(result, "Hello World");
 });
 
-Deno.test("renderTemplateString - conditional rendering with isDm", async () => {
+test("renderTemplateString - conditional rendering with isDm", async () => {
   const env = createTemplateEngine(".");
   const template = `{{ if isDm }}DM mode{{ else }}Public mode{{ /if }}`;
 
@@ -25,14 +28,14 @@ Deno.test("renderTemplateString - conditional rendering with isDm", async () => 
   assertEquals(publicResult, "Public mode");
 });
 
-Deno.test("renderTemplateString - platform variable", async () => {
+test("renderTemplateString - platform variable", async () => {
   const env = createTemplateEngine(".");
   const template = `Platform: {{ platform }}`;
   const result = await renderTemplateString(env, template, { platform: "discord" });
   assertEquals(result, "Platform: discord");
 });
 
-Deno.test("renderTemplateString - platform conditional", async () => {
+test("renderTemplateString - platform conditional", async () => {
   const env = createTemplateEngine(".");
   const template =
     `{{ if platform === "discord" }}Discord{{ else if platform === "misskey" }}Misskey{{ /if }}`;
@@ -44,36 +47,36 @@ Deno.test("renderTemplateString - platform conditional", async () => {
   assertEquals(misskey, "Misskey");
 });
 
-Deno.test("renderTemplateString - set and reuse variable", async () => {
+test("renderTemplateString - set and reuse variable", async () => {
   const env = createTemplateEngine(".");
   const template = `{{- set greeting }}Hello{{ /set -}}\n{{ greeting }}, {{ greeting }}!`;
   const result = await renderTemplateString(env, template, {});
   assertEquals(result, "Hello, Hello!");
 });
 
-Deno.test("renderTemplateString - trimming whitespace", async () => {
+test("renderTemplateString - trimming whitespace", async () => {
   const env = createTemplateEngine(".");
   const result = await renderTemplateString(env, "  Hello World  ", {});
   assertEquals(result, "Hello World");
 });
 
-Deno.test("renderTemplate - renders file with variables", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("renderTemplate - renders file with variables", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${tempDir}/test.md`, "Hello {{ name }}!");
+    await fsp.writeFile(`${tempDir}/test.md`, "Hello {{ name }}!");
     const env = createTemplateEngine(tempDir);
     const result = await renderTemplate(env, `${tempDir}/test.md`, { name: "Yuna" });
     assertEquals(result, "Hello Yuna!");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("renderTemplate - include works", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("renderTemplate - include works", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${tempDir}/fragment.md`, "World");
-    await Deno.writeTextFile(
+    await fsp.writeFile(`${tempDir}/fragment.md`, "World");
+    await fsp.writeFile(
       `${tempDir}/main.md`,
       '{{- set name }}{{ include "./fragment.md" }}{{ /set -}}\nHello {{ name }}!',
     );
@@ -81,11 +84,11 @@ Deno.test("renderTemplate - include works", async () => {
     const result = await renderTemplate(env, `${tempDir}/main.md`, {});
     assertEquals(result, "Hello World!");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("renderTemplate - throws ConfigError on missing file", async () => {
+test("renderTemplate - throws ConfigError on missing file", async () => {
   const env = createTemplateEngine(".");
   await assertRejects(
     () => renderTemplate(env, "/nonexistent/path.md", {}),
@@ -93,21 +96,21 @@ Deno.test("renderTemplate - throws ConfigError on missing file", async () => {
   );
 });
 
-Deno.test("renderTemplateString - JavaScript expressions", async () => {
+test("renderTemplateString - JavaScript expressions", async () => {
   const env = createTemplateEngine(".");
   const template = `{{ isDm ? "Private" : "Public" }}`;
   const result = await renderTemplateString(env, template, { isDm: true });
   assertEquals(result, "Private");
 });
 
-Deno.test("renderTemplateString - optional variables render empty when undefined", async () => {
+test("renderTemplateString - optional variables render empty when undefined", async () => {
   const env = createTemplateEngine(".");
   const template = `{{ if rssItems }}{{ rssItems }}{{ else }}No items{{ /if }}`;
   const result = await renderTemplateString(env, template, {});
   assertEquals(result, "No items");
 });
 
-Deno.test("renderTemplateString - Vento comment syntax", async () => {
+test("renderTemplateString - Vento comment syntax", async () => {
   const env = createTemplateEngine(".");
   const template = `{{# This is a comment #}}Hello`;
   const result = await renderTemplateString(env, template, {});
@@ -116,7 +119,7 @@ Deno.test("renderTemplateString - Vento comment syntax", async () => {
 
 // ============ canWriteAgentWorkspace Template Variable Tests ============
 
-Deno.test("canWriteAgentWorkspace - true with yolo false shows write instructions", async () => {
+test("canWriteAgentWorkspace - true with yolo false shows write instructions", async () => {
   const env = createTemplateEngine(".");
   const template =
     `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
@@ -127,7 +130,7 @@ Deno.test("canWriteAgentWorkspace - true with yolo false shows write instruction
   assertEquals(result, "write-enabled");
 });
 
-Deno.test("canWriteAgentWorkspace - false with yolo false shows read-only", async () => {
+test("canWriteAgentWorkspace - false with yolo false shows read-only", async () => {
   const env = createTemplateEngine(".");
   const template =
     `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
@@ -138,7 +141,7 @@ Deno.test("canWriteAgentWorkspace - false with yolo false shows read-only", asyn
   assertEquals(result, "read-only");
 });
 
-Deno.test("canWriteAgentWorkspace - false with yolo true shows write instructions", async () => {
+test("canWriteAgentWorkspace - false with yolo true shows write instructions", async () => {
   const env = createTemplateEngine(".");
   const template =
     `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
@@ -149,7 +152,7 @@ Deno.test("canWriteAgentWorkspace - false with yolo true shows write instruction
   assertEquals(result, "write-enabled");
 });
 
-Deno.test("canWriteAgentWorkspace - undefined with yolo false shows read-only (backward compat)", async () => {
+test("canWriteAgentWorkspace - undefined with yolo false shows read-only (backward compat)", async () => {
   const env = createTemplateEngine(".");
   const template =
     `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;

@@ -1,13 +1,16 @@
 // tests/core/identity-registry.test.ts
 
 import { assertEquals, assertThrows } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { IdentityRegistry } from "@core/identity-registry.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { pathExists } from "@utils/path-validator.ts";
 import type { IdentityGroupConfig } from "../../src/types/config.ts";
 import type { Platform } from "../../src/types/events.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 /** Build the WorkspaceInfo a session would hold for one account. */
 function workspaceInfo(
@@ -27,8 +30,8 @@ function workspaceInfo(
   };
 }
 
-Deno.test("IdentityRegistry - linked workspaces follow configuration order", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("IdentityRegistry - linked workspaces follow configuration order", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const emailUserId = `e_${"a".repeat(64)}`;
@@ -49,12 +52,12 @@ Deno.test("IdentityRegistry - linked workspaces follow configuration order", asy
       assertEquals(`${info.components.platform}/${info.components.userId}`, info.key);
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdentityRegistry - isDm is propagated for both values", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("IdentityRegistry - isDm is propagated for both values", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const registry = new IdentityRegistry(
@@ -69,12 +72,12 @@ Deno.test("IdentityRegistry - isDm is propagated for both values", async () => {
       assertEquals(linked[0].isDm, isDm);
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdentityRegistry - unlinked account and single-account group return no workspaces", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("IdentityRegistry - unlinked account and single-account group return no workspaces", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const registry = new IdentityRegistry(
@@ -85,12 +88,12 @@ Deno.test("IdentityRegistry - unlinked account and single-account group return n
     assertEquals(registry.linkedWorkspaces(workspaceInfo(manager, "misskey", "2", false)), []);
     assertEquals(registry.linkedWorkspaces(workspaceInfo(manager, "discord", "9", false)), []);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdentityRegistry - group label lookup and group count", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("IdentityRegistry - group label lookup and group count", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const registry = new IdentityRegistry([
@@ -103,12 +106,12 @@ Deno.test("IdentityRegistry - group label lookup and group count", async () => {
     assertEquals(registry.groupOf("discord/99"), undefined);
     assertEquals(registry.groupCount, 2);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdentityRegistry - account listed in two groups throws", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("IdentityRegistry - account listed in two groups throws", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const error = assertThrows(
@@ -122,12 +125,12 @@ Deno.test("IdentityRegistry - account listed in two groups throws", async () => 
 
     assertEquals(error.message, "Identity account listed in more than one group: bob");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdentityRegistry - lookup never creates the linked workspace", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("IdentityRegistry - lookup never creates the linked workspace", async () => {
+  const tempDir = await makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
     const registry = new IdentityRegistry(
@@ -141,6 +144,6 @@ Deno.test("IdentityRegistry - lookup never creates the linked workspace", async 
     assertEquals(await pathExists(linked[0].path), false);
     assertEquals(await pathExists(join(tempDir, "workspaces")), false);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });

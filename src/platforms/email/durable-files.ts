@@ -6,7 +6,7 @@
 // strict directory/file fsync ordering, path confinement, private permissions,
 // and safe diagnostic codes (never leaking private line contents).
 
-import { isAbsolute, normalize, relative, resolve } from "@std/path";
+import { isAbsolute, normalize, relative, resolve } from "node:path";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
 import { createLogger } from "@utils/logger.ts";
 

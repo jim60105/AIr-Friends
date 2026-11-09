@@ -80,7 +80,7 @@ import type {
   MCPServerConfig,
   PermissionRejection,
 } from "@acp/types.ts";
-import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafePath, canonicalizeRoot } from "../platforms/email/durable-files.ts";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";

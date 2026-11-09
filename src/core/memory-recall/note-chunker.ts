@@ -1,6 +1,6 @@
 // src/core/memory-recall/note-chunker.ts
 
-import { basename } from "@std/path";
+import { basename } from "node:path";
 
 /**
  * A chunk is split again at blank lines when its text is longer than this

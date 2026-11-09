@@ -6,6 +6,7 @@ import { extractChannelLurkIds } from "@platforms/discord/index.ts";
 import type { ChannelLurkConfig } from "../../src/types/config.ts";
 import type { PlatformMessage } from "../../src/types/events.ts";
 import { MockPlatformAdapter } from "../mocks/mock-platform-adapter.ts";
+import { test } from "bun:test";
 
 function createConfig(overrides?: Partial<ChannelLurkConfig>): ChannelLurkConfig {
   return {
@@ -27,7 +28,7 @@ function createMockMessage(overrides?: Partial<PlatformMessage>): PlatformMessag
   };
 }
 
-Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
+test("extractDiscordChannelIds - filters discord channel entries", () => {
   const channels = [
     { id: "discord/channel/11100000000000000", enabled: true, channelLurk: true },
     { id: "discord/account/22200000000000000", enabled: true, channelLurk: false },
@@ -38,7 +39,7 @@ Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
   assertEquals(result, ["11100000000000000", "44400000000000000"]);
 });
 
-Deno.test("extractChannelLurkIds - returns empty for no matches", () => {
+test("extractChannelLurkIds - returns empty for no matches", () => {
   const result = extractChannelLurkIds([
     { id: "discord/account/12345678901234567", enabled: true, channelLurk: false },
     { id: "misskey/account/456", enabled: true, channelLurk: false },
@@ -46,7 +47,7 @@ Deno.test("extractChannelLurkIds - returns empty for no matches", () => {
   assertEquals(result, []);
 });
 
-Deno.test("ChannelLurkScheduler - triggers callback when all conditions met", async () => {
+test("ChannelLurkScheduler - triggers callback when all conditions met", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage();
   adapter.setMockMessages([message]);
@@ -77,7 +78,7 @@ Deno.test("ChannelLurkScheduler - triggers callback when all conditions met", as
   assertEquals(capturedMessage?.messageId, "msg-001");
 });
 
-Deno.test("ChannelLurkScheduler - skips when last message is from bot", async () => {
+test("ChannelLurkScheduler - skips when last message is from bot", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage({ userId: "bot-123" }); // bot's own ID
   adapter.setMockMessages([message]);
@@ -99,7 +100,7 @@ Deno.test("ChannelLurkScheduler - skips when last message is from bot", async ()
   assertEquals(triggered, false);
 });
 
-Deno.test("ChannelLurkScheduler - skips when no messages in channel", async () => {
+test("ChannelLurkScheduler - skips when no messages in channel", async () => {
   const adapter = new MockPlatformAdapter();
   adapter.setMockMessages([]);
 
@@ -120,7 +121,7 @@ Deno.test("ChannelLurkScheduler - skips when no messages in channel", async () =
   assertEquals(triggered, false);
 });
 
-Deno.test("ChannelLurkScheduler - skips already processed messageId", async () => {
+test("ChannelLurkScheduler - skips already processed messageId", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage();
   adapter.setMockMessages([message]);
@@ -144,7 +145,7 @@ Deno.test("ChannelLurkScheduler - skips already processed messageId", async () =
   assertEquals(triggerCount, 1);
 });
 
-Deno.test("ChannelLurkScheduler - start/stop lifecycle", () => {
+test("ChannelLurkScheduler - start/stop lifecycle", () => {
   const adapter = new MockPlatformAdapter();
   const scheduler = new ChannelLurkScheduler(
     createConfig(),
@@ -160,7 +161,7 @@ Deno.test("ChannelLurkScheduler - start/stop lifecycle", () => {
   scheduler.stop();
 });
 
-Deno.test("ChannelLurkScheduler - disabled config does not start", async () => {
+test("ChannelLurkScheduler - disabled config does not start", async () => {
   const adapter = new MockPlatformAdapter();
   adapter.setMockMessages([createMockMessage()]);
 
@@ -181,7 +182,7 @@ Deno.test("ChannelLurkScheduler - disabled config does not start", async () => {
   assertEquals(triggered, false);
 });
 
-Deno.test("ChannelLurkScheduler - skips when bot mentioned in message", async () => {
+test("ChannelLurkScheduler - skips when bot mentioned in message", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage();
   adapter.setMockMessages([message]);
@@ -205,7 +206,7 @@ Deno.test("ChannelLurkScheduler - skips when bot mentioned in message", async ()
   assertEquals(triggered, false);
 });
 
-Deno.test("ChannelLurkScheduler - skips when bot already reacted", async () => {
+test("ChannelLurkScheduler - skips when bot already reacted", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage();
   adapter.setMockMessages([message]);
@@ -229,7 +230,7 @@ Deno.test("ChannelLurkScheduler - skips when bot already reacted", async () => {
   assertEquals(triggered, false);
 });
 
-Deno.test("ChannelLurkScheduler - continues after single channel error", async () => {
+test("ChannelLurkScheduler - continues after single channel error", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage();
   adapter.setMockMessages([message]);
@@ -265,7 +266,7 @@ Deno.test("ChannelLurkScheduler - continues after single channel error", async (
   assertEquals(triggeredChannels.includes("channel-2"), true);
 });
 
-Deno.test("ChannelLurkScheduler - triggers for new messageId after previous", async () => {
+test("ChannelLurkScheduler - triggers for new messageId after previous", async () => {
   const adapter = new MockPlatformAdapter();
   const message1 = createMockMessage({ messageId: "msg-001" });
   adapter.setMockMessages([message1]);
@@ -296,7 +297,7 @@ Deno.test("ChannelLurkScheduler - triggers for new messageId after previous", as
 
 // === State Restoration Tests ===
 
-Deno.test("ChannelLurkScheduler - uses restored schedule time within valid range", () => {
+test("ChannelLurkScheduler - uses restored schedule time within valid range", () => {
   const adapter = new MockPlatformAdapter();
   const scheduler = new ChannelLurkScheduler(
     createConfig({ intervalMs: 5000 }),
@@ -312,7 +313,7 @@ Deno.test("ChannelLurkScheduler - uses restored schedule time within valid range
   scheduler.stop();
 });
 
-Deno.test("ChannelLurkScheduler - executes immediately when restored time is past", async () => {
+test("ChannelLurkScheduler - executes immediately when restored time is past", async () => {
   const adapter = new MockPlatformAdapter();
   const message = createMockMessage();
   adapter.setMockMessages([message]);
@@ -335,7 +336,7 @@ Deno.test("ChannelLurkScheduler - executes immediately when restored time is pas
   scheduler.stop();
 });
 
-Deno.test("ChannelLurkScheduler - persists next time via stateStore", () => {
+test("ChannelLurkScheduler - persists next time via stateStore", () => {
   const adapter = new MockPlatformAdapter();
   adapter.setMockMessages([createMockMessage()]);
 

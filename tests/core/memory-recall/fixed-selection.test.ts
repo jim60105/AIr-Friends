@@ -5,6 +5,7 @@ import { renderFixedMemoryLine, selectFixedMemories } from "@core/memory-recall/
 import { estimateTokens } from "@utils/token-counter.ts";
 import type { ResolvedMemory } from "../../../src/types/memory.ts";
 import { makeMemory } from "./memory-fixture.ts";
+import { test } from "bun:test";
 
 /** Default budgets of `memory.recall` (design §10). */
 const BUDGETS = { coreMaxTokens: 512, workingMaxItems: 4, workingMaxTokens: 384 };
@@ -45,7 +46,7 @@ const SMALL = "x".repeat(32); // 10 tokens
 const TINY = "x".repeat(8); // 4 tokens
 const MICRO = "x".repeat(4); // 2 tokens at a 1-digit prefix, 3 at a 2-digit one
 
-Deno.test("selectFixedMemories - core memories within budget are all kept, oldest first", () => {
+test("selectFixedMemories - core memories within budget are all kept, oldest first", () => {
   // 15 core memories of 18 tokens each: 270 of the 512 tokens.
   const userCore = Array.from(
     { length: 15 },
@@ -61,7 +62,7 @@ Deno.test("selectFixedMemories - core memories within budget are all kept, oldes
   assertEquals(sectionTokens(selection.userCore) <= BUDGETS.coreMaxTokens, true);
 });
 
-Deno.test("selectFixedMemories - a long core memory is skipped whole and later ones are kept", () => {
+test("selectFixedMemories - a long core memory is skipped whole and later ones are kept", () => {
   const userCore = [
     mem("first", 0, { tier: "core", content: MICRO }),
     mem("huge", 1, { tier: "core", content: LONG }),
@@ -79,7 +80,7 @@ Deno.test("selectFixedMemories - a long core memory is skipped whole and later o
   assertEquals(selection.injectedIds.includes("huge"), false);
 });
 
-Deno.test("selectFixedMemories - core is one shared budget, user entries before channel ones", () => {
+test("selectFixedMemories - core is one shared budget, user entries before channel ones", () => {
   const userCore = Array.from(
     { length: 3 },
     (_, i) => mem(`u${i}`, i, { tier: "core", content: MEDIUM }),
@@ -105,7 +106,7 @@ Deno.test("selectFixedMemories - core is one shared budget, user entries before 
   );
 });
 
-Deno.test("selectFixedMemories - the newest working memories are selected by default", () => {
+test("selectFixedMemories - the newest working memories are selected by default", () => {
   // 25 working memories of 50 tokens each; the newest 4 are w21..w24.
   const userWorking = Array.from(
     { length: 25 },
@@ -122,7 +123,7 @@ Deno.test("selectFixedMemories - the newest working memories are selected by def
   assertEquals(sectionTokens(selection.userWorking) <= BUDGETS.workingMaxTokens, true);
 });
 
-Deno.test("selectFixedMemories - workingMaxItems caps the selection", () => {
+test("selectFixedMemories - workingMaxItems caps the selection", () => {
   const userWorking = Array.from(
     { length: 25 },
     (_, i) => mem(`w${i}`, i, { tier: "working", content: "x".repeat(178) }),
@@ -136,7 +137,7 @@ Deno.test("selectFixedMemories - workingMaxItems caps the selection", () => {
   assertEquals(ids(selection.userWorking), ["w23", "w24"]);
 });
 
-Deno.test("selectFixedMemories - the working token budget is enforced", () => {
+test("selectFixedMemories - the working token budget is enforced", () => {
   // The 4 newest working memories total 600 tokens; only 2 fit in 384.
   const userWorking = Array.from(
     { length: 4 },
@@ -152,7 +153,7 @@ Deno.test("selectFixedMemories - the working token budget is enforced", () => {
   assertEquals(sectionTokens(selection.userWorking) <= BUDGETS.workingMaxTokens, true);
 });
 
-Deno.test("selectFixedMemories - the working budget keeps the entries that fill it exactly", () => {
+test("selectFixedMemories - the working budget keeps the entries that fill it exactly", () => {
   // Five working memories of 96 tokens each: four fill the 384-token budget
   // exactly, and the fifth is skipped rather than replacing an earlier one.
   const userWorking = Array.from(
@@ -170,7 +171,7 @@ Deno.test("selectFixedMemories - the working budget keeps the entries that fill 
   assertEquals(selection.injectedIds.includes("w0"), false);
 });
 
-Deno.test("selectFixedMemories - a working candidate skipped for size is not replaced", () => {
+test("selectFixedMemories - a working candidate skipped for size is not replaced", () => {
   const userWorking = [
     mem("w0", 0, { tier: "working", content: SMALL }),
     mem("w1", 1, { tier: "working", content: SMALL }),
@@ -190,7 +191,7 @@ Deno.test("selectFixedMemories - a working candidate skipped for size is not rep
   assertEquals(selection.injectedIds.includes("w0"), false);
 });
 
-Deno.test("selectFixedMemories - importance does not promote a memory into the fixed set", () => {
+test("selectFixedMemories - importance does not promote a memory into the fixed set", () => {
   const userWorking = Array.from({ length: 5 }, (_, i) =>
     mem(`w${i}`, i, {
       tier: "working",
@@ -207,7 +208,7 @@ Deno.test("selectFixedMemories - importance does not promote a memory into the f
   assertEquals(ids(selection.userWorking), ["w1", "w2", "w3", "w4"]);
 });
 
-Deno.test("selectFixedMemories - channel and user working memories are merged", () => {
+test("selectFixedMemories - channel and user working memories are merged", () => {
   const userWorking = [0, 2, 4, 6, 8].map((seconds, i) =>
     mem(`u${i}`, seconds, { tier: "working", content: "x".repeat(178) })
   );
@@ -230,7 +231,7 @@ Deno.test("selectFixedMemories - channel and user working memories are merged", 
   assertEquals(ids(selection.channelWorking), ["ch3", "ch4"]);
 });
 
-Deno.test("selectFixedMemories - zero budgets select nothing", () => {
+test("selectFixedMemories - zero budgets select nothing", () => {
   const userCore = [mem("c0", 0, { tier: "core", content: MEDIUM })];
   const userWorking = [mem("w0", 0, { tier: "working", content: "x".repeat(178) })];
 
@@ -249,7 +250,7 @@ Deno.test("selectFixedMemories - zero budgets select nothing", () => {
   assertEquals(ids(noWorking.userCore), ["c0"]);
 });
 
-Deno.test("selectFixedMemories - equal createdAt is ordered by id, deterministically", () => {
+test("selectFixedMemories - equal createdAt is ordered by id, deterministically", () => {
   const userWorking = [
     mem("b", 0, { tier: "working", content: "x".repeat(178) }),
     mem("a", 0, { tier: "working", content: "x".repeat(178) }),
@@ -267,7 +268,7 @@ Deno.test("selectFixedMemories - equal createdAt is ordered by id, deterministic
   assertEquals(ids(first.userWorking), ids(second.userWorking));
 });
 
-Deno.test("selectFixedMemories - injectedIds is exactly the injected set", () => {
+test("selectFixedMemories - injectedIds is exactly the injected set", () => {
   const selection = selectFixedMemories(
     {
       userCore: [mem("u-core", 0, { tier: "core", content: MEDIUM })],
@@ -297,7 +298,7 @@ Deno.test("selectFixedMemories - injectedIds is exactly the injected set", () =>
   assertEquals(selection.injectedIds.length, injected.length);
 });
 
-Deno.test("selectFixedMemories - channel working entries follow the selected channel core", () => {
+test("selectFixedMemories - channel working entries follow the selected channel core", () => {
   // Ten channel core memories do not fit the core budget, so none is selected and
   // the channel working entry is numbered 1, not 11. Its line costs 5 tokens at a
   // 1-digit prefix and 6 at a 2-digit one, so a wrong offset drops it.
@@ -324,7 +325,7 @@ Deno.test("selectFixedMemories - channel working entries follow the selected cha
   assertEquals(ids(selection.channelWorking), ["ch-work"]);
 });
 
-Deno.test("selectFixedMemories - the rendered working sections stay within the budget", () => {
+test("selectFixedMemories - the rendered working sections stay within the budget", () => {
   // Twelve working candidates whose walk numbering and rendered numbering differ
   // across the ten-entry digit boundary: the walk measures 42 tokens, but the
   // chronologically numbered lines cost 45, so the oldest entry is dropped.
@@ -344,7 +345,7 @@ Deno.test("selectFixedMemories - the rendered working sections stay within the b
   assertEquals(sectionTokens(selection.userWorking) <= 42, true);
 });
 
-Deno.test("renderFixedMemoryLine - renders the numbered line the sections emit", () => {
+test("renderFixedMemoryLine - renders the numbered line the sections emit", () => {
   const memory = mem("m", 0, { content: "likes tea" });
   assertEquals(renderFixedMemoryLine(memory, 1, false), "1. likes tea");
 

@@ -2,8 +2,9 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { buildExcerpt, parseNote } from "@core/memory-recall/note-chunker.ts";
+import { test } from "bun:test";
 
-Deno.test("parseNote - chunks at level-2 and level-3 headings and keeps the heading path", () => {
+test("parseNote - chunks at level-2 and level-3 headings and keeps the heading path", () => {
   const content = [
     "# Guide",
     "",
@@ -50,7 +51,7 @@ Deno.test("parseNote - chunks at level-2 and level-3 headings and keeps the head
   ]);
 });
 
-Deno.test("parseNote - a heading inside a fenced code block does not split the chunk", () => {
+test("parseNote - a heading inside a fenced code block does not split the chunk", () => {
   const content = [
     "## Code",
     "text before",
@@ -70,7 +71,7 @@ Deno.test("parseNote - a heading inside a fenced code block does not split the c
   assertEquals(note.chunks[0].text, content);
 });
 
-Deno.test("parseNote - a heading-less note is one chunk titled by its file name", () => {
+test("parseNote - a heading-less note is one chunk titled by its file name", () => {
   const note = parseNote("just text\nmore text\n", "/ws/journal/2026-09-20.md");
 
   assertEquals(note.title, "2026-09-20");
@@ -84,7 +85,7 @@ Deno.test("parseNote - a heading-less note is one chunk titled by its file name"
   ]);
 });
 
-Deno.test("parseNote - a note that starts with a level-2 heading has no intro chunk", () => {
+test("parseNote - a note that starts with a level-2 heading has no intro chunk", () => {
   const note = parseNote("## Only\ntext", "/ws/notes/only.md");
 
   assertEquals(note.title, "only");
@@ -93,7 +94,7 @@ Deno.test("parseNote - a note that starts with a level-2 heading has no intro ch
   ]);
 });
 
-Deno.test("parseNote - a chunk longer than 600 characters splits at blank lines", () => {
+test("parseNote - a chunk longer than 600 characters splits at blank lines", () => {
   const paragraphs = ["a".repeat(300), "b".repeat(300), "c".repeat(300)];
   const content = ["## Long", paragraphs[0], "", paragraphs[1], "", paragraphs[2]].join("\n");
 
@@ -111,7 +112,7 @@ Deno.test("parseNote - a chunk longer than 600 characters splits at blank lines"
   }
 });
 
-Deno.test("parseNote - a paragraph longer than 600 characters stands alone", () => {
+test("parseNote - a paragraph longer than 600 characters stands alone", () => {
   const content = "x".repeat(700);
 
   const note = parseNote(content, "/ws/notes/huge.md");
@@ -120,20 +121,20 @@ Deno.test("parseNote - a paragraph longer than 600 characters stands alone", () 
   assertEquals(note.chunks[0].text, content);
 });
 
-Deno.test("buildExcerpt - picks the sentence with the most distinct matched terms", () => {
+test("buildExcerpt - picks the sentence with the most distinct matched terms", () => {
   const text = "Alpha beta。Gamma delta epsilon.";
 
   assertEquals(buildExcerpt(text, ["gamma", "delta"], 320), "Gamma delta epsilon.");
 });
 
-Deno.test("buildExcerpt - a tie goes to the earliest sentence", () => {
+test("buildExcerpt - a tie goes to the earliest sentence", () => {
   const text = "one alpha。two alpha。";
 
   // The limit leaves room for the first sentence only, so the tie is visible.
   assertEquals(buildExcerpt(text, ["alpha"], 12), "one alpha。");
 });
 
-Deno.test("buildExcerpt - appends the following sentences while under the limit", () => {
+test("buildExcerpt - appends the following sentences while under the limit", () => {
   const text = "First alpha。Second beta。Third gamma。";
 
   assertEquals(
@@ -142,7 +143,7 @@ Deno.test("buildExcerpt - appends the following sentences while under the limit"
   );
 });
 
-Deno.test("buildExcerpt - cuts around the first matched term and marks both ends", () => {
+test("buildExcerpt - cuts around the first matched term and marks both ends", () => {
   const text = `${"x".repeat(200)} Portaly ${"y".repeat(200)}`;
   const maxChars = 100;
 
@@ -155,6 +156,6 @@ Deno.test("buildExcerpt - cuts around the first matched term and marks both ends
   assert(excerpt.length <= maxChars + 2, `excerpt is ${excerpt.length} characters`);
 });
 
-Deno.test("buildExcerpt - an unmatched note still yields an excerpt", () => {
+test("buildExcerpt - an unmatched note still yields an excerpt", () => {
   assertEquals(buildExcerpt("no terms here.", [], 320), "no terms here.");
 });

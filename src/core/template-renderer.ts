@@ -1,8 +1,8 @@
 // src/core/template-renderer.ts
 
 import vento from "ventojs";
-import type { Environment } from "ventojs/core/environment.ts";
-import { resolve } from "@std/path";
+import type { Environment } from "ventojs/core/environment.js";
+import { resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { quoteShellArgument, skillScriptPath } from "./skills-root.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";

@@ -9,6 +9,7 @@ import {
 } from "@core/memory-recall/ranker.ts";
 import type { QueryHints, ScoredMemory } from "@core/memory-recall/types.ts";
 import { DAY_MS, index, noteFile, NOW } from "./memory-fixture.ts";
+import { test } from "bun:test";
 
 const NO_HINTS: QueryHints = { current: false, historical: false, preference: false };
 
@@ -25,7 +26,7 @@ function byId(scored: ScoredMemory[], id: string): ScoredMemory {
   return found;
 }
 
-Deno.test("scoreMemories - BM25 over a three-document population", () => {
+test("scoreMemories - BM25 over a three-document population", () => {
   const population = [
     index({ id: "d1", content: "keyboard" }),
     index({ id: "d2", content: "keyboard mouse pad" }),
@@ -44,7 +45,7 @@ Deno.test("scoreMemories - BM25 over a three-document population", () => {
   assertAlmostEquals(scored[1].lexicalScore, Math.log(1.6) * (2.2 / 2.92), 1e-9);
 });
 
-Deno.test("scoreMemories - the entity and phrase bonuses of a current-message entity", () => {
+test("scoreMemories - the entity and phrase bonuses of a current-message entity", () => {
   const population = [index({ content: "air75 v3" })];
   const scored = scoreMemories(population, buildQuery("air75 v3"), NO_HINTS, NOW);
 
@@ -55,7 +56,7 @@ Deno.test("scoreMemories - the entity and phrase bonuses of a current-message en
   assertAlmostEquals(entity.score, Math.log(4 / 3) * 3.5 + 3.7, 1e-9);
 });
 
-Deno.test("scoreMemories - the phrase bonus spans a CJK and an entity boundary", () => {
+test("scoreMemories - the phrase bonus spans a CJK and an entity boundary", () => {
   const population = [index({ content: "我在 AIr-Friends 用 OpenClaw 搭配 Air75 V3" })];
   const scored = scoreMemories(population, buildQuery("用 Air75 V3"), NO_HINTS, NOW);
 
@@ -63,7 +64,7 @@ Deno.test("scoreMemories - the phrase bonus spans a CJK and an entity boundary",
   assertAlmostEquals(scored[0].score - scored[0].lexicalScore, 3.7, 1e-9);
 });
 
-Deno.test("scoreMemories - the phrase bonus needs two adjacent tokens and four characters", () => {
+test("scoreMemories - the phrase bonus needs two adjacent tokens and four characters", () => {
   const population = [index({ content: "我喜歡喝無糖綠茶" })];
 
   // 無糖 + 綠茶 join into the four-character span 無糖綠茶: 2.0 phrase + 0.20 recency.
@@ -75,7 +76,7 @@ Deno.test("scoreMemories - the phrase bonus needs two adjacent tokens and four c
   assertAlmostEquals(single[0].score - single[0].lexicalScore, RECENCY_AT_NOW, 1e-9);
 });
 
-Deno.test("scoreMemories - the metadata bonus adds importance, tier and decay", () => {
+test("scoreMemories - the metadata bonus adds importance, tier and decay", () => {
   const population = [
     index({ id: "plain", content: "keyboard" }),
     index({ id: "rich", content: "keyboard", importance: "high", tier: "working", decay: 1.0 }),
@@ -88,7 +89,7 @@ Deno.test("scoreMemories - the metadata bonus adds importance, tier and decay", 
   assertAlmostEquals(scored[0].score - scored[1].score, 0.55, 1e-9);
 });
 
-Deno.test("scoreMemories - the recency bonus fades to zero over a year", () => {
+test("scoreMemories - the recency bonus fades to zero over a year", () => {
   const population = [
     index({ id: "fresh", content: "keyboard" }),
     index({
@@ -104,7 +105,7 @@ Deno.test("scoreMemories - the recency bonus fades to zero over a year", () => {
   assertAlmostEquals(scored[0].score - scored[1].score, RECENCY_AT_NOW, 1e-9);
 });
 
-Deno.test("scoreMemories - a preference query boosts preference memories", () => {
+test("scoreMemories - a preference query boosts preference memories", () => {
   const message = "我喜歡什麼茶";
   const hints = detectHints(message);
   assert(hints.preference);
@@ -123,7 +124,7 @@ Deno.test("scoreMemories - a preference query boosts preference memories", () =>
   assertAlmostEquals(scored[0].score - scored[1].score, 0.3, 1e-9);
 });
 
-Deno.test("scoreMemories - a current hint adds the recency term once more", () => {
+test("scoreMemories - a current hint adds the recency term once more", () => {
   const population = [index({ id: "m", content: "keyboard" })];
   const query = buildQuery("keyboard");
   const [without] = scoreMemories(population, query, NO_HINTS, NOW);
@@ -133,7 +134,7 @@ Deno.test("scoreMemories - a current hint adds the recency term once more", () =
   assertAlmostEquals(withCurrent.score - without.score, RECENCY_AT_NOW, 1e-9);
 });
 
-Deno.test("scoreMemories - a historical hint boosts superseded memories", () => {
+test("scoreMemories - a historical hint boosts superseded memories", () => {
   const population = [
     index({ id: "old", content: "keyboard" }),
     index({ id: "new", content: "keyboard", supersedes: ["old"] }),
@@ -146,7 +147,7 @@ Deno.test("scoreMemories - a historical hint boosts superseded memories", () => 
   assertEquals(byId(withHistorical, "new").score, byId(without, "new").score);
 });
 
-Deno.test("scoreMemories - an explicit supersede set is authoritative", () => {
+test("scoreMemories - an explicit supersede set is authoritative", () => {
   // The superseder was filtered out of the population, so the set is passed in.
   const population = [index({ id: "old", content: "keyboard" })];
   const query = buildQuery("keyboard");
@@ -157,7 +158,7 @@ Deno.test("scoreMemories - an explicit supersede set is authoritative", () => {
   assertAlmostEquals(explicit.score - inferred.score, 0.2, 1e-9);
 });
 
-Deno.test("scoreMemories - bonuses never apply without a lexical match", () => {
+test("scoreMemories - bonuses never apply without a lexical match", () => {
   const scored = scoreMemories(
     [
       index({ id: "match", content: "keyboard" }),
@@ -178,11 +179,11 @@ Deno.test("scoreMemories - bonuses never apply without a lexical match", () => {
   assertEquals(ids(scored), ["match"]);
 });
 
-Deno.test("scoreMemories - an empty population scores nothing", () => {
+test("scoreMemories - an empty population scores nothing", () => {
   assertEquals(scoreMemories([], buildQuery("keyboard"), NO_HINTS, NOW), []);
 });
 
-Deno.test("scoreMemories - lexical relevance outranks metadata", () => {
+test("scoreMemories - lexical relevance outranks metadata", () => {
   // The weak memory carries every metadata bonus; the strong one only decay 0.3.
   const scored = scoreMemories(
     [
@@ -205,7 +206,7 @@ Deno.test("scoreMemories - lexical relevance outranks metadata", () => {
   assert(scored[0].score > scored[1].score + 0.4);
 });
 
-Deno.test("scoreMemories - metadata breaks a near tie", () => {
+test("scoreMemories - metadata breaks a near tie", () => {
   const scored = scoreMemories(
     [
       index({ id: "aaa-normal", content: "keyboard" }),
@@ -220,7 +221,7 @@ Deno.test("scoreMemories - metadata breaks a near tie", () => {
   assertAlmostEquals(scored[0].score - scored[1].score, 0.2, 1e-9);
 });
 
-Deno.test("scoreMemories - the previous message has limited influence", () => {
+test("scoreMemories - the previous message has limited influence", () => {
   const scored = scoreMemories(
     [
       index({ id: "previous-only", content: "mouse" }),
@@ -236,7 +237,7 @@ Deno.test("scoreMemories - the previous message has limited influence", () => {
   assertAlmostEquals(scored[1].lexicalScore / scored[0].lexicalScore, 0.35, 1e-12);
 });
 
-Deno.test("compareScoredMemories - orders by score, then createdAt, then id", () => {
+test("compareScoredMemories - orders by score, then createdAt, then id", () => {
   const older = "2026-01-01T00:00:00.000Z";
   const newer = "2026-06-01T00:00:00.000Z";
   const items: ScoredMemory[] = [
@@ -249,7 +250,7 @@ Deno.test("compareScoredMemories - orders by score, then createdAt, then id", ()
   assertEquals(ids([...items].sort(compareScoredMemories)), ["c", "z", "a", "b"]);
 });
 
-Deno.test("scoreMemories - repeated and reordered input gives deep-equal results", () => {
+test("scoreMemories - repeated and reordered input gives deep-equal results", () => {
   const build = () => [
     index({ id: "a", content: "我喜歡喝無糖綠茶" }),
     index({ id: "b", content: "keyboard mouse", decay: 0.5, importance: "high" }),
@@ -268,7 +269,7 @@ Deno.test("scoreMemories - repeated and reordered input gives deep-equal results
   assertEquals(first, reversed);
 });
 
-Deno.test("scoreNoteFiles - scores a chunk with note-only statistics and no memory metadata", () => {
+test("scoreNoteFiles - scores a chunk with note-only statistics and no memory metadata", () => {
   const scored = scoreNoteFiles(
     [noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "keyboard" }])],
     buildQuery("keyboard"),
@@ -282,7 +283,7 @@ Deno.test("scoreNoteFiles - scores a chunk with note-only statistics and no memo
   assertEquals(scored[0].best.chunk.headingPath, ["A"]);
 });
 
-Deno.test("scoreNoteFiles - aggregates per file with the best chunk as representative", () => {
+test("scoreNoteFiles - aggregates per file with the best chunk as representative", () => {
   const file = noteFile("/ws/notes/a.md", [
     { headingPath: ["A"], text: "keyboard" },
     { headingPath: ["B"], text: "keyboard keyboard keyboard" },
@@ -297,14 +298,14 @@ Deno.test("scoreNoteFiles - aggregates per file with the best chunk as represent
   assert(scored[0].best.score > scored[0].chunks[1].score);
 });
 
-Deno.test("scoreNoteFiles - a file without a matching chunk is absent", () => {
+test("scoreNoteFiles - a file without a matching chunk is absent", () => {
   const files = [noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "monitor" }])];
 
   assertEquals(scoreNoteFiles(files, buildQuery("keyboard")), []);
   assertEquals(scoreNoteFiles([], buildQuery("keyboard")), []);
 });
 
-Deno.test("scoreNoteFiles - files rank by best score, then by path", () => {
+test("scoreNoteFiles - files rank by best score, then by path", () => {
   const byScore = scoreNoteFiles(
     [
       noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "keyboard" }]),
@@ -324,7 +325,7 @@ Deno.test("scoreNoteFiles - files rank by best score, then by path", () => {
   assertEquals(byPath.map((item) => item.file.path), ["/ws/notes/a.md", "/ws/notes/b.md"]);
 });
 
-Deno.test("scoreNoteFiles - chunks of one file rank by score, then by line", () => {
+test("scoreNoteFiles - chunks of one file rank by score, then by line", () => {
   const file = noteFile("/ws/notes/a.md", [
     { headingPath: ["A"], text: "keyboard" },
     { headingPath: ["B"], text: "keyboard" },
@@ -340,7 +341,7 @@ Deno.test("scoreNoteFiles - chunks of one file rank by score, then by line", () 
   assert(scored[0].chunks[1].chunk.lineStart < scored[0].chunks[2].chunk.lineStart);
 });
 
-Deno.test("scoreNoteFiles - the entity and phrase bonuses apply to a note chunk", () => {
+test("scoreNoteFiles - the entity and phrase bonuses apply to a note chunk", () => {
   const scored = scoreNoteFiles(
     [noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "air75 v3" }])],
     buildQuery("air75 v3"),

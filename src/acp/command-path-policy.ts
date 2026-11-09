@@ -1,5 +1,5 @@
 /** Decision-time command containment; not protected command execution. */
-import { basename, dirname, resolve } from "@std/path";
+import { basename, dirname, resolve } from "node:path";
 import {
   opencodeDataRoot,
   opencodeToolOutputDir,

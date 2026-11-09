@@ -4,6 +4,7 @@ import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { RateLimiter } from "@core/rate-limiter.ts";
 import type { RateLimitConfig } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 function createConfig(overrides: Partial<RateLimitConfig> = {}): RateLimitConfig {
   return {
@@ -15,28 +16,28 @@ function createConfig(overrides: Partial<RateLimitConfig> = {}): RateLimitConfig
   };
 }
 
-Deno.test("RateLimiter - disabled always allows", () => {
+test("RateLimiter - disabled always allows", () => {
   const limiter = new RateLimiter(createConfig({ enabled: false }));
   for (let i = 0; i < 100; i++) {
     assertEquals(limiter.isAllowed("discord:user1"), true);
   }
 });
 
-Deno.test("RateLimiter - allows requests within limit", () => {
+test("RateLimiter - allows requests within limit", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 3 }));
   assertEquals(limiter.isAllowed("discord:user1"), true);
   assertEquals(limiter.isAllowed("discord:user1"), true);
   assertEquals(limiter.isAllowed("discord:user1"), true);
 });
 
-Deno.test("RateLimiter - blocks after exceeding limit", () => {
+test("RateLimiter - blocks after exceeding limit", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 2 }));
   assertEquals(limiter.isAllowed("discord:user1"), true);
   assertEquals(limiter.isAllowed("discord:user1"), true);
   assertEquals(limiter.isAllowed("discord:user1"), false);
 });
 
-Deno.test("RateLimiter - enters cooldown after exceeding", () => {
+test("RateLimiter - enters cooldown after exceeding", () => {
   using _time = new FakeTime();
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 1, cooldownMs: 30000 }));
 
@@ -47,7 +48,7 @@ Deno.test("RateLimiter - enters cooldown after exceeding", () => {
   assertEquals(limiter.isAllowed("discord:user1"), false);
 });
 
-Deno.test("RateLimiter - allows after cooldown expires", () => {
+test("RateLimiter - allows after cooldown expires", () => {
   using time = new FakeTime();
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 1, cooldownMs: 30000 }));
 
@@ -59,7 +60,7 @@ Deno.test("RateLimiter - allows after cooldown expires", () => {
   assertEquals(limiter.isAllowed("discord:user1"), true);
 });
 
-Deno.test("RateLimiter - sliding window expires old requests", () => {
+test("RateLimiter - sliding window expires old requests", () => {
   using time = new FakeTime();
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 2, windowMs: 60000 }));
 
@@ -73,7 +74,7 @@ Deno.test("RateLimiter - sliding window expires old requests", () => {
   assertEquals(limiter.isAllowed("discord:user1"), true);
 });
 
-Deno.test("RateLimiter - independent per user", () => {
+test("RateLimiter - independent per user", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 1 }));
   assertEquals(limiter.isAllowed("discord:user1"), true);
   assertEquals(limiter.isAllowed("discord:user1"), false);
@@ -81,7 +82,7 @@ Deno.test("RateLimiter - independent per user", () => {
   assertEquals(limiter.isAllowed("discord:user2"), true);
 });
 
-Deno.test("RateLimiter - cleanup removes expired entries", () => {
+test("RateLimiter - cleanup removes expired entries", () => {
   using time = new FakeTime();
   const limiter = new RateLimiter(createConfig({ windowMs: 60000 }));
 
@@ -93,7 +94,7 @@ Deno.test("RateLimiter - cleanup removes expired entries", () => {
   assertEquals(limiter.getRemainingRequests("discord:user1"), 3);
 });
 
-Deno.test("RateLimiter - reset clears user state", () => {
+test("RateLimiter - reset clears user state", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 1 }));
   limiter.isAllowed("discord:user1");
   assertEquals(limiter.isAllowed("discord:user1"), false);
@@ -102,7 +103,7 @@ Deno.test("RateLimiter - reset clears user state", () => {
   assertEquals(limiter.isAllowed("discord:user1"), true);
 });
 
-Deno.test("RateLimiter - getRemainingRequests returns correct count", () => {
+test("RateLimiter - getRemainingRequests returns correct count", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 3 }));
   assertEquals(limiter.getRemainingRequests("discord:user1"), 3);
   limiter.isAllowed("discord:user1");
@@ -111,19 +112,19 @@ Deno.test("RateLimiter - getRemainingRequests returns correct count", () => {
   assertEquals(limiter.getRemainingRequests("discord:user1"), 1);
 });
 
-Deno.test("RateLimiter - getRemainingRequests returns 0 during cooldown", () => {
+test("RateLimiter - getRemainingRequests returns 0 during cooldown", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 1 }));
   limiter.isAllowed("discord:user1");
   limiter.isAllowed("discord:user1"); // triggers cooldown
   assertEquals(limiter.getRemainingRequests("discord:user1"), 0);
 });
 
-Deno.test("RateLimiter - getRemainingRequests returns Infinity when disabled", () => {
+test("RateLimiter - getRemainingRequests returns Infinity when disabled", () => {
   const limiter = new RateLimiter(createConfig({ enabled: false }));
   assertEquals(limiter.getRemainingRequests("discord:user1"), Infinity);
 });
 
-Deno.test("RateLimiter - resetAll clears all state", () => {
+test("RateLimiter - resetAll clears all state", () => {
   const limiter = new RateLimiter(createConfig({ maxRequestsPerWindow: 1 }));
   limiter.isAllowed("discord:user1");
   limiter.isAllowed("discord:user2");

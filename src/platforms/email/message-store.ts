@@ -9,7 +9,7 @@
  * crash-safe recovery replaying in-memory indexes from disk.
  */
 
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import { BaseError, ErrorCode } from "../../types/errors.ts";
 import {
   appendDurable,

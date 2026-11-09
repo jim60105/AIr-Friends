@@ -3,6 +3,7 @@
 import { Jieba } from "@node-rs/jieba";
 import { createLogger } from "@utils/logger.ts";
 import type { SearchToken, TokenKind } from "./types.ts";
+import fs from "node:fs";
 
 const logger = createLogger("MemoryTokenizer");
 
@@ -71,7 +72,7 @@ let defaultSegmenter: Jieba | null | undefined;
 function loadDefaultSegmenter(): Jieba | null {
   if (defaultSegmenter === undefined) {
     try {
-      defaultSegmenter = Jieba.withDict(Deno.readFileSync(DICT_URL));
+      defaultSegmenter = Jieba.withDict(fs.readFileSync(DICT_URL));
     } catch {
       defaultSegmenter = null;
     }

@@ -1,6 +1,8 @@
 // src/core/scheduler-state-store.ts
 
 import { createLogger } from "@utils/logger.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../utils/fs-compat.ts";
 
 const logger = createLogger("SchedulerStateStore");
 
@@ -33,11 +35,11 @@ export class SchedulerStateStore {
    */
   async load(): Promise<SchedulerState> {
     try {
-      const text = await Deno.readTextFile(this.filePath);
+      const text = await fsp.readFile(this.filePath, "utf8");
       this.cache = JSON.parse(text) as SchedulerState;
       logger.info("Scheduler state loaded from {filePath}", { filePath: this.filePath });
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         logger.info("No scheduler state file found at {filePath}, starting fresh", {
           filePath: this.filePath,
         });
@@ -63,7 +65,7 @@ export class SchedulerStateStore {
     this.cache[key] = nextAt.toISOString();
 
     try {
-      await Deno.writeTextFile(this.filePath, JSON.stringify(this.cache, null, 2) + "\n");
+      await fsp.writeFile(this.filePath, JSON.stringify(this.cache, null, 2) + "\n");
     } catch (error) {
       logger.warn("Failed to save scheduler state for {key}: {error}", {
         key,
@@ -80,7 +82,7 @@ export class SchedulerStateStore {
     delete this.cache[key];
 
     try {
-      await Deno.writeTextFile(this.filePath, JSON.stringify(this.cache, null, 2) + "\n");
+      await fsp.writeFile(this.filePath, JSON.stringify(this.cache, null, 2) + "\n");
     } catch {
       // Ignore errors — non-critical operation
     }

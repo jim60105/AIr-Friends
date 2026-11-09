@@ -1,8 +1,8 @@
 // src/core/config-loader.ts
 
-import { parse as parseYaml } from "@std/yaml";
-import { exists } from "@std/fs";
-import { dirname } from "@std/path";
+import { parse as parseYaml } from "yaml";
+import { isNotFoundError, pathExists as exists } from "../utils/fs-compat.ts";
+import { dirname } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
@@ -36,6 +36,7 @@ import {
   EMAIL_WHITELIST_PATTERN,
   normalizeEmailMailbox,
 } from "../platforms/email/email-identity.ts";
+import fsp from "node:fs/promises";
 
 const logger = createLogger("ConfigLoader");
 export { expandEnvVars };
@@ -625,7 +626,7 @@ const REQUIRED_FIELDS = [
  */
 function expandEnvVars(value: string): string {
   return value.replace(/\$\{([^}]+)\}/g, (_match, varName) => {
-    return Deno.env.get(varName) ?? "";
+    return process.env[varName] ?? "";
   });
 }
 
@@ -1604,7 +1605,7 @@ function deepMerge(
  */
 async function loadYamlFile(path: string): Promise<Record<string, unknown>> {
   try {
-    const content = await Deno.readTextFile(path);
+    const content = await fsp.readFile(path, "utf8");
     const parsed = parseYaml(content);
 
     if (parsed === null || typeof parsed !== "object") {
@@ -1617,7 +1618,7 @@ async function loadYamlFile(path: string): Promise<Record<string, unknown>> {
 
     return parsed as Record<string, unknown>;
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
+    if (isNotFoundError(error)) {
       throw new ConfigError(
         ErrorCode.CONFIG_NOT_FOUND,
         `Configuration file not found: ${path}`,
@@ -1699,9 +1700,9 @@ export async function loadSystemPrompt(
   variables: TemplateVariables,
 ): Promise<string> {
   try {
-    await Deno.stat(path);
+    await fsp.stat(path);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
+    if (isNotFoundError(error)) {
       throw new ConfigError(
         ErrorCode.CONFIG_NOT_FOUND,
         `System prompt file not found: ${path}`,

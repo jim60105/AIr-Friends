@@ -1,15 +1,16 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env
+#!/usr/bin/env -S bun run --no-env-file
 // scripts/migrate-memory-v2.ts
 //
 // Migration script: adds v2 fields (tier, category, scope, decay) to legacy memory entries.
 // Safe to run multiple times (idempotent). Removes empty memory files as cleanup.
 //
 // Usage:
-//   deno run --allow-read --allow-write scripts/migrate-memory-v2.ts --data-dir ./data
+//   bun run --no-env-file scripts/migrate-memory-v2.ts --data-dir ./data
 
-import { join } from "jsr:@std/path@^1/join";
-import { parseArgs } from "jsr:@std/cli@^1/parse-args";
-import { exists } from "jsr:@std/fs@^1/exists";
+import { join } from "node:path";
+import { parseArgs } from "node:util";
+import fsp from "node:fs/promises";
+import { pathExists as exists, removePath } from "../src/utils/fs-compat.ts";
 
 interface MigrationStats {
   workspaces: number;
@@ -23,11 +24,11 @@ interface MigrationStats {
 const MEMORY_FILES = ["memory.public.jsonl", "memory.private.jsonl"] as const;
 
 function parseCliArgs(): { dataDir: string } {
-  const args = parseArgs(Deno.args, {
-    string: ["data-dir"],
-    default: { "data-dir": "./data" },
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: { "data-dir": { type: "string", default: "./data" } },
   });
-  return { dataDir: args["data-dir"] };
+  return { dataDir: values["data-dir"] };
 }
 
 function migrateLine(line: string): { output: string; migrated: boolean } {
@@ -69,7 +70,7 @@ function migrateLine(line: string): { output: string; migrated: boolean } {
 async function migrateFile(
   filePath: string,
 ): Promise<{ migrated: number; skipped: number }> {
-  const content = await Deno.readTextFile(filePath);
+  const content = await fsp.readFile(filePath, "utf8");
   const lines = content.split("\n");
 
   let migrated = 0;
@@ -89,14 +90,14 @@ async function migrateFile(
 
   // Atomic write: write to temp file then rename
   const tmpPath = filePath + ".tmp";
-  await Deno.writeTextFile(tmpPath, outputLines.join("\n"));
-  await Deno.rename(tmpPath, filePath);
+  await fsp.writeFile(tmpPath, outputLines.join("\n"));
+  await fsp.rename(tmpPath, filePath);
 
   return { migrated, skipped };
 }
 
 async function isEmptyFile(filePath: string): Promise<boolean> {
-  const content = await Deno.readTextFile(filePath);
+  const content = await fsp.readFile(filePath, "utf8");
   return content.trim().length === 0;
 }
 
@@ -110,11 +111,11 @@ async function discoverWorkspaces(dataDir: string): Promise<string[]> {
   }
 
   // Enumerate {platform}/{userId} directories
-  for await (const platformEntry of Deno.readDir(workspacesDir)) {
-    if (!platformEntry.isDirectory) continue;
+  for (const platformEntry of await fsp.readdir(workspacesDir, { withFileTypes: true })) {
+    if (!platformEntry.isDirectory()) continue;
     const platformDir = join(workspacesDir, platformEntry.name);
-    for await (const userEntry of Deno.readDir(platformDir)) {
-      if (!userEntry.isDirectory) continue;
+    for (const userEntry of await fsp.readdir(platformDir, { withFileTypes: true })) {
+      if (!userEntry.isDirectory()) continue;
       workspacePaths.push(join(platformDir, userEntry.name));
     }
   }
@@ -155,7 +156,7 @@ async function main(): Promise<void> {
       try {
         // Remove empty files as cleanup
         if (await isEmptyFile(filePath)) {
-          await Deno.remove(filePath);
+          await removePath(filePath);
           stats.filesRemoved++;
           console.log(`  🗑  ${fileName}: empty file removed`);
           continue;
