@@ -47,6 +47,8 @@ import {
   DurableFileOptions,
   replaceSnapshot,
 } from "./durable-files.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../../utils/fs-compat.ts";
 
 const logger = createLogger("EmailSpontaneousStore");
 
@@ -512,9 +514,9 @@ export class EmailSpontaneousStore {
     const filePath = await assertSafePath(canonicalRoot, SPONTANEOUS_SNAPSHOT_FILENAME);
     let text: string;
     try {
-      text = await Deno.readTextFile(filePath);
+      text = await fsp.readFile(filePath, "utf8");
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         return EMPTY_STATE;
       }
       throw new EmailSpontaneousStoreError(

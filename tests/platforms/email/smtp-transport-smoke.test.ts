@@ -19,6 +19,7 @@ import {
 } from "../../../src/platforms/email/outgoing-mime.ts";
 import { EmailSmtpClient, SmtpDiagnosticCode } from "../../../src/platforms/email/smtp-client.ts";
 import { EmailSmtpTestService } from "../../helpers/email-smtp-service.ts";
+import { test } from "bun:test";
 
 const OWNER = "e_" + "a".repeat(64);
 const FROM = "bot@example.com";
@@ -75,7 +76,7 @@ async function withService(
   }
 }
 
-Deno.test("Smoke: constructed bytes reach the wire verbatim with one envelope recipient", async () => {
+test("Smoke: constructed bytes reach the wire verbatim with one envelope recipient", async () => {
   await withService({ tlsMode: "tls", username: FROM, password: PASSWORD }, async (service) => {
     const constructed = await constructSmokeMessage("smoke-smtp-accepted");
     const result = await smtpClient(service, "tls").submit(constructed);
@@ -107,7 +108,7 @@ Deno.test("Smoke: constructed bytes reach the wire verbatim with one envelope re
   });
 });
 
-Deno.test("Smoke: accepted and rejected envelopes stay distinct with one DATA each", async () => {
+test("Smoke: accepted and rejected envelopes stay distinct with one DATA each", async () => {
   const rejected = await constructSmokeMessage("smoke-smtp-rejected");
 
   await withService(
@@ -151,7 +152,7 @@ Deno.test("Smoke: accepted and rejected envelopes stay distinct with one DATA ea
   );
 });
 
-Deno.test("Smoke: unsafe server receives no credentials and no message bytes", async () => {
+test("Smoke: unsafe server receives no credentials and no message bytes", async () => {
   await withService(
     {
       tlsMode: "starttls",
@@ -175,7 +176,7 @@ Deno.test("Smoke: unsafe server receives no credentials and no message bytes", a
   );
 });
 
-Deno.test("Smoke: lost final reply is unknown with no internal retry", async () => {
+test("Smoke: lost final reply is unknown with no internal retry", async () => {
   await withService(
     {
       tlsMode: "tls",

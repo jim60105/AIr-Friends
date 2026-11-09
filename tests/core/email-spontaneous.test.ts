@@ -14,7 +14,7 @@
 // across repeated calls and restarts, and target-owned session context.
 
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { ChannelConfig, Config, EmailConfig } from "../../src/types/config.ts";
 import { normalizeEmailMailbox } from "../../src/platforms/email/email-identity.ts";
 import { buildMailboxFingerprint, MailboxStore } from "../../src/platforms/email/mailbox-store.ts";
@@ -65,6 +65,9 @@ import type { EmailSpontaneousTarget } from "@core/spontaneous-target.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 const BOT = "bot@example.com";
 const SENDER = "alice@allowed-domain.org";
@@ -224,12 +227,12 @@ function makeOrchestrator(stack: Stack, dispatches: Dispatch[], text = "Spontane
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "email-spontaneous-targets-" });
+  const dir = await makeTempDir({ prefix: "email-spontaneous-targets-" });
   try {
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
+    await fsp.rm(dir, { recursive: true }).catch(() => {});
   }
 }
 
@@ -332,7 +335,7 @@ async function seedInbound(messageStore: EmailMessageStore): Promise<void> {
 
 async function readSnapshot(emailRoot: string): Promise<Snapshot> {
   return JSON.parse(
-    await Deno.readTextFile(join(emailRoot, SPONTANEOUS_SNAPSHOT_FILENAME)),
+    await fsp.readFile(join(emailRoot, SPONTANEOUS_SNAPSHOT_FILENAME), "utf8"),
   ) as Snapshot;
 }
 
@@ -364,7 +367,7 @@ async function restartSubmissionStore(emailRoot: string): Promise<SubmissionStor
   return restarted;
 }
 
-Deno.test("email spontaneous - only enabled accounts that explicitly opt in are targets", async () => {
+test("email spontaneous - only enabled accounts that explicitly opt in are targets", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base, [{ id: `email/account/${OWNER}`, enabled: true }]);
 
@@ -391,7 +394,7 @@ Deno.test("email spontaneous - only enabled accounts that explicitly opt in are 
   });
 });
 
-Deno.test("email spontaneous - opting out while markSubmitting is pending refuses SMTP and records failed", async () => {
+test("email spontaneous - opting out while markSubmitting is pending refuses SMTP and records failed", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -429,7 +432,7 @@ Deno.test("email spontaneous - opting out while markSubmitting is pending refuse
   });
 });
 
-Deno.test("email spontaneous - memory ownership: only the permitted target user's memories appear, not bot or other users", async () => {
+test("email spontaneous - memory ownership: only the permitted target user's memories appear, not bot or other users", async () => {
   await withTempDir(async (base) => {
     await buildStack(base);
     const workspaceManager = new WorkspaceManager({
@@ -437,8 +440,8 @@ Deno.test("email spontaneous - memory ownership: only the permitted target user'
       workspacesDir: "workspaces",
     });
     const memoryStore = new MemoryStore(workspaceManager, {});
-    await Deno.mkdir(join(base, "prompts"), { recursive: true });
-    await Deno.writeTextFile(join(base, "prompts", "system_spontaneous.md"), "Spontaneous prompt.");
+    await fsp.mkdir(join(base, "prompts"), { recursive: true });
+    await fsp.writeFile(join(base, "prompts", "system_spontaneous.md"), "Spontaneous prompt.");
     const contextAssembler = new ContextAssembler(memoryStore, {
       recentMessageLimit: 20,
       tokenLimit: 4000,
@@ -514,7 +517,7 @@ Deno.test("email spontaneous - memory ownership: only the permitted target user'
   });
 });
 
-Deno.test("email spontaneous - one tick binds the owner's new thread and sends one message", async () => {
+test("email spontaneous - one tick binds the owner's new thread and sends one message", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -589,7 +592,7 @@ Deno.test("email spontaneous - one tick binds the owner's new thread and sends o
   });
 });
 
-Deno.test("email spontaneous - consecutive ticks use distinct new threads with no reply headers", async () => {
+test("email spontaneous - consecutive ticks use distinct new threads with no reply headers", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -627,7 +630,7 @@ Deno.test("email spontaneous - consecutive ticks use distinct new threads with n
   });
 });
 
-Deno.test("email spontaneous - a repeated send in one tick is answered by the recorded operation", async () => {
+test("email spontaneous - a repeated send in one tick is answered by the recorded operation", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -660,7 +663,7 @@ Deno.test("email spontaneous - a repeated send in one tick is answered by the re
   });
 });
 
-Deno.test("email spontaneous - a restart after acceptance selects nothing and sends nothing more", async () => {
+test("email spontaneous - a restart after acceptance selects nothing and sends nothing more", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -724,7 +727,7 @@ Deno.test("email spontaneous - a restart after acceptance selects nothing and se
   });
 });
 
-Deno.test("email spontaneous - a restart after an unknown outcome requires review and sends nothing", async () => {
+test("email spontaneous - a restart after an unknown outcome requires review and sends nothing", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -770,7 +773,7 @@ Deno.test("email spontaneous - a restart after an unknown outcome requires revie
   });
 });
 
-Deno.test("email spontaneous - a revoked account is never selected and never mailed", async () => {
+test("email spontaneous - a revoked account is never selected and never mailed", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -806,7 +809,7 @@ Deno.test("email spontaneous - a revoked account is never selected and never mai
   });
 });
 
-Deno.test("email spontaneous - an already bound account that is removed is not claimed again", async () => {
+test("email spontaneous - an already bound account that is removed is not claimed again", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -840,7 +843,7 @@ Deno.test("email spontaneous - an already bound account that is removed is not c
   });
 });
 
-Deno.test("email spontaneous - opting out between binding and submission stops the send", async () => {
+test("email spontaneous - opting out between binding and submission stops the send", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -875,7 +878,7 @@ Deno.test("email spontaneous - opting out between binding and submission stops t
   });
 });
 
-Deno.test("email spontaneous - an owner without a verified address is never mailed", async () => {
+test("email spontaneous - an owner without a verified address is never mailed", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
 
@@ -895,7 +898,7 @@ Deno.test("email spontaneous - an owner without a verified address is never mail
   });
 });
 
-Deno.test("email spontaneous - the outbound evidence keeps the bound internal thread", async () => {
+test("email spontaneous - the outbound evidence keeps the bound internal thread", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     await seedInbound(stack.messageStore);
@@ -919,7 +922,7 @@ Deno.test("email spontaneous - the outbound evidence keeps the bound internal th
     // Crash repair reads this metadata alone, so the thread it records must be the bound one.
     const operationId = computeOperationId(OWNER, key);
     const metaPath = join(stack.emailRoot, outboundEvidenceMetaRef(operationId));
-    const meta = JSON.parse(await Deno.readTextFile(metaPath)) as {
+    const meta = JSON.parse(await fsp.readFile(metaPath, "utf8")) as {
       internalThreadId?: string;
       to?: string;
     };
@@ -928,7 +931,7 @@ Deno.test("email spontaneous - the outbound evidence keeps the bound internal th
   });
 });
 
-Deno.test("email spontaneous - the durable occurrence lane stays email-only", async () => {
+test("email spontaneous - the durable occurrence lane stays email-only", async () => {
   await withTempDir(async (base) => {
     const stack = await buildStack(base);
     // Discord keeps its existing best-effort channel selection while the durable occurrence

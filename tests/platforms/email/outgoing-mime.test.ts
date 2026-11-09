@@ -37,6 +37,7 @@ import {
   SIGNATURE_SEPARATOR,
 } from "../../../src/platforms/email/outgoing-mime.ts";
 import { parseIncomingMime } from "../../../src/platforms/email/incoming-mime.ts";
+import { test } from "bun:test";
 
 const OWNER = "e_" + "1".repeat(64);
 const FIXED_DATE = new Date("2026-10-17T00:00:00Z");
@@ -88,13 +89,13 @@ function assertChain(result: ConstructedOutgoingEmail): void {
   assertEquals(result.digest, sha256Hex(result.emlBytes));
 }
 
-Deno.test("applyOutgoingSignature: blank and whitespace-only signatures add nothing", () => {
+test("applyOutgoingSignature: blank and whitespace-only signatures add nothing", () => {
   assertEquals(applyOutgoingSignature("Body", ""), "Body");
   assertEquals(applyOutgoingSignature("Body", "   \n\t "), "Body");
   assertEquals(applyOutgoingSignature("Body\r\nMore", "  "), "Body\nMore");
 });
 
-Deno.test("applyOutgoingSignature: literal multiline signature keeps line structure once", () => {
+test("applyOutgoingSignature: literal multiline signature keeps line structure once", () => {
   assertEquals(
     applyOutgoingSignature("Thanks, I will review.", MULTILINE_SIGNATURE),
     `Thanks, I will review.\n${SIGNATURE_SEPARATOR}\n${MULTILINE_SIGNATURE}`,
@@ -111,7 +112,7 @@ Deno.test("applyOutgoingSignature: literal multiline signature keeps line struct
   );
 });
 
-Deno.test("construct: golden plain reply fixture with chain, Auto-Submitted and signature", async () => {
+test("construct: golden plain reply fixture with chain, Auto-Submitted and signature", async () => {
   const result = await builder().construct(
     draft({
       thread: { wireMessageId: "<parent@relay.example>", references: ["<root@relay.example>"] },
@@ -150,7 +151,7 @@ AIr-Friends Bot
   assertChain(result);
 });
 
-Deno.test("construct: blank signature adds no separator at all", async () => {
+test("construct: blank signature adds no separator at all", async () => {
   const result = await builder().construct(
     draft({
       thread: { wireMessageId: "<parent@relay.example>", references: ["<root@relay.example>"] },
@@ -167,7 +168,7 @@ Deno.test("construct: blank signature adds no separator at all", async () => {
   assertChain(result);
 });
 
-Deno.test("construct: model-written signature-like tail is preserved without de-duplication", async () => {
+test("construct: model-written signature-like tail is preserved without de-duplication", async () => {
   const authored = "Here you go.\n-- \nModel Invented Tail";
   const result = await builder().construct(draft({ authoredBody: authored }), "Real Signature");
 
@@ -179,7 +180,7 @@ Deno.test("construct: model-written signature-like tail is preserved without de-
   assertEquals(occurrences, 1);
 });
 
-Deno.test("construct: golden multipart binary attachment with encoded Subject", async () => {
+test("construct: golden multipart binary attachment with encoded Subject", async () => {
   const binary = new Uint8Array([0x00, 0x01, 0x02, 0xfe, 0xff, 0x0a, 0x0d]);
   const result = await builder().construct(
     draft({
@@ -232,7 +233,7 @@ AAEC/v8KDQ==
   assertChain(result);
 });
 
-Deno.test("construct: forward preserves commentary ordering and original bytes", async () => {
+test("construct: forward preserves commentary ordering and original bytes", async () => {
   const originalBody = "Original line one.\n\nOriginal line two with  trailing space.  ";
   const originalAttachment = new Uint8Array([0x10, 0x00, 0xff, 0x0d, 0x0a]);
   const result = await builder().construct(
@@ -288,7 +289,7 @@ Deno.test("construct: forward preserves commentary ordering and original bytes",
   assertChain(result);
 });
 
-Deno.test("buildForwardSection: marker, metadata and verbatim body only", () => {
+test("buildForwardSection: marker, metadata and verbatim body only", () => {
   const section = buildForwardSection({
     from: "src@example.com",
     to: "bot@example.com",
@@ -303,7 +304,7 @@ Deno.test("buildForwardSection: marker, metadata and verbatim body only", () => 
   );
 });
 
-Deno.test("construct: rejects header injection before producing any bytes", async () => {
+test("construct: rejects header injection before producing any bytes", async () => {
   const cases: Array<{ draft: EmailDraft; code: OutgoingMimeDiagnosticCode }> = [
     {
       draft: draft({ subject: "Hello\r\nBcc: attacker@example.com" }),
@@ -360,14 +361,14 @@ Deno.test("construct: rejects header injection before producing any bytes", asyn
   }
 });
 
-Deno.test("construct: rejects unsafe configured from address", () => {
+test("construct: rejects unsafe configured from address", () => {
   assertThrows(
     () => new OutgoingMimeBuilder({ fromAddress: "bot@example.com\r\nBcc: x@example.com" }),
     OutgoingMimeError,
   );
 });
 
-Deno.test("construct: no Cc/Bcc surface and single envelope recipient", async () => {
+test("construct: no Cc/Bcc surface and single envelope recipient", async () => {
   const result = await builder().construct(draft(), "Sig");
   const text = decode(result.emlBytes);
   assertEquals(/\r\nCc:/i.test(text), false);
@@ -376,7 +377,7 @@ Deno.test("construct: no Cc/Bcc surface and single envelope recipient", async ()
   assertEquals(result.envelope.to[0], "user@example.com");
 });
 
-Deno.test("construct: deterministic bytes and digest, sensitive to attachment bytes", async () => {
+test("construct: deterministic bytes and digest, sensitive to attachment bytes", async () => {
   const first = await builder().construct(draft(), "Sig");
   const second = await builder().construct(draft(), "Sig");
   assertEquals(first.emlBytes, second.emlBytes);
@@ -397,7 +398,7 @@ Deno.test("construct: deterministic bytes and digest, sensitive to attachment by
   assertNotEquals(withAttachment.messageId, first.messageId);
 });
 
-Deno.test("construct: wire bytes are pure CRLF with accounting metadata", async () => {
+test("construct: wire bytes are pure CRLF with accounting metadata", async () => {
   const result = await builder().construct(
     draft({ authoredBody: "Ünïcode body line one.\nLine two." }),
     "Sig",
@@ -412,7 +413,7 @@ Deno.test("construct: wire bytes are pure CRLF with accounting metadata", async 
   }
 });
 
-Deno.test("construct: empty body with attachment and blank signature stays valid", async () => {
+test("construct: empty body with attachment and blank signature stays valid", async () => {
   const result = await builder().construct(
     draft({
       authoredBody: "",
@@ -435,7 +436,7 @@ Deno.test("construct: empty body with attachment and blank signature stays valid
   assertChain(result);
 });
 
-Deno.test("construct: signed source forward preserves the original signature section", async () => {
+test("construct: signed source forward preserves the original signature section", async () => {
   const sourceSignatureBody = "Original text.\n\n-- \nOriginal Sender Signature\nSecond line";
   const result = await builder().construct(
     draft({
@@ -464,14 +465,14 @@ Deno.test("construct: signed source forward preserves the original signature sec
   assertEquals(parsed.provenance.forwardedText?.includes(sourceSignatureBody), true);
 });
 
-Deno.test("construct: newline-ended commentary keeps its bytes before the separator", async () => {
+test("construct: newline-ended commentary keeps its bytes before the separator", async () => {
   const authored = "Commentary line.\n\n";
   const result = await builder().construct(draft({ authoredBody: authored }), "Sig");
   assertEquals(result.historyBody, `${authored}\n${SIGNATURE_SEPARATOR}\nSig`);
   assertEquals(result.historyBody.includes(authored), true);
 });
 
-Deno.test("construct: preserved message/rfc822 attachments round-trip byte-exact", async () => {
+test("construct: preserved message/rfc822 attachments round-trip byte-exact", async () => {
   const rawSource = new TextEncoder().encode(
     "From: src@example.com\r\nSubject: original\r\n\r\nbody line\r\n",
   );
@@ -496,7 +497,7 @@ Deno.test("construct: preserved message/rfc822 attachments round-trip byte-exact
   );
 });
 
-Deno.test("construct: attached message preserves non-UTF-8 bytes exactly", async () => {
+test("construct: attached message preserves non-UTF-8 bytes exactly", async () => {
   const header = new TextEncoder().encode("From: src@example.com\r\n\r\n");
   const rawSource = new Uint8Array([...header, 0x00, 0xff, 0xfe, 0x80, 0x0d, 0x0a]);
   const result = await builder().construct(
@@ -512,7 +513,7 @@ Deno.test("construct: attached message preserves non-UTF-8 bytes exactly", async
   assertEquals(containsBytes(result.emlBytes, rawSource), true);
 });
 
-Deno.test("construct: rejects message attachments whose bytes cannot be preserved", async () => {
+test("construct: rejects message attachments whose bytes cannot be preserved", async () => {
   const error = await assertRejects(
     () =>
       builder().construct(
@@ -530,7 +531,7 @@ Deno.test("construct: rejects message attachments whose bytes cannot be preserve
   assertEquals(error.diagnosticCode, OutgoingMimeDiagnosticCode.INVALID_ATTACHMENT);
 });
 
-Deno.test("construct: attachment partition changes identity as well as bytes", async () => {
+test("construct: attachment partition changes identity as well as bytes", async () => {
   const attA = {
     filename: "a.bin",
     contentType: "application/octet-stream",
@@ -558,7 +559,7 @@ Deno.test("construct: attachment partition changes identity as well as bytes", a
   assertNotEquals(split.digest, merged.digest);
 });
 
-Deno.test("construct: consecutive-dot local parts are rejected", async () => {
+test("construct: consecutive-dot local parts are rejected", async () => {
   const error = await assertRejects(
     () => builder().construct(draft({ to: "a..b@example.com" }), "Sig"),
     OutgoingMimeError,
@@ -566,7 +567,7 @@ Deno.test("construct: consecutive-dot local parts are rejected", async () => {
   assertEquals(error.diagnosticCode, OutgoingMimeDiagnosticCode.INVALID_MAILBOX);
 });
 
-Deno.test("construct: round-trip through parseIncomingMime for reply and forward", async () => {
+test("construct: round-trip through parseIncomingMime for reply and forward", async () => {
   const reply = await builder().construct(
     draft({ thread: { wireMessageId: "<parent@relay.example>" } }),
     MULTILINE_SIGNATURE,

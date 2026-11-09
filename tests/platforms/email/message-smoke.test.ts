@@ -2,6 +2,9 @@
 
 import { assertEquals, assertNotEquals } from "@std/assert";
 import { EmailMessageStore } from "../../../src/platforms/email/message-store.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const OWNER_1 = "e_" + "1".repeat(64);
 const OWNER_2 = "e_" + "2".repeat(64);
@@ -9,17 +12,17 @@ const OWNER_2 = "e_" + "2".repeat(64);
 async function withTempSmokeStore(
   fn: (store: EmailMessageStore, tempDir: string) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-smoke-test-" });
+  const tempDir = await makeTempDir({ prefix: "email-smoke-test-" });
   const store = new EmailMessageStore({ workspacesRoot: tempDir });
   try {
     await fn(store, tempDir);
   } finally {
     store.close();
-    await Deno.remove(tempDir, { recursive: true }).catch(() => {});
+    await fsp.rm(tempDir, { recursive: true }).catch(() => {});
   }
 }
 
-Deno.test("Smoke 2.1 - Spec Scenario 1: Forged reference", async () => {
+test("Smoke 2.1 - Spec Scenario 1: Forged reference", async () => {
   // Scenario: Forged reference
   // WHEN user B references user A wire Message-ID
   // THEN no A message is returned or joined
@@ -75,7 +78,7 @@ Deno.test("Smoke 2.1 - Spec Scenario 1: Forged reference", async () => {
   });
 });
 
-Deno.test("Smoke 2.1 - Spec Scenario 2: Duplicate wire ID", async () => {
+test("Smoke 2.1 - Spec Scenario 2: Duplicate wire ID", async () => {
   // Scenario: Duplicate wire ID
   // WHEN distinct raw messages claim the same Message-ID
   // THEN both immutable source records survive and ambiguous threading requires review
@@ -123,20 +126,20 @@ Deno.test("Smoke 2.1 - Spec Scenario 2: Duplicate wire ID", async () => {
   });
 });
 
-Deno.test("Smoke 2.1 - Spec Scenario 3: Forward later", async () => {
+test("Smoke 2.1 - Spec Scenario 3: Forward later", async () => {
   // Scenario: Forward later
   // WHEN the originating session tmp area has been reclaimed
   // THEN the selected original and every attachment remain available by internal ID
   await withTempSmokeStore(async (store) => {
     // Simulate disposable session tmp dir
-    const sessionTmp = await Deno.makeTempDir({ prefix: "disposable-session-" });
+    const sessionTmp = await makeTempDir({ prefix: "disposable-session-" });
     const tmpSourceFile = `${sessionTmp}/received.eml`;
     const tmpAttFile = `${sessionTmp}/contract.pdf`;
 
     const originalEml = "Subject: Legal Contract\r\n\r\nSee attached contract.";
     const originalPdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x35]); // %PDF-1.5
-    await Deno.writeTextFile(tmpSourceFile, originalEml);
-    await Deno.writeFile(tmpAttFile, originalPdf);
+    await fsp.writeFile(tmpSourceFile, originalEml);
+    await fsp.writeFile(tmpAttFile, originalPdf);
 
     const attId = crypto.randomUUID().toLowerCase();
 
@@ -161,7 +164,7 @@ Deno.test("Smoke 2.1 - Spec Scenario 3: Forward later", async () => {
     );
 
     // Reclaim / wipe disposable session tmp directory completely
-    await Deno.remove(sessionTmp, { recursive: true });
+    await fsp.rm(sessionTmp, { recursive: true });
 
     // The selected original source and every attachment remain available by internal ID
     const preservedSource = await store.getSourceBytes(OWNER_1, recordId);

@@ -21,7 +21,7 @@
 // would supply one is successor row 15.
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { AgentCore } from "@core/agent-core.ts";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
@@ -54,11 +54,13 @@ import {
 } from "../../src/types/events.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 /** The ONE deployment-resolved skill-script root (mirrors the sibling fixtures). */
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
-  resolve(import.meta.dirname ?? ".", "../../skills"),
-);
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 const FINGERPRINT = buildMailboxFingerprint("imap.example.com", "bot@example.com", "INBOX");
 const UIDVALIDITY = 987654321;
@@ -244,8 +246,8 @@ class MockEmailPlatformAdapter {
 }
 
 async function createPrompts(dir: string): Promise<void> {
-  await Deno.mkdir(join(dir, "prompts"), { recursive: true });
-  await Deno.writeTextFile(
+  await fsp.mkdir(join(dir, "prompts"), { recursive: true });
+  await fsp.writeFile(
     join(dir, "prompts", "system_reply.md"),
     "You are a helper.\nSkill root: {{ skillsDir }}\n" +
       "{{ if sessionId }}Session: {{ sessionId }}{{ /if }}",
@@ -310,7 +312,7 @@ interface Harness {
 }
 
 async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
-  const root = await Deno.makeTempDir({ prefix: "email-session-receipts-test-" });
+  const root = await makeTempDir({ prefix: "email-session-receipts-test-" });
   await createPrompts(root);
   const pooled = options.pooled ?? false;
   const config = createConfig(root, { pooled, dryRun: options.dryRun ?? false });
@@ -387,7 +389,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
         pool.stop();
       }
       sessionRegistry.stop();
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await fsp.rm(root, { recursive: true }).catch(() => {});
     },
   };
 }
@@ -421,7 +423,7 @@ function discordEvent(channelId = "discord-channel"): NormalizedEvent {
 
 // --- Tests -----------------------------------------------------------------------
 
-Deno.test("Email work is fenced with a durable started receipt before the first prompt", async () => {
+test("Email work is fenced with a durable started receipt before the first prompt", async () => {
   const harness = await createHarness();
   const observed: string[][] = [];
   const propagatedWorkIds: (string | undefined)[] = [];
@@ -462,7 +464,7 @@ Deno.test("Email work is fenced with a durable started receipt before the first 
   }
 });
 
-Deno.test("Completed is recorded only after the session's in-flight side effects settle", async () => {
+test("Completed is recorded only after the session's in-flight side effects settle", async () => {
   const harness = await createHarness();
   let finalizingSession: { recoveryFenced?: boolean; inflightSideEffects?: number } | null = null;
   harness.setScript(async ({ channelId }) => {
@@ -518,7 +520,7 @@ Deno.test("Completed is recorded only after the session's in-flight side effects
   }
 });
 
-Deno.test("Queued email work stays unstarted until the execution lease is acquired", async () => {
+test("Queued email work stays unstarted until the execution lease is acquired", async () => {
   const releaseHolder = Promise.withResolvers<void>();
   const order: string[] = [];
 
@@ -579,7 +581,7 @@ Deno.test("Queued email work stays unstarted until the execution lease is acquir
   }
 });
 
-Deno.test("An agent failure after the fence records review-required, never completed", async () => {
+test("An agent failure after the fence records review-required, never completed", async () => {
   // Per-spawn: the agent prompt rejects out of the session lifecycle.
   const perSpawn = await createHarness({
     script: () => Promise.reject(new Error("agent transport failure")),
@@ -620,7 +622,7 @@ Deno.test("An agent failure after the fence records review-required, never compl
   }
 });
 
-Deno.test("Interrupted turns record review-required, even when a reply was delivered", async () => {
+test("Interrupted turns record review-required, even when a reply was delivered", async () => {
   // Per-spawn: a delivered reply followed by a cancelled stop reason is still an
   // interrupted turn — its outcome cannot be declared terminal.
   const perSpawn = await createHarness();
@@ -674,8 +676,8 @@ Deno.test("Interrupted turns record review-required, even when a reply was deliv
   }
 });
 
-Deno.test("A pre-agent failure fences before its error notice and records the notice outcome", async () => {
-  const root = await Deno.makeTempDir({ prefix: "email-receipts-notice-test-" });
+test("A pre-agent failure fences before its error notice and records the notice outcome", async () => {
+  const root = await makeTempDir({ prefix: "email-receipts-notice-test-" });
   const store = new MailboxStore({ emailRoot: root, fingerprint: FINGERPRINT });
   const receipts = new EmailSessionReceipts(store);
   try {
@@ -687,7 +689,7 @@ Deno.test("A pre-agent failure fences before its error notice and records the no
     // A workspace root that is a regular file makes session setup fail BEFORE
     // the agent fence could be taken: no prompt, no connector, no mock reply.
     const notADirectory = join(root, "not-a-directory");
-    await Deno.writeTextFile(notADirectory, "not a directory");
+    await fsp.writeFile(notADirectory, "not a directory");
 
     const config = createConfig(root, { pooled: false, dryRun: false });
     config.replyPolicy = "all";
@@ -709,11 +711,11 @@ Deno.test("A pre-agent failure fences before its error notice and records the no
       await agentCore.shutdown();
     }
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("Dry run fences started before the mock reply and completes afterwards", async () => {
+test("Dry run fences started before the mock reply and completes afterwards", async () => {
   const harness = await createHarness({ dryRun: true });
   const statesBeforeMockReply: string[][] = [];
   const deliver = harness.adapter.sendReply.bind(harness.adapter);
@@ -743,7 +745,7 @@ Deno.test("Dry run fences started before the mock reply and completes afterwards
   }
 });
 
-Deno.test("A failed dry-run mock delivery is an uncertain outcome, not completed", async () => {
+test("A failed dry-run mock delivery is an uncertain outcome, not completed", async () => {
   const harness = await createHarness({ dryRun: true });
   try {
     harness.adapter.failReplies = true;
@@ -761,7 +763,7 @@ Deno.test("A failed dry-run mock delivery is an uncertain outcome, not completed
   }
 });
 
-Deno.test("Control commands are recorded as terminally ignored admissions", async () => {
+test("Control commands are recorded as terminally ignored admissions", async () => {
   const harness = await createHarness();
   try {
     await harness.accept(MAILBOX_KEY, RECORD_ID);
@@ -780,8 +782,8 @@ Deno.test("Control commands are recorded as terminally ignored admissions", asyn
   }
 });
 
-Deno.test("Receipt API honors the durable transition and settlement contract", async () => {
-  const root = await Deno.makeTempDir({ prefix: "email-receipts-api-test-" });
+test("Receipt API honors the durable transition and settlement contract", async () => {
+  const root = await makeTempDir({ prefix: "email-receipts-api-test-" });
   const store = new MailboxStore({ emailRoot: root, fingerprint: FINGERPRINT });
   const receipts = new EmailSessionReceipts(store);
   try {
@@ -894,12 +896,12 @@ Deno.test("Receipt API honors the durable transition and settlement contract", a
       "requires a side-effect settler",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("A completion without settlement proof is refused and denials are ignored", async () => {
-  const root = await Deno.makeTempDir({ prefix: "email-receipts-deny-test-" });
+test("A completion without settlement proof is refused and denials are ignored", async () => {
+  const root = await makeTempDir({ prefix: "email-receipts-deny-test-" });
   const store = new MailboxStore({ emailRoot: root, fingerprint: FINGERPRINT });
   const receipts = new EmailSessionReceipts(store);
   try {
@@ -936,12 +938,12 @@ Deno.test("A completion without settlement proof is refused and denials are igno
     assertEquals(store.getEntry(deniedKey)?.state, "ignored");
     assertEquals(store.getEntry(deniedKey)?.detail, "access-policy-denied");
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("Crash semantics: unstarted work resumes; started work without a terminal needs review", async () => {
-  const root = await Deno.makeTempDir({ prefix: "email-receipts-crash-test-" });
+test("Crash semantics: unstarted work resumes; started work without a terminal needs review", async () => {
+  const root = await makeTempDir({ prefix: "email-receipts-crash-test-" });
   try {
     const resumableKey: MailboxKey = { ...MAILBOX_KEY, uid: UID + 1 };
     const startedKey: MailboxKey = { ...MAILBOX_KEY, uid: UID + 2 };
@@ -996,11 +998,11 @@ Deno.test("Crash semantics: unstarted work resumes; started work without a termi
       "[INVALID_TRANSITION]",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("Discord/Misskey events never write mailbox receipts", async () => {
+test("Discord/Misskey events never write mailbox receipts", async () => {
   const harness = await createHarness();
   try {
     const response = await harness.orchestrator.processMessage(
@@ -1034,8 +1036,8 @@ Deno.test("Discord/Misskey events never write mailbox receipts", async () => {
   }
 });
 
-Deno.test("AgentCore records denied email admissions without disrupting other platforms", async () => {
-  const root = await Deno.makeTempDir({ prefix: "email-receipts-agentcore-test-" });
+test("AgentCore records denied email admissions without disrupting other platforms", async () => {
+  const root = await makeTempDir({ prefix: "email-receipts-agentcore-test-" });
   const store = new MailboxStore({ emailRoot: root, fingerprint: FINGERPRINT });
   const receipts = new EmailSessionReceipts(store);
   try {
@@ -1074,12 +1076,12 @@ Deno.test("AgentCore records denied email admissions without disrupting other pl
       await policyCore.shutdown();
     }
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("A fence on work that was never accepted fails closed", async () => {
-  const root = await Deno.makeTempDir({ prefix: "email-receipts-unaccepted-test-" });
+test("A fence on work that was never accepted fails closed", async () => {
+  const root = await makeTempDir({ prefix: "email-receipts-unaccepted-test-" });
   const store = new MailboxStore({ emailRoot: root, fingerprint: FINGERPRINT });
   const receipts = new EmailSessionReceipts(store);
   try {
@@ -1094,6 +1096,6 @@ Deno.test("A fence on work that was never accepted fails closed", async () => {
     );
     assertEquals(await statesFor(root, WORK_ID), []);
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await fsp.rm(root, { recursive: true }).catch(() => {});
   }
 });

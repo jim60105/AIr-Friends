@@ -14,7 +14,7 @@
 // byte identity between the wire copy, the stored evidence, local history and the APPEND.
 
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { EmailConfig } from "../../../src/types/config.ts";
 import { normalizeEmailMailbox } from "../../../src/platforms/email/email-identity.ts";
 import {
@@ -34,6 +34,9 @@ import {
 import { applyOutgoingSignature } from "../../../src/platforms/email/outgoing-mime.ts";
 import { EmailImapTestService } from "../../helpers/email-imap-service.ts";
 import { EmailSmtpTestService } from "../../helpers/email-smtp-service.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const OWNER = "e_" + "12".repeat(32);
 const BOT = "bot@smoke.example";
@@ -144,21 +147,21 @@ async function withFixtures(
 }
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "submission-service-smoke-" });
+  const dir = await makeTempDir({ prefix: "submission-service-smoke-" });
   try {
     _resetSharedRegistryForTesting();
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
   }
 }
 
-Deno.test("Smoke: one send is byte-identical across SMTP, evidence, history and APPEND", async () => {
+test("Smoke: one send is byte-identical across SMTP, evidence, history and APPEND", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (smtp, imap) => {
       const env = buildEnv(base, smtp, imap);
@@ -178,8 +181,8 @@ Deno.test("Smoke: one send is byte-identical across SMTP, evidence, history and 
 
       // Identical bytes everywhere.
       const wireBytes = smtp.dataTransactions[0].decoded;
-      const evidenceBytes = await Deno.readFile(
-        join(env.emailRoot, outboundEvidenceRef(outcome.operationId)),
+      const evidenceBytes = new Uint8Array(
+        await fsp.readFile(join(env.emailRoot, outboundEvidenceRef(outcome.operationId))),
       );
       const historyBytes = await env.messageStore.getSourceBytes(OWNER, outcome.recordId!);
       assertEquals(evidenceBytes, wireBytes);
@@ -210,7 +213,7 @@ Deno.test("Smoke: one send is byte-identical across SMTP, evidence, history and 
   });
 });
 
-Deno.test("Smoke: restart returns the recorded result with zero further SMTP transactions", async () => {
+test("Smoke: restart returns the recorded result with zero further SMTP transactions", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (smtp, imap) => {
       const first = buildEnv(base, smtp, imap);
@@ -243,7 +246,7 @@ Deno.test("Smoke: restart returns the recorded result with zero further SMTP tra
   });
 });
 
-Deno.test("Smoke: restart repairs lost local history from stored evidence without SMTP", async () => {
+test("Smoke: restart repairs lost local history from stored evidence without SMTP", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (smtp, imap) => {
       const first = buildEnv(base, smtp, imap);
@@ -252,7 +255,7 @@ Deno.test("Smoke: restart repairs lost local history from stored evidence withou
       const wireBytes = smtp.dataTransactions[0].decoded;
 
       // The owner's local history is lost while the accepted operation and its evidence remain.
-      await Deno.remove(join(base, "workspaces"), { recursive: true });
+      await fsp.rm(join(base, "workspaces"), { recursive: true });
       _resetSharedRegistryForTesting();
       const restarted = buildEnv(base, smtp, imap, { emailRoot: first.emailRoot });
 
@@ -262,8 +265,9 @@ Deno.test("Smoke: restart repairs lost local history from stored evidence withou
       assertEquals(recovery.unknownRecovered, []);
 
       const meta = JSON.parse(
-        await Deno.readTextFile(
+        await fsp.readFile(
           join(restarted.emailRoot, outboundEvidenceMetaRef(sent.operationId)),
+          "utf8",
         ),
       ) as { history?: { recordId: string } };
       assert(meta.history?.recordId);
@@ -284,7 +288,7 @@ Deno.test("Smoke: restart repairs lost local history from stored evidence withou
   });
 });
 
-Deno.test("Smoke: a real IMAP APPEND rejection never downgrades an accepted submission", async () => {
+test("Smoke: a real IMAP APPEND rejection never downgrades an accepted submission", async () => {
   await withTempDir(async (base) => {
     await withFixtures(async (smtp, imap) => {
       const env = buildEnv(base, smtp, imap);

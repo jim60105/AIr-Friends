@@ -7,7 +7,7 @@
 // 3. Unattributable corrupt intent: journal corruption blocks whole mailbox submission lane.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import {
   _resetSharedRegistryForTesting,
   EmailOperationKey,
@@ -16,23 +16,26 @@ import {
   SubmissionStore,
   SubmissionStoreError,
 } from "../../../src/platforms/email/submission-store.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 async function withIsolatedState(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "submission-smoke-" });
+  const dir = await makeTempDir({ prefix: "submission-smoke-" });
   try {
     _resetSharedRegistryForTesting();
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup
     }
   }
 }
 
-Deno.test("Smoke Scenario: Concurrent repeats - Stable logical operation and payload conflict", async () => {
+test("Smoke Scenario: Concurrent repeats - Stable logical operation and payload conflict", async () => {
   await withIsolatedState(async (root) => {
     const store = new SubmissionStore(root);
     const key: EmailOperationKey = { workId: "smoke-op-1", actionSlot: "reply" };
@@ -62,7 +65,7 @@ Deno.test("Smoke Scenario: Concurrent repeats - Stable logical operation and pay
   });
 });
 
-Deno.test("Smoke Scenario: Tail lacks outcome - Submitting without outcome becomes unknown, auto-send blocked", async () => {
+test("Smoke Scenario: Tail lacks outcome - Submitting without outcome becomes unknown, auto-send blocked", async () => {
   await withIsolatedState(async (root) => {
     let externalSmtpSendCalls = 0;
 
@@ -112,12 +115,12 @@ Deno.test("Smoke Scenario: Tail lacks outcome - Submitting without outcome becom
   });
 });
 
-Deno.test("Smoke Scenario: Unattributable corrupt intent - Whole mailbox submission lane is blocked for review", async () => {
+test("Smoke Scenario: Unattributable corrupt intent - Whole mailbox submission lane is blocked for review", async () => {
   await withIsolatedState(async (root) => {
     const journalPath = join(root, SUBMISSIONS_JOURNAL_FILENAME);
 
     // Corrupt the journal directly with garbage bytes
-    await Deno.writeTextFile(journalPath, "INVALID_GARBAGE_LINE\n");
+    await fsp.writeFile(journalPath, "INVALID_GARBAGE_LINE\n");
 
     const store = new SubmissionStore(root);
 

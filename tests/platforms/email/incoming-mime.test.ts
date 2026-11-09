@@ -25,8 +25,9 @@ import {
   sanitizeAttachmentDisplayName,
   toMessageStoreParsedEmail,
 } from "../../../src/platforms/email/incoming-mime.ts";
+import { test } from "bun:test";
 
-Deno.test("sanitizeAttachmentDisplayName: strips directory traversals, control chars, and defaults correctly", () => {
+test("sanitizeAttachmentDisplayName: strips directory traversals, control chars, and defaults correctly", () => {
   assertEquals(sanitizeAttachmentDisplayName("report.pdf", 0), "report.pdf");
   assertEquals(
     sanitizeAttachmentDisplayName("../../../etc/passwd", 0),
@@ -46,7 +47,7 @@ Deno.test("sanitizeAttachmentDisplayName: strips directory traversals, control c
   );
 });
 
-Deno.test("convertHtmlToInertText: converts HTML without executing scripts or referencing external images", () => {
+test("convertHtmlToInertText: converts HTML without executing scripts or referencing external images", () => {
   const html = `
     <html>
       <head>
@@ -67,7 +68,7 @@ Deno.test("convertHtmlToInertText: converts HTML without executing scripts or re
   assertEquals(text.includes("Some quoted text"), true);
 });
 
-Deno.test("extractProvenance: separates authored and quoted text", () => {
+test("extractProvenance: separates authored and quoted text", () => {
   const body = `
 I approve this request.
 
@@ -86,7 +87,7 @@ On Fri, Oct 17, 2026 at 10:00 AM Alice <alice@example.com> wrote:
   assertEquals(prov.forwardedText, undefined);
 });
 
-Deno.test("extractProvenance: separates forwarded text", () => {
+test("extractProvenance: separates forwarded text", () => {
   const body = `
 FYI take a look at this.
 
@@ -102,7 +103,7 @@ Here is the status.
   assertEquals(prov.forwardedText?.includes("From: Bob"), true);
 });
 
-Deno.test("extractProvenance: marks status ambiguous when mixed reply occurs after quote", () => {
+test("extractProvenance: marks status ambiguous when mixed reply occurs after quote", () => {
   const body = `
 Top comment.
 
@@ -118,14 +119,14 @@ Middle reply between quotes!
   assertEquals(prov.authoredText.includes("Middle reply between quotes!"), true);
 });
 
-Deno.test("extractProvenance: marks status ambiguous for HTML-only fallback bodies", () => {
+test("extractProvenance: marks status ambiguous for HTML-only fallback bodies", () => {
   const body = "Please process this command immediately.";
   const prov = extractProvenance(body, { isHtmlOnly: true });
   assertEquals(prov.status, "ambiguous");
   assertEquals(prov.authoredText, body);
 });
 
-Deno.test("parseIncomingMime: parses clean plain-text MIME with wireIds", async () => {
+test("parseIncomingMime: parses clean plain-text MIME with wireIds", async () => {
   const eml = [
     "From: Alice Bob <alice@example.com>",
     "To: bot@example.com",
@@ -164,7 +165,7 @@ Deno.test("parseIncomingMime: parses clean plain-text MIME with wireIds", async 
   assertEquals(parsed.attachments.length, 0);
 });
 
-Deno.test("parseIncomingMime: HTML-only message converts inertly with ambiguous status", async () => {
+test("parseIncomingMime: HTML-only message converts inertly with ambiguous status", async () => {
   const eml = [
     "From: <bob@example.com>",
     "Subject: HTML Announcement",
@@ -181,7 +182,7 @@ Deno.test("parseIncomingMime: HTML-only message converts inertly with ambiguous 
   assertEquals(parsed.plainBody.includes("Please click here"), true);
 });
 
-Deno.test("parseIncomingMime: multipart/alternative prefers plain text over HTML", async () => {
+test("parseIncomingMime: multipart/alternative prefers plain text over HTML", async () => {
   const eml = [
     "From: sender@example.com",
     "Subject: Multi Part",
@@ -205,7 +206,7 @@ Deno.test("parseIncomingMime: multipart/alternative prefers plain text over HTML
   assertEquals(parsed.provenance.authoredText, "Plain text representation.");
 });
 
-Deno.test("parseIncomingMime: attachment-only request is valid with empty authoredText", async () => {
+test("parseIncomingMime: attachment-only request is valid with empty authoredText", async () => {
   const eml = [
     "From: sender@example.com",
     "Subject: Attachment Only",
@@ -233,7 +234,7 @@ Deno.test("parseIncomingMime: attachment-only request is valid with empty author
   );
 });
 
-Deno.test("parseIncomingMime: pre-byte check rejects declaredSize exceeding limit", async () => {
+test("parseIncomingMime: pre-byte check rejects declaredSize exceeding limit", async () => {
   const err = await assertRejects(
     async () => {
       await parseIncomingMime("From: a@b.com\r\n\r\nSmall", {
@@ -249,7 +250,7 @@ Deno.test("parseIncomingMime: pre-byte check rejects declaredSize exceeding limi
   );
 });
 
-Deno.test("parseIncomingMime: understated declaredSize is caught by streaming byte counter and cancels source", async () => {
+test("parseIncomingMime: understated declaredSize is caught by streaming byte counter and cancels source", async () => {
   let streamCancelled = false;
   const chunk = new Uint8Array(2000);
   const stream = new ReadableStream<Uint8Array>({
@@ -278,7 +279,7 @@ Deno.test("parseIncomingMime: understated declaredSize is caught by streaming by
   assertEquals(streamCancelled, true);
 });
 
-Deno.test("parseIncomingMime: streaming byte check rejects oversized payload and cancels stream", async () => {
+test("parseIncomingMime: streaming byte check rejects oversized payload and cancels stream", async () => {
   let streamCancelled = false;
   const bigChunk = new Uint8Array(1024 * 1024); // 1 MiB
   const stream = new ReadableStream<Uint8Array>({
@@ -306,7 +307,7 @@ Deno.test("parseIncomingMime: streaming byte check rejects oversized payload and
   assertEquals(streamCancelled, true);
 });
 
-Deno.test("parseIncomingMime: rejects message with 11 attachments before consuming and cancels source", async () => {
+test("parseIncomingMime: rejects message with 11 attachments before consuming and cancels source", async () => {
   const parts: string[] = [
     "From: sender@example.com",
     "Subject: Too Many Attachments",
@@ -345,7 +346,7 @@ Deno.test("parseIncomingMime: rejects message with 11 attachments before consumi
   );
 });
 
-Deno.test("parseIncomingMime: rejects multiple From header lines", async () => {
+test("parseIncomingMime: rejects multiple From header lines", async () => {
   const eml = [
     "From: user1@example.com",
     "From: user2@example.com",
@@ -366,7 +367,7 @@ Deno.test("parseIncomingMime: rejects multiple From header lines", async () => {
   );
 });
 
-Deno.test("parseIncomingMime: rejects multiple Message-ID header lines", async () => {
+test("parseIncomingMime: rejects multiple Message-ID header lines", async () => {
   const eml = [
     "From: user@example.com",
     "Message-ID: <id1@example.com>",
@@ -388,7 +389,7 @@ Deno.test("parseIncomingMime: rejects multiple Message-ID header lines", async (
   );
 });
 
-Deno.test("parseIncomingMime: rejects multi-valued or malformed Message-ID and References", async () => {
+test("parseIncomingMime: rejects multi-valued or malformed Message-ID and References", async () => {
   const emlMultiMsgId = [
     "From: user@example.com",
     "Message-ID: <id1@example.com> <id2@example.com>",
@@ -429,7 +430,7 @@ Deno.test("parseIncomingMime: rejects multi-valued or malformed Message-ID and R
   );
 });
 
-Deno.test("parseIncomingMime: rejects malformed From mailbox (e.g. invalid syntax or group)", async () => {
+test("parseIncomingMime: rejects malformed From mailbox (e.g. invalid syntax or group)", async () => {
   const eml = [
     "From: Group Name: user1@example.com, user2@example.com;",
     "Subject: Group Mail",
@@ -449,7 +450,7 @@ Deno.test("parseIncomingMime: rejects malformed From mailbox (e.g. invalid synta
   );
 });
 
-Deno.test("Privacy: errors never disclose private message bodies or malformed header values", async () => {
+test("Privacy: errors never disclose private message bodies or malformed header values", async () => {
   const privateSecret = "SUPER_SECRET_TOKEN_98765";
   const eml = [
     `From: attacker@example.com`,
@@ -471,7 +472,7 @@ Deno.test("Privacy: errors never disclose private message bodies or malformed he
   assertEquals(err.message.includes(privateSecret), false);
 });
 
-Deno.test("toMessageStoreParsedEmail: correctly transforms ParsedEmail for EmailMessageStore", async () => {
+test("toMessageStoreParsedEmail: correctly transforms ParsedEmail for EmailMessageStore", async () => {
   const eml = [
     "From: sender@example.com",
     "Subject: Storage Test",

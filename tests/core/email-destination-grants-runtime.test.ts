@@ -14,8 +14,8 @@
 // `tests/acp/email-intent-runtime.test.ts`.
 
 import { assert, assertEquals } from "@std/assert";
-import { fromFileUrl, join } from "@std/path";
-import { stringify as stringifyYaml } from "@std/yaml";
+import { join } from "node:path";
+import { stringify as stringifyYaml } from "yaml";
 import type { EmailIntentProfileOptions } from "@acp/agent-factory.ts";
 import type { AgentConnectorOptions, AgentType } from "@acp/types.ts";
 import {
@@ -39,8 +39,13 @@ import {
   EmailIntentRuntime,
   type EmailIntentRuntimeOptions,
 } from "@core/email-intent-runtime.ts";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import type { Config } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { fileURLToPath as fromFileUrl } from "node:url";
 
 const SHIPPED_OPENCODE_CONFIG = fromFileUrl(
   new URL("../../agent-config/email-intent-opencode.json", import.meta.url),
@@ -65,13 +70,13 @@ const SELECTION = {
 function provisionNativeCache(base: string): OmpNativeCache {
   const platform = ompNativeCachePlatform();
   const cache = ompNativeCacheDescriptor(base, platform, "development");
-  Deno.mkdirSync(cache.versionDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(cache.versionDir, { recursive: true, mode: 0o700 });
   const files = ompNativeCacheExpectedAddons(platform).exact.map((name) => {
     const bytes = `fixture addon ${name}`;
-    Deno.writeTextFileSync(join(cache.versionDir, name), bytes);
+    fs.writeFileSync(join(cache.versionDir, name), bytes);
     return { name, size: bytes.length };
   });
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -90,11 +95,11 @@ function intentProfileOptions(
 ): EmailIntentProfileOptions {
   const modelsPath = join(workspace, "omp-models.yml");
   const catalogPath = join(workspace, "opencode-catalog.json");
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     modelsPath,
     stringifyYaml({ providers: { openrouter: { headers: { "X-Title": "fixture" } } } }),
   );
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     catalogPath,
     JSON.stringify({ provider: { openrouter: { models: { "fixture-model": {} } } } }),
   );
@@ -107,7 +112,7 @@ function intentProfileOptions(
       installRoot: cache.installRoot,
       launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
     },
-    readFile: (path) => Deno.readTextFileSync(path),
+    readFile: (path) => fs.readFileSync(path, "utf8"),
     exists: (path) =>
       path === SHIPPED_OMP_SETTINGS || path === SHIPPED_OMP_MODELS || path === modelsPath ||
       path === catalogPath || path === SHIPPED_OPENCODE_CONFIG ||
@@ -182,12 +187,12 @@ async function withRuntimeCase(
   turn: EngineTurn,
   run: (harness: CaseHarness) => Promise<void>,
 ): Promise<void> {
-  const workspace = await Deno.makeTempDir({ prefix: "email-destination-grants-runtime-" });
+  const workspace = await makeTempDir({ prefix: "email-destination-grants-runtime-" });
   const rootsBase = join(workspace, "roots");
-  Deno.mkdirSync(rootsBase, { mode: 0o700 });
+  fs.mkdirSync(rootsBase, { mode: 0o700 });
   const env: Record<string, string> = {
     HOME: "/home/test-daemon",
-    PATH: Deno.env.get("PATH") ?? "/usr/bin",
+    PATH: process.env["PATH"] ?? "/usr/bin",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     USER: "deno",
@@ -210,7 +215,7 @@ async function withRuntimeCase(
   try {
     await run({ runtime, preflight, stub });
   } finally {
-    await Deno.remove(workspace, { recursive: true }).catch(() => {});
+    await fsp.rm(workspace, { recursive: true }).catch(() => {});
   }
 }
 
@@ -239,7 +244,7 @@ function grantsOf(outcome: EmailDestinationGrantOutcome) {
 }
 
 for (const backend of ["opencode", "omp"] as const) {
-  Deno.test(`grants - ${backend}: the real runtime carries the preflight envelope and its decision`, async () => {
+  test(`grants - ${backend}: the real runtime carries the preflight envelope and its decision`, async () => {
     await withRuntimeCase(
       backend,
       {
@@ -273,7 +278,7 @@ for (const backend of ["opencode", "omp"] as const) {
     );
   });
 
-  Deno.test(`grants - ${backend}: a tool attempt in the real runtime fails the grant closed`, async () => {
+  test(`grants - ${backend}: a tool attempt in the real runtime fails the grant closed`, async () => {
     await withRuntimeCase(
       backend,
       {
@@ -289,7 +294,7 @@ for (const backend of ["opencode", "omp"] as const) {
     );
   });
 
-  Deno.test(`grants - ${backend}: non-JSON engine output is never a grant`, async () => {
+  test(`grants - ${backend}: non-JSON engine output is never a grant`, async () => {
     await withRuntimeCase(
       backend,
       { text: "I think you should email alice@example.com." },

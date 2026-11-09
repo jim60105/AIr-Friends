@@ -10,6 +10,9 @@ import {
   validateOwnerId,
   validateUuid,
 } from "../../../src/platforms/email/message-store.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 const OWNER_A = "e_" + "a".repeat(64);
 const OWNER_B = "e_" + "b".repeat(64);
@@ -17,17 +20,17 @@ const OWNER_B = "e_" + "b".repeat(64);
 async function withTempStore(
   fn: (store: EmailMessageStore, tempDir: string) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-store-test-" });
+  const tempDir = await makeTempDir({ prefix: "email-store-test-" });
   const store = new EmailMessageStore({ workspacesRoot: tempDir });
   try {
     await fn(store, tempDir);
   } finally {
     store.close();
-    await Deno.remove(tempDir, { recursive: true }).catch(() => {});
+    await fsp.rm(tempDir, { recursive: true }).catch(() => {});
   }
 }
 
-Deno.test("EmailMessageStore - Channel & Identifier Validation", () => {
+test("EmailMessageStore - Channel & Identifier Validation", () => {
   // Valid owner
   assertEquals(validateOwnerId(OWNER_A), OWNER_A);
   assertThrows(
@@ -66,7 +69,7 @@ Deno.test("EmailMessageStore - Channel & Identifier Validation", () => {
   );
 });
 
-Deno.test("EmailMessageStore - Scenario: Forged reference / Cross-owner isolation", async () => {
+test("EmailMessageStore - Scenario: Forged reference / Cross-owner isolation", async () => {
   await withTempStore(async (store) => {
     // User A receives an initial email with wire Message-ID <msg-a-1@example.com>
     const wireIdA = "<msg-a-1@example.com>";
@@ -119,7 +122,7 @@ Deno.test("EmailMessageStore - Scenario: Forged reference / Cross-owner isolatio
   });
 });
 
-Deno.test("EmailMessageStore - Thread derivation strictly from references (never subject)", async () => {
+test("EmailMessageStore - Thread derivation strictly from references (never subject)", async () => {
   await withTempStore(async (store) => {
     // Message 1 with subject "Meeting Discussion"
     const rec1Id = await store.putSource(
@@ -176,7 +179,7 @@ Deno.test("EmailMessageStore - Thread derivation strictly from references (never
   });
 });
 
-Deno.test("EmailMessageStore - Scenario: Duplicate wire ID preserves both records with review required", async () => {
+test("EmailMessageStore - Scenario: Duplicate wire ID preserves both records with review required", async () => {
   await withTempStore(async (store) => {
     const wireId = "<shared-id@example.com>";
 
@@ -227,7 +230,7 @@ Deno.test("EmailMessageStore - Scenario: Duplicate wire ID preserves both record
   });
 });
 
-Deno.test("EmailMessageStore - Conflicting thread references flag review required without destructive merge", async () => {
+test("EmailMessageStore - Conflicting thread references flag review required without destructive merge", async () => {
   await withTempStore(async (store) => {
     // Thread 1
     const rec1Id = await store.putSource(
@@ -275,7 +278,7 @@ Deno.test("EmailMessageStore - Conflicting thread references flag review require
   });
 });
 
-Deno.test("EmailMessageStore - Unresolved references stored as metadata without invented content", async () => {
+test("EmailMessageStore - Unresolved references stored as metadata without invented content", async () => {
   await withTempStore(async (store) => {
     const unknownRef = "<unknown-parent@example.com>";
     const recId = await store.putSource(
@@ -301,7 +304,7 @@ Deno.test("EmailMessageStore - Unresolved references stored as metadata without 
   });
 });
 
-Deno.test("EmailMessageStore - Scenario: Forward later / Immutable source and attachment bytes", async () => {
+test("EmailMessageStore - Scenario: Forward later / Immutable source and attachment bytes", async () => {
   await withTempStore(async (store) => {
     const sourceBytes = new TextEncoder().encode("RFC 5322 Raw Message Bytes with Attachments");
     const attachmentContent = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG header
@@ -340,7 +343,7 @@ Deno.test("EmailMessageStore - Scenario: Forward later / Immutable source and at
   });
 });
 
-Deno.test("EmailMessageStore - putSent: Third-party conversation separation and idempotency", async () => {
+test("EmailMessageStore - putSent: Third-party conversation separation and idempotency", async () => {
   await withTempStore(async (store) => {
     // 1. Initial user inbound thread
     const inRecId = await store.putSource(
@@ -413,8 +416,8 @@ Deno.test("EmailMessageStore - putSent: Third-party conversation separation and 
   });
 });
 
-Deno.test("EmailMessageStore - Crash recovery & index rebuild from disk", async () => {
-  const tempDir = await Deno.makeTempDir({ prefix: "email-recovery-test-" });
+test("EmailMessageStore - Crash recovery & index rebuild from disk", async () => {
+  const tempDir = await makeTempDir({ prefix: "email-recovery-test-" });
   try {
     const store1 = new EmailMessageStore({ workspacesRoot: tempDir });
 
@@ -465,6 +468,6 @@ Deno.test("EmailMessageStore - Crash recovery & index rebuild from disk", async 
 
     store2.close();
   } finally {
-    await Deno.remove(tempDir, { recursive: true }).catch(() => {});
+    await fsp.rm(tempDir, { recursive: true }).catch(() => {});
   }
 });

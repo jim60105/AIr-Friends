@@ -14,7 +14,7 @@
 // IMAP/SMTP exchange or production credential is claimed here.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { FakeTime } from "@std/testing/time";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import type { EmailIntentProviderSelection } from "@acp/agent-factory.ts";
@@ -40,8 +40,12 @@ import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform
 import type { PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Config } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(
   resolvePath(import.meta.dirname ?? ".", "../../skills"),
 );
 
@@ -139,7 +143,7 @@ function reasonOf(outcome: EmailDestinationGrantOutcome): string {
 // Grant derivation: current authored text only
 // ---------------------------------------------------------------------------
 
-Deno.test("preflight - a grant is derived from the current unambiguous authored text", async () => {
+test("preflight - a grant is derived from the current unambiguous authored text", async () => {
   const { preflight, interpreter } = createPreflight(
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}',
   );
@@ -171,7 +175,7 @@ Deno.test("preflight - a grant is derived from the current unambiguous authored 
   assertEquals(interpreter.calls[0].backend, SELECTION.backend);
 });
 
-Deno.test("preflight - a digest binds the grant to the exact request", async () => {
+test("preflight - a digest binds the grant to the exact request", async () => {
   const answer =
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}';
   const first = grantsOf(await createPreflight(answer).preflight.derive(grantRequest()));
@@ -189,7 +193,7 @@ Deno.test("preflight - a digest binds the grant to the exact request", async () 
   assert(first[0].requestDigest !== otherText[0].requestDigest);
 });
 
-Deno.test("preflight - a quoted-only destination produces no grant", async () => {
+test("preflight - a quoted-only destination produces no grant", async () => {
   // The authored text the parser separated carries no address; the address only
   // exists in the quoted material the producer never receives.
   const { preflight, interpreter } = createPreflight(
@@ -203,7 +207,7 @@ Deno.test("preflight - a quoted-only destination produces no grant", async () =>
   assertEquals(interpreter.calls.length, 1);
 });
 
-Deno.test("preflight - an address that is only a substring of another token never grants", async () => {
+test("preflight - an address that is only a substring of another token never grants", async () => {
   const { preflight } = createPreflight(
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}',
   );
@@ -213,7 +217,7 @@ Deno.test("preflight - an address that is only a substring of another token neve
   assertEquals(reasonOf(outcome), "recipient_not_authored");
 });
 
-Deno.test("preflight - a decorated or leading-dot token never authorizes the bare address", async () => {
+test("preflight - a decorated or leading-dot token never authorizes the bare address", async () => {
   const answer =
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}';
   // A combining mark inside the authored token is part of the address, not a
@@ -248,7 +252,7 @@ Deno.test("preflight - a decorated or leading-dot token never authorizes the bar
   assertEquals(grants[0].canonicalRecipient, "alice@example.com");
 });
 
-Deno.test("preflight - provenance normalization follows the deployment mailbox identity", async () => {
+test("preflight - provenance normalization follows the deployment mailbox identity", async () => {
   // Domain case and IDNA form are equivalent; local-part case and plus tags are
   // NOT (the deployment's own contract keeps them distinct).
   const { preflight } = createPreflight(
@@ -296,7 +300,7 @@ Deno.test("preflight - provenance normalization follows the deployment mailbox i
   );
 });
 
-Deno.test("preflight - ambiguous authorship asks for clarification and never interprets", async () => {
+test("preflight - ambiguous authorship asks for clarification and never interprets", async () => {
   const { preflight, interpreter } = createPreflight('{"decision":"none"}');
   const outcome = await preflight.derive(grantRequest({
     provenanceStatus: "ambiguous",
@@ -305,7 +309,7 @@ Deno.test("preflight - ambiguous authorship asks for clarification and never int
   assertEquals(interpreter.calls.length, 0);
 });
 
-Deno.test("preflight - only an authenticated email request session may grant", async () => {
+test("preflight - only an authenticated email request session may grant", async () => {
   for (const origin of ["reminder", "spontaneous", "other"] as const) {
     const { preflight, interpreter } = createPreflight(
       '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}',
@@ -316,7 +320,7 @@ Deno.test("preflight - only an authenticated email request session may grant", a
   }
 });
 
-Deno.test("preflight - blank or oversized authored text asks for clarification", async () => {
+test("preflight - blank or oversized authored text asks for clarification", async () => {
   const blank = createPreflight('{"decision":"none"}');
   assertEquals(
     reasonOf(await blank.preflight.derive(grantRequest({ authoredText: "   " }))),
@@ -340,21 +344,21 @@ Deno.test("preflight - blank or oversized authored text asks for clarification",
 // Fail-closed interpretation
 // ---------------------------------------------------------------------------
 
-Deno.test("preflight - an unavailable interpretation yields no grant and a clarification", async () => {
+test("preflight - an unavailable interpretation yields no grant and a clarification", async () => {
   const { preflight } = createPreflight(
     () => ({ status: "unavailable", reason: "timeout" }),
   );
   assertEquals(reasonOf(await preflight.derive(grantRequest())), "intent_unavailable");
 });
 
-Deno.test("preflight - an interpreter throw fails closed", async () => {
+test("preflight - an interpreter throw fails closed", async () => {
   const { preflight } = createPreflight(() => {
     throw new Error("engine exploded");
   });
   assertEquals(reasonOf(await preflight.derive(grantRequest())), "intent_unavailable");
 });
 
-Deno.test("preflight - invalid decision JSON yields no grant", async () => {
+test("preflight - invalid decision JSON yields no grant", async () => {
   const invalid = [
     "not json at all",
     '```json\n{"decision":"none"}\n```',
@@ -376,7 +380,7 @@ Deno.test("preflight - invalid decision JSON yields no grant", async () => {
   }
 });
 
-Deno.test("preflight - a clarify decision never carries interpreter wording into the outcome", async () => {
+test("preflight - a clarify decision never carries interpreter wording into the outcome", async () => {
   const decision = parseDecision('{"decision":"clarify","reason":"send it to alice@example.com"}');
   assertEquals(decision?.kind, "clarify");
   const { preflight } = createPreflight(
@@ -392,7 +396,7 @@ Deno.test("preflight - a clarify decision never carries interpreter wording into
 // Forward sources and multiple actions
 // ---------------------------------------------------------------------------
 
-Deno.test("preflight - a forward needs a proven owner-accessible source", async () => {
+test("preflight - a forward needs a proven owner-accessible source", async () => {
   const answer =
     '{"decision":"grant","actions":[{"action":"forward","recipient":"alice@example.com","sourceRecordId":"rec-1"}]}';
 
@@ -423,7 +427,7 @@ Deno.test("preflight - a forward needs a proven owner-accessible source", async 
   assertEquals(queries, [{ owner: OWNER, sourceRecordId: "rec-1" }]);
 });
 
-Deno.test("preflight - one invalid action rejects the whole decision", async () => {
+test("preflight - one invalid action rejects the whole decision", async () => {
   const { preflight } = createPreflight(
     '{"decision":"grant","actions":[' +
       '{"action":"compose","recipient":"alice@example.com"},' +
@@ -433,7 +437,7 @@ Deno.test("preflight - one invalid action rejects the whole decision", async () 
   assertEquals(reasonOf(outcome), "recipient_not_authored");
 });
 
-Deno.test("preflight - multiple explicit actions get separately identified grants", async () => {
+test("preflight - multiple explicit actions get separately identified grants", async () => {
   const { preflight } = createPreflight(
     '{"decision":"grant","actions":[' +
       '{"action":"compose","recipient":"alice@example.com"},' +
@@ -455,7 +459,7 @@ Deno.test("preflight - multiple explicit actions get separately identified grant
 // Immutability, session scope and the read surface
 // ---------------------------------------------------------------------------
 
-Deno.test("preflight - grants are frozen and the sessions registry records them exactly once", async () => {
+test("preflight - grants are frozen and the sessions registry records them exactly once", async () => {
   const { preflight } = createPreflight(
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}',
   );
@@ -500,7 +504,7 @@ Deno.test("preflight - grants are frozen and the sessions registry records them 
   assertEquals(registry.emailDestinationGrantsOf("sess_missing"), []);
 });
 
-Deno.test("preflight - an empty verdict latches and grants die with the session", async () => {
+test("preflight - an empty verdict latches and grants die with the session", async () => {
   const registry = new SessionRegistry(50);
   const sessionId = registry.register({
     platform: "email",
@@ -698,8 +702,8 @@ async function createOrchestrator(): Promise<{
   root: string;
   dispose: () => Promise<void>;
 }> {
-  const root = await Deno.makeTempDir({ prefix: "email-destination-grants-test-" });
-  await Deno.mkdir(join(root, "prompts"), { recursive: true });
+  const root = await makeTempDir({ prefix: "email-destination-grants-test-" });
+  await fsp.mkdir(join(root, "prompts"), { recursive: true });
   const config = {
     platforms: {
       discord: { token: "test", enabled: true },
@@ -722,7 +726,7 @@ async function createOrchestrator(): Promise<{
   } as unknown as Config;
   // The classified prompt render refuses a template that omits the literal
   // trusted skill-script root, so the fixture carries it like the shipped one.
-  await Deno.writeTextFile(
+  await fsp.writeFile(
     join(root, "prompts", "system_reply.md"),
     "You are a helper.\nSkill root: {{ skillsDir }}\n" +
       "{{ if sessionId }}Session: {{ sessionId }}{{ /if }}\n" +
@@ -752,7 +756,7 @@ async function createOrchestrator(): Promise<{
     root,
     dispose: async () => {
       registry.stop();
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await fsp.rm(root, { recursive: true }).catch(() => {});
     },
   };
 }
@@ -785,7 +789,7 @@ function emailEvent(authoredText: string, content = authoredText): NormalizedEve
   };
 }
 
-Deno.test("orchestrator - an email request records its grants before the agent starts", async () => {
+test("orchestrator - an email request records its grants before the agent starts", async () => {
   const { orchestrator, registry, dispose } = await createOrchestrator();
   const { preflight, interpreter } = createPreflight(
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}',
@@ -815,7 +819,7 @@ Deno.test("orchestrator - an email request records its grants before the agent s
   }
 });
 
-Deno.test("orchestrator - a send attempt inside the prompt cannot widen the grant", async () => {
+test("orchestrator - a send attempt inside the prompt cannot widen the grant", async () => {
   const { orchestrator, registry, dispose } = await createOrchestrator();
   const { preflight, interpreter } = createPreflight(
     '{"decision":"grant","actions":[{"action":"compose","recipient":"alice@example.com"}]}',
@@ -843,7 +847,7 @@ Deno.test("orchestrator - a send attempt inside the prompt cannot widen the gran
   }
 });
 
-Deno.test("orchestrator - a clarify outcome instructs the agent without sending", async () => {
+test("orchestrator - a clarify outcome instructs the agent without sending", async () => {
   const { orchestrator, registry, dispose } = await createOrchestrator();
   const { preflight } = createPreflight(
     '{"decision":"clarify"}',
@@ -871,7 +875,7 @@ Deno.test("orchestrator - a clarify outcome instructs the agent without sending"
   }
 });
 
-Deno.test("orchestrator - non-email and unsupported email events are untouched", async () => {
+test("orchestrator - non-email and unsupported email events are untouched", async () => {
   const { orchestrator, registry, dispose } = await createOrchestrator();
   const { preflight, interpreter } = createPreflight('{"decision":"none"}');
   orchestrator.setEmailDestinationGrantPreflight(preflight);
@@ -910,7 +914,7 @@ Deno.test("orchestrator - non-email and unsupported email events are untouched",
   }
 });
 
-Deno.test("preflight - authored mailbox extraction accepts complete tokens only", () => {
+test("preflight - authored mailbox extraction accepts complete tokens only", () => {
   const mailboxes = extractAuthoredMailboxes(
     "Mail Alice@Example.com, bob@bücher.example, or carol@example.com. Not notalice@example.com.",
   );

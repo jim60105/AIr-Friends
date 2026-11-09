@@ -15,6 +15,8 @@ import {
   DurableFileOptions,
   readJournal,
 } from "./durable-files.ts";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../../utils/fs-compat.ts";
 
 const logger = createLogger("EmailSubmissionStore");
 
@@ -1018,9 +1020,9 @@ export class SubmissionStore {
 
     let bytes: Uint8Array;
     try {
-      bytes = await Deno.readFile(safeEmlPath);
+      bytes = new Uint8Array(await fsp.readFile(safeEmlPath));
     } catch (err) {
-      if (err instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(err)) {
         throw new SubmissionStoreError(
           SubmissionDiagnosticCode.MISSING_SUBMISSION_EVIDENCE,
           "Constructed message evidence file is missing",

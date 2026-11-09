@@ -23,6 +23,7 @@ import {
   stripComments,
   unquoteString,
 } from "../../../src/platforms/email/incoming-auth.ts";
+import { test } from "bun:test";
 
 const BOT_OWN_ADDRESS = "bot@example.com";
 const TRUSTED_AUTHSERV_ID = "mx.example.com";
@@ -66,7 +67,7 @@ function makeParsedEmail(overrides?: Partial<ParsedEmail>): ParsedEmail {
   };
 }
 
-Deno.test("stripComments and unquoteString: handles nested parens, quotes, escapes", () => {
+test("stripComments and unquoteString: handles nested parens, quotes, escapes", () => {
   assertEquals(
     stripComments("dmarc=pass (p=reject (nested comment)) header.from=example.com"),
     "dmarc=pass  header.from=example.com",
@@ -84,7 +85,7 @@ Deno.test("stripComments and unquoteString: handles nested parens, quotes, escap
   assertEquals(unquoteString("plain"), "plain");
 });
 
-Deno.test("parseAuthenticationResultsHeader: parses quoted authserv-id and quoted header.from", () => {
+test("parseAuthenticationResultsHeader: parses quoted authserv-id and quoted header.from", () => {
   const header = '"mx.example.com"; dmarc=pass header.from="allowed-domain.org"';
   const parsed = parseAuthenticationResultsHeader(header);
   assertEquals(parsed?.authservId, "mx.example.com");
@@ -92,13 +93,13 @@ Deno.test("parseAuthenticationResultsHeader: parses quoted authserv-id and quote
   assertEquals(parsed?.dmarcResults[0].headerFrom, "allowed-domain.org");
 });
 
-Deno.test("parseAuthenticationResultsHeader: parses method versions like dmarc/1=pass", () => {
+test("parseAuthenticationResultsHeader: parses method versions like dmarc/1=pass", () => {
   const header = "mx.example.com; dmarc/1=pass header.from=allowed-domain.org";
   const parsed = parseAuthenticationResultsHeader(header);
   assertEquals(parsed?.dmarcResults[0].result, "pass");
 });
 
-Deno.test("parseAuthenticationResultsHeader: extracts authserv-id, dmarc result, and header.from", () => {
+test("parseAuthenticationResultsHeader: extracts authserv-id, dmarc result, and header.from", () => {
   const header1 = "mx.example.com; dmarc=pass (p=reject) header.from=allowed-domain.org";
   const parsed1 = parseAuthenticationResultsHeader(header1);
   assertEquals(parsed1?.authservId, "mx.example.com");
@@ -122,7 +123,7 @@ Deno.test("parseAuthenticationResultsHeader: extracts authserv-id, dmarc result,
   assertEquals(parsed3?.dmarcResults.length, 0); // Comments stripped, no dmarc clause!
 });
 
-Deno.test("HeaderMultimap: handles folded headers and multiple instances across types", () => {
+test("HeaderMultimap: handles folded headers and multiple instances across types", () => {
   const rawString = [
     "From: Alice <alice@example.com>",
     "Authentication-Results: mx.example.com; dmarc=pass",
@@ -154,7 +155,7 @@ Deno.test("HeaderMultimap: handles folded headers and multiple instances across 
   assertEquals(mapFromTuples.getAll("authentication-results").length, 2);
 });
 
-Deno.test("authenticateInbound: ADMITTED on valid authoritative DMARC pass and allowed From", () => {
+test("authenticateInbound: ADMITTED on valid authoritative DMARC pass and allowed From", () => {
   const parsed = makeParsedEmail();
   const rawHeaders =
     `Authentication-Results: mx.example.com; dmarc=pass (p=reject) header.from=allowed-domain.org\r\nFrom: ${ALLOWED_USER_ADDRESS}\r\n`;
@@ -179,7 +180,7 @@ Deno.test("authenticateInbound: ADMITTED on valid authoritative DMARC pass and a
   }
 });
 
-Deno.test("authenticateInbound: REJECTED_UNATTESTED_STRIPPING if attestedStripping is false", () => {
+test("authenticateInbound: REJECTED_UNATTESTED_STRIPPING if attestedStripping is false", () => {
   const parsed = makeParsedEmail();
   const rawHeaders =
     `Authentication-Results: mx.example.com; dmarc=pass header.from=allowed-domain.org\r\n`;
@@ -196,7 +197,7 @@ Deno.test("authenticateInbound: REJECTED_UNATTESTED_STRIPPING if attestedStrippi
   assertEquals(decision.reason, AdmissionReason.REJECTED_UNATTESTED_STRIPPING);
 });
 
-Deno.test("authenticateInbound: REJECTED_MISSING_AUTH_RESULTS if no Authentication-Results header", () => {
+test("authenticateInbound: REJECTED_MISSING_AUTH_RESULTS if no Authentication-Results header", () => {
   const parsed = makeParsedEmail();
   const rawHeaders = `Subject: Hello\r\n`;
 
@@ -212,7 +213,7 @@ Deno.test("authenticateInbound: REJECTED_MISSING_AUTH_RESULTS if no Authenticati
   assertEquals(decision.reason, AdmissionReason.REJECTED_MISSING_AUTH_RESULTS);
 });
 
-Deno.test("authenticateInbound: REJECTED_MISSING_AUTH_RESULTS if authservId does not match configured", () => {
+test("authenticateInbound: REJECTED_MISSING_AUTH_RESULTS if authservId does not match configured", () => {
   const parsed = makeParsedEmail();
   // Header claims a different authservId (untrusted)
   const rawHeaders =
@@ -230,7 +231,7 @@ Deno.test("authenticateInbound: REJECTED_MISSING_AUTH_RESULTS if authservId does
   assertEquals(decision.reason, AdmissionReason.REJECTED_MISSING_AUTH_RESULTS);
 });
 
-Deno.test("authenticateInbound: ignores untrusted authserv-id when trusted authserv-id is present", () => {
+test("authenticateInbound: ignores untrusted authserv-id when trusted authserv-id is present", () => {
   const parsed = makeParsedEmail();
   // Message has untrusted header (e.g. from upstream MTA that stripped previous ones, or attacker header that wasn't matching authserv-id)
   // and trusted header matching configured authservId
@@ -253,7 +254,7 @@ Deno.test("authenticateInbound: ignores untrusted authserv-id when trusted auths
   }
 });
 
-Deno.test("authenticateInbound: REJECTED_MULTIPLE_AUTHSERV_RESULTS on duplicate trusted authservId headers", () => {
+test("authenticateInbound: REJECTED_MULTIPLE_AUTHSERV_RESULTS on duplicate trusted authservId headers", () => {
   const parsed = makeParsedEmail();
   // Two headers both claiming mx.example.com (trusted) -> fail closed!
   const rawHeaders = [
@@ -273,7 +274,7 @@ Deno.test("authenticateInbound: REJECTED_MULTIPLE_AUTHSERV_RESULTS on duplicate 
   assertEquals(decision.reason, AdmissionReason.REJECTED_MULTIPLE_AUTHSERV_RESULTS);
 });
 
-Deno.test("authenticateInbound: REJECTED_MULTIPLE_AUTHSERV_RESULTS on mixed quoted and unquoted trusted authserv-id", () => {
+test("authenticateInbound: REJECTED_MULTIPLE_AUTHSERV_RESULTS on mixed quoted and unquoted trusted authserv-id", () => {
   const parsed = makeParsedEmail();
   const rawHeaders = [
     'Authentication-Results: "mx.example.com"; dmarc=pass header.from=allowed-domain.org',
@@ -292,7 +293,7 @@ Deno.test("authenticateInbound: REJECTED_MULTIPLE_AUTHSERV_RESULTS on mixed quot
   assertEquals(decision.reason, AdmissionReason.REJECTED_MULTIPLE_AUTHSERV_RESULTS);
 });
 
-Deno.test("authenticateInbound: REJECTED_MULTIPLE_DMARC_RESULTS when clause has multiple header.from properties", () => {
+test("authenticateInbound: REJECTED_MULTIPLE_DMARC_RESULTS when clause has multiple header.from properties", () => {
   const parsed = makeParsedEmail();
   const rawHeaders =
     "Authentication-Results: mx.example.com; dmarc=pass header.from=allowed-domain.org header.from=evil.net\r\n";
@@ -309,7 +310,7 @@ Deno.test("authenticateInbound: REJECTED_MULTIPLE_DMARC_RESULTS when clause has 
   assertEquals(decision.reason, AdmissionReason.REJECTED_MULTIPLE_DMARC_RESULTS);
 });
 
-Deno.test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from has invalid suffix (e.g. /evil)", () => {
+test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from has invalid suffix (e.g. /evil)", () => {
   const parsed = makeParsedEmail();
   const rawHeaders =
     "Authentication-Results: mx.example.com; dmarc=pass header.from=allowed-domain.org/evil\r\n";
@@ -326,7 +327,7 @@ Deno.test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from
   assertEquals(decision.reason, AdmissionReason.REJECTED_DMARC_ALIGNMENT_FAILED);
 });
 
-Deno.test("authenticateInbound: REJECTED_MISSING_DMARC when trusted header lacks DMARC result", () => {
+test("authenticateInbound: REJECTED_MISSING_DMARC when trusted header lacks DMARC result", () => {
   const parsed = makeParsedEmail();
   const rawHeaders =
     `Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=allowed-domain.org\r\n`;
@@ -343,7 +344,7 @@ Deno.test("authenticateInbound: REJECTED_MISSING_DMARC when trusted header lacks
   assertEquals(decision.reason, AdmissionReason.REJECTED_MISSING_DMARC);
 });
 
-Deno.test("authenticateInbound: REJECTED_MULTIPLE_DMARC_RESULTS when trusted header contains multiple DMARC clauses", () => {
+test("authenticateInbound: REJECTED_MULTIPLE_DMARC_RESULTS when trusted header contains multiple DMARC clauses", () => {
   const parsed = makeParsedEmail();
   const rawHeaders =
     `Authentication-Results: mx.example.com; dmarc=pass header.from=allowed-domain.org; dmarc=pass header.from=allowed-domain.org\r\n`;
@@ -360,7 +361,7 @@ Deno.test("authenticateInbound: REJECTED_MULTIPLE_DMARC_RESULTS when trusted hea
   assertEquals(decision.reason, AdmissionReason.REJECTED_MULTIPLE_DMARC_RESULTS);
 });
 
-Deno.test("authenticateInbound: REJECTED_DMARC_FAILED when authoritative DMARC result is fail/softfail/none", () => {
+test("authenticateInbound: REJECTED_DMARC_FAILED when authoritative DMARC result is fail/softfail/none", () => {
   const parsed = makeParsedEmail();
   const failHeaders =
     `Authentication-Results: mx.example.com; dmarc=fail (p=reject) header.from=allowed-domain.org\r\n`;
@@ -388,7 +389,7 @@ Deno.test("authenticateInbound: REJECTED_DMARC_FAILED when authoritative DMARC r
   assertEquals(decisionNone.reason, AdmissionReason.REJECTED_DMARC_FAILED);
 });
 
-Deno.test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from differs from From domain", () => {
+test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from differs from From domain", () => {
   const parsed = makeParsedEmail({ from: "attacker@spoofed-domain.net" });
   // DMARC passed for allowed-domain.org, but From header is spoofed-domain.net
   const rawHeaders =
@@ -406,7 +407,7 @@ Deno.test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from
   assertEquals(decision.reason, AdmissionReason.REJECTED_DMARC_ALIGNMENT_FAILED);
 });
 
-Deno.test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from is missing from dmarc clause", () => {
+test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from is missing from dmarc clause", () => {
   const parsed = makeParsedEmail();
   // DMARC pass but no header.from property declared
   const rawHeaders = `Authentication-Results: mx.example.com; dmarc=pass\r\n`;
@@ -423,7 +424,7 @@ Deno.test("authenticateInbound: REJECTED_DMARC_ALIGNMENT_FAILED when header.from
   assertEquals(decision.reason, AdmissionReason.REJECTED_DMARC_ALIGNMENT_FAILED);
 });
 
-Deno.test("authenticateInbound: REJECTED_SENDER_NOT_ALLOWED when From domain aligns with DMARC pass but sender not in channels", () => {
+test("authenticateInbound: REJECTED_SENDER_NOT_ALLOWED when From domain aligns with DMARC pass but sender not in channels", () => {
   // Bob is from the same authenticated domain, but Bob is not in channels allowlist
   const bobAddress = "bob@allowed-domain.org";
   const parsed = makeParsedEmail({ from: bobAddress });
@@ -442,7 +443,7 @@ Deno.test("authenticateInbound: REJECTED_SENDER_NOT_ALLOWED when From domain ali
   assertEquals(decision.reason, AdmissionReason.REJECTED_SENDER_NOT_ALLOWED);
 });
 
-Deno.test("authenticateInbound: REJECTED_SENDER_NOT_ALLOWED when sender channel entry is disabled (enabled: false)", () => {
+test("authenticateInbound: REJECTED_SENDER_NOT_ALLOWED when sender channel entry is disabled (enabled: false)", () => {
   // Address corresponding to disabled entry
   const disabledSender = "disabled@allowed-domain.org";
   const disabledUserId = normalizeEmailMailbox(disabledSender).userId;
@@ -463,7 +464,7 @@ Deno.test("authenticateInbound: REJECTED_SENDER_NOT_ALLOWED when sender channel 
   assertEquals(decision.reason, AdmissionReason.REJECTED_SENDER_NOT_ALLOWED);
 });
 
-Deno.test("authenticateInbound: IGNORED_SELF_ORIGINATED when From matches bot ownAddress", () => {
+test("authenticateInbound: IGNORED_SELF_ORIGINATED when From matches bot ownAddress", () => {
   const parsed = makeParsedEmail({ from: "Bot <bot@example.com>" });
   const rawHeaders =
     `Authentication-Results: mx.example.com; dmarc=pass header.from=example.com\r\n`;
@@ -480,7 +481,7 @@ Deno.test("authenticateInbound: IGNORED_SELF_ORIGINATED when From matches bot ow
   assertEquals(decision.reason, AdmissionReason.IGNORED_SELF_ORIGINATED);
 });
 
-Deno.test("authenticateInbound: IGNORED_AUTO_SUBMITTED when Auto-Submitted header is not 'no'", () => {
+test("authenticateInbound: IGNORED_AUTO_SUBMITTED when Auto-Submitted header is not 'no'", () => {
   const parsed = makeParsedEmail();
 
   // Test Auto-Submitted: auto-generated
@@ -528,7 +529,7 @@ Deno.test("authenticateInbound: IGNORED_AUTO_SUBMITTED when Auto-Submitted heade
   assertEquals(decision3.admitted, true);
 });
 
-Deno.test("authenticateInbound: IGNORED_DELIVERY_FAILURE on Return-Path: <>, report-type=delivery-status, or bounce subject", () => {
+test("authenticateInbound: IGNORED_DELIVERY_FAILURE on Return-Path: <>, report-type=delivery-status, or bounce subject", () => {
   const parsed = makeParsedEmail();
 
   // 1. Return-Path: <>
@@ -592,7 +593,7 @@ Deno.test("authenticateInbound: IGNORED_DELIVERY_FAILURE on Return-Path: <>, rep
   assertEquals(decision4.reason, AdmissionReason.IGNORED_DELIVERY_FAILURE);
 });
 
-Deno.test("authenticateInbound: replyDestination is strictly canonicalAddress, ignoring Reply-To and Cc", () => {
+test("authenticateInbound: replyDestination is strictly canonicalAddress, ignoring Reply-To and Cc", () => {
   const parsed = makeParsedEmail({
     from: "Alice <alice@allowed-domain.org>",
   });

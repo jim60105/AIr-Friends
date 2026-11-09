@@ -37,6 +37,7 @@ import type { Config } from "../types/config.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { WorkspaceTmpUnreclaimableSink } from "./workspace-manager.ts";
 import { join, resolve } from "node:path";
+import fsp from "node:fs/promises";
 
 const logger = createLogger("AgentProcessPool");
 
@@ -645,14 +646,14 @@ export class AgentProcessPool {
         forbiddenRoots: ompNativeCacheForbiddenRoots(this.config.workspace),
       });
       // Pooled OMP processes share the pooled TMPDIR convention with OpenCode.
-      await Deno.mkdir(resolve(join(dataRoot, "channel-tmp", poolKey)), { recursive: true });
+      await fsp.mkdir(resolve(join(dataRoot, "channel-tmp", poolKey)), { recursive: true });
       return;
     }
     for (const sub of ["channel-cwd", "channel-tmp", "opencode-data"]) {
       // Resolve lexically so the created directory string is byte-identical to
       // the absolute paths exported into the agent process env (proposal:
       // reader and writer always agree, independent of the process cwd).
-      await Deno.mkdir(resolve(join(dataRoot, sub, poolKey)), { recursive: true });
+      await fsp.mkdir(resolve(join(dataRoot, sub, poolKey)), { recursive: true });
     }
   }
 
@@ -687,7 +688,7 @@ export class AgentProcessPool {
     const filePath = join(this.jwtDir, "active.json");
     let current: string | undefined;
     try {
-      const raw = await Deno.readTextFile(filePath);
+      const raw = await fsp.readFile(filePath, "utf8");
       const parsed = JSON.parse(raw) as { sessionId?: string };
       current = parsed.sessionId;
     } catch {

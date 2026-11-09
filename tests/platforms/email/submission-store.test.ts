@@ -6,7 +6,7 @@
 // multi-root isolation, delimiter collision resistance, and zero-resubmission counting seams.
 
 import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import {
   _resetSharedRegistryForTesting,
   computeSha256Hex,
@@ -16,16 +16,20 @@ import {
   SubmissionStore,
   SubmissionStoreError,
 } from "../../../src/platforms/email/submission-store.ts";
+import fsp from "node:fs/promises";
+import { Buffer } from "node:buffer";
+import { test } from "bun:test";
+import { makeTempDir } from "../../../src/utils/fs-compat.ts";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "submission-store-test-" });
+  const dir = await makeTempDir({ prefix: "submission-store-test-" });
   try {
     _resetSharedRegistryForTesting();
     await fn(dir);
   } finally {
     _resetSharedRegistryForTesting();
     try {
-      await Deno.remove(dir, { recursive: true });
+      await fsp.rm(dir, { recursive: true });
     } catch {
       // ignore cleanup errors
     }
@@ -38,7 +42,32 @@ function makeKey(workId: string, actionSlot = "reply"): EmailOperationKey {
   return { workId, actionSlot };
 }
 
-Deno.test("SubmissionStore - 1.1 Reservation keys, digest conflict detection, and idempotent repetition", async () => {
+test("SubmissionStore - evidence verification hands the callback plain bytes, not a Buffer", async () => {
+  await withTempDir(async (root) => {
+    const store = new SubmissionStore(root);
+    const key = makeKey("work-verify-bytes", "reply");
+    const bytes = new TextEncoder().encode("plain evidence bytes");
+    const emlRef = "sent/verify-bytes.eml";
+    await store.prepare(DEFAULT_OWNER, key, computeSha256Hex(bytes), emlRef, {
+      targetKind: "user",
+      recipientRef: "user@example.com",
+    });
+    await fsp.mkdir(join(root, "sent"), { recursive: true });
+    await fsp.writeFile(join(root, emlRef), bytes);
+
+    let received: Uint8Array | undefined;
+    await store.verifySubmissionEvidence(DEFAULT_OWNER, key, (value) => {
+      received = value;
+      return computeSha256Hex(value);
+    });
+
+    assertEquals(received === undefined, false);
+    assertEquals(Buffer.isBuffer(received), false);
+    assertEquals(received, bytes);
+  });
+});
+
+test("SubmissionStore - 1.1 Reservation keys, digest conflict detection, and idempotent repetition", async () => {
   await withTempDir(async (root) => {
     const store = new SubmissionStore(root);
 
@@ -92,7 +121,7 @@ Deno.test("SubmissionStore - 1.1 Reservation keys, digest conflict detection, an
   });
 });
 
-Deno.test("SubmissionStore - 1.2 Full lifecycle transitions, exclusive submitting, and terminal immutability", async () => {
+test("SubmissionStore - 1.2 Full lifecycle transitions, exclusive submitting, and terminal immutability", async () => {
   await withTempDir(async (root) => {
     const store = new SubmissionStore(root);
 
@@ -159,7 +188,7 @@ Deno.test("SubmissionStore - 1.2 Full lifecycle transitions, exclusive submittin
   });
 });
 
-Deno.test("SubmissionStore - 1.3 Sent copy failure preserves submitted state", async () => {
+test("SubmissionStore - 1.3 Sent copy failure preserves submitted state", async () => {
   await withTempDir(async (root) => {
     const store = new SubmissionStore(root);
     const key = makeKey("work-sent-copy-fail", "reply");
@@ -177,7 +206,7 @@ Deno.test("SubmissionStore - 1.3 Sent copy failure preserves submitted state", a
   });
 });
 
-Deno.test("SubmissionStore - 1.4 Startup recovery: unclosed submitting converts durably to absorbing unknown", async () => {
+test("SubmissionStore - 1.4 Startup recovery: unclosed submitting converts durably to absorbing unknown", async () => {
   await withTempDir(async (root) => {
     // 1. Simulate process 1 running and crashing during SMTP dispatch
     const store1 = new SubmissionStore(root);
@@ -238,7 +267,7 @@ Deno.test("SubmissionStore - 1.4 Startup recovery: unclosed submitting converts 
   });
 });
 
-Deno.test("SubmissionStore - 1.5 Real file replay and counting test seam for zero resubmission", async () => {
+test("SubmissionStore - 1.5 Real file replay and counting test seam for zero resubmission", async () => {
   await withTempDir(async (root) => {
     // Counting seam for external SMTP side-effects
     let smtpAttempts = 0;
@@ -281,7 +310,7 @@ Deno.test("SubmissionStore - 1.5 Real file replay and counting test seam for zer
   });
 });
 
-Deno.test("SubmissionStore - 1.6 Torn tail and interior corruption fail closed and prohibit append", async () => {
+test("SubmissionStore - 1.6 Torn tail and interior corruption fail closed and prohibit append", async () => {
   await withTempDir(async (root) => {
     const journalPath = join(root, SUBMISSIONS_JOURNAL_FILENAME);
 
@@ -293,8 +322,8 @@ Deno.test("SubmissionStore - 1.6 Torn tail and interior corruption fail closed a
 
     // Append a torn trailing line directly to file (e.g. truncated JSON without newline)
     const tornLine = '{"v":1,"seq":2,"data":{"operationId":"op_torn","phase":"submitt';
-    await Deno.writeTextFile(journalPath, tornLine, { append: true });
-    const bytesBefore = await Deno.readFile(journalPath);
+    await fsp.appendFile(journalPath, tornLine);
+    const bytesBefore = await fsp.readFile(journalPath);
 
     _resetSharedRegistryForTesting();
 
@@ -314,14 +343,14 @@ Deno.test("SubmissionStore - 1.6 Torn tail and interior corruption fail closed a
     );
 
     // Byte-for-byte evidence preservation: damaged journal was NOT trimmed or altered!
-    const bytesAfter = await Deno.readFile(journalPath);
+    const bytesAfter = await fsp.readFile(journalPath);
     assertEquals(bytesAfter, bytesBefore);
 
     store2.close();
   });
 });
 
-Deno.test("SubmissionStore - 1.7 Real SHA-256 evidence verification gates markSubmitting", async () => {
+test("SubmissionStore - 1.7 Real SHA-256 evidence verification gates markSubmitting", async () => {
   await withTempDir(async (root) => {
     const store = new SubmissionStore(root);
     const key = makeKey("work-evidence", "reply");
@@ -344,8 +373,8 @@ Deno.test("SubmissionStore - 1.7 Real SHA-256 evidence verification gates markSu
     );
 
     // 2. Create evidence file with corrupted/wrong bytes: markSubmitting fails with EVIDENCE_DIGEST_MISMATCH
-    await Deno.mkdir(join(root, "email", "sent"), { recursive: true });
-    await Deno.writeFile(emlAbs, new TextEncoder().encode("Different altered content"));
+    await fsp.mkdir(join(root, "email", "sent"), { recursive: true });
+    await fsp.writeFile(emlAbs, new TextEncoder().encode("Different altered content"));
 
     await assertRejects(
       () => store.markSubmitting(DEFAULT_OWNER, key),
@@ -354,7 +383,7 @@ Deno.test("SubmissionStore - 1.7 Real SHA-256 evidence verification gates markSu
     );
 
     // 3. Write real matching content: markSubmitting succeeds!
-    await Deno.writeFile(emlAbs, messageContent);
+    await fsp.writeFile(emlAbs, messageContent);
     const snap = await store.markSubmitting(DEFAULT_OWNER, key);
     assertEquals(snap.phase, "submitting");
 
@@ -362,7 +391,7 @@ Deno.test("SubmissionStore - 1.7 Real SHA-256 evidence verification gates markSu
   });
 });
 
-Deno.test("SubmissionStore - 1.8 Multi-root isolation, cross-owner scope, and delimiter safety", async () => {
+test("SubmissionStore - 1.8 Multi-root isolation, cross-owner scope, and delimiter safety", async () => {
   await withTempDir(async (rootA) => {
     await withTempDir(async (rootB) => {
       const storeA = new SubmissionStore(rootA);

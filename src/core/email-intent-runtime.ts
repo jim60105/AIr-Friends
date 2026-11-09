@@ -35,7 +35,7 @@
 // deliberately NOT wired into production bootstrap — `email-activation` owns
 // that cutover — while tests exercise this real implementation.
 
-import { join } from "@std/path";
+import { join } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   createEmailIntentAgentConfig,
@@ -63,6 +63,9 @@ import { ompNativeCacheForbiddenRoots } from "@utils/omp-native-cache.ts";
 import { getMemoizedOmpVersionProbe } from "@utils/omp-version.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { Config } from "../types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { isNotFoundError, makeTempDir } from "../utils/fs-compat.ts";
 
 /**
  * The interpretation deadline: an interpretation that has not produced a
@@ -412,17 +415,17 @@ export class EmailIntentRuntime {
   private async allocateRoots(): Promise<string | undefined> {
     let base: string | undefined;
     try {
-      base = await Deno.makeTempDir({
+      base = await makeTempDir({
         prefix: EMAIL_INTENT_ROOTS_PREFIX,
         ...(this.options.rootsBase === undefined ? {} : { dir: this.options.rootsBase }),
       });
-      Deno.chmodSync(base, 0o700);
+      fs.chmodSync(base, 0o700);
       return base;
     } catch (error) {
       // Never leak a directory this call created: a partially prepared base is
       // removed before the failure is reported.
       if (base !== undefined) {
-        await Deno.remove(base, { recursive: true }).catch(() => {});
+        await fsp.rm(base, { recursive: true }).catch(() => {});
       }
       this.options.logger.error("Email intent interpretation could not allocate private roots", {
         error: error instanceof Error ? error.message : String(error),
@@ -609,9 +612,9 @@ export class EmailIntentRuntime {
       return;
     }
     try {
-      await Deno.remove(base, { recursive: true });
+      await fsp.rm(base, { recursive: true });
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
+      if (!(isNotFoundError(error))) {
         logger.warn("Failed to reclaim email intent private roots", {
           base,
           error: error instanceof Error ? error.message : String(error),

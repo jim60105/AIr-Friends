@@ -21,7 +21,7 @@
 // itself is exercised by the predecessor email suites.
 
 import { assert, assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { ChatbotClient } from "@acp/client.ts";
 import { getRetryPromptStrategy } from "@acp/agent-factory.ts";
@@ -48,9 +48,13 @@ import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform
 import { createTemplateEngine, renderTemplate } from "@core/template-renderer.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import * as acp from "@agentclientprotocol/sdk";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir, makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const PROMPTS_DIR = join(import.meta.dirname ?? ".", "..", "..", "prompts");
-const SKILLS_ROOT = Deno.realPathSync(join(import.meta.dirname ?? ".", "..", "..", "skills"));
+const SKILLS_ROOT = fs.realpathSync(join(import.meta.dirname ?? ".", "..", "..", "skills"));
 const SESSION_ID = "sess_guidance_1";
 const STAGING_DIR = "/data/workspaces/email/owner/tmp/sess_guidance_1";
 /** A value that MUST never appear in any rendered prompt. */
@@ -114,7 +118,7 @@ for (const agentType of ["opencode", "omp"] as const) {
       ],
     ] as const
   ) {
-    Deno.test(`prompt - email ${label} ${agentType} carries the email contract`, async () => {
+    test(`prompt - email ${label} ${agentType} carries the email contract`, async () => {
       const rendered = await renderer({
         ...baseVars("email"),
         agentType,
@@ -160,7 +164,7 @@ for (const agentType of ["opencode", "omp"] as const) {
       }
     });
 
-    Deno.test(`prompt - non-email ${label} ${agentType} stays unchanged`, async () => {
+    test(`prompt - non-email ${label} ${agentType} stays unchanged`, async () => {
       // A reminder renders only for Discord; the other two are message shapes.
       const vars = {
         ...baseVars("discord"),
@@ -192,7 +196,7 @@ for (const agentType of ["opencode", "omp"] as const) {
   }
 }
 
-Deno.test("prompt - an email session without a grant refuses send-email", async () => {
+test("prompt - an email session without a grant refuses send-email", async () => {
   const rendered = await render("system_reply.md", {
     ...baseVars("email"),
     emailSessionKind: "request",
@@ -215,7 +219,7 @@ const RETRY_CTX = {
 } as const;
 
 for (const agentType of ["opencode", "omp"] as const) {
-  Deno.test(`retry - email corrective turn (${agentType}) has no reaction guidance`, () => {
+  test(`retry - email corrective turn (${agentType}) has no reaction guidance`, () => {
     const strategy = getRetryPromptStrategy(agentType, { ...RETRY_CTX, email: true }, undefined);
     assertEquals(strategy.maxRetries, 1);
     // The supported literal send-reply recipe and the send-file document remain.
@@ -232,7 +236,7 @@ for (const agentType of ["opencode", "omp"] as const) {
     assertStringIncludes(strategy.retryPromptMessage, "Never write a signature");
   });
 
-  Deno.test(`retry - ordinary platform keeps the full prompt (${agentType})`, () => {
+  test(`retry - ordinary platform keeps the full prompt (${agentType})`, () => {
     const strategy = getRetryPromptStrategy(agentType, RETRY_CTX, undefined);
     assertStringIncludes(strategy.retryPromptMessage, "# React Message Skill");
     assertStringIncludes(strategy.retryPromptMessage, "# Send Reply Skill");
@@ -244,7 +248,7 @@ for (const agentType of ["opencode", "omp"] as const) {
 // Hidden-skill policy (input to the ACP gate)
 // ---------------------------------------------------------------------------
 
-Deno.test("policy - only an email request with a grant exposes send-email", () => {
+test("policy - only an email request with a grant exposes send-email", () => {
   assertEquals(
     hiddenEmailSkillsFor({ platform: "email" }, 0),
     EMAIL_HIDDEN_SKILLS,
@@ -268,11 +272,11 @@ Deno.test("policy - only an email request with a grant exposes send-email", () =
 const createTestLogger = (): Logger => new Logger("test", { level: LogLevel.FATAL });
 
 function fixtureRoot(scriptSkills: string[]): string {
-  const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-guidance-skills-" }));
+  const root = fs.realpathSync(makeTempDirSync({ prefix: "air-guidance-skills-" }));
   for (const name of scriptSkills) {
-    Deno.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
-    Deno.writeTextFileSync(`${root}/${name}/scripts/${name}.ts`, "#!/usr/bin/env deno\n");
+    fs.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
+    fs.writeFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
+    fs.writeFileSync(`${root}/${name}/scripts/${name}.ts`, "#!/usr/bin/env deno\n");
   }
   return root;
 }
@@ -338,8 +342,8 @@ async function verdict(
 }
 
 for (const agentType of ["opencode", "omp"] as const) {
-  Deno.test(`gate - hidden send-email is denied in both invocation shapes (${agentType})`, async () => {
-    const tempDir = Deno.makeTempDirSync();
+  test(`gate - hidden send-email is denied in both invocation shapes (${agentType})`, async () => {
+    const tempDir = makeTempDirSync();
     try {
       const root = fixtureRoot(["send-email", "memory-save"]);
       const registry = registryWithEmailSkill(tempDir);
@@ -407,7 +411,7 @@ for (const agentType of ["opencode", "omp"] as const) {
         "cancelled",
       );
     } finally {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     }
   });
 }
@@ -590,7 +594,7 @@ async function runSmoke(
   clientConfig: ClientConfig;
   dispose: () => Promise<void>;
 }> {
-  const root = await Deno.makeTempDir({ prefix: "email-tool-guidance-smoke-" });
+  const root = await makeTempDir({ prefix: "email-tool-guidance-smoke-" });
   const config = smokeConfig(root);
   const workspaceManager = new WorkspaceManager(config.workspace);
   const memoryStore = new MemoryStore(workspaceManager, {});
@@ -630,12 +634,12 @@ async function runSmoke(
     prompts: recorded.prompts,
     clientConfig: recorded.clientConfig,
     dispose: async () => {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await fsp.rm(root, { recursive: true }).catch(() => {});
     },
   };
 }
 
-Deno.test("wiring - granted email request renders grants and keeps send-email visible", async () => {
+test("wiring - granted email request renders grants and keeps send-email visible", async () => {
   const smoke = await runSmoke({
     event: emailEvent(`Send a note to friend@example.org saying hello`),
     grant: { ...EMAIL_GRANT, sessionId: "unused", workId: "work_1" },
@@ -658,7 +662,7 @@ Deno.test("wiring - granted email request renders grants and keeps send-email vi
   }
 });
 
-Deno.test("wiring - ungranted email session hides send-email from the gate", async () => {
+test("wiring - ungranted email session hides send-email from the gate", async () => {
   const smoke = await runSmoke({
     event: emailEvent("Hello bot, what is the weather?"),
   });
@@ -672,7 +676,7 @@ Deno.test("wiring - ungranted email session hides send-email from the gate", asy
   }
 });
 
-Deno.test("wiring - ordinary Discord session keeps its prompts and hides nothing", async () => {
+test("wiring - ordinary Discord session keeps its prompts and hides nothing", async () => {
   const smoke = await runSmoke({ event: discordEvent() });
   try {
     assertEquals(smoke.prompts.length, 2);
