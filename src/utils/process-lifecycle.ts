@@ -19,8 +19,60 @@
 // still be reading.
 
 import { createLogger } from "@utils/logger.ts";
+import fsp from "node:fs/promises";
+import { execFile } from "node:child_process";
 
 const logger = createLogger("ProcessLifecycle");
+
+/** Output ceiling for one observation command; both commands print a short PID list. */
+const MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024;
+
+interface CommandOutput {
+  code: number;
+  success: boolean;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+}
+
+/**
+ * `Deno.Command(...).output()` semantics for the process-observation commands. A
+ * signal-terminated or otherwise code-less child reports `-1`, never `1`: `listChildPids`
+ * reads exit code 1 as a POSITIVE "no children" observation, so no uncertain outcome may
+ * borrow that code. A missing binary rejects like the original throw.
+ */
+function runCommand(command: string, args: string[]): Promise<CommandOutput> {
+  const pending = Promise.withResolvers<CommandOutput>();
+  execFile(command, args, { encoding: "buffer", maxBuffer: MAX_COMMAND_OUTPUT_BYTES }, (
+    error,
+    stdout,
+    stderr,
+  ) => {
+    if (error === null) {
+      pending.resolve({
+        code: 0,
+        success: true,
+        stdout: new Uint8Array(stdout),
+        stderr: new Uint8Array(stderr),
+      });
+      return;
+    }
+    if (typeof error.code === "string") {
+      pending.reject(error);
+      return;
+    }
+    pending.resolve({
+      code: typeof error.code === "number" ? error.code : -1,
+      success: false,
+      stdout: new Uint8Array(
+        typeof error.stdout === "string" ? Buffer.from(error.stdout) : error.stdout ?? stdout,
+      ),
+      stderr: new Uint8Array(
+        typeof error.stderr === "string" ? Buffer.from(error.stderr) : error.stderr ?? stderr,
+      ),
+    });
+  });
+  return pending.promise;
+}
 
 /** Bounded wait for the agent's tool children to exit before clearing the pointer. */
 export const CHILD_DRAIN_TIMEOUT_MS = 5_000;
@@ -82,7 +134,7 @@ export interface ChildDrainOptions {
 /** Whether a process is still alive (`kill -0`). */
 export async function processAlive(pid: number): Promise<boolean> {
   try {
-    const out = await new Deno.Command("kill", { args: ["-0", String(pid)] }).output();
+    const out = await runCommand("kill", ["-0", String(pid)]);
     return out.code === 0;
   } catch {
     return false;
@@ -212,7 +264,7 @@ export async function awaitChildQuiescence(
 /** List the direct child PIDs of a process (via `pgrep -P`). */
 async function listChildPids(pid: number): Promise<{ ok: boolean; pids: number[] }> {
   try {
-    const out = await new Deno.Command("pgrep", { args: ["-P", String(pid)] }).output();
+    const out = await runCommand("pgrep", ["-P", String(pid)]);
     if (out.success) {
       const pids = new TextDecoder()
         .decode(out.stdout)
@@ -253,7 +305,7 @@ async function oldestChildPid(pids: number[]): Promise<number | undefined> {
 /** Process start time (`/proc/<pid>/stat` field 22, clock ticks since boot). */
 async function procStartTime(pid: number): Promise<number | undefined> {
   try {
-    const stat = await Deno.readTextFile(`/proc/${pid}/stat`);
+    const stat = await fsp.readFile(`/proc/${pid}/stat`, "utf8");
     const afterComm = stat.slice(stat.lastIndexOf(")") + 2);
     const fields = afterComm.split(" ");
     // fields[0] is the state (field 3); starttime is field 22 -> index 19.
@@ -314,7 +366,7 @@ async function collectDescendantPids(
 async function killPids(pids: number[], signal: "TERM" | "KILL"): Promise<void> {
   for (const pid of pids) {
     try {
-      await new Deno.Command("kill", { args: [`-${signal}`, String(pid)] }).output();
+      await runCommand("kill", [`-${signal}`, String(pid)]);
     } catch {
       // Best effort: the process may have exited between enumeration and here.
     }

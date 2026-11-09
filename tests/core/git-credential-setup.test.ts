@@ -51,15 +51,7 @@ function runSetupInSubprocess(
       JSON.stringify(backupConfig)
     });`;
 
-  const result = runEval(code, env);
-  // `git-credential-setup.ts` catches the absent `Deno` global around its
-  // command site, so an unported `Deno.Command` surfaces only as a logged
-  // warning in the child. Re-raise the same ReferenceError here so the parity
-  // gate records the deferral instead of a downstream assertion mismatch.
-  if (`${result.stdout}\n${result.stderr}`.includes("Deno is not defined")) {
-    throw new ReferenceError("Deno is not defined");
-  }
-  return result;
+  return runEval(code, env);
 }
 
 test("git-credential-setup - resolveHost prefers explicit host override", () => {

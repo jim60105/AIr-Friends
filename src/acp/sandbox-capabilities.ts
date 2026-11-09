@@ -22,18 +22,17 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { runtimeOs } from "@utils/runtime-platform.ts";
+import { spawnSync } from "node:child_process";
 
 const logger = createLogger("SandboxCapabilities");
 
 function runProbeSync(command: string, args: string[]): boolean {
   if (runtimeOs() !== "linux") return false;
   try {
-    const output = new Deno.Command(command, {
-      args,
-      stdout: "null",
-      stderr: "null",
-    }).outputSync();
-    return output.success;
+    // A missing tool is reported as `error` rather than a throw; both that and a non-zero
+    // exit are a failed probe, which the callers treat as "capability absent" (fail closed).
+    const result = spawnSync(command, args, { stdio: "ignore" });
+    return result.error === undefined && result.status === 0;
   } catch {
     return false;
   }

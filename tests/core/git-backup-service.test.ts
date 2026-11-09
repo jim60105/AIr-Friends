@@ -310,13 +310,6 @@ test("GitBackupService - converts relative path to absolute for safe.directory",
       env: { GIT_CONFIG_GLOBAL: gitConfigPath },
     });
     if (childResult.code !== 0) {
-      // The helper runs production code in its own process, so an unported
-      // `Deno.Command` surfaces there as this exact ReferenceError. Re-raise it
-      // here so the parity gate records the same deferred failure it would see
-      // from an in-process call.
-      if (childResult.stderr.includes("Deno is not defined")) {
-        throw new ReferenceError("Deno is not defined");
-      }
       assertEquals(childResult.code, 0, `helper failed: ${childResult.stderr}`);
     }
 

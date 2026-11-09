@@ -25,6 +25,7 @@ None.
 ## Impact
 
 - Edited: the seven production files above, `scripts/omp/prepare-native-cache.ts`, `package.json`, three converted test files. New: `tests/acp/sandbox-capabilities.test.ts`.
+- Authorized out-of-D1 edits (standing authorization, recorded in design D5): `src/utils/process-lifecycle.ts`, `tests/core/session-orchestrator.test.ts`, `tests/core/git-backup-service.test.ts`, `tests/core/git-credential-setup.test.ts`, `tests/core/skill-installer.test.ts` and `migration/bun/baseline/parity-exceptions.json`.
 - P0 ownership: **P0-7** at process and CI level (real probes in capable and incapable environments, fail-closed results). The target-container check is `package-bun-container-image`; the CI capable/incapable jobs are `migrate-ci-and-docs-to-bun`.
 - No human review document.
 

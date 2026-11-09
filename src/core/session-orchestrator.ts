@@ -112,8 +112,39 @@ import {
 } from "./research-output.ts";
 import fsp from "node:fs/promises";
 import { removePath } from "../utils/fs-compat.ts";
+import { execFile } from "node:child_process";
 
 const logger = createLogger("SessionOrchestrator");
+
+/** Output ceiling for one converter run; ImageMagick writes its bytes to the target file. */
+const MAX_CONVERTER_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`: an absent
+ * converter (a string error code such as `ENOENT`) rejects like the original throw, and a
+ * signal-terminated child reports `-1` rather than reading as success.
+ */
+function runConverter(args: string[]): Promise<{ code: number; success: boolean }> {
+  const pending = Promise.withResolvers<{ code: number; success: boolean }>();
+  execFile("convert", args, {
+    encoding: "buffer",
+    maxBuffer: MAX_CONVERTER_OUTPUT_BYTES,
+  }, (error) => {
+    if (error === null) {
+      pending.resolve({ code: 0, success: true });
+      return;
+    }
+    if (typeof error.code === "string") {
+      pending.reject(error);
+      return;
+    }
+    pending.resolve({
+      code: typeof error.code === "number" ? error.code : -1,
+      success: false,
+    });
+  });
+  return pending.promise;
+}
 
 /** Bounded machine-readable reason vocabulary for a row-11 recovery abort. */
 type RecoveryAbortReason =
@@ -6497,12 +6528,7 @@ export class SessionOrchestrator {
       gifPath = await assertSafePath(canonicalStaging, `${scratchBase}.gif`);
       webpPath = await assertSafePath(canonicalStaging, `${scratchBase}.webp`);
 
-      const command = new Deno.Command("convert", {
-        args: [`${gifPath}[0]`, webpPath],
-        stdout: "null",
-        stderr: "piped",
-      });
-      const result = await command.output();
+      const result = await runConverter([`${gifPath}[0]`, webpPath]);
 
       if (!result.success) {
         sessionLogger.warn("ImageMagick GIF-to-WebP conversion failed", {

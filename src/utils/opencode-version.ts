@@ -8,6 +8,8 @@
 // is the actual prevention, and this warning surfaces drift early (Design Decision 5).
 
 import { createLogger } from "@utils/logger.ts";
+import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 
 /**
  * Known-good minimum OpenCode version. The permission gate handles both request
@@ -37,7 +39,7 @@ export type OpenCodeVersionCheckResult = "ok" | "below_minimum" | "unknown";
  * set and non-empty, otherwise the known-good default.
  */
 export function getMinimumOpenCodeVersion(): string {
-  const override = Deno.env.get("AGENT_OPENCODE_MIN_VERSION");
+  const override = process.env["AGENT_OPENCODE_MIN_VERSION"];
   return override && override.trim().length > 0 ? override.trim() : KNOWN_GOOD_OPENCODE_MIN_VERSION;
 }
 
@@ -84,48 +86,60 @@ export async function detectOpenCodeVersion(
    * simulated without mutating the global PATH (which would race parallel tests). */
   commandName: string = "opencode",
 ): Promise<string | null> {
-  let command: Deno.Command;
-  let process: Deno.ChildProcess;
+  let child: ChildProcess;
   try {
-    command = new Deno.Command(commandName, {
-      args: ["--version"],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    process = command.spawn();
+    child = spawn(commandName, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
   } catch {
     // Command not found or spawn failed
     return null;
   }
 
-  const output = process.output();
+  // A missing binary is reported through this promise's `error` event, not a throw.
+  const observed = Promise.withResolvers<
+    { code: number | null; stdout: Uint8Array; stderr: Uint8Array } | null
+  >();
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+  child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+  child.once("error", () => observed.resolve(null));
+  child.once("close", (code) =>
+    observed.resolve({
+      code,
+      stdout: new Uint8Array(Buffer.concat(stdoutChunks)),
+      stderr: new Uint8Array(Buffer.concat(stderrChunks)),
+    }));
+  const output = observed.promise;
 
   // Race the subprocess output against the timeout so a SIGTERM-ignoring child
   // (or its wrapper) can never block startup. On timeout: SIGKILL as a
   // best-effort cleanup and resolve as "undetermined" immediately.
   const result = await Promise.race([
-    output.then(({ code, stdout, stderr }) => {
-      if (code !== 0) return null;
-      const text = new TextDecoder().decode(stdout) || new TextDecoder().decode(stderr);
+    output.then((captured) => {
+      if (captured === null || captured.code !== 0) return null;
+      const text = new TextDecoder().decode(captured.stdout) ||
+        new TextDecoder().decode(captured.stderr);
       const version = text.trim();
       if (!version || !parseSemver(version)) return null;
       return version;
     }),
-    new Promise<string | null>((resolve) => {
+    (() => {
+      const expired = Promise.withResolvers<string | null>();
       setTimeout(() => {
         try {
-          process.kill("SIGKILL");
+          child.kill("SIGKILL");
         } catch {
           // Process already exited — ignore
         }
-        resolve(null);
+        expired.resolve(null);
       }, timeoutMs);
-    }),
+      return expired.promise;
+    })(),
   ]);
 
   try {
     // Wait for the child to be reaped (best-effort; never blocks).
-    await output.catch(() => {});
+    await output;
   } catch {
     // Ignore reaping errors
   }
