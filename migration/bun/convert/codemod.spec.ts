@@ -143,6 +143,13 @@ test("row - object form with a non-literal options argument is manual", () => {
   assert(result.manual.length > 0);
 });
 
+test("row - name option in the three-argument form is manual", () => {
+  const source = 'Deno.test("n", { name: "other" }, () => {});\n';
+  const result = convert(source);
+  assertEquals(result.code, source);
+  assert(result.manual.some((entry) => entry.reason.includes("declares name")));
+});
+
 test("row - Deno.test.ignore becomes test.skip", () => {
   const result = convert('Deno.test.ignore("n", () => {});\n');
   assertStringIncludes(result.code, 'test.skip("n", () => {});');
@@ -169,8 +176,13 @@ test("row - env.has", () => {
 
 test("row - env.toObject with note", () => {
   const result = convert("const env = Deno.env.toObject();\n");
-  assertEquals(result.code, "const env = { ...process.env };\n");
+  assertEquals(result.code, "const env = ({ ...process.env });\n");
   assert(result.manual.some((entry) => entry.reason.includes("undefined")));
+});
+
+test("row - env.toObject in an arrow body stays an expression", () => {
+  const result = convert("const f = () => Deno.env.toObject();\n");
+  assertEquals(result.code, "const f = () => ({ ...process.env });\n");
 });
 
 test("row - cwd and execPath", () => {
@@ -266,6 +278,13 @@ test("row - symlink third argument dropped and reported", () => {
   const result = convert('await Deno.symlink("target", "path", "dir");\n');
   assertStringIncludes(result.code, 'await fsp.symlink("target", "path");');
   assert(result.manual.some((entry) => entry.reason.includes("symlink type argument")));
+});
+
+test("row - symlink needs both required arguments", () => {
+  const source = 'await Deno.symlink("target");\n';
+  const result = convert(source);
+  assertEquals(result.code, source);
+  assert(result.manual.some((entry) => entry.reason.includes("argument count")));
 });
 
 test("row - for-await readDir", () => {
@@ -457,6 +476,13 @@ test("guard - a shadowed fs binding is manual", () => {
   assert(result.manual.some((entry) => entry.reason.includes("shadowed")));
 });
 
+test("guard - a shadowed process binding is manual", () => {
+  const source = 'function f() { const process = { env: {} }; return Deno.env.get("X"); }\n';
+  const result = convert(source);
+  assertEquals(result.code, source);
+  assert(result.manual.some((entry) => entry.reason.includes("process is shadowed")));
+});
+
 test("guard - a local test wrapper is reported, not refused", () => {
   const source = 'function test(name, run) { Deno.test(name, run); }\ntest("x", () => {});\n';
   const result = convert(source);
@@ -482,4 +508,16 @@ test("guard - parse errors refuse the file", () => {
   const result = convert("const = ;\n");
   assertEquals(result.refused.length, 1);
   assertStringIncludes(result.refused[0], "parse error");
+});
+
+test("report - bare Deno reference", () => {
+  const result = convert("const D = Deno;\n");
+  assertEquals(result.code, "const D = Deno;\n");
+  assert(result.manual.some((entry) => entry.reason.includes("bare Deno")));
+});
+
+test("report - Deno element access", () => {
+  const result = convert('Deno["open"]("p");\n');
+  assertEquals(result.code, 'Deno["open"]("p");\n');
+  assert(result.manual.some((entry) => entry.reason.includes("element access")));
 });

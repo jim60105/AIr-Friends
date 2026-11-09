@@ -152,7 +152,7 @@ const ASYNC_FILE_CALLS: Record<string, { name: string; args: number }> = {
   "Deno.rename": { name: "rename", args: 2 },
   "Deno.chmod": { name: "chmod", args: 2 },
   "Deno.copyFile": { name: "copyFile", args: 2 },
-  "Deno.symlink": { name: "symlink", args: 0 },
+  "Deno.symlink": { name: "symlink", args: 2 },
 };
 
 const SYNC_FILE_CALLS: Record<string, { name: string; args: number }> = {
@@ -163,7 +163,7 @@ const SYNC_FILE_CALLS: Record<string, { name: string; args: number }> = {
   "Deno.renameSync": { name: "renameSync", args: 2 },
   "Deno.chmodSync": { name: "chmodSync", args: 2 },
   "Deno.copyFileSync": { name: "copyFileSync", args: 2 },
-  "Deno.symlinkSync": { name: "symlinkSync", args: 0 },
+  "Deno.symlinkSync": { name: "symlinkSync", args: 2 },
 };
 
 function emptyNeeds(): Needs {
@@ -510,6 +510,25 @@ function requireRuntime(context: AnalysisContext, node: ts.Node, name: string): 
   return requireBinding(context, node, "runtimePlatform", name);
 }
 
+const PROCESS_CALLS: Record<string, true> = {
+  "Deno.env.get": true,
+  "Deno.env.set": true,
+  "Deno.env.delete": true,
+  "Deno.env.has": true,
+  "Deno.env.toObject": true,
+  "Deno.cwd": true,
+  "Deno.execPath": true,
+};
+
+/** A local or imported `process` binding would change the meaning of `process.env`. */
+function processIsShadowed(context: AnalysisContext, node: ts.Node): boolean {
+  const importedFrom = importSources(context.sourceFile).get("process");
+  if (importedFrom === "node:process") return false;
+  return importedFrom !== undefined ||
+    moduleDeclarationNames(context.sourceFile).has("process") ||
+    isShadowedBelowModule(node, "process");
+}
+
 function isObjectLiteral(node: ts.Expression): node is ts.ObjectLiteralExpression {
   return ts.isObjectLiteralExpression(node);
 }
@@ -663,6 +682,9 @@ function parseTestRegistration(
       if (parsed.options.fn !== undefined) {
         return { ok: false, reason: "Deno.test options argument declares fn" };
       }
+      if (parsed.options.name !== undefined) {
+        return { ok: false, reason: "Deno.test options argument declares name" };
+      }
       ignoreText = parsed.options.ignore?.getText(sourceFile);
       fn = args[2];
     }
@@ -795,6 +817,10 @@ function handleCall(context: AnalysisContext, call: ts.CallExpression): boolean 
 
   if (chain === "Deno.test") return handleTestCall(context, call, false);
   if (chain === "Deno.test.ignore") return handleTestCall(context, call, true);
+  if (chain in PROCESS_CALLS && processIsShadowed(context, call)) {
+    addManual(context, call, "process is shadowed at this usage", call.expression);
+    return false;
+  }
 
   switch (chain) {
     case "Deno.env.get": {
@@ -827,7 +853,7 @@ function handleCall(context: AnalysisContext, call: ts.CallExpression): boolean 
     }
     case "Deno.env.toObject": {
       if (args.length !== 0) break;
-      emitEdit(context, call, "{ ...process.env }");
+      emitEdit(context, call, "({ ...process.env })");
       addExtraManual(context, call, "env values may be undefined");
       return true;
     }
@@ -1475,6 +1501,30 @@ function collectResidualAndFlags(
         reason: "timestamp compared with null; Node returns a Date",
       });
     }
+    if (ts.isElementAccessExpression(node)) {
+      const root = denoChain(node.expression);
+      if (root?.startsWith("Deno") && !isExplained(context, node)) {
+        context.manual.push({
+          line: lineOf(sourceFile, node),
+          text: nodeText(sourceFile, node),
+          reason: "unhandled Deno element access",
+        });
+      }
+    }
+    if (ts.isIdentifier(node) && node.text === "Deno") {
+      const parent = node.parent;
+      const partOfChain = parent !== undefined &&
+        ((ts.isPropertyAccessExpression(parent) && parent.expression === node) ||
+          (ts.isQualifiedName(parent) && parent.left === node) ||
+          (ts.isElementAccessExpression(parent) && parent.expression === node));
+      if (!partOfChain && !isExplained(context, node)) {
+        context.manual.push({
+          line: lineOf(sourceFile, node),
+          text: nodeText(sourceFile, node),
+          reason: "bare Deno reference",
+        });
+      }
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
@@ -1598,6 +1648,19 @@ export function convertSource(
   }));
 
   const finalSource = parseSource(current, fileName);
+  const finalDiagnostics = parseErrors(finalSource);
+  if (finalDiagnostics.length > 0) {
+    return {
+      code: text,
+      rewrites: 0,
+      manual: [],
+      refused: [
+        `rewrite produced invalid syntax: ${finalDiagnostics.map((diagnostic) =>
+          ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")
+        ).join("; ")}`,
+      ],
+    };
+  }
   const diagnose = newContext("diagnose", finalSource, fileName, resolvedOptions, emptyNeeds());
   walk(diagnose, finalSource);
   collectResidualAndFlags(diagnose, typeRewritten || diagnose.typeRewritten);

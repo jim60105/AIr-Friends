@@ -5,7 +5,7 @@ migration (design D6). It parses each file with the TypeScript AST, applies only
 exact call shapes in the table below, and prints one JSON line per file:
 
 ```json
-{"file":"tests/example.test.ts","rewrites":12,"manual":[{"line":40,"text":"Deno.open(path)","reason":"unhandled Deno usage Deno.open"}]}
+{"file":"tests/example.test.ts","rewrites":12,"manual":[{"line":40,"text":"Deno.open(path)","reason":"high-risk symbol Deno.open; port by hand (D4)"}]}
 ```
 
 A refused file (name collision, parse error or non-convergence) keeps its original
@@ -106,10 +106,12 @@ Flagged patterns (reported, not rewritten): a property access `.isFile`, `.isDir
 Implementation guards beyond the table (all reported, never rewritten): a local `test`
 binding that would collide with `bun:test` (for example a top-level test wrapper
 `function test(...) { Deno.test(...) }`) is reported for manual conversion instead of
-refusing the whole file; any other `fs`/`fsp`/helper collision still refuses it. A call
-whose target identifier is shadowed in the surrounding scope, a `readDirSync` result
-consumed as an iterator (`.next()`), and a spread of a `Stats`/`Dirent` result are also
-left for manual conversion.
+refusing the whole file — this is the one intentional deviation from the D3 collision
+sentence above, and no `bun:test` import is needed when every registration is manual.
+Any other `fs`/`fsp`/helper collision still refuses the file. A call whose target
+identifier (including `process`) is shadowed in the surrounding scope, a `readDirSync`
+result consumed as an iterator (`.next()`), and a spread of a `Stats`/`Dirent` result
+are also left for manual conversion.
 
 ## D4. High-risk symbol set
 

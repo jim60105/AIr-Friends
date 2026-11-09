@@ -90,6 +90,21 @@ test("removePath - symbolic link", async () => {
   }
 });
 
+test("removePath - symbolic link to a directory", async () => {
+  const root = await makeTempDir({ prefix: "fs-compat-" });
+  const target = join(root, "target");
+  const link = join(root, "link");
+  await fsp.mkdir(target);
+  await fsp.symlink(target, link);
+  try {
+    await removePath(link);
+    assertEquals(await pathExists(link), false);
+    assertEquals((await fsp.stat(target)).isDirectory(), true);
+  } finally {
+    await removeTree(root);
+  }
+});
+
 test("removePath - non-empty directory rejects", async () => {
   const root = await makeTempDir({ prefix: "fs-compat-" });
   const directory = join(root, "full");
@@ -139,10 +154,23 @@ test("makeTempDir - prefix honored", async () => {
     assertEquals(second.split("/").at(-1)?.startsWith("abc-"), true);
     const mode = (await fsp.stat(first)).mode & 0o777;
     assertEquals(mode, 0o700);
+    assertEquals((await fsp.stat(second)).mode & 0o777, 0o700);
     assertEquals(await pathExists(second), true);
   } finally {
     await removeTree(first);
     await removeTree(second);
+  }
+});
+
+test("makeTempDir - suffix honored", async () => {
+  const created = await makeTempDir({ prefix: "abc-", suffix: "-end" });
+  try {
+    const name = created.split("/").at(-1) ?? "";
+    assertEquals(name.startsWith("abc-"), true);
+    assertEquals(name.endsWith("-end"), true);
+    assertEquals((await fsp.stat(created)).mode & 0o777, 0o700);
+  } finally {
+    await removeTree(created);
   }
 });
 
@@ -174,6 +202,7 @@ test("makeTempFile - suffix honored", async () => {
   try {
     assertEquals(path.endsWith(".json"), true);
     assertEquals((await fsp.stat(path)).isFile(), true);
+    assertEquals((await fsp.stat(path)).mode & 0o777, 0o600);
     assertEquals((await fsp.readFile(path)).length, 0);
   } finally {
     await removeTree(path);
