@@ -7,7 +7,7 @@
 
 import { test } from "bun:test";
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, type StdioOptions } from "node:child_process";
 import { listDescendantPids } from "../../src/utils/process-lifecycle.ts";
 import { assertNoLeak, snapshot } from "./leak-check.ts";
 
@@ -43,7 +43,7 @@ async function waitForDescendant(pid: number): Promise<void> {
 }
 
 /** Start a real long-lived child and wait until it is observable as a descendant. */
-async function startSleepChild(stdio: ChildProcess["stdio"]): Promise<ChildProcess> {
+async function startSleepChild(stdio: StdioOptions): Promise<ChildProcess> {
   const child = spawn("sleep", ["30"], { stdio });
   assert(child.pid !== undefined, "the sleep child has a pid");
   await waitForDescendant(child.pid);

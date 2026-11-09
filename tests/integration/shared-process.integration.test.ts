@@ -415,6 +415,9 @@ test.skipIf(!DUMB_INIT_READY)(
     try {
       const config = buildTestConfig(tempDir, jwtDir);
       sessionRegistry = new SessionRegistry();
+      // The runner closure below reads the registry, so capture the assigned
+      // instance in a const the closure can narrow.
+      const registry = sessionRegistry;
       const workspaceManager = new WorkspaceManager({
         repoPath: tempDir,
         workspacesDir: "workspaces",
@@ -562,7 +565,7 @@ test.skipIf(!DUMB_INIT_READY)(
               workspace.key,
               "discord/456",
             );
-            const fileSent = sessionRegistry.hasFileSent(sessionId);
+            const fileSent = registry.hasFileSent(sessionId);
             if (!replySent && !reactionSent && !fileSent) {
               const response = await promptWithQuotaRetry(connector, acpSessionId, prompt);
               assertEquals(response.stopReason, "end_turn");
