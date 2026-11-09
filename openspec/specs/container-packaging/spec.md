@@ -87,7 +87,7 @@ The resolution from each contracted development-tree path (the trusted-extension
 #### Scenario: Missing generated development entry fails launch closed
 - **GIVEN** no installed extension and no generated development entry
 - **WHEN** launch preflight consumes the resolver output
-- **THEN** launch SHALL fail with the build remedy rather than import a raw Deno-only tree
+- **THEN** launch SHALL fail with the build remedy rather than import the raw unbundled source tree
 - **AND** no alternative extension-root convention SHALL be selected
 
 ### Requirement: Native OMP Single ESM Code Artifact
