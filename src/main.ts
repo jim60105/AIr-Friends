@@ -3,28 +3,94 @@
 import { bootstrap, startPlatforms } from "./bootstrap.ts";
 import { shutdownHandler } from "./shutdown.ts";
 import { configureLogger, createLogger } from "@utils/logger.ts";
-import { parse } from "@std/flags";
+import { parseArgs } from "node:util";
 
 const logger = createLogger("Main");
 
 /**
+ * The command line arguments the entry point reads.
+ */
+export interface CliArgs {
+  config?: string;
+  help: boolean;
+  yolo: boolean;
+  dryRun: boolean;
+}
+
+const CLI_OPTIONS = {
+  config: { type: "string", short: "c" },
+  help: { type: "boolean", short: "h" },
+  yolo: { type: "boolean" },
+  "dry-run": { type: "boolean" },
+} as const;
+
+const BOOLEAN_FLAGS: Record<string, true> = {
+  "--help": true,
+  "-h": true,
+  "--yolo": true,
+  "--dry-run": true,
+};
+
+/**
+ * Reproduce the value rules the entry point's previous flags parser relied on,
+ * which `node:util` `parseArgs` does not share:
+ *
+ * - a string option never consumes a value that starts with `-`, so a bare
+ *   `--config`/`-c` yields `""` (the `start:config` script passes one);
+ * - a boolean option consumes a separate `true`/`false` token, and everything
+ *   after `--` stays a positional.
+ */
+function normalizeArgv(argv: readonly string[]): string[] {
+  const normalized: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--") {
+      normalized.push(...argv.slice(i));
+      break;
+    }
+
+    const next = argv[i + 1];
+    if (BOOLEAN_FLAGS[arg] === true && (next === "true" || next === "false")) {
+      const flag = arg.startsWith("--") ? arg : "--help";
+      normalized.push(`${flag}=${next}`);
+      i++;
+      continue;
+    }
+
+    if ((arg === "--config" || arg === "-c") && (next === undefined || next.startsWith("-"))) {
+      normalized.push("--config=");
+      continue;
+    }
+
+    normalized.push(arg);
+  }
+  return normalized;
+}
+
+/**
+ * The previous flags parser treated a boolean option as `false` only for the
+ * exact token `false`; any other value (an explicit one or none) enabled it.
+ */
+function parseBooleanFlag(value: unknown): boolean {
+  return value !== undefined && value !== false && value !== "false";
+}
+
+/**
  * Parse command line arguments
  */
-function parseArgs(): { config?: string; help: boolean; yolo: boolean; dryRun: boolean } {
-  const args = parse(Deno.args, {
-    string: ["config"],
-    boolean: ["help", "yolo", "dry-run"],
-    alias: {
-      c: "config",
-      h: "help",
-    },
+export function parseCliArgs(argv: readonly string[] = process.argv.slice(2)): CliArgs {
+  const { values } = parseArgs({
+    args: normalizeArgv(argv),
+    options: CLI_OPTIONS,
+    strict: false,
+    allowPositionals: true,
   });
 
   return {
-    config: args.config,
-    help: args.help,
-    yolo: args.yolo || false,
-    dryRun: args["dry-run"] || false,
+    config: typeof values.config === "string" ? values.config : undefined,
+    help: parseBooleanFlag(values.help),
+    yolo: parseBooleanFlag(values.yolo),
+    dryRun: parseBooleanFlag(values["dry-run"]),
   };
 }
 
@@ -36,7 +102,7 @@ function printHelp(): void {
 AIr-Friends - AI-powered chatbot supporting multiple platforms
 
 Usage:
-  deno run -A src/main.ts [options]
+  bun run start [-- options]
 
 Options:
   -c, --config <path>   Path to configuration file (default: config.yaml)
@@ -51,7 +117,7 @@ Environment Variables:
   MISSKEY_HOST          Misskey instance host
 
 Example:
-  deno run -A src/main.ts --config ./my-config.yaml --yolo
+  bun run start -- --config ./my-config.yaml --yolo
 `);
 }
 
@@ -60,18 +126,18 @@ Example:
  */
 async function main(): Promise<void> {
   // Parse command line arguments
-  const args = parseArgs();
+  const args = parseCliArgs();
 
   if (args.help) {
     printHelp();
-    Deno.exit(0);
+    process.exit(0);
   }
 
   // Configure initial logging (will be reconfigured after config load)
   configureLogger({ level: "INFO", format: "json" });
 
   logger.info("Starting AIr-Friends");
-  logger.info("Deno version", { version: Deno.version.deno });
+  logger.info("Bun version", { version: Bun.version });
 
   try {
     // Bootstrap application
@@ -98,7 +164,7 @@ async function main(): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 

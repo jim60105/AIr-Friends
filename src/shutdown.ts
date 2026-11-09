@@ -28,8 +28,8 @@ export class ShutdownHandler {
       this.shutdown();
     };
 
-    Deno.addSignalListener("SIGTERM", handler);
-    Deno.addSignalListener("SIGINT", handler);
+    process.on("SIGTERM", handler);
+    process.on("SIGINT", handler);
 
     logger.info("Signal handlers registered");
   }
@@ -56,7 +56,7 @@ export class ShutdownHandler {
   private async performShutdown(): Promise<void> {
     if (!this.context) {
       logger.warn("No context to shutdown");
-      Deno.exit(0);
+      process.exit(0);
       return;
     }
 
@@ -151,12 +151,12 @@ export class ShutdownHandler {
       }
 
       logger.info("Graceful shutdown completed");
-      Deno.exit(0);
+      process.exit(0);
     } catch (error) {
       logger.error("Error during shutdown", {
         error: error instanceof Error ? error.message : String(error),
       });
-      Deno.exit(1);
+      process.exit(1);
     }
   }
 

@@ -14,16 +14,14 @@ let isShuttingDown = false;
 
 export function setupGlobalErrorHandler(options: ErrorHandlerOptions = {}): void {
   // Handle unhandled promise rejections
-  globalThis.addEventListener("unhandledrejection", (event) => {
-    event.preventDefault();
-    const error = event.reason;
-
-    if (error instanceof BaseError) {
+  process.on("unhandledRejection", (reason) => {
+    if (reason instanceof BaseError) {
       logger.error("Unhandled promise rejection", {
-        ...error.toJSON(),
-        stack: error.stack,
+        ...reason.toJSON(),
+        stack: reason.stack,
       });
     } else {
+      const error = reason as Error | undefined;
       logger.error("Unhandled promise rejection", {
         message: error?.message ?? String(error),
         stack: error?.stack,
@@ -32,15 +30,11 @@ export function setupGlobalErrorHandler(options: ErrorHandlerOptions = {}): void
   });
 
   // Handle uncaught errors
-  globalThis.addEventListener("error", (event) => {
-    event.preventDefault();
-    const error = event.error;
-
+  process.on("uncaughtException", (error) => {
+    // The stack carries the file, line and column that the Deno `error` event
+    // exposed as separate fields; the process hook has no event object.
     logger.fatal("Uncaught error", {
-      message: error?.message ?? event.message,
-      filename: event.filename,
-      lineno: event.lineno,
-      colno: event.colno,
+      message: error?.message,
       stack: error?.stack,
     });
 
@@ -51,7 +45,7 @@ export function setupGlobalErrorHandler(options: ErrorHandlerOptions = {}): void
 
   // Handle SIGTERM for graceful shutdown
   if (options.enableGracefulShutdown) {
-    Deno.addSignalListener("SIGTERM", () => {
+    process.on("SIGTERM", () => {
       if (isShuttingDown) return;
       isShuttingDown = true;
 
@@ -60,7 +54,7 @@ export function setupGlobalErrorHandler(options: ErrorHandlerOptions = {}): void
       globalThis.dispatchEvent(new CustomEvent("shutdown"));
     });
 
-    Deno.addSignalListener("SIGINT", () => {
+    process.on("SIGINT", () => {
       if (isShuttingDown) return;
       isShuttingDown = true;
 
