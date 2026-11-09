@@ -7,7 +7,7 @@ Constrain the ACP agent subprocess so a compromised or prompt-injected agent can
 
 ### Requirement: Agent Subprocess Environment Isolation
 
-The system SHALL spawn the ACP agent subprocess with a cleared parent environment so that it receives ONLY the explicitly-built allowlisted environment variables and inherits NO variables from the parent bot process; the `Deno.Command` used to spawn the agent SHALL set `clearEnv: true`.
+The system SHALL spawn the ACP agent subprocess with a cleared parent environment so that it receives ONLY the explicitly-built allowlisted environment variables and inherits NO variables from the parent bot process; the spawn boundary SHALL pass the built environment as the complete child environment and SHALL NOT merge the parent environment into it.
 
 #### Scenario: Parent secret not inherited by agent
 
@@ -17,8 +17,8 @@ The system SHALL spawn the ACP agent subprocess with a cleared parent environmen
 
 #### Scenario: Allowlisted variables still provided
 
-- **GIVEN** the agent configuration builds an environment containing `PATH`, `HOME`, `TMPDIR`, `DENO_DIR`, `SESSION_ID`, `AGENT_WORKSPACE`, and `SKILL_JWT_DIR` (no `SKILL_API_SECRET` — the HMAC key stays in the bot process)
-- **WHEN** the agent subprocess is spawned with `clearEnv: true`
+- **GIVEN** the agent configuration builds an environment containing `PATH`, `HOME`, `TMPDIR`, `SESSION_ID`, `AGENT_WORKSPACE`, and `SKILL_JWT_DIR` (no `SKILL_API_SECRET` — the HMAC key stays in the bot process)
+- **WHEN** the agent subprocess is spawned through the spawn boundary
 - **THEN** the agent subprocess environment SHALL contain exactly those built variables (plus agent-type-specific variables) and nothing inherited from the parent
 
 #### Scenario: Deployment secret kept out of the agent environment
