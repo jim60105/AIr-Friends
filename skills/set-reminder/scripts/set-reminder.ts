@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -10,21 +10,42 @@ import {
 } from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
+export interface SetReminderArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  scheduledAt?: string;
+}
+
+export function parseSetReminderArgs(argv: string[]): SetReminderArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      "scheduled-at": { type: "string" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    scheduledAt: typeof values["scheduled-at"] === "string" ? values["scheduled-at"] : undefined,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "scheduled-at"],
-      alias: { s: "session-id", a: "api-url" },
-    });
+    const { scheduledAt } = parseSetReminderArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
-
-    const scheduledAt = args["scheduled-at"];
     if (!scheduledAt) {
       exitWithError("Missing required parameter: --scheduled-at");
     }
 
-    const message = await readPayloadArg(Deno.args, "message", {
+    const message = await readPayloadArg(argv, "message", {
       sessionId,
       fileName: "reminder.md",
       example:
@@ -41,7 +62,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -55,4 +76,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

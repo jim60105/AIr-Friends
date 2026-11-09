@@ -1,5 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -9,11 +10,34 @@ import {
 } from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
-async function main() {
-  try {
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
+export interface SendReplyArgs {
+  sessionId?: string;
+  apiUrl?: string;
+}
 
-    const message = await readPayloadArg(Deno.args, "message", {
+export function parseSendReplyArgs(argv: string[]): SendReplyArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+  };
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  try {
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
+
+    const message = await readPayloadArg(argv, "message", {
       sessionId,
       alias: "m",
       fileName: "reply.md",
@@ -30,7 +54,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -44,4 +68,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -10,26 +10,67 @@ import {
 } from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
+export interface MemorySaveArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  importance: string;
+  tier?: string;
+  category?: string;
+  scope?: string;
+  decay?: number;
+  relatedTo?: string;
+  supersedes?: string;
+}
+
+export function parseMemorySaveArgs(argv: string[]): MemorySaveArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      importance: { type: "string", short: "i" },
+      "related-to": { type: "string" },
+      supersedes: { type: "string" },
+      tier: { type: "string" },
+      category: { type: "string" },
+      scope: { type: "string" },
+      decay: { type: "string" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  // The previous parser applied the declared "normal" default only when the
+  // flag was absent; a value-less flag was the empty string and failed validation.
+  const importance = values.importance === undefined
+    ? "normal"
+    : typeof values.importance === "string"
+      ? values.importance
+      : "";
+  const decay = typeof values.decay === "string" && values.decay !== ""
+    ? Number(values.decay)
+    : undefined;
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    importance,
+    tier: typeof values.tier === "string" ? values.tier : undefined,
+    category: typeof values.category === "string" ? values.category : undefined,
+    scope: typeof values.scope === "string" ? values.scope : undefined,
+    decay,
+    relatedTo: typeof values["related-to"] === "string" ? values["related-to"] : undefined,
+    supersedes: typeof values.supersedes === "string" ? values.supersedes : undefined,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    const args = parse(Deno.args, {
-      string: [
-        "session-id",
-        "api-url",
-        "importance",
-        "related-to",
-        "supersedes",
-        "tier",
-        "category",
-        "scope",
-        "decay",
-      ],
-      alias: { s: "session-id", a: "api-url", i: "importance" },
-    });
+    const parsed = parseMemorySaveArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
-
-    const content = await readPayloadArg(Deno.args, "content", {
+    const content = await readPayloadArg(argv, "content", {
       sessionId,
       alias: "c",
       fileName: "content.md",
@@ -38,7 +79,7 @@ async function main() {
         `--content-file "<absolute staging directory rendered in your system prompt>/content.md"`,
     });
 
-    const importance = args.importance ?? "normal";
+    const importance = parsed.importance;
 
     // Validate values
     if (!["high", "normal"].includes(importance)) {
@@ -51,43 +92,43 @@ async function main() {
       importance,
     };
 
-    if (args.tier) {
-      if (!["core", "working", "archive"].includes(args.tier)) {
+    if (parsed.tier) {
+      if (!["core", "working", "archive"].includes(parsed.tier)) {
         exitWithError("Invalid tier. Must be 'core', 'working', or 'archive'");
       }
-      params.tier = args.tier;
+      params.tier = parsed.tier;
     }
 
-    if (args.category) {
-      if (!["fact", "preference", "episode", "summary", "relationship"].includes(args.category)) {
+    if (parsed.category) {
+      if (!["fact", "preference", "episode", "summary", "relationship"].includes(parsed.category)) {
         exitWithError(
           "Invalid category. Must be 'fact', 'preference', 'episode', 'summary', or 'relationship'",
         );
       }
-      params.category = args.category;
+      params.category = parsed.category;
     }
 
-    if (args.scope) {
-      if (!["user", "channel"].includes(args.scope)) {
+    if (parsed.scope) {
+      if (!["user", "channel"].includes(parsed.scope)) {
         exitWithError("Invalid scope. Must be 'user' or 'channel'");
       }
-      params.scope = args.scope;
+      params.scope = parsed.scope;
     }
 
-    if (args.decay) {
-      const decay = Number(args.decay);
+    if (parsed.decay !== undefined) {
+      const decay = parsed.decay;
       if (isNaN(decay) || decay < 0 || decay > 1) {
         exitWithError("Invalid decay. Must be a number between 0.0 and 1.0");
       }
       params.decay = decay;
     }
 
-    if (args["related-to"]) {
-      params.relatedTo = args["related-to"].split(",").map((id: string) => id.trim());
+    if (parsed.relatedTo) {
+      params.relatedTo = parsed.relatedTo.split(",").map((id: string) => id.trim());
     }
 
-    if (args.supersedes) {
-      params.supersedes = args.supersedes.split(",").map((id: string) => id.trim());
+    if (parsed.supersedes) {
+      params.supersedes = parsed.supersedes.split(",").map((id: string) => id.trim());
     }
 
     const result = await callSkillApi(apiUrl, "memory-save", sessionId, params);
@@ -95,7 +136,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -109,4 +150,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

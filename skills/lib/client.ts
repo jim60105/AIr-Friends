@@ -1,7 +1,8 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 // This file is used by all skill scripts to interact with the Skill API
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import fs from "node:fs";
+import { parseArgs } from "node:util";
 
 /**
  * Skill API client configuration
@@ -17,7 +18,7 @@ export interface SkillClientConfig {
  * Only localhost/127.0.0.1 URLs are allowed for security
  */
 export function getDefaultConfig(): SkillClientConfig {
-  const apiUrl = Deno.env.get("SKILL_API_URL") ?? "http://localhost:3001";
+  const apiUrl = process.env["SKILL_API_URL"] ?? "http://localhost:3001";
 
   // Validate that URL is localhost
   try {
@@ -46,18 +47,23 @@ export function getDefaultConfig(): SkillClientConfig {
  * Parse common CLI arguments
  */
 export function parseBaseArgs(args: string[]): { sessionId: string; apiUrl: string } {
-  const parsed = parse(args, {
-    string: ["session-id", "api-url"],
-    alias: { s: "session-id", a: "api-url" },
+  const { values } = parseArgs({
+    args,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+    },
+    strict: false,
+    allowPositionals: true,
   });
 
-  const sessionId = parsed["session-id"];
+  const sessionId = typeof values["session-id"] === "string" ? values["session-id"] : undefined;
   if (!sessionId) {
     throw new Error("Missing required argument: --session-id");
   }
 
   const config = getDefaultConfig();
-  const apiUrl = parsed["api-url"] ?? config.apiUrl;
+  const apiUrl = typeof values["api-url"] === "string" ? values["api-url"] : config.apiUrl;
 
   return { sessionId, apiUrl };
 }
@@ -68,7 +74,7 @@ export function parseBaseArgs(args: string[]): { sessionId: string; apiUrl: stri
  * `SKILL_JWT_DIR`; per-spawn deployments never carry it.
  */
 function isSharedProcessMode(): boolean {
-  return Deno.env.get("SKILL_SHARED_PROCESS") === "1";
+  return process.env["SKILL_SHARED_PROCESS"] === "1";
 }
 
 /**
@@ -135,7 +141,7 @@ export class SkillSessionUnresolvedError extends Error {
  * overwriting the pointer mid-script cannot change this script's identity.
  */
 export function resolveOwningSessionId(): string {
-  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const jwtDir = process.env["SKILL_JWT_DIR"];
   // Snapshot is keyed by the JWT dir so distinct script invocations (each with
   // its own SKILL_JWT_DIR) never observe a previous invocation's identity.
   if (jwtDir && owningSessionSnapshot?.jwtDir === jwtDir) {
@@ -145,7 +151,7 @@ export function resolveOwningSessionId(): string {
   const readPointer = (): string | undefined => {
     if (!jwtDir) return undefined;
     try {
-      const raw = Deno.readTextFileSync(`${jwtDir}/active.json`);
+      const raw = fs.readFileSync(`${jwtDir}/active.json`, "utf8");
       const parsed = JSON.parse(raw) as { sessionId?: unknown };
       // Strict schema: a non-empty string session id, anything else is treated
       // as an unreadable/malformed pointer.
@@ -161,7 +167,7 @@ export function resolveOwningSessionId(): string {
     // Pointer only — no environment fallback in shared mode.
     resolved = readPointer();
   } else {
-    resolved = Deno.env.get("SESSION_ID") ?? readPointer();
+    resolved = process.env["SESSION_ID"] ?? readPointer();
   }
   if (!resolved) {
     if (shared) {
@@ -183,7 +189,7 @@ export function resolveOwningSessionId(): string {
  * Snapshotted once per script invocation alongside the session id.
  */
 export function readSkillJwt(sessionId: string): string {
-  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const jwtDir = process.env["SKILL_JWT_DIR"];
   if (!jwtDir) {
     throw new Error("SKILL_JWT_DIR env var is not set");
   }
@@ -197,7 +203,7 @@ export function readSkillJwt(sessionId: string): string {
   const path = `${jwtDir}/${sessionId}.jwt`;
   let jwt: string;
   try {
-    jwt = Deno.readTextFileSync(path).trim();
+    jwt = fs.readFileSync(path, "utf8").trim();
   } catch (cause) {
     throw new Error(
       `SKILL_JWT_UNREADABLE: no JWT file at ${path} — the owning session's lease may have ended: ${
@@ -239,7 +245,7 @@ export async function callSkillApi(
   // the CURRENT session. The library substitutes the resolved owner so the
   // agent command line never needs extra params.
   let effectiveSessionId = sessionId;
-  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const jwtDir = process.env["SKILL_JWT_DIR"];
   if (jwtDir) {
     // Snapshot the owning session + JWT (first call wins; later calls reuse it).
     const owningSessionId = resolveOwningSessionId();
@@ -281,5 +287,5 @@ export function exitWithError(message: string, code?: string): never {
     payload.code = code;
   }
   console.error(JSON.stringify(payload));
-  Deno.exit(1);
+  process.exit(1);
 }
