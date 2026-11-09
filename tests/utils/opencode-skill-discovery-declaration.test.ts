@@ -131,7 +131,8 @@ test("declaration - the deployed document names the resolved root and nothing el
     updated.indexOf('"bash": {'),
     updated.indexOf('"external_directory"'),
   );
-  assertStringIncludes(routing, '"deno run *": "ask"');
+  assertStringIncludes(routing, '"bun *": "ask"');
+  assertStringIncludes(routing, '"bunx *": "deny"');
   assertStringIncludes(routing, '"*.ts*": "ask"');
   assert(!updated.includes('"/app/data/workspaces/*/tmp/**": "deny"'));
 });
