@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# Image test stage for `package-bun-container-image` (design D3).
+#
+# Builds ON TOP of the built runtime image and adds the dev dependencies the
+# in-image test subset needs (`@std/assert`, `@std/testing`). The runtime image
+# itself ships production dependencies only.
+#
+# Usage (from the repository root):
+#   podman build -f tests/image/Containerfile \
+#     --build-arg IMAGE=localhost/air-friends:bun-local -t air-friends:bun-test .
+#
+# `tests/` is excluded from the build context by `.containerignore`, so the smoke
+# script mounts it read-only at run time.
+ARG IMAGE
+FROM ${IMAGE}
+
+# Root only inside the image build: install the full (frozen) dependency graph
+# over the production tree, then hand it back to the runtime UID.
+USER 0
+COPY package.json bun.lock bunfig.toml /app/
+RUN cd /app && bun install --frozen-lockfile && chown -R 1000:0 /app/node_modules
+USER 1000
