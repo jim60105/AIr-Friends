@@ -1,4 +1,11 @@
 {
   "schemaVersion": 1,
-  "exceptions": []
+  "exceptions": [
+    {
+      "file": "tests/utils/omp-native-cache.test.ts",
+      "name": "assertOmpNativeCacheComplete - accepts a matching payload and names every mismatch",
+      "disposition": "removed",
+      "reason": "Deno emitted the `t.step` container as its own passing test case; in bun:test that container is a `describe` suite that only registers the 13 step tests, which run as separate cases under the same name (`<parent> > <step>`). Bun has no case for a bare suite, and an empty `test(parent)` would be a fake pass."
+    }
+  ]
 }

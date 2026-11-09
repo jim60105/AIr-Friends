@@ -110,6 +110,23 @@ tests/mocks/omp-native-lifecycle-driver.ts
 tests/mocks/omp-mock-session.ts
 ```
 
+Scope deviations (supervisor-authorized at apply time):
+
+- `src/core/skills-root.ts` gets the two edits its D1 owner
+  (`convert-core-sessions-and-workspaces-to-bun`) would make here anyway: line 34 changes only
+  `import { isAbsolute, resolve } from "@std/path";` to `from "node:path";` (same imported names),
+  and the default existence probe at line 136 becomes
+  `return fs.statSync(path).isDirectory();` behind the identical `try`/`catch` with the same
+  `return false` fallback (plus `import fs from "node:fs";`). Without the first edit,
+  `tests/utils/opencode-skill-discovery-declaration.test.ts` (in D1) aborts at module load with
+  `error: Cannot find module '@std/path' from src/core/skills-root.ts`; without the second, its
+  `declaration - the declared value is the root the inventory and prompts resolve` case fails with
+  `ConfigError` because the swallowed `ReferenceError` from `Deno.statSync` reports every real root
+  as absent, so parity cannot treat it as deferred. Every other `Deno.*` call in that file
+  (`statSync`/`realPathSync` in `defaultObserveDirectory`, `cwd`) stays untouched for the owner.
+- `tests/utils/omp-packaging.test.ts` is absent from the D1 list, but proposal "What Changes",
+  design D4 and task 2.5 name its conversion, so it is converted here.
+
 ### D2. Mock and driver programs
 
 The mock agent and drivers are child programs. Convert their I/O to Bun: read stdin with `for await (const chunk of process.stdin)` or `Readable.toWeb(process.stdin)` where the code expects a web stream; write with `process.stdout.write(bytes)`, awaiting the callback where the old code awaited a writer. `Deno.args` → `process.argv.slice(2)`, `Deno.exit` → `process.exit`, `Deno.pid` → `process.pid`, `Deno.kill(pid, sig)` → `process.kill(pid, sig)`. Their own `Deno.Command` uses go to `spawn`/`spawnSync` from `node:child_process` per README D4. Model text that a mock scripts must stay non-periodic (Go record finding 5); do not shorten or repeat scripted strings.
