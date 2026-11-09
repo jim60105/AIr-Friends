@@ -935,7 +935,11 @@ const createSandbox = (overrides: Partial<SandboxConfig> = {}): SandboxConfig =>
   ...overrides,
 });
 
-test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
+// TEMPORARY (port-egress-proxy-and-gelf-to-node-net): `ensureEgressProxy` reaches
+// `Deno.listen` at `src/utils/egress-proxy.ts:375`, so these two cases cannot get
+// past the proxy start. That owner must restore the `test` registrations and delete
+// the matching `parity-exceptions.json` entries.
+test.skip("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
   ensureEgressProxy(0);
   try {
     const config = createTestConfig({
@@ -959,7 +963,7 @@ test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
   }
 });
 
-test("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () => {
+test.skip("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () => {
   ensureEgressProxy(0);
   try {
     const config = createTestConfig({

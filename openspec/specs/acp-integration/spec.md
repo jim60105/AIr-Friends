@@ -18,7 +18,7 @@ The system SHALL manage the external OpenCode ACP agent lifecycle through the `A
 #### Scenario: Parent environment cleared on spawn
 - **GIVEN** the parent bot process holds secrets (bot tokens, provider API keys, git credentials) not present in `AgentConfig.env`
 - **WHEN** `connect()` spawns the subprocess
-- **THEN** the `Deno.Command` SHALL be configured with `clearEnv: true`
+- **THEN** the spawn boundary SHALL receive `AgentConfig.env` as the complete child environment
 - **AND** the subprocess environment SHALL contain only the variables in `AgentConfig.env`, with no inherited parent variables
 
 #### Scenario: Session creation with MCP servers
@@ -473,7 +473,7 @@ All agent subprocesses SHALL receive common environment variables regardless of 
 #### Scenario: Common env vars
 - **GIVEN** any agent type
 - **WHEN** the subprocess is spawned
-- **THEN** the environment SHALL include `TMPDIR` (set to `{workingDir}/tmp`), `AGENT_WORKSPACE` (if provided), `PATH`, `HOME`, `DENO_DIR`, `LANG`, `LC_ALL`, and `USER`
+- **THEN** the environment SHALL include `TMPDIR` (set to `{workingDir}/tmp`), `AGENT_WORKSPACE` (if provided), `PATH`, `HOME`, `LANG`, `LC_ALL`, and `USER`
 
 #### Scenario: SESSION_ID env var provided to agent (per-spawn mode)
 - **GIVEN** a per-spawn session has been created via ACP `createSession()`
@@ -489,8 +489,6 @@ All agent subprocesses SHALL receive common environment variables regardless of 
 - **GIVEN** any agent subprocess (per-spawn or shared-process)
 - **WHEN** its environment is inspected
 - **THEN** it SHALL NOT contain the deployment `SKILL_API_SECRET` or any raw per-session caller-token environment value (e.g. a legacy `SKILL_API_TOKEN`); skill scripts authenticate with the per-session JWT file addressed by `SKILL_JWT_DIR`
-
----
 
 ### Requirement: OpenCode YOLO Mode Switching
 
@@ -2439,3 +2437,34 @@ For OMP callback contexts, native state SHALL be excluded from broad callback wo
 - **WHEN** persisted journal provenance is checked
 - **THEN** both the header cwd and registered cwd SHALL be canonicalized through the same path rule before comparison
 - **AND** a valid alias SHALL remain usable without accepting a different workspace identity
+
+### Requirement: Agent Stdin Backpressure
+
+A write to the agent subprocess's stdin stream SHALL settle only after the operating system accepted the bytes, so a child that stops reading holds back the writer.
+
+#### Scenario: Sleeping child
+- **GIVEN** an agent subprocess that sleeps for 2 seconds before reading stdin
+- **WHEN** 16 MiB is written to its stdin stream
+- **THEN** the write SHALL still be pending 500 ms after it started, and SHALL resolve after the child starts reading
+
+#### Scenario: Data intact
+- **GIVEN** an agent subprocess that echoes stdin to stdout
+- **WHEN** 32 MiB of seeded bytes is written and stdin is closed
+- **THEN** the SHA-256 of the bytes read from stdout SHALL equal the SHA-256 of the bytes written
+
+### Requirement: Agent Exit Report
+
+The spawn boundary SHALL report an exit as a code, a signal name and a success flag, where a signal exit has a null code and the signal name, and success is true only for exit code 0.
+
+#### Scenario: Normal exit
+- **WHEN** the agent subprocess exits with code 3
+- **THEN** the report SHALL be code 3, signal null, success false
+
+#### Scenario: Signal exit
+- **WHEN** the agent wrapper is killed with `SIGKILL`
+- **THEN** the report SHALL be code null, signal `SIGKILL`, success false
+
+#### Scenario: Escalation after grace period
+- **GIVEN** an agent subprocess that ignores `SIGTERM`
+- **WHEN** the connector disconnects
+- **THEN** it SHALL send `SIGKILL` 2 seconds after `SIGTERM` and the exit report SHALL show `SIGKILL`

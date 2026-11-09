@@ -2,9 +2,11 @@
 
 import { assertEquals, assertRejects } from "@std/assert";
 import { AgentConnector } from "@acp/agent-connector.ts";
+import type { AgentProcessExit, AgentProcessHandle } from "../../src/acp/agent-process.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 /**
  * Test suite for the AgentConnector crash-signal mechanism (handle-agent-process-crash):
@@ -13,9 +15,8 @@ import type { IdleTimeoutConfig } from "../../src/types/config.ts";
  * setSessionMode, setSessionConfigOption, prompt, cancel), independent of idle-timeout
  * configuration. Also covers the connect-time handshake timeout.
  *
- * `connect()` spawns a real subprocess via `dumb-init`, which is not installed in this
- * test/CI environment (see other agent-connector test files, which avoid calling it for
- * the same reason). These tests instead exercise the crash-signal mechanism
+ * `connect()` spawns a real subprocess via `dumb-init`; these unit cases need no
+ * live child, so they exercise the crash-signal mechanism
  * (`buildCrashSignal()` + `raceAgainstCrash()` + `raceWithConnectTimeout()`) directly via
  * injected mock process/connection objects — the exact same private helpers `connect()`
  * and every other call site rely on.
@@ -70,22 +71,22 @@ function createConnector(
   });
 }
 
-/** A controllable `Deno.ChildProcess`-shaped mock: resolve() simulates the process exiting. */
+/** A controllable spawn-handle mock: resolve() simulates the process exiting. */
 function createDeferredProcess(): {
-  process: Deno.ChildProcess;
-  resolve: (status: Deno.CommandStatus) => void;
+  process: AgentProcessHandle;
+  resolve: (exit: AgentProcessExit) => void;
 } {
-  let resolve!: (status: Deno.CommandStatus) => void;
-  const status = new Promise<Deno.CommandStatus>((r) => {
-    resolve = r;
-  });
-  return { process: { status } as unknown as Deno.ChildProcess, resolve };
+  const bridge = Promise.withResolvers<AgentProcessExit>();
+  return {
+    process: { pid: 0, exited: bridge.promise } as unknown as AgentProcessHandle,
+    resolve: bridge.resolve,
+  };
 }
 
 /** Attach a fresh process + crash signal to `connector`, as `connect()` does after spawn. */
 function setupCrashSignal(
   connector: AgentConnector,
-): { resolveExit: (status: Deno.CommandStatus) => void } {
+): { resolveExit: (exit: AgentProcessExit) => void } {
   const { process, resolve } = createDeferredProcess();
   connector["process"] = process;
   connector["crashSignal"] = connector["buildCrashSignal"]();
@@ -94,7 +95,7 @@ function setupCrashSignal(
 
 // --- buildCrashSignal ---
 
-Deno.test("buildCrashSignal - rejects with a descriptive error once the process exits", async () => {
+test("buildCrashSignal - rejects with a descriptive error once the process exits", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { process, resolve } = createDeferredProcess();
@@ -110,7 +111,7 @@ Deno.test("buildCrashSignal - rejects with a descriptive error once the process 
   );
 });
 
-Deno.test("buildCrashSignal - message does not match promptWithIdleTimeoutHandling's reconnect-trigger substrings (Decision 5)", async () => {
+test("buildCrashSignal - message does not match promptWithIdleTimeoutHandling's reconnect-trigger substrings (Decision 5)", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { process, resolve } = createDeferredProcess();
@@ -129,7 +130,7 @@ Deno.test("buildCrashSignal - message does not match promptWithIdleTimeoutHandli
   }
 });
 
-Deno.test("buildCrashSignal - does not surface as an unhandled rejection when nothing races against it", async () => {
+test("buildCrashSignal - does not surface as an unhandled rejection when nothing races against it", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { process, resolve } = createDeferredProcess();
@@ -147,7 +148,7 @@ Deno.test("buildCrashSignal - does not surface as an unhandled rejection when no
 
 // --- raceAgainstCrash ---
 
-Deno.test("raceAgainstCrash - passes the operation through unchanged when no crash signal exists yet", async () => {
+test("raceAgainstCrash - passes the operation through unchanged when no crash signal exists yet", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   // Not connected: crashSignal is null.
@@ -156,7 +157,7 @@ Deno.test("raceAgainstCrash - passes the operation through unchanged when no cra
   assertEquals(result, "ok");
 });
 
-Deno.test("raceAgainstCrash - rejects a pending operation promptly when the subprocess exits", async () => {
+test("raceAgainstCrash - rejects a pending operation promptly when the subprocess exits", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -171,7 +172,7 @@ Deno.test("raceAgainstCrash - rejects a pending operation promptly when the subp
 
 // --- Public call sites reject promptly on crash (tasks 4.2-4.4) ---
 
-Deno.test("createSession - rejects promptly when subprocess exits mid-call", async () => {
+test("createSession - rejects promptly when subprocess exits mid-call", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -186,7 +187,7 @@ Deno.test("createSession - rejects promptly when subprocess exits mid-call", asy
   assertEquals(connector["sessionModelIds"].get("sess"), undefined);
 });
 
-Deno.test("setSessionModel (stable) - rejects promptly when subprocess exits mid-call", async () => {
+test("setSessionModel (stable) - rejects promptly when subprocess exits mid-call", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -211,7 +212,7 @@ Deno.test("setSessionModel (stable) - rejects promptly when subprocess exits mid
   assertEquals(connector["sessionModelIds"].get("sess"), undefined);
 });
 
-Deno.test("setSessionModel - rejects promptly when subprocess exits mid-call", async () => {
+test("setSessionModel - rejects promptly when subprocess exits mid-call", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -225,7 +226,7 @@ Deno.test("setSessionModel - rejects promptly when subprocess exits mid-call", a
   await assertRejects(() => call, Error, "Agent process exited unexpectedly");
 });
 
-Deno.test("setSessionMode - rejects promptly when subprocess exits mid-call", async () => {
+test("setSessionMode - rejects promptly when subprocess exits mid-call", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -239,7 +240,7 @@ Deno.test("setSessionMode - rejects promptly when subprocess exits mid-call", as
   await assertRejects(() => call, Error, "Agent process exited unexpectedly");
 });
 
-Deno.test("cancel - rejects promptly when subprocess exits mid-call", async () => {
+test("cancel - rejects promptly when subprocess exits mid-call", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -253,7 +254,7 @@ Deno.test("cancel - rejects promptly when subprocess exits mid-call", async () =
   await assertRejects(() => call, Error, "Agent process exited unexpectedly");
 });
 
-Deno.test("setReasoningEffort - crash-signal rejection during setSessionConfigOption is caught and returns 'failed'", async () => {
+test("setReasoningEffort - crash-signal rejection during setSessionConfigOption is caught and returns 'failed'", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
@@ -278,7 +279,7 @@ Deno.test("setReasoningEffort - crash-signal rejection during setSessionConfigOp
 
 // prompt(): idle timeout enabled and disabled (tasks 4.2, 4.3)
 
-Deno.test("prompt - rejects promptly when subprocess exits mid-prompt, idle timeout enabled", async () => {
+test("prompt - rejects promptly when subprocess exits mid-prompt, idle timeout enabled", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     idleTimeoutConfig: { enabled: true, timeoutMs: 300000, checkIntervalMs: 30000 },
@@ -294,7 +295,7 @@ Deno.test("prompt - rejects promptly when subprocess exits mid-prompt, idle time
   await assertRejects(() => call, Error, "Agent process exited unexpectedly");
 });
 
-Deno.test("prompt - rejects promptly when subprocess exits mid-prompt, idle timeout disabled (regression)", async () => {
+test("prompt - rejects promptly when subprocess exits mid-prompt, idle timeout disabled (regression)", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     idleTimeoutConfig: { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 },
@@ -312,7 +313,7 @@ Deno.test("prompt - rejects promptly when subprocess exits mid-prompt, idle time
 
 // --- connect-time timeout (raceWithConnectTimeout) — task 4.5 ---
 
-Deno.test("raceWithConnectTimeout - rejects with a timeout error when the handshake never completes", async () => {
+test("raceWithConnectTimeout - rejects with a timeout error when the handshake never completes", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, { connectTimeoutMs: 50 });
 
@@ -321,7 +322,7 @@ Deno.test("raceWithConnectTimeout - rejects with a timeout error when the handsh
   await assertRejects(() => call, Error, "did not complete within 50ms");
 });
 
-Deno.test("raceWithConnectTimeout - logs a WARN at the 80% mark before timing out", async () => {
+test("raceWithConnectTimeout - logs a WARN at the 80% mark before timing out", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger, { connectTimeoutMs: 50 });
 
@@ -335,22 +336,19 @@ Deno.test("raceWithConnectTimeout - logs a WARN at the 80% mark before timing ou
   );
 });
 
-Deno.test(
-  "raceWithConnectTimeout - clears both timers when the operation settles early (no leaked timer)",
-  async () => {
-    const { logger } = createCapturingLogger();
-    const connector = createConnector(logger, { connectTimeoutMs: 10000 });
+test("raceWithConnectTimeout - clears both timers when the operation settles early (no leaked timer)", async () => {
+  const { logger } = createCapturingLogger();
+  const connector = createConnector(logger, { connectTimeoutMs: 10000 });
 
-    const result = await connector["raceWithConnectTimeout"](Promise.resolve("ok"), logger);
-    assertEquals(result, "ok");
-    // Deno's default sanitizers (enabled here, unlike the timeout tests above) fail the
-    // test if the WARN/timeout setTimeout handles were left dangling instead of cleared.
-  },
-);
+  const result = await connector["raceWithConnectTimeout"](Promise.resolve("ok"), logger);
+  assertEquals(result, "ok");
+  // Deno's default sanitizers (enabled here, unlike the timeout tests above) fail the
+  // test if the WARN/timeout setTimeout handles were left dangling instead of cleared.
+});
 
 // --- Fresh crash signal per connect() cycle — task 4.8 ---
 
-Deno.test("crashSignal - a fresh signal built for a new subprocess is independent of a stale one", async () => {
+test("crashSignal - a fresh signal built for a new subprocess is independent of a stale one", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -378,7 +376,7 @@ Deno.test("crashSignal - a fresh signal built for a new subprocess is independen
 
 // --- Double disconnect() safety — task 4.10 ---
 
-Deno.test("disconnect - calling twice in a row for the same failed connection attempt is a safe no-op", async () => {
+test("disconnect - calling twice in a row for the same failed connection attempt is a safe no-op", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   let killCount = 0;
@@ -386,8 +384,8 @@ Deno.test("disconnect - calling twice in a row for the same failed connection at
     kill: () => {
       killCount++;
     },
-    status: Promise.resolve({ code: 1, signal: null, success: false }),
-  } as unknown as Deno.ChildProcess;
+    exited: Promise.resolve({ code: 1, signal: null, success: false }),
+  } as unknown as AgentProcessHandle;
 
   // Models connect()'s own catch block calling disconnect(), followed by the
   // orchestrator's outer finally calling disconnect() again unconditionally.

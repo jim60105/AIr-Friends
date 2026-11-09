@@ -101,14 +101,6 @@ function dumbInitAvailable(): boolean {
 
 const SUBPROCESS_SKIP = !dumbInitAvailable();
 
-// TEMPORARY (convert-acp-client-and-factory-to-bun): the cases that drive the
-// real `AgentConnector` are registered with `test.skip` because its unconverted
-// `new Deno.Command` (`src/acp/agent-connector.ts:320`, owned by
-// `adopt-bun-agent-process-boundary`) is swallowed into `session_failed` instead
-// of surfacing as a deferrable `ReferenceError`. That owner must restore these
-// registrations to `test.skipIf(SUBPROCESS_SKIP)` and delete the matching
-// `parity-exceptions.json` entries.
-
 /** Scripted engine inputs, one per case. */
 interface EngineScript {
   mode?: string;
@@ -424,7 +416,7 @@ function unavailableReason(
 // ---------------------------------------------------------------------------
 
 for (const backend of ["opencode", "omp"] as const) {
-  test.skip(
+  test.skipIf(SUBPROCESS_SKIP)(
     `runtime - ${backend}: captures the bounded final text and reclaims its roots`,
     async () => {
       await withRuntime({
@@ -485,7 +477,7 @@ for (const backend of ["opencode", "omp"] as const) {
   );
 }
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a permission attempt fails the interpretation closed with zero tool effect",
   async () => {
     await withRuntime({
@@ -512,7 +504,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a tool-call notification fails the interpretation closed",
   async () => {
     await withRuntime({
@@ -529,7 +521,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a write attempt is refused without creating the target file",
   async () => {
     // The sentinel path is handed to the engine through the script file, so the
@@ -601,7 +593,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a read attempt is refused and discloses no content",
   async () => {
     const workspace = await makeTempDir({ prefix: "email-intent-runtime-read-" });
@@ -650,7 +642,7 @@ test.skip(
 // Bounded private interpretation
 // ---------------------------------------------------------------------------
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - an exceeded deadline returns unavailable and still reclaims",
   async () => {
     const started = Date.now();
@@ -668,7 +660,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - an output overflow past the 8 KiB bound returns no partial text",
   async () => {
     await withRuntime({
@@ -689,7 +681,7 @@ test.skip(
   },
 );
 
-test.skip("runtime - an exactly-8 KiB output is still complete", async () => {
+test.skipIf(SUBPROCESS_SKIP)("runtime - an exactly-8 KiB output is still complete", async () => {
   await withRuntime({
     backend: "opencode",
     script: {
@@ -732,7 +724,7 @@ test("runtime - an unusable bound override cannot disable a hard limit", () => {
   }
 });
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - text that is not this prompt turn's answer is never returned",
   async () => {
     // The engine speaks during setup and on a foreign session, then answers the
@@ -755,7 +747,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a pre-prompt tool attempt still fails the interpretation closed",
   async () => {
     // A tool attempt is latched regardless of prompt-turn arming: an attempt made
@@ -785,7 +777,7 @@ for (
     { name: "blank captured text", script: { chunks: ["   \n"] } },
   ]
 ) {
-  test.skip(
+  test.skipIf(SUBPROCESS_SKIP)(
     `runtime - incomplete output (${stop.name}) returns unavailable`,
     async () => {
       await withRuntime({
@@ -817,7 +809,7 @@ test("runtime - a model selection the catalog does not carry never spawns an eng
   });
 });
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a session that is not in the intent mode fails closed before any prompt",
   async () => {
     await withRuntime({
@@ -839,7 +831,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a session advertising NO mode selector fails closed",
   async () => {
     await withRuntime({
@@ -852,7 +844,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a mode selector offering another mode fails closed",
   async () => {
     await withRuntime({
@@ -870,7 +862,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a mode selector advertising an EMPTY roster fails closed",
   async () => {
     // The pinned contract advertises exactly one selectable mode. An empty roster
@@ -890,7 +882,7 @@ test.skip(
   },
 );
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - a model pin the engine does not apply fails closed before dispatch",
   async () => {
     // The pin's OWN response replaces the cached options, so the resulting active
@@ -962,7 +954,7 @@ test("runtime - an unconfirmed producer termination retains the private roots", 
   }
 });
 
-test.skip(
+test.skipIf(SUBPROCESS_SKIP)(
   "runtime - the requested model is pinned when the session advertises another",
   async () => {
     await withRuntime({
@@ -989,7 +981,7 @@ test.skip(
 // Privacy and teardown
 // ---------------------------------------------------------------------------
 
-test.skip("runtime - engine stderr is drained but never logged", async () => {
+test.skipIf(SUBPROCESS_SKIP)("runtime - engine stderr is drained but never logged", async () => {
   await withRuntime({
     backend: "opencode",
     script: {
@@ -1008,7 +1000,7 @@ test.skip("runtime - engine stderr is drained but never logged", async () => {
   });
 });
 
-test.skip("runtime - captured output never reaches a log record", async () => {
+test.skipIf(SUBPROCESS_SKIP)("runtime - captured output never reaches a log record", async () => {
   await withRuntime({
     backend: "omp",
     script: {
