@@ -766,9 +766,17 @@ export class DashboardServer {
       logger.error("Failed to connect chat session: {error}", {
         error: error instanceof Error ? error.message : String(error),
       });
-      // Release the spawned agent tree. The launch failure stays the reported
-      // cause; a release failure is logged separately and never replaces it.
-      if (pendingConnector !== undefined && this.chatSession?.connector !== pendingConnector) {
+      // Release the spawned agent tree on EVERY failure path. The launch failure
+      // stays the reported cause; a release failure is logged separately and
+      // never replaces it.
+      if (pendingConnector !== undefined) {
+        const session = this.chatSession;
+        if (session !== null && session.connector === pendingConnector) {
+          // A failure after the session was published must not leave a session
+          // (or its idle timer) that the client can never disconnect.
+          clearTimeout(session.idleTimer ?? undefined);
+          this.chatSession = null;
+        }
         try {
           await pendingConnector.disconnect();
         } catch (disconnectError) {
