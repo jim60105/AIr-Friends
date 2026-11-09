@@ -1,7 +1,7 @@
 // tests/core/agent-core.test.ts
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { AgentCore } from "@core/agent-core.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { Config } from "../../src/types/config.ts";
@@ -12,6 +12,9 @@ import type {
   PlatformCapabilities,
   ReplyResult,
 } from "../../src/types/platform.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // Mock PlatformAdapter
 class MockPlatformAdapter implements Partial<PlatformAdapter> {
@@ -122,15 +125,12 @@ function createTestEvent(): NormalizedEvent {
   };
 }
 
-Deno.test("AgentCore - constructs successfully", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - constructs successfully", async () => {
+  const tempDir = await makeTempDir();
   try {
     // Create system prompt
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     const agentCore = new AgentCore(config);
@@ -140,18 +140,15 @@ Deno.test("AgentCore - constructs successfully", async () => {
     // Cleanup
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - registers platform adapters", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - registers platform adapters", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     const agentCore = new AgentCore(config);
@@ -168,18 +165,15 @@ Deno.test("AgentCore - registers platform adapters", async () => {
     // Cleanup
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - handles events from registered platforms", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - handles events from registered platforms", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir, "all", []);
     const agentCore = new AgentCore(config);
@@ -204,18 +198,15 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
     // Cleanup
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - filters events blocked by access control", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - filters events blocked by access control", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     // Default whitelist mode with empty whitelist should block all events.
     const config = createTestConfig(tempDir, "channels", []);
@@ -232,18 +223,15 @@ Deno.test("AgentCore - filters events blocked by access control", async () => {
 
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - returns config", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - returns config", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     const agentCore = new AgentCore(config);
@@ -254,18 +242,15 @@ Deno.test("AgentCore - returns config", async () => {
     // Cleanup
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - getOrchestrator returns orchestrator", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - getOrchestrator returns orchestrator", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     const agentCore = new AgentCore(config);
@@ -275,18 +260,15 @@ Deno.test("AgentCore - getOrchestrator returns orchestrator", async () => {
 
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - getWorkspaceManager returns workspace manager", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - getWorkspaceManager returns workspace manager", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     const agentCore = new AgentCore(config);
@@ -296,18 +278,15 @@ Deno.test("AgentCore - getWorkspaceManager returns workspace manager", async () 
 
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - getMemoryStore returns memory store", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - getMemoryStore returns memory store", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     const agentCore = new AgentCore(config);
@@ -317,15 +296,15 @@ Deno.test("AgentCore - getMemoryStore returns memory store", async () => {
 
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - a channel session's context carries the channel memories", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - a channel session's context carries the channel memories", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(
       `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.\n\n{{ userContextMessage }}\n\nSkill root: {{ skillsDir }}",
     );
@@ -357,31 +336,28 @@ Deno.test("AgentCore - a channel session's context carries the channel memories"
 
     const promptDir = `${tempDir}/dry-run/`;
     const promptFiles: string[] = [];
-    for await (const entry of Deno.readDir(promptDir)) {
+    for (const entry of await fsp.readdir(promptDir, { withFileTypes: true })) {
       if (entry.name.startsWith("message_") && entry.name.endsWith(".md")) {
         promptFiles.push(entry.name);
       }
     }
     assertEquals(promptFiles.length, 1);
-    const prompt = await Deno.readTextFile(join(promptDir, promptFiles[0]));
+    const prompt = await fsp.readFile(join(promptDir, promptFiles[0]), "utf8");
 
     assertStringIncludes(prompt, "## Channel Notes");
     assertStringIncludes(prompt, "[from user_42] The channel meets on Tuesdays");
 
     await agentCore.shutdown();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("AgentCore - identity groups reach the memory read paths", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("AgentCore - identity groups reach the memory read paths", async () => {
+  const tempDir = await makeTempDir();
   try {
-    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
-    await Deno.writeTextFile(
-      `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
-    );
+    await fsp.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await fsp.writeFile(`${tempDir}/prompts/system_reply.md`, "You are a helpful assistant.");
 
     const config = createTestConfig(tempDir);
     config.identities = [{ id: "alice", accounts: ["discord/1", "misskey/2"] }];
@@ -440,6 +416,6 @@ Deno.test("AgentCore - identity groups reach the memory read paths", async () =>
       await agentCore.shutdown();
     }
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });

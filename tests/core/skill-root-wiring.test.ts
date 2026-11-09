@@ -19,7 +19,7 @@ import { assertEquals } from "@std/assert";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
 import { buildSkillAutoApproveList, matchesScriptEntrypoint } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot, resolveTrustedSkillsRoot } from "@core/skills-root.ts";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
 import { HealthCheckServer } from "../../src/healthcheck.ts";
 import type { Config } from "../../src/types/config.ts";
@@ -35,6 +35,10 @@ import {
   resetSandboxCapabilityCache,
   setSandboxCapabilityCacheForTest,
 } from "../../src/acp/sandbox-capabilities.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /**
  * The ONE deployment-resolved root in the repository-development shape
@@ -42,7 +46,7 @@ import {
  * what `agent.skillsDir` (default `"skills"`) resolves to from the repository
  * working directory for BOTH agent types.
  */
-const REPO_SKILLS_ROOT = Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
+const REPO_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 function makeConfig(overrides: Partial<Config["agent"]> = {}): Config {
   return {
@@ -66,7 +70,7 @@ function makeConfig(overrides: Partial<Config["agent"]> = {}): Config {
   };
 }
 
-Deno.test("wiring identity - repository development: every consumer carries ONE root", async () => {
+test("wiring identity - repository development: every consumer carries ONE root", async () => {
   // Deployment-default agent is OpenCode with the development default root
   // (`skills` relative to the deployment cwd = the repository `skills/` tree).
   const config = makeConfig();
@@ -147,7 +151,7 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   assertEquals(resolveTrustedSkillsRoot(agentType, config.agent.skillsDir), resolver.root);
 });
 
-Deno.test("wiring identity - a dashboard agent-type override cannot change the root", () => {
+test("wiring identity - a dashboard agent-type override cannot change the root", () => {
   // Dashboard override: selecting the OTHER agent type must not create a
   // second root spelling. Since `unify-skill-root-and-inventory` the resolver
   // has no agent-type selection at all, so both agent types (and every
@@ -160,7 +164,7 @@ Deno.test("wiring identity - a dashboard agent-type override cannot change the r
   assertEquals(overridden.root, REPO_SKILLS_ROOT);
 });
 
-Deno.test("wiring identity - both agent types resolve a byte-identical canonical root in every deployment shape", () => {
+test("wiring identity - both agent types resolve a byte-identical canonical root in every deployment shape", () => {
   // Stock-image shape: the trio's declared container value, observed through
   // the injectable seam. The seam FABRICATES the identity, so this case proves
   // the SELECTION is that one configured value for both agent types (a
@@ -184,7 +188,7 @@ Deno.test("wiring identity - both agent types resolve a byte-identical canonical
   assertEquals(opencodeDev.identity, ompDev.identity);
 
   // Custom absolute root (real filesystem): a deployment-specific directory.
-  const custom = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-custom-skills-" }));
+  const custom = fs.realpathSync(makeTempDirSync({ prefix: "air-custom-skills-" }));
   try {
     const opencodeCustom = observeTrustedSkillsRoot("opencode", custom);
     const ompCustom = observeTrustedSkillsRoot("omp", custom);
@@ -192,30 +196,30 @@ Deno.test("wiring identity - both agent types resolve a byte-identical canonical
     assertEquals(ompCustom.root, custom);
     assertEquals(opencodeCustom.identity, ompCustom.identity);
   } finally {
-    Deno.removeSync(custom, { recursive: true });
+    fs.rmSync(custom, { recursive: true });
   }
 });
 
-Deno.test("wiring identity - per-spawn and pooled connectors resolve the identical root without SESSION_ID", () => {
+test("wiring identity - per-spawn and pooled connectors resolve the identical root without SESSION_ID", () => {
   // One deployment configuration used by a per-spawn connector and by a pooled
   // connector must yield a byte-identical root for either agent type, and the
   // resolution must not read a per-session value to select one.
   // The `omp` factory hard-requires the shared prepared native payload, so this
   // suite supplies one over the internal selection seam (a real temporary tree,
   // no OMP process and no installed image).
-  const nativeCacheRoot = Deno.makeTempDirSync();
+  const nativeCacheRoot = makeTempDirSync();
   // A per-run deployment root: the mode roots carry the reserved `natives` link, so a
   // shared fixed path would make a second run refuse the previous run's link.
-  const deploymentRoot = Deno.makeTempDirSync();
+  const deploymentRoot = makeTempDirSync();
   const workingDir = `${deploymentRoot}/workspace`;
-  Deno.mkdirSync(workingDir, { recursive: true });
+  fs.mkdirSync(workingDir, { recursive: true });
   const platform = ompNativeCachePlatform();
   const cache = ompNativeCacheDescriptor(nativeCacheRoot, platform, "development");
   const { exact } = ompNativeCacheExpectedAddons(platform);
   const addonNames = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
-  Deno.mkdirSync(cache.versionDir, { recursive: true });
-  for (const name of addonNames) Deno.writeTextFileSync(`${cache.versionDir}/${name}`, "fixture");
-  Deno.writeTextFileSync(
+  fs.mkdirSync(cache.versionDir, { recursive: true });
+  for (const name of addonNames) fs.writeFileSync(`${cache.versionDir}/${name}`, "fixture");
+  fs.writeFileSync(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -232,8 +236,8 @@ Deno.test("wiring identity - per-spawn and pooled connectors resolve the identic
     },
   });
   config.workspace.repoPath = deploymentRoot;
-  const original = Deno.env.get("SESSION_ID");
-  Deno.env.set("SESSION_ID", "sess_must_not_select_a_root");
+  const original = process.env["SESSION_ID"];
+  process.env["SESSION_ID"] = "sess_must_not_select_a_root";
   try {
     for (const agentType of ["opencode", "omp"] as const) {
       const perSpawn = createAgentConfig(agentType, workingDir, config);
@@ -251,14 +255,14 @@ Deno.test("wiring identity - per-spawn and pooled connectors resolve the identic
       assertEquals(perSpawn.skillsRoot?.identity, pooled.skillsRoot?.identity, agentType);
     }
   } finally {
-    if (original === undefined) Deno.env.delete("SESSION_ID");
-    else Deno.env.set("SESSION_ID", original);
-    Deno.removeSync(nativeCacheRoot, { recursive: true });
-    Deno.removeSync(deploymentRoot, { recursive: true });
+    if (original === undefined) delete process.env["SESSION_ID"];
+    else process.env["SESSION_ID"] = original;
+    fs.rmSync(nativeCacheRoot, { recursive: true });
+    fs.rmSync(deploymentRoot, { recursive: true });
   }
 });
 
-Deno.test("wiring identity - pooled reconnect re-observation is deterministic", () => {
+test("wiring identity - pooled reconnect re-observation is deterministic", () => {
   // Recovery replays cached session contexts onto a fresh client, whose
   // connector re-observes through the SAME resolver (no gate-context drift in
   // the root spelling): two consecutive observations of the same configured
@@ -274,23 +278,23 @@ Deno.test("wiring identity - pooled reconnect re-observation is deterministic", 
   assertEquals(first.identity?.ino, second.identity?.ino);
 });
 
-Deno.test("external publication - the shared root admits the installed script for either agent type", async () => {
+test("external publication - the shared root admits the installed script for either agent type", async () => {
   // Publish an external script into the ONE resolved root layout (a temp tree
   // standing in for it), then decide for both agent types with an EMPTY and an
   // EXPLICIT approval list (`unify-skill-root-and-inventory`: the shared root
   // grants either agent type the installed script and neither needs a catalog
   // entry for it). Bootstrap ordering itself is pinned in
   // external-skill-publication-parity.test.ts.
-  const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-shared-" }));
+  const root = fs.realpathSync(makeTempDirSync({ prefix: "air-shared-" }));
   try {
     const skillDir = `${root}/installed-external/scripts`;
-    await Deno.mkdir(skillDir, { recursive: true });
-    await Deno.writeTextFile(`${root}/installed-external/SKILL.md`, "# external");
-    await Deno.writeTextFile(`${skillDir}/installed-external.ts`, "// grant");
+    await fsp.mkdir(skillDir, { recursive: true });
+    await fsp.writeFile(`${root}/installed-external/SKILL.md`, "# external");
+    await fsp.writeFile(`${skillDir}/installed-external.ts`, "// grant");
     const bundled = `${root}/memory-save/scripts`;
-    await Deno.mkdir(bundled, { recursive: true });
-    await Deno.writeTextFile(`${root}/memory-save/SKILL.md`, "# bundled");
-    await Deno.writeTextFile(`${bundled}/memory-save.ts`, "// bundled grant");
+    await fsp.mkdir(bundled, { recursive: true });
+    await fsp.writeFile(`${root}/memory-save/SKILL.md`, "# bundled");
+    await fsp.writeFile(`${bundled}/memory-save.ts`, "// bundled grant");
 
     const scriptPath = `${root}/installed-external/scripts/installed-external.ts`;
 
@@ -328,6 +332,6 @@ Deno.test("external publication - the shared root admits the installed script fo
       assertEquals(filtered.commandPrefixes.size, 0, agentType);
     }
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });

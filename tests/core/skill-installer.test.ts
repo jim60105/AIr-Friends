@@ -13,6 +13,10 @@ import {
   type SkillInstallExecutor,
 } from "@core/skill-installer.ts";
 import type { ExternalSkillConfig } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 /**
  * Mock executor that emulates the `skills` CLI posture: writes the skill tree
@@ -44,14 +48,14 @@ function materializingExecutor(
       if (home) stagingHomes.push(home);
       if (home) {
         const dir = `${home}/.agents/skills/${skill}`;
-        await Deno.mkdir(dir, { recursive: true });
-        await Deno.writeTextFile(`${dir}/SKILL.md`, `# ${skill}`);
-        await Deno.mkdir(`${dir}/scripts`, { recursive: true });
-        await Deno.writeTextFile(`${dir}/scripts/${skill}.ts`, "#!/usr/bin/env deno\n");
+        await fsp.mkdir(dir, { recursive: true });
+        await fsp.writeFile(`${dir}/SKILL.md`, `# ${skill}`);
+        await fsp.mkdir(`${dir}/scripts`, { recursive: true });
+        await fsp.writeFile(`${dir}/scripts/${skill}.ts`, "#!/usr/bin/env deno\n");
         if (behavior(skill) === "linked") {
           // A hostile materialization: a link inside the published tree.
-          await Deno.writeTextFile(`${home}/escape-target`, "escaped");
-          await Deno.symlink(`${home}/escape-target`, `${dir}/scripts/linked.ts`);
+          await fsp.writeFile(`${home}/escape-target`, "escaped");
+          await fsp.symlink(`${home}/escape-target`, `${dir}/scripts/linked.ts`);
         }
       }
       return { code: 0, stdout: encoder.encode("installed"), stderr: new Uint8Array() };
@@ -60,7 +64,7 @@ function materializingExecutor(
   return { executor, calls, stagingHomes };
 }
 
-Deno.test("buildSkillInstallCommand - should build an npx command with the expected args", () => {
+test("buildSkillInstallCommand - should build an npx command with the expected args", () => {
   const skill: ExternalSkillConfig = { repo: "owner/repo", skill: "my-skill" };
 
   const { cmd, args } = buildSkillInstallCommand(skill);
@@ -84,21 +88,21 @@ Deno.test("buildSkillInstallCommand - should build an npx command with the expec
   ]);
 });
 
-Deno.test("installExternalSkills - does nothing with an empty list", async () => {
+test("installExternalSkills - does nothing with an empty list", async () => {
   const { executor, calls } = materializingExecutor();
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(destination, [], executor);
     assertEquals(calls.length, 0);
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - publishes each skill into the EXPLICIT destination via private HOME", async () => {
+test("installExternalSkills - publishes each skill into the EXPLICIT destination via private HOME", async () => {
   const { executor, calls, stagingHomes } = materializingExecutor();
-  const destination = await Deno.makeTempDir();
-  const ambientHome = Deno.env.get("HOME");
+  const destination = await makeTempDir();
+  const ambientHome = process.env["HOME"];
   try {
     const skills: ExternalSkillConfig[] = [
       { repo: "owner/repo-a", skill: "skill-a" },
@@ -114,32 +118,32 @@ Deno.test("installExternalSkills - publishes each skill into the EXPLICIT destin
       assert(call.env!.HOME.startsWith("/"), "staging HOME is absolute");
     }
     // Both skills land in the explicit destination, physically.
-    await Deno.stat(`${destination}/skill-a/SKILL.md`);
-    await Deno.stat(`${destination}/skill-a/scripts/skill-a.ts`);
-    await Deno.stat(`${destination}/skill-b/SKILL.md`);
+    await fsp.stat(`${destination}/skill-a/SKILL.md`);
+    await fsp.stat(`${destination}/skill-a/scripts/skill-a.ts`);
+    await fsp.stat(`${destination}/skill-b/SKILL.md`);
     // Staging homes are removed in `finally`.
     assertEquals(stagingHomes.length, 2);
     for (const home of stagingHomes) {
       let removed = false;
       try {
-        await Deno.stat(home);
+        await fsp.stat(home);
       } catch {
         removed = true;
       }
       assert(removed, `staging HOME ${home} must be removed`);
     }
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - refresh: an existing EXTERNAL entry is replaced, never duplicated", async () => {
+test("installExternalSkills - refresh: an existing EXTERNAL entry is replaced, never duplicated", async () => {
   const { executor } = materializingExecutor();
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
-    await Deno.mkdir(`${destination}/skill-a/scripts`, { recursive: true });
-    await Deno.writeTextFile(`${destination}/skill-a/SKILL.md`, "# old");
-    await Deno.writeTextFile(`${destination}/skill-a/legacy.txt`, "old leftover");
+    await fsp.mkdir(`${destination}/skill-a/scripts`, { recursive: true });
+    await fsp.writeFile(`${destination}/skill-a/SKILL.md`, "# old");
+    await fsp.writeFile(`${destination}/skill-a/legacy.txt`, "old leftover");
     await installExternalSkills(
       destination,
       [{ repo: "owner/repo-a", skill: "skill-a" }],
@@ -148,25 +152,25 @@ Deno.test("installExternalSkills - refresh: an existing EXTERNAL entry is replac
     // Refresh replaces the entry wholesale: old leftovers are gone, new tree is real.
     let gone = false;
     try {
-      await Deno.stat(`${destination}/skill-a/legacy.txt`);
+      await fsp.stat(`${destination}/skill-a/legacy.txt`);
     } catch {
       gone = true;
     }
     assert(gone, "refresh must remove the previous external content");
-    await Deno.stat(`${destination}/skill-a/scripts/skill-a.ts`);
+    await fsp.stat(`${destination}/skill-a/scripts/skill-a.ts`);
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - bundled and reserved names are NEVER installed", async () => {
+test("installExternalSkills - bundled and reserved names are NEVER installed", async () => {
   const { executor, calls } = materializingExecutor();
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
-    await Deno.mkdir(`${destination}/memory-save`, { recursive: true });
-    await Deno.writeTextFile(`${destination}/memory-save/SKILL.md`, "# owned");
-    await Deno.mkdir(`${destination}/lib`, { recursive: true });
-    await Deno.writeTextFile(`${destination}/lib/shared.ts`, "// owned");
+    await fsp.mkdir(`${destination}/memory-save`, { recursive: true });
+    await fsp.writeFile(`${destination}/memory-save/SKILL.md`, "# owned");
+    await fsp.mkdir(`${destination}/lib`, { recursive: true });
+    await fsp.writeFile(`${destination}/lib/shared.ts`, "// owned");
 
     await installExternalSkills(
       destination,
@@ -179,16 +183,16 @@ Deno.test("installExternalSkills - bundled and reserved names are NEVER installe
 
     // No CLI call at all, and the owned content is untouched.
     assertEquals(calls.length, 0);
-    assertEquals(await Deno.readTextFile(`${destination}/memory-save/SKILL.md`), "# owned");
-    assertEquals(await Deno.readTextFile(`${destination}/lib/shared.ts`), "// owned");
+    assertEquals(await fsp.readFile(`${destination}/memory-save/SKILL.md`, "utf8"), "# owned");
+    assertEquals(await fsp.readFile(`${destination}/lib/shared.ts`, "utf8"), "// owned");
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - traversal/absolute names are rejected before the CLI", async () => {
+test("installExternalSkills - traversal/absolute names are rejected before the CLI", async () => {
   const { executor, calls } = materializingExecutor();
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(
       destination,
@@ -202,17 +206,17 @@ Deno.test("installExternalSkills - traversal/absolute names are rejected before 
     );
     assertEquals(calls.length, 0);
     // Nothing escaped the destination either.
-    assertEquals([...Deno.readDirSync(destination)].length, 0);
+    assertEquals([...fs.readdirSync(destination, { withFileTypes: true })].length, 0);
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - per-entry failure isolation and staging cleanup", async () => {
+test("installExternalSkills - per-entry failure isolation and staging cleanup", async () => {
   const { executor, calls, stagingHomes } = materializingExecutor((skill) =>
     skill === "skill-a" ? "fail" : "ok"
   );
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(
       destination,
@@ -223,10 +227,10 @@ Deno.test("installExternalSkills - per-entry failure isolation and staging clean
       executor,
     );
     assertEquals(calls.length, 2, "the second skill still runs after the first fails");
-    await Deno.stat(`${destination}/skill-b/SKILL.md`);
+    await fsp.stat(`${destination}/skill-b/SKILL.md`);
     let failedAbsent = false;
     try {
-      await Deno.stat(`${destination}/skill-a`);
+      await fsp.stat(`${destination}/skill-a`);
     } catch {
       failedAbsent = true;
     }
@@ -234,35 +238,35 @@ Deno.test("installExternalSkills - per-entry failure isolation and staging clean
     for (const home of stagingHomes) {
       let removed = false;
       try {
-        await Deno.stat(home);
+        await fsp.stat(home);
       } catch {
         removed = true;
       }
       assert(removed, `staging HOME ${home} must be removed even on failure`);
     }
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - a successful exit with no materialized directory publishes nothing", async () => {
+test("installExternalSkills - a successful exit with no materialized directory publishes nothing", async () => {
   const { executor } = materializingExecutor(() => "nothing");
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(
       destination,
       [{ repo: "owner/repo-a", skill: "skill-a" }],
       executor,
     );
-    assertEquals([...Deno.readDirSync(destination)].length, 0);
+    assertEquals([...fs.readdirSync(destination, { withFileTypes: true })].length, 0);
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - linked materialization inside the tree is refused ATOMICALLY (B4)", async () => {
+test("installExternalSkills - linked materialization inside the tree is refused ATOMICALLY (B4)", async () => {
   const { executor } = materializingExecutor(() => "linked");
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(
       destination,
@@ -274,30 +278,30 @@ Deno.test("installExternalSkills - linked materialization inside the tree is ref
     // exists (no partial grant, no half-tree).
     let absent = false;
     try {
-      await Deno.stat(`${destination}/skill-a`);
+      await fsp.stat(`${destination}/skill-a`);
     } catch {
       absent = true;
     }
     assert(absent, "a refused publication must leave no destination entry at all");
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - failed refresh PRESERVES the previous external entry (B4)", async () => {
+test("installExternalSkills - failed refresh PRESERVES the previous external entry (B4)", async () => {
   // Install skill-a successfully, then a refresh whose materialization is
   // hostile (deep link): the previous COMPLETE entry must survive intact and
   // no partial content may be left at the final path.
   let hostile = false;
   const { executor } = materializingExecutor(() => (hostile ? "linked" : "ok"));
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(
       destination,
       [{ repo: "owner/repo-a", skill: "skill-a" }],
       executor,
     );
-    await Deno.writeTextFile(`${destination}/skill-a/KEEP.txt`, "previous");
+    await fsp.writeFile(`${destination}/skill-a/KEEP.txt`, "previous");
     hostile = true;
     await installExternalSkills(
       destination,
@@ -305,26 +309,28 @@ Deno.test("installExternalSkills - failed refresh PRESERVES the previous externa
       executor,
     );
     // Previous content intact…
-    assertEquals(await Deno.readTextFile(`${destination}/skill-a/KEEP.txt`), "previous");
-    await Deno.stat(`${destination}/skill-a/scripts/skill-a.ts`);
+    assertEquals(await fsp.readFile(`${destination}/skill-a/KEEP.txt`, "utf8"), "previous");
+    await fsp.stat(`${destination}/skill-a/scripts/skill-a.ts`);
     // …no partial tree, no backup leftovers inside the published entry.
     assertEquals(
-      [...Deno.readDirSync(`${destination}/skill-a`)].some((e) => e.name.includes("air-refresh")),
+      [...fs.readdirSync(`${destination}/skill-a`, { withFileTypes: true })].some((e) =>
+        e.name.includes("air-refresh")
+      ),
       false,
     );
   } finally {
-    await Deno.remove(destination, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
   }
 });
 
-Deno.test("installExternalSkills - linked .agents ancestor is refused (B5)", async () => {
+test("installExternalSkills - linked .agents ancestor is refused (B5)", async () => {
   // The installer previously followed a symlinked `<stagingHome>/.agents`
   // ancestor through realPathSync: the foreign tree's REGULAR files would
   // publish through it. The chain from the private HOME down must be link-free.
-  const foreign = await Deno.makeTempDir();
-  await Deno.mkdir(`${foreign}/.agents-elsewhere/skills/skill-a/scripts`, { recursive: true });
-  await Deno.writeTextFile(`${foreign}/.agents-elsewhere/skills/skill-a/SKILL.md`, "# foreign");
-  await Deno.writeTextFile(
+  const foreign = await makeTempDir();
+  await fsp.mkdir(`${foreign}/.agents-elsewhere/skills/skill-a/scripts`, { recursive: true });
+  await fsp.writeFile(`${foreign}/.agents-elsewhere/skills/skill-a/SKILL.md`, "# foreign");
+  await fsp.writeFile(
     `${foreign}/.agents-elsewhere/skills/skill-a/scripts/skill-a.ts`,
     "// foreign",
   );
@@ -334,11 +340,11 @@ Deno.test("installExternalSkills - linked .agents ancestor is refused (B5)", asy
       const home = options?.env?.HOME!;
       // Hostile staging: `.agents` is a LINK to a foreign tree carrying the
       // skill as regular files.
-      await Deno.symlink(`${foreign}/.agents-elsewhere`, `${home}/.agents`);
+      await fsp.symlink(`${foreign}/.agents-elsewhere`, `${home}/.agents`);
       return { code: 0, stdout: new Uint8Array(), stderr: new Uint8Array() };
     },
   };
-  const destination = await Deno.makeTempDir();
+  const destination = await makeTempDir();
   try {
     await installExternalSkills(
       destination,
@@ -347,13 +353,13 @@ Deno.test("installExternalSkills - linked .agents ancestor is refused (B5)", asy
     );
     let published = true;
     try {
-      await Deno.stat(`${destination}/skill-a`);
+      await fsp.stat(`${destination}/skill-a`);
     } catch {
       published = false;
     }
     assert(!published, "a linked staging ancestor must never publish foreign content");
   } finally {
-    await Deno.remove(destination, { recursive: true });
-    await Deno.remove(foreign, { recursive: true });
+    await fsp.rm(destination, { recursive: true });
+    await fsp.rm(foreign, { recursive: true });
   }
 });

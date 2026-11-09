@@ -13,12 +13,14 @@ import {
   isValidSkillNameComponent,
   RESERVED_SKILL_ENTRIES,
 } from "@core/bundled-skills.ts";
+import fs from "node:fs";
+import { test } from "bun:test";
 
-Deno.test("catalog parity - the authored catalog matches the repository skills/ directories", () => {
+test("catalog parity - the authored catalog matches the repository skills/ directories", () => {
   const sourceRoot = new URL("../../skills", import.meta.url).pathname;
   const authoredDirs: string[] = [];
-  for (const entry of Deno.readDirSync(sourceRoot)) {
-    if (entry.isDirectory) authoredDirs.push(entry.name);
+  for (const entry of fs.readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (entry.isDirectory()) authoredDirs.push(entry.name);
   }
   const catalog = new Set([...RESERVED_SKILL_ENTRIES, ...BUNDLED_SKILLS]);
   for (const dir of authoredDirs) {
@@ -35,13 +37,13 @@ Deno.test("catalog parity - the authored catalog matches the repository skills/ 
   }
 });
 
-Deno.test("catalog - reserved lib is never an installable/collidable skill name via bundling", () => {
+test("catalog - reserved lib is never an installable/collidable skill name via bundling", () => {
   assert(collidesWithBundledContent("lib"));
   assert(collidesWithBundledContent("memory-save"));
   assertEquals(collidesWithBundledContent("create-blog-post"), false);
 });
 
-Deno.test("name component - traversal/absolute/separator names rejected", () => {
+test("name component - traversal/absolute/separator names rejected", () => {
   for (const bad of ["", ".", "..", "a/b", "a\\b", "/abs", "..hidden", "x/../y", "a\0b"]) {
     assertEquals(isValidSkillNameComponent(bad), false, `must reject ${JSON.stringify(bad)}`);
   }
@@ -105,9 +107,10 @@ function skillsTreeInstalls(containerfile: string): string[] {
   return installs;
 }
 
-Deno.test("Containerfile - installs exactly one skill tree, at the personal skill root", () => {
-  const containerfile = Deno.readTextFileSync(
+test("Containerfile - installs exactly one skill tree, at the personal skill root", () => {
+  const containerfile = fs.readFileSync(
     new URL("../../Containerfile", import.meta.url).pathname,
+    "utf8",
   );
   // Exactly ONE instruction installs a skill tree, and it is the personal
   // root every agent type resolves and external runtime installs publish into.
@@ -119,7 +122,7 @@ Deno.test("Containerfile - installs exactly one skill tree, at the personal skil
   assert(!containerfile.includes("stage-owned-skills"));
 });
 
-Deno.test("Containerfile guard - a second skill tree is surfaced in every form", () => {
+test("Containerfile guard - a second skill tree is surfaced in every form", () => {
   // A second source COPY, whatever its spelling.
   assertEquals(
     skillsTreeInstalls(
@@ -154,15 +157,15 @@ Deno.test("Containerfile guard - a second skill tree is surfaced in every form",
   assertEquals(skillsTreeInstalls("COPY --link prompts/ /app/prompts/"), []);
 });
 
-Deno.test("Containerfile and Helm declare the same shared installed root; development default stays 'skills'", () => {
-  const containerfile = Deno.readTextFileSync(
+test("Containerfile and Helm declare the same shared installed root; development default stays 'skills'", () => {
+  const containerfile = fs.readFileSync(
     new URL("../../Containerfile", import.meta.url).pathname,
+    "utf8",
   );
-  const helm = Deno.readTextFileSync(
-    new URL("../../helm/values.yaml", import.meta.url).pathname,
-  );
-  const envExample = Deno.readTextFileSync(
+  const helm = fs.readFileSync(new URL("../../helm/values.yaml", import.meta.url).pathname, "utf8");
+  const envExample = fs.readFileSync(
     new URL("../../.env.example", import.meta.url).pathname,
+    "utf8",
   );
   // Stock image declares the SAME tree the COPY installs.
   assert(containerfile.includes("ENV AGENT_SKILLS_DIR=/home/deno/.agents/skills"));
