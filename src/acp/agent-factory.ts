@@ -153,7 +153,7 @@ function buildBaseAgentConfig(
         env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
       }
 
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
+      const inheritVars = ["PATH", "HOME", "LANG", "LC_ALL", "USER", "TMPDIR"];
       for (const varName of inheritVars) {
         const value = process.env[varName];
         if (value !== undefined) {
@@ -352,7 +352,7 @@ function buildBaseAgentConfig(
       // System essentials inheritance. HOME IS inherited normally: native OMP
       // reads its model configuration from the deployment HOME
       // (`~/.omp/agent/models.yml`) and there is no daemon-owned home anymore.
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      const inheritVars = ["PATH", "HOME", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
         const value = process.env[varName];
         if (value !== undefined) {
@@ -1064,7 +1064,6 @@ const PROFILE_RESERVED_ENV: Record<string, true> = {
   PWD: true,
   LANG: true,
   LC_ALL: true,
-  DENO_DIR: true,
   OPENCODE_CONFIG_CONTENT: true,
 };
 

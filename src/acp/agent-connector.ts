@@ -3,6 +3,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "./client.ts";
 import { buildSkillAutoApproveList, type SkillAutoApproveList } from "./skill-inventory.ts";
+import { type AgentProcessHandle, createAgentProcess } from "./agent-process.ts";
 import {
   type AgentCapabilities,
   type AgentConnectorOptions,
@@ -43,13 +44,6 @@ import {
  * Following GitHub's ACP best practices
  */
 const DISCONNECT_TIMEOUT_MS = 2000;
-
-/**
- * Default path to dumb-init binary for wrapping agent subprocesses.
- * dumb-init ensures proper signal forwarding and zombie process reaping,
- * preventing memory leaks from orphaned child processes.
- */
-const DUMB_INIT_PATH = "dumb-init";
 
 /**
  * Default idle timeout in milliseconds (5 minutes)
@@ -205,7 +199,7 @@ export interface AgentProcessEvidence {
  */
 export class AgentConnector {
   private connection: acp.ClientSideConnection | null = null;
-  private process: Deno.ChildProcess | null = null;
+  private process: AgentProcessHandle | null = null;
   private client: ChatbotClient | null = null;
   /**
    * Positive observation of the LAST spawned wrapper's exit, recorded by
@@ -312,22 +306,17 @@ export class AgentConnector {
     // Spawn the Agent subprocess wrapped with dumb-init for proper signal
     // forwarding and child process reaping (prevents memory leaks from orphaned processes).
     //
-    // Security (F1): `clearEnv: true` ensures the child receives ONLY the explicitly-built
-    // allowlisted `agentConfig.env` and inherits NO variables from the parent bot process.
-    // Without this, `Deno.Command` MERGES `env` into the inherited parent environment, which
-    // would leak every secret the bot holds (bot tokens, provider keys, git credentials) to
-    // the agent subprocess — defeating the SandboxManager env allowlist entirely.
-    const command = new Deno.Command(DUMB_INIT_PATH, {
-      args: ["--", agentConfig.command, ...agentConfig.args],
+    // Security (F1): the spawn boundary passes exactly `agentConfig.env` and never
+    // merges the parent environment, so the child receives ONLY the explicitly-built
+    // allowlisted environment and inherits NO parent variables. A merge would leak
+    // every secret the bot holds (bot tokens, provider keys, git credentials) to the
+    // agent subprocess — defeating the SandboxManager env allowlist entirely.
+    this.process = createAgentProcess({
+      command: agentConfig.command,
+      args: agentConfig.args,
       cwd: agentConfig.cwd,
-      clearEnv: true,
-      env: agentConfig.env,
-      stdin: "piped",
-      stdout: "piped",
-      stderr: "piped", // Capture stderr to log error messages
+      env: agentConfig.env ?? {},
     });
-
-    this.process = command.spawn();
     this.spawnGeneration++;
     // A new generation has no termination evidence yet.
     this.terminationConfirmed = undefined;
@@ -481,8 +470,8 @@ export class AgentConnector {
    * its EXACT value. The marker is the OMP arm's launch identity: the pinned
    * extension classifies an unobservable marker as an ORDINARY launch, which
    * would select the restricted capability callback instead of the deny-all
-   * one. The connector spawns `agentConfig.env` verbatim under `clearEnv`
-   * semantics, so a marker present here is a marker the child observes.
+   * one. The connector spawns `agentConfig.env` verbatim as the complete child
+   * environment, so a marker present here is a marker the child observes.
    */
   private assertOmpIntentLaunchMarker(agentConfig: AgentConnectorOptions["agentConfig"]): void {
     const observed = agentConfig.env?.[OMP_INTENT_PROFILE_FLAG];
@@ -1129,7 +1118,7 @@ export class AgentConnector {
         let disconnectTimer: ReturnType<typeof setTimeout> | undefined;
         let exited = false;
         const statusRace = Promise.race([
-          this.process.status.then(() => {
+          this.process.exited.then(() => {
             exited = true;
           }),
           new Promise<void>((resolve) => {
@@ -1160,7 +1149,7 @@ export class AgentConnector {
             const escalated = Promise.withResolvers<void>();
             const escalatedTimer = setTimeout(() => escalated.resolve(), DISCONNECT_TIMEOUT_MS);
             await Promise.race([
-              this.process.status.then(() => {
+              this.process.exited.then(() => {
                 killedExited = true;
               }),
               escalated.promise,
@@ -1343,7 +1332,7 @@ export class AgentConnector {
    */
   private monitorProcessExit(logger: Logger): void {
     if (!this.process) return;
-    this.process.status.then((status) => {
+    this.process.exited.then((status) => {
       if (this.process !== null && !this.intentionalShutdown) {
         logger.error("Agent process exited unexpectedly", {
           code: status.code,
@@ -1368,7 +1357,7 @@ export class AgentConnector {
    * logged exactly once, in `monitorProcessExit()`, to avoid duplicate log lines.
    */
   private buildCrashSignal(): Promise<never> {
-    const signal = this.process!.status.then((status): never => {
+    const signal = this.process!.exited.then((status): never => {
       throw new Error(
         `Agent process exited unexpectedly (code=${status.code}, signal=${status.signal}) ` +
           "while awaiting a response",
@@ -1537,7 +1526,7 @@ export class AgentConnector {
   private async isProcessAlive(): Promise<boolean> {
     if (!this.process) return false;
     const result = await Promise.race([
-      this.process.status.then(() => "exited" as const),
+      this.process.exited.then(() => "exited" as const),
       new Promise<"running">((resolve) => setTimeout(() => resolve("running"), 100)),
     ]);
     return result === "running";
