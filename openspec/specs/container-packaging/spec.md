@@ -28,8 +28,8 @@ The container image SHALL install the official OMP executable at an exact pinned
 
 #### Scenario: No new runtime dependency for the binary
 - **WHEN** the OMP packaging steps are inspected
-- **THEN** no step SHALL install a JavaScript/Bun runtime or speculative helper packages to support the official executable
-- **AND** the pre-existing application runtime base image SHALL remain the only such dependency
+- **THEN** no step SHALL install an additional JavaScript runtime or speculative helper packages to support the official executable
+- **AND** the Bun application base image SHALL remain the only such dependency
 
 #### Scenario: Architecture-to-asset mapping
 - **GIVEN** a build target architecture of `amd64` or `arm64`
@@ -161,7 +161,7 @@ The image SHALL provide the Node.js runtime used by its `npx`/`npm` consumers fr
 
 ### Requirement: Prepared Shared OMP Native Runtime Cache Artifact
 
-The container image SHALL package exactly one prepared OMP native runtime payload per target platform, produced by running the checksum-verified pinned executable's real ACP initialization rather than a version probe, and publishing only the extracted native subtree. It SHALL NOT package per-channel native copies and SHALL NOT install a JavaScript/Bun runtime to prepare them.
+The container image SHALL package exactly one prepared OMP native runtime payload per target platform, produced by running the checksum-verified pinned executable's real ACP initialization rather than a version probe, and publishing only the extracted native subtree. It SHALL NOT package per-channel native copies and SHALL NOT install a JavaScript runtime beyond the Bun application base to prepare them.
 
 #### Scenario: Preparation uses the real pinned consumer
 - **GIVEN** a container build with the default or supplied `OMP_VERSION`
@@ -190,7 +190,7 @@ The container image SHALL package exactly one prepared OMP native runtime payloa
 
 #### Scenario: No new runtime dependency
 - **WHEN** the native-cache packaging steps are inspected
-- **THEN** no step SHALL install a JavaScript/Bun runtime or speculative helper packages to prepare the payload
+- **THEN** no step SHALL install a JavaScript runtime beyond the Bun application base, or speculative helper packages, to prepare the payload
 
 ### Requirement: OMP Native Runtime Cache Identity And Deployment Selection
 
@@ -229,3 +229,29 @@ Prepared cache identity SHALL be the pinned executable version `18.6.1` combined
 #### Scenario: No fabricated environment override
 - **WHEN** an agent launch environment is assembled
 - **THEN** no invented OMP native-cache environment variable SHALL be introduced
+
+### Requirement: Trusted Skill Config Is Immutable For The Runtime User
+
+The image SHALL contain an empty `/opt/air/skill-bunfig.toml` owned by root with mode `0444`, inside a root-owned `/opt/air` directory with mode `0755`, so the runtime user can read it but cannot replace, remove or rename it.
+
+#### Scenario: Ownership and mode
+- **WHEN** the built image is inspected
+- **THEN** `/opt/air/skill-bunfig.toml` SHALL be `root:root` mode `0444` size 0 and `/opt/air` SHALL be `root:root` mode `0755`
+
+#### Scenario: Runtime user cannot replace it
+- **GIVEN** a container running as UID 1000
+- **WHEN** that user tries to remove, rename or overwrite `/opt/air/skill-bunfig.toml`
+- **THEN** each attempt SHALL fail and the file SHALL stay empty
+
+### Requirement: Image Smoke Check
+
+An image smoke script SHALL start the built image under the deployment's container permissions and SHALL fail unless the daemon prints its help, the bundled tools run, the native tokenizer segments text, and the filesystem backend loads.
+
+#### Scenario: Help
+- **WHEN** the smoke script runs the image with `--help`
+- **THEN** the command SHALL exit 0
+
+#### Scenario: Seccomp-denied openat2 fails closed
+- **GIVEN** the image run with a seccomp profile returning `ENOSYS` for `openat2`
+- **WHEN** protected file access is attempted through the real backend
+- **THEN** it SHALL report `secure_access_unavailable` and read no content
