@@ -60,7 +60,7 @@ import { isNotFoundError, makeTempDir } from "../../src/utils/fs-compat.ts";
   const root = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
   const built = spawnSync(
     `${root}/scripts/omp/bundle-omp-extension.sh`,
-    [root, `${root}/${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}`, `${root}/deno.lock`],
+    [root, `${root}/${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}`],
     { encoding: "utf8" },
   );
   if (built.status !== 0) {
