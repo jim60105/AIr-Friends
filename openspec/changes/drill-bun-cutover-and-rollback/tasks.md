@@ -14,8 +14,8 @@ Prerequisite: `migrate-ci-and-docs-to-bun` is applied and its CI run succeeded. 
 ## 3. Drill on the data copy
 
 - [ ] 3.1 Ask the owner for the data copy path and record its provenance in `TRIAL.md`. Verify: the path exists and `du -sh` of it is recorded.
-- [ ] 3.2 Measure the rollback image. Verify: `sh migration/bun/cutover/drill.sh ghcr.io/jim60105/air-friends@sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059 <copy> deno 5` writes `measurements/deno.json` with five ready runs.
-- [ ] 3.3 Write `thresholds.json` from `measurements/deno.json` per design D3 and commit it (with `measurements/deno.json`) before the next task. Verify: `git log -1 --format=%cI -- migration/bun/cutover/thresholds.json` prints a time.
+- [x] 3.2 Measure the rollback image. Verify: `sh migration/bun/cutover/drill.sh ghcr.io/jim60105/air-friends@sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059 <copy> deno 5` writes `measurements/deno.json` with five ready runs.
+- [x] 3.3 Write `thresholds.json` from `measurements/deno.json` per design D3 and commit it (with `measurements/deno.json`) before the next task. Verify: `git log -1 --format=%cI -- migration/bun/cutover/thresholds.json` prints a time.
 - [ ] 3.4 Measure the Bun image and compare. Verify: `sh migration/bun/cutover/drill.sh localhost/air-friends:bun-local <copy> bun 5` then `cd migration/bun/cutover && bun run --no-env-file compare.ts measurements/deno.json measurements/bun.json thresholds.json` exits 0 (P0-3 stop and restart: `stopExit`, `stopSeconds`, `restartReady`, no leftover process).
 - [ ] 3.5 Rollback drill (P0-10). Verify: `sh migration/bun/cutover/drill.sh --rollback ghcr.io/jim60105/air-friends@sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059 <bun scratch dir>` reports the rollback image ready.
 
