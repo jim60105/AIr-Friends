@@ -57,3 +57,11 @@ Remove `"DENO_DIR"` from both `inheritVars` arrays and the `DENO_DIR: true` key-
 - [A test fake implements the old `Deno.ChildProcess` shape] → Update fakes to `AgentProcessHandle` (`exited`, web streams, `kill`, `pid`).
 - [Builder function names differ from what D4 assumes] → Use whichever exported function `AgentConnector`'s caller uses to build `AgentConfig` for each agent type; record the names in the task report.
 - [`dumb-init` missing on a developer host] → Tests skip; CI and the image provide it.
+
+## Design deviations (apply time)
+
+| File | Change | Owner / authority |
+| --- | --- | --- |
+| `src/acp/agent-process.ts` | D1 says to keep the PoC stdin adapter verbatim; the adapter additionally attaches `child.stdin.on("error")` and rejects the pending write/close from it. Node's stream contract calls the write callback before emitting `error`, so a child that closes stdin (or dies mid-write) would otherwise raise an uncaught `EPIPE` and take the bot process down. The backpressure mechanism (write-callback resolution, `highWaterMark: 1`, no `Writable.toWeb`) is unchanged. | This change owns the file; regression case `Agent Exit Report - a write after the child closed stdin rejects instead of crashing`. |
+| `src/acp/agent-connector.ts` | D2's literal `env: agentConfig.env` becomes `env: agentConfig.env ?? {}` because `AgentConfig.env` is optional. An omitted environment now means the empty environment (the same "no inherited parent variables" contract); production builders always supply one. | This change owns the edit. |
+| `tests/acp/agent-factory.test.ts` (lines 938–983) | The two `createAgentConfig - NO_PROXY …` cases call `ensureEgressProxy`, which reaches `Deno.listen` at `src/utils/egress-proxy.ts:375` and raises `ReferenceError: Deno is not defined` before their assertions. They are registered with `test.skip` and recorded as `skipped` `parity-exceptions.json` entries naming the owner. The file is already in the proposal Impact list, so no new scope path is added. | `port-egress-proxy-and-gelf-to-node-net` owns `src/utils/egress-proxy.ts` and must restore the registrations and delete the two exceptions. |
