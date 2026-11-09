@@ -135,7 +135,7 @@ COPY assets/ ./assets/
 # and the build fails. Copied AFTER the dependency install so editing a packaging
 # script cannot invalidate the cached dependency layer. `bun build` uses the
 # `bun.lock`-installed `node_modules` above and fetches no build backend.
-COPY --link --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/
+COPY --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/
 
 ########################################
 # OMP unpack stage
@@ -262,7 +262,7 @@ ARG NODE_ENV=production
 ENV NODE_ENV=$NODE_ENV
 
 # Copy license file (OpenShift Policy)
-COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
+COPY --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
 
 # Get Dumb Init
 # Pinned release + per-arch SHA-256, verified BEFORE install exactly like the
@@ -288,7 +288,7 @@ RUN case "${TARGETARCH}" in \
 
 # Copy the frozen production dependency tree from the deps stage. Bun resolves
 # every runtime import from this tree; there is no separate module cache.
-COPY --link --chown=$UID:0 --chmod=775 --from=deps /app/node_modules /app/node_modules
+COPY --chown=$UID:0 --chmod=775 --from=deps /app/node_modules /app/node_modules
 
 # Get agent-browser
 RUN npm install -g agent-browser && \
@@ -300,7 +300,7 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
     npx playwright install-deps chromium-headless-shell
 
 # Copy Agents CLI binary
-COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
+COPY --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
 
 # Copy the official OMP executable, following the same $UID:0 + 775 install
 # convention as the OpenCode binary above. The runtime needs the exec bit; the
@@ -309,13 +309,13 @@ COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/openco
 # installs a JavaScript/Bun runtime or speculative helper packages (the pinned
 # Bun base is the image's only such dependency and is not modified by these
 # steps).
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/out/omp /usr/local/bin/omp
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/out/omp /usr/local/bin/omp
 
 # Copy official OMP notices (checksum-verified in the unpacker stage above)
 # under the image's third-party license location, following the normal
 # $UID:0 + 775 license-packaging convention used for the project LICENSE.
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
 
 # Copy the prepared shared native runtime payload (extracted by the pinned, checksum-
 # verified executable in the unpacker stage above) to the same absolute image path the
@@ -323,10 +323,10 @@ COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-P
 # install convention. Exactly ONE `{platform}` subtree is present, because the unpacker
 # stage prepared only its own target platform: the executable, LICENSE and
 # THIRD-PARTY-NOTICES installs above are unchanged.
-COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /opt/air/omp/native-cache /opt/air/omp/native-cache
+COPY --chown=$UID:0 --chmod=775 --from=omp-unpacker /opt/air/omp/native-cache /opt/air/omp/native-cache
 
 # Copy OpenCode configuration
-COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/air/.config/opencode/opencode.json
+COPY --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/air/.config/opencode/opencode.json
 
 # Authored deny-all OpenCode intent profile (`email-opencode-intent-profile`).
 # Installed at its OWN deployment path instead of beside the deployed global
@@ -336,27 +336,27 @@ COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/air/.con
 # development-tree spelling outside an image) and injects the document through
 # OPENCODE_CONFIG_CONTENT. The ordinary configuration above stays
 # byte-identical; directory modes are prepared in the post-COPY directory step
-# below, like every other linked copy in this stage.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/email-intent-opencode.json /opt/air/opencode/config/email-intent-opencode.json
+# below, like every other copy in this stage.
+COPY --chown=$UID:0 --chmod=775 agent-config/email-intent-opencode.json /opt/air/opencode/config/email-intent-opencode.json
 
 # Authored native OMP model configuration. Native OMP reads `models.yml` from
 # `getAgentDir()/models.yml` (config HOME), so the authored provider header is
 # installed at the NATIVE config path instead of a second overlay tree,
 # following the project's ordinary $UID:0 + 775 install convention.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/models.yml /home/air/.omp/agent/models.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/models.yml /home/air/.omp/agent/models.yml
 
 # Copy application files
 # `tsconfig.json` carries the path aliases (`@utils/*`, `@acp/*`, …) Bun resolves
 # at run time; `bunfig.toml` holds the registry scope and test-root settings.
-COPY --link --chown=$UID:0 --chmod=775 package.json bun.lock bunfig.toml tsconfig.json /app/
-COPY --link --chown=$UID:0 --chmod=775 config.example.yaml /app/config.yaml
-COPY --link --chown=$UID:0 --chmod=775 src/ /app/src/
-COPY --link --chown=$UID:0 --chmod=775 assets/ /app/assets/
+COPY --chown=$UID:0 --chmod=775 package.json bun.lock bunfig.toml tsconfig.json /app/
+COPY --chown=$UID:0 --chmod=775 config.example.yaml /app/config.yaml
+COPY --chown=$UID:0 --chmod=775 src/ /app/src/
+COPY --chown=$UID:0 --chmod=775 assets/ /app/assets/
 # Copy default prompts (can be overridden by mounting custom prompts to /app/prompts)
-COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
+COPY --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 
 # Copy skills to ~/.agents/skills/ for personal skills
-COPY --link --chown=$UID:0 --chmod=775 skills/ /home/air/.agents/skills/
+COPY --chown=$UID:0 --chmod=775 skills/ /home/air/.agents/skills/
 
 # The COPY above is the image's ONLY skill tree (`collapse-skill-packaging-to-
 # one-tree`): both agent types resolve that one path through `AGENT_SKILLS_DIR`
@@ -366,26 +366,26 @@ COPY --link --chown=$UID:0 --chmod=775 skills/ /home/air/.agents/skills/
 # Authored OMP mode settings and prompt artifact, installed at the stable
 # /opt/air/omp deployment paths under the project's ordinary $UID:0 + 775
 # convention (the same convention as agent-config/opencode.json). Directory
-# modes are prepared in the post-COPY directory step below: a `COPY --link`
-# lands as an independent layer that recreates its destination's parent
-# directories, so preparing them here would be discarded.
+# modes are prepared in the post-COPY directory step below: a copy that
+# creates its destination's parent directories applies that copy's `--chown`,
+# so preparing them here would be discarded.
 # Content-faithful install: the settings/prompt content lands byte-identical
 # from these authored paths; the extension-tree step below installs the
 # GENERATED native-loadable bundle — a deterministic transformation of
 # canonical source plus frozen-lock dependencies (package-bun-compatible-
 # omp-extension). No independently edited or augmented content exists either
 # way, and the build synthesizes or rewrites no OMP YAML.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
 # INTERNAL email-intent profile settings (`email-omp-intent-profile`): the
 # authored DENY-ALL native document the intent launch selects with `--config`.
 # It lands beside the two ordinary mode documents, never in the native config
 # home (`~/.omp/agent`), so no ordinary launch ever discovers it.
-COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/email-intent.yml /opt/air/omp/config/email-intent.yml
+COPY --chown=$UID:0 --chmod=775 agent-config/omp/email-intent.yml /opt/air/omp/config/email-intent.yml
 # Row-8 prompt mapping: the SYSTEM.md prompt artifact installs under its
 # contracted name; operator prompt mounts keep their existing semantics and
 # are never relocated (src/utils/omp-paths.ts resolveOmpSystemPromptPath).
-COPY --link --chown=$UID:0 --chmod=775 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
+COPY --chown=$UID:0 --chmod=775 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
 
 # Trusted-extension tree: build the native-loadable ESM bundle (the single
 # generated index.js) from the committed canonical sources and frozen lock and
@@ -402,12 +402,11 @@ RUN --mount=type=bind,from=build,src=/app,target=/build-src \
 # Set up directories with proper permissions.
 # OpenShift compatibility: root group (GID 0) for arbitrary UID support.
 #
-# THIS RUN MUST FOLLOW EVERY `COPY --link` IN THIS STAGE. A linked copy lands as
-# an independent layer that re-creates the destination's PARENT directories as
-# plain 0755 entries owned by that copy's `--chown`, discarding modes prepared
-# earlier — verified under rootless podman, where /app and /home/air came back
-# 0755 while the non-parent /app/data kept 0775. A linked copy
-# added after this RUN silently resets /app to 0755 again.
+# THIS RUN MUST FOLLOW EVERY COPY IN THIS STAGE. A copy that creates the
+# destination's PARENT directories applies that copy's `--chown`, discarding
+# modes prepared earlier — verified under rootless podman, where /app and
+# /home/air came back 0755 while the non-parent /app/data kept 0775. A copy
+# added after this RUN can reset /app to 0755 again.
 # Deliberately NOT declared here, and therefore left at 0755: /home/air/.config
 # (the 775 entry below is its `opencode` child) and /home/air/.agents /
 # /home/air/.agents/skills (the packaged personal-skill tree).
@@ -431,7 +430,7 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/air/.agent-browser && \
     # OMP artifact destinations (mode settings, prompt artifact, generated
     # extension bundle, prepared shared native cache). Prepared AFTER every
-    # linked copy above — including the FILES in them, which is why the
+    # copy above — including the FILES in them, which is why the
     # generated tree is re-owned and re-moded here: the build-time bundler and
     # the native-cache preparation run as root while the deployment convention
     # is $UID:0 + 775. Only these named paths get 775; the `/opt` and
@@ -447,8 +446,8 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     find /opt/air/omp -type f -exec chmod 775 {} + && \
     # Root-owned and NOT group-writable, unlike the $UID:0 entries above: this
     # is the SHARED binary directory both agents and dumb-init live in, and the
-    # declaration exists to stop linked-copy parent-directory drift (an
-    # un-declared parent takes the owner of whichever linked copy touched it
+    # declaration exists to stop copy parent-directory drift (an
+    # un-declared parent takes the owner of whichever copy touched it
     # last). It is not an OMP-artifact protection property.
     install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin && \
     # Root-owned and NOT writable by $UID: the agent itself runs as $UID, so a
