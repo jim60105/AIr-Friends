@@ -31,7 +31,8 @@
 // shares the SAME canonical absolute spelling and a root identity an inventory
 // can recheck at decision time.
 
-import { isAbsolute, resolve } from "@std/path";
+import fs from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { isSupportedAgentType } from "../acp/types.ts";
 import type { AgentType } from "../acp/types.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
@@ -133,7 +134,7 @@ export function observeTrustedSkillsRoot(
       // refused outright, so a symlinked host renders a root those consumers
       // would deny — a fail-closed confusion, never an escape.
       try {
-        return Deno.statSync(path).isDirectory;
+        return fs.statSync(path).isDirectory();
       } catch {
         return false;
       }
