@@ -15,7 +15,7 @@ import {
   getRetryPromptStrategy,
   getSessionModeOverride,
 } from "@acp/agent-factory.ts";
-import { isAbsolute, join, resolve } from "@std/path";
+import { isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_SKILL_JWT_DIR } from "../../src/utils/skill-jwt.ts";
 import { ConfigError, ErrorCode } from "../../src/types/errors.ts";
 import type { Config } from "../../src/types/config.ts";
@@ -72,7 +72,7 @@ const createTestConfig = (overrides: Partial<Config> = {}): Config => {
   };
 };
 
-Deno.test("createAgentConfig - creates opencode config correctly", () => {
+test("createAgentConfig - creates opencode config correctly", () => {
   const config = createTestConfig({
     agent: {
       model: "test-model",
@@ -89,7 +89,7 @@ Deno.test("createAgentConfig - creates opencode config correctly", () => {
   assertEquals(agentConfig.env?.OPENCODE_API_KEY, "oc1");
 });
 
-Deno.test("getDefaultAgentType - returns omp when configured", () => {
+test("getDefaultAgentType - returns omp when configured", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -101,13 +101,13 @@ Deno.test("getDefaultAgentType - returns omp when configured", () => {
   assertEquals(getDefaultAgentType(config), "omp");
 });
 
-Deno.test("createAgentConfig - sets TMPDIR to workspace-scoped tmp directory", () => {
+test("createAgentConfig - sets TMPDIR to workspace-scoped tmp directory", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
   assertEquals(agentConfig.env?.TMPDIR, "/tmp/workspace/tmp");
 });
 
-Deno.test("createAgentConfig - sets session-scoped XDG_DATA_HOME under the workspace TMPDIR", () => {
+test("createAgentConfig - sets session-scoped XDG_DATA_HOME under the workspace TMPDIR", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
   // OpenCode's data dir (tool-output, logs) must be scoped to the session workspace so
@@ -115,7 +115,7 @@ Deno.test("createAgentConfig - sets session-scoped XDG_DATA_HOME under the works
   assertEquals(agentConfig.env?.XDG_DATA_HOME, "/tmp/workspace/tmp/opencode-data");
 });
 
-Deno.test("createAgentConfig - XDG_DATA_HOME is per-session when a session id exists", () => {
+test("createAgentConfig - XDG_DATA_HOME is per-session when a session id exists", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig(
     "opencode",
@@ -129,7 +129,7 @@ Deno.test("createAgentConfig - XDG_DATA_HOME is per-session when a session id ex
   assertEquals(agentConfig.env?.XDG_DATA_HOME, "/tmp/workspace/tmp/opencode-data/sess_abc");
 });
 
-Deno.test("createAgentConfig - creates opencode without API key (uses providers)", () => {
+test("createAgentConfig - creates opencode without API key (uses providers)", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -140,8 +140,8 @@ Deno.test("createAgentConfig - creates opencode without API key (uses providers)
   });
 
   // Clear env var too
-  const originalKey = Deno.env.get("OPENCODE_API_KEY");
-  Deno.env.delete("OPENCODE_API_KEY");
+  const originalKey = process.env["OPENCODE_API_KEY"];
+  delete process.env["OPENCODE_API_KEY"];
 
   try {
     // OpenCode can work without an API key by using other providers
@@ -152,12 +152,12 @@ Deno.test("createAgentConfig - creates opencode without API key (uses providers)
   } finally {
     // Restore env var if it existed
     if (originalKey) {
-      Deno.env.set("OPENCODE_API_KEY", originalKey);
+      process.env["OPENCODE_API_KEY"] = originalKey;
     }
   }
 });
 
-Deno.test("createAgentConfig - uses env var for OpenCode API key if config not set", () => {
+test("createAgentConfig - uses env var for OpenCode API key if config not set", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -168,8 +168,8 @@ Deno.test("createAgentConfig - uses env var for OpenCode API key if config not s
   });
 
   // Set env var
-  const originalKey = Deno.env.get("OPENCODE_API_KEY");
-  Deno.env.set("OPENCODE_API_KEY", "env-opencode-key");
+  const originalKey = process.env["OPENCODE_API_KEY"];
+  process.env["OPENCODE_API_KEY"] = "env-opencode-key";
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
@@ -177,14 +177,14 @@ Deno.test("createAgentConfig - uses env var for OpenCode API key if config not s
   } finally {
     // Restore env var
     if (originalKey) {
-      Deno.env.set("OPENCODE_API_KEY", originalKey);
+      process.env["OPENCODE_API_KEY"] = originalKey;
     } else {
-      Deno.env.delete("OPENCODE_API_KEY");
+      delete process.env["OPENCODE_API_KEY"];
     }
   }
 });
 
-Deno.test("createAgentConfig - sets OPENROUTER_API_KEY from config", () => {
+test("createAgentConfig - sets OPENROUTER_API_KEY from config", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -194,20 +194,20 @@ Deno.test("createAgentConfig - sets OPENROUTER_API_KEY from config", () => {
     },
   });
 
-  const originalKey = Deno.env.get("OPENROUTER_API_KEY");
-  Deno.env.delete("OPENROUTER_API_KEY");
+  const originalKey = process.env["OPENROUTER_API_KEY"];
+  delete process.env["OPENROUTER_API_KEY"];
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
     assertEquals(agentConfig.env?.OPENROUTER_API_KEY, "or1");
   } finally {
     if (originalKey) {
-      Deno.env.set("OPENROUTER_API_KEY", originalKey);
+      process.env["OPENROUTER_API_KEY"] = originalKey;
     }
   }
 });
 
-Deno.test("createAgentConfig - uses env var for OPENROUTER_API_KEY if config not set", () => {
+test("createAgentConfig - uses env var for OPENROUTER_API_KEY if config not set", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -217,22 +217,22 @@ Deno.test("createAgentConfig - uses env var for OPENROUTER_API_KEY if config not
     },
   });
 
-  const originalKey = Deno.env.get("OPENROUTER_API_KEY");
-  Deno.env.set("OPENROUTER_API_KEY", "env-openrouter-key");
+  const originalKey = process.env["OPENROUTER_API_KEY"];
+  process.env["OPENROUTER_API_KEY"] = "env-openrouter-key";
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
     assertEquals(agentConfig.env?.OPENROUTER_API_KEY, "env-openrouter-key");
   } finally {
     if (originalKey) {
-      Deno.env.set("OPENROUTER_API_KEY", originalKey);
+      process.env["OPENROUTER_API_KEY"] = originalKey;
     } else {
-      Deno.env.delete("OPENROUTER_API_KEY");
+      delete process.env["OPENROUTER_API_KEY"];
     }
   }
 });
 
-Deno.test("createAgentConfig - sets GEMINI_API_KEY and GOOGLE_GENERATIVE_AI_API_KEY when gemini key present", () => {
+test("createAgentConfig - sets GEMINI_API_KEY and GOOGLE_GENERATIVE_AI_API_KEY when gemini key present", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -242,8 +242,8 @@ Deno.test("createAgentConfig - sets GEMINI_API_KEY and GOOGLE_GENERATIVE_AI_API_
     },
   });
 
-  const originalKey = Deno.env.get("GEMINI_API_KEY");
-  Deno.env.delete("GEMINI_API_KEY");
+  const originalKey = process.env["GEMINI_API_KEY"];
+  delete process.env["GEMINI_API_KEY"];
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
@@ -251,12 +251,12 @@ Deno.test("createAgentConfig - sets GEMINI_API_KEY and GOOGLE_GENERATIVE_AI_API_
     assertEquals(agentConfig.env?.GOOGLE_GENERATIVE_AI_API_KEY, "gm2");
   } finally {
     if (originalKey) {
-      Deno.env.set("GEMINI_API_KEY", originalKey);
+      process.env["GEMINI_API_KEY"] = originalKey;
     }
   }
 });
 
-Deno.test("createAgentConfig - uses env var for gemini key and sets both provider vars", () => {
+test("createAgentConfig - uses env var for gemini key and sets both provider vars", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -266,8 +266,8 @@ Deno.test("createAgentConfig - uses env var for gemini key and sets both provide
     },
   });
 
-  const originalKey = Deno.env.get("GEMINI_API_KEY");
-  Deno.env.set("GEMINI_API_KEY", "env-gemini-key");
+  const originalKey = process.env["GEMINI_API_KEY"];
+  process.env["GEMINI_API_KEY"] = "env-gemini-key";
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
@@ -275,14 +275,14 @@ Deno.test("createAgentConfig - uses env var for gemini key and sets both provide
     assertEquals(agentConfig.env?.GOOGLE_GENERATIVE_AI_API_KEY, "env-gemini-key");
   } finally {
     if (originalKey) {
-      Deno.env.set("GEMINI_API_KEY", originalKey);
+      process.env["GEMINI_API_KEY"] = originalKey;
     } else {
-      Deno.env.delete("GEMINI_API_KEY");
+      delete process.env["GEMINI_API_KEY"];
     }
   }
 });
 
-Deno.test("createAgentConfig - throws for unknown agent type", () => {
+test("createAgentConfig - throws for unknown agent type", () => {
   const config = createTestConfig();
 
   assertThrows(
@@ -292,12 +292,12 @@ Deno.test("createAgentConfig - throws for unknown agent type", () => {
   );
 });
 
-Deno.test("getDefaultAgentType - returns opencode as default", () => {
+test("getDefaultAgentType - returns opencode as default", () => {
   const config = createTestConfig();
   assertEquals(getDefaultAgentType(config), "opencode");
 });
 
-Deno.test("getDefaultAgentType - returns opencode when configured", () => {
+test("getDefaultAgentType - returns opencode when configured", () => {
   const config = createTestConfig({
     agent: {
       model: "test",
@@ -309,7 +309,7 @@ Deno.test("getDefaultAgentType - returns opencode when configured", () => {
   assertEquals(getDefaultAgentType(config), "opencode");
 });
 
-Deno.test("createAgentConfig - inherits critical environment variables for opencode", () => {
+test("createAgentConfig - inherits critical environment variables for opencode", () => {
   const config = createTestConfig({
     agent: {
       model: "test-model",
@@ -320,10 +320,10 @@ Deno.test("createAgentConfig - inherits critical environment variables for openc
   });
 
   // Set up environment variables to inherit
-  const originalPath = Deno.env.get("PATH");
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("PATH", "/usr/local/bin:/usr/bin");
-  Deno.env.set("HOME", "/home/testuser");
+  const originalPath = process.env["PATH"];
+  const originalHome = process.env["HOME"];
+  process.env["PATH"] = "/usr/local/bin:/usr/bin";
+  process.env["HOME"] = "/home/testuser";
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
@@ -336,15 +336,15 @@ Deno.test("createAgentConfig - inherits critical environment variables for openc
   } finally {
     // Restore original env vars
     if (originalPath) {
-      Deno.env.set("PATH", originalPath);
+      process.env["PATH"] = originalPath;
     }
     if (originalHome) {
-      Deno.env.set("HOME", originalHome);
+      process.env["HOME"] = originalHome;
     }
   }
 });
 
-Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is true", () => {
+test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is true", () => {
   const config = createTestConfig({
     agent: {
       model: "test-model",
@@ -362,7 +362,7 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is t
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
 
-Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is false", () => {
+test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is false", () => {
   const config = createTestConfig({
     agent: {
       model: "test-model",
@@ -380,7 +380,7 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is f
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
 
-Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
+test("getRetryPromptStrategy - returns strategy for opencode", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   assertEquals(strategy.maxRetries, 1);
   assertStringIncludes(strategy.retryPromptMessage, "send-reply");
@@ -388,7 +388,7 @@ Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
   assertStringIncludes(strategy.retryPromptMessage, "send-file");
 });
 
-Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {
+test("getRetryPromptStrategy - throws for unknown agent type", () => {
   assertThrows(
     () => getRetryPromptStrategy("unknown" as never, TEST_RETRY_CTX),
     Error,
@@ -396,7 +396,7 @@ Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {
   );
 });
 
-Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system message intro", () => {
+test("getRetryPromptStrategy - retryPromptMessage starts with system message intro", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   assertStringIncludes(strategy.retryPromptMessage, "System message:");
   // `clarify-delivery-recovery-guidance`: the directive to communicate is
@@ -418,14 +418,14 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system messag
   );
 });
 
-Deno.test("getRetryPromptStrategy - retryPromptMessage contains section separators", () => {
+test("getRetryPromptStrategy - retryPromptMessage contains section separators", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Should have at least two --- separators between the three sections
   const separatorCount = (strategy.retryPromptMessage.match(/\n---\n/g) ?? []).length;
   assertEquals(separatorCount >= 2, true, "Should contain at least 2 --- separators");
 });
 
-Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL.md content", () => {
+test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL.md content", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/send-reply/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send Reply Skill");
@@ -442,14 +442,14 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL
   );
 });
 
-Deno.test("getRetryPromptStrategy - retryPromptMessage includes react-message SKILL.md content", () => {
+test("getRetryPromptStrategy - retryPromptMessage includes react-message SKILL.md content", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/react-message/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# React Message Skill");
   assertStringIncludes(strategy.retryPromptMessage, "Use appropriate emoji");
 });
 
-Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.md content", () => {
+test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.md content", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/send-file/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send File Skill");
@@ -458,7 +458,7 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.
 
 // ============ Retry prompt rejection enrichment (task 5.4) ============
 
-Deno.test("getRetryPromptStrategy - byte-identical to no-rejections when rejections empty", () => {
+test("getRetryPromptStrategy - byte-identical to no-rejections when rejections empty", () => {
   const without = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined).retryPromptMessage;
   const withEmpty = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, []).retryPromptMessage;
   const withUndefined =
@@ -468,7 +468,7 @@ Deno.test("getRetryPromptStrategy - byte-identical to no-rejections when rejecti
   assertFalse(without.includes("Recent permission rejections"));
 });
 
-Deno.test("getRetryPromptStrategy - includes rejection section when rejections present", () => {
+test("getRetryPromptStrategy - includes rejection section when rejections present", () => {
   const rejections = [
     {
       toolName: "write",
@@ -501,7 +501,7 @@ Deno.test("getRetryPromptStrategy - includes rejection section when rejections p
   assertStringIncludes(message, "System message:");
 });
 
-Deno.test("formatPermissionRejections - section capped at 2000 chars", () => {
+test("formatPermissionRejections - section capped at 2000 chars", () => {
   const rejections = Array.from({ length: 10 }, (_, i) => ({
     toolName: "write",
     kind: "edit",
@@ -514,13 +514,13 @@ Deno.test("formatPermissionRejections - section capped at 2000 chars", () => {
   assertStringIncludes(section, "(truncated)");
 });
 
-Deno.test("formatPermissionRejections - empty input yields empty section", () => {
+test("formatPermissionRejections - empty input yields empty section", () => {
   assertEquals(formatPermissionRejections([]), "");
 });
 
 // ============ Agent Workspace Env Var Tests ============
 
-Deno.test("createAgentConfig - includes AGENT_WORKSPACE env var for opencode", () => {
+test("createAgentConfig - includes AGENT_WORKSPACE env var for opencode", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig(
     "opencode",
@@ -532,21 +532,21 @@ Deno.test("createAgentConfig - includes AGENT_WORKSPACE env var for opencode", (
   assertEquals(agentConfig.env?.AGENT_WORKSPACE, "/data/agent-workspace");
 });
 
-Deno.test("createAgentConfig - omits AGENT_WORKSPACE when not provided", () => {
+test("createAgentConfig - omits AGENT_WORKSPACE when not provided", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config, false);
   assertEquals(agentConfig.env?.AGENT_WORKSPACE, undefined);
 });
 
-Deno.test("getSessionModeOverride - returns yolo for opencode with yolo enabled", () => {
+test("getSessionModeOverride - returns yolo for opencode with yolo enabled", () => {
   assertEquals(getSessionModeOverride("opencode", true), "yolo");
 });
 
-Deno.test("getSessionModeOverride - returns null for opencode without yolo", () => {
+test("getSessionModeOverride - returns null for opencode without yolo", () => {
   assertEquals(getSessionModeOverride("opencode", false), null);
 });
 
-Deno.test("createAgentConfig - sets SESSION_ID in env when sessionId provided", () => {
+test("createAgentConfig - sets SESSION_ID in env when sessionId provided", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig(
     "opencode",
@@ -559,13 +559,13 @@ Deno.test("createAgentConfig - sets SESSION_ID in env when sessionId provided", 
   assertEquals(agentConfig.env?.["SESSION_ID"], "sess_test123");
 });
 
-Deno.test("createAgentConfig - does not set SESSION_ID when sessionId omitted", () => {
+test("createAgentConfig - does not set SESSION_ID when sessionId omitted", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
   assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
 });
 
-Deno.test("createAgentConfig - omits SESSION_ID in shared-process mode (poolKey set)", () => {
+test("createAgentConfig - omits SESSION_ID in shared-process mode (poolKey set)", () => {
   const config = createTestConfig();
   config.agent.sharedProcess = {
     enabled: true,
@@ -588,7 +588,7 @@ Deno.test("createAgentConfig - omits SESSION_ID in shared-process mode (poolKey 
   assertEquals(agentConfig.env?.["SKILL_SHARED_PROCESS"], "1");
 });
 
-Deno.test("createAgentConfig - sets SKILL_JWT_DIR in env (JWT skill auth)", () => {
+test("createAgentConfig - sets SKILL_JWT_DIR in env (JWT skill auth)", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig(
     "opencode",
@@ -608,7 +608,7 @@ Deno.test("createAgentConfig - sets SKILL_JWT_DIR in env (JWT skill auth)", () =
   assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], undefined);
 });
 
-Deno.test("createAgentConfig - shared-process mode (poolKey) scopes data roots under the bot data root", () => {
+test("createAgentConfig - shared-process mode (poolKey) scopes data roots under the bot data root", () => {
   const config = createTestConfig();
   config.agent.sharedProcess = {
     enabled: true,
@@ -634,7 +634,7 @@ Deno.test("createAgentConfig - shared-process mode (poolKey) scopes data roots u
   assertEquals(isAbsolute(agentConfig.env?.["TMPDIR"] ?? ""), true);
 });
 
-Deno.test("createAgentConfig - relative config values export absolute pool paths", () => {
+test("createAgentConfig - relative config values export absolute pool paths", () => {
   const config = createTestConfig();
   config.workspace.repoPath = "./data"; // relative, resolved against the process cwd
   config.agent.sharedProcess = {
@@ -666,10 +666,10 @@ Deno.test("createAgentConfig - relative config values export absolute pool paths
   assertEquals(agentConfig.cwd, resolve(join("./data", "channel-cwd", "discord:123")));
 });
 
-Deno.test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {
-  const tempDir = Deno.makeTempDirSync();
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("HOME", tempDir);
+test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {
+  const tempDir = makeTempDirSync();
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = tempDir;
 
   try {
     const playwrightDir = join(
@@ -679,76 +679,76 @@ Deno.test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => 
       "chromium_headless_shell-1208",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(playwrightDir, { recursive: true });
+    fs.mkdirSync(playwrightDir, { recursive: true });
     const binaryPath = join(playwrightDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(binaryPath, "dummy binary content");
+    fs.writeFileSync(binaryPath, "dummy binary content");
 
     const detected = detectPlaywrightBinarySync();
     assertEquals(detected, binaryPath);
   } finally {
     if (originalHome) {
-      Deno.env.set("HOME", originalHome);
+      process.env["HOME"] = originalHome;
     } else {
-      Deno.env.delete("HOME");
+      delete process.env["HOME"];
     }
     try {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     } catch {
       // Ignore cleanup error
     }
   }
 });
 
-Deno.test("detectPlaywrightBinarySync - detects standard chromium", () => {
-  const tempDir = Deno.makeTempDirSync();
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("HOME", tempDir);
+test("detectPlaywrightBinarySync - detects standard chromium", () => {
+  const tempDir = makeTempDirSync();
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = tempDir;
 
   try {
     const playwrightDir = join(tempDir, ".cache", "ms-playwright", "chromium-1097", "chrome-linux");
-    Deno.mkdirSync(playwrightDir, { recursive: true });
+    fs.mkdirSync(playwrightDir, { recursive: true });
     const binaryPath = join(playwrightDir, "chrome");
-    Deno.writeTextFileSync(binaryPath, "dummy binary content");
+    fs.writeFileSync(binaryPath, "dummy binary content");
 
     const detected = detectPlaywrightBinarySync();
     assertEquals(detected, binaryPath);
   } finally {
     if (originalHome) {
-      Deno.env.set("HOME", originalHome);
+      process.env["HOME"] = originalHome;
     } else {
-      Deno.env.delete("HOME");
+      delete process.env["HOME"];
     }
     try {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     } catch {
       // Ignore cleanup error
     }
   }
 });
 
-Deno.test("createAgentConfig - sets AGENT_BROWSER_EXECUTABLE_PATH and respects env override", () => {
+test("createAgentConfig - sets AGENT_BROWSER_EXECUTABLE_PATH and respects env override", () => {
   const config = createTestConfig();
-  const originalEnvVar = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+  const originalEnvVar = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
 
   // Set custom path in env
-  Deno.env.set("AGENT_BROWSER_EXECUTABLE_PATH", "/custom/path/to/chrome");
+  process.env["AGENT_BROWSER_EXECUTABLE_PATH"] = "/custom/path/to/chrome";
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
     assertEquals(agentConfig.env?.["AGENT_BROWSER_EXECUTABLE_PATH"], "/custom/path/to/chrome");
   } finally {
     if (originalEnvVar) {
-      Deno.env.set("AGENT_BROWSER_EXECUTABLE_PATH", originalEnvVar);
+      process.env["AGENT_BROWSER_EXECUTABLE_PATH"] = originalEnvVar;
     } else {
-      Deno.env.delete("AGENT_BROWSER_EXECUTABLE_PATH");
+      delete process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
     }
   }
 });
 
-Deno.test("detectPlaywrightBinarySync - sorts by revision descending", () => {
-  const tempDir = Deno.makeTempDirSync();
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("HOME", tempDir);
+test("detectPlaywrightBinarySync - sorts by revision descending", () => {
+  const tempDir = makeTempDirSync();
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = tempDir;
 
   try {
     // Create an older version (1100)
@@ -759,9 +759,9 @@ Deno.test("detectPlaywrightBinarySync - sorts by revision descending", () => {
       "chromium_headless_shell-1100",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(oldPlaywrightDir, { recursive: true });
+    fs.mkdirSync(oldPlaywrightDir, { recursive: true });
     const oldBinaryPath = join(oldPlaywrightDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(oldBinaryPath, "old binary content");
+    fs.writeFileSync(oldBinaryPath, "old binary content");
 
     // Create a newer version (1208)
     const newPlaywrightDir = join(
@@ -771,30 +771,30 @@ Deno.test("detectPlaywrightBinarySync - sorts by revision descending", () => {
       "chromium_headless_shell-1208",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(newPlaywrightDir, { recursive: true });
+    fs.mkdirSync(newPlaywrightDir, { recursive: true });
     const newBinaryPath = join(newPlaywrightDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(newBinaryPath, "new binary content");
+    fs.writeFileSync(newBinaryPath, "new binary content");
 
     const detected = detectPlaywrightBinarySync();
     assertEquals(detected, newBinaryPath); // Must be the newer revision
   } finally {
     if (originalHome) {
-      Deno.env.set("HOME", originalHome);
+      process.env["HOME"] = originalHome;
     } else {
-      Deno.env.delete("HOME");
+      delete process.env["HOME"];
     }
     try {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     } catch {
       // Ignore
     }
   }
 });
 
-Deno.test("detectPlaywrightBinarySync - ignores temporary download folders", () => {
-  const tempDir = Deno.makeTempDirSync();
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("HOME", tempDir);
+test("detectPlaywrightBinarySync - ignores temporary download folders", () => {
+  const tempDir = makeTempDirSync();
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = tempDir;
 
   try {
     // Create a temp folder (chromium_headless_shell-1208-temp)
@@ -805,9 +805,9 @@ Deno.test("detectPlaywrightBinarySync - ignores temporary download folders", () 
       "chromium_headless_shell-1208-temp",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(tempPlaywrightDir, { recursive: true });
+    fs.mkdirSync(tempPlaywrightDir, { recursive: true });
     const tempBinaryPath = join(tempPlaywrightDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(tempBinaryPath, "temp binary content");
+    fs.writeFileSync(tempBinaryPath, "temp binary content");
 
     // Create a valid folder with older version (1100)
     const validPlaywrightDir = join(
@@ -817,30 +817,30 @@ Deno.test("detectPlaywrightBinarySync - ignores temporary download folders", () 
       "chromium_headless_shell-1100",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(validPlaywrightDir, { recursive: true });
+    fs.mkdirSync(validPlaywrightDir, { recursive: true });
     const validBinaryPath = join(validPlaywrightDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(validBinaryPath, "valid binary content");
+    fs.writeFileSync(validBinaryPath, "valid binary content");
 
     const detected = detectPlaywrightBinarySync();
     assertEquals(detected, validBinaryPath); // Must ignore the temp folder and pick the valid older folder
   } finally {
     if (originalHome) {
-      Deno.env.set("HOME", originalHome);
+      process.env["HOME"] = originalHome;
     } else {
-      Deno.env.delete("HOME");
+      delete process.env["HOME"];
     }
     try {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     } catch {
       // Ignore
     }
   }
 });
 
-Deno.test("detectPlaywrightBinarySync - prioritizes headless_shell over chromium when revisions match", () => {
-  const tempDir = Deno.makeTempDirSync();
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("HOME", tempDir);
+test("detectPlaywrightBinarySync - prioritizes headless_shell over chromium when revisions match", () => {
+  const tempDir = makeTempDirSync();
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = tempDir;
 
   try {
     const chromiumDir = join(
@@ -850,9 +850,9 @@ Deno.test("detectPlaywrightBinarySync - prioritizes headless_shell over chromium
       "chromium-1200",
       "chrome-linux",
     );
-    Deno.mkdirSync(chromiumDir, { recursive: true });
+    fs.mkdirSync(chromiumDir, { recursive: true });
     const chromiumBinary = join(chromiumDir, "chrome");
-    Deno.writeTextFileSync(chromiumBinary, "chromium binary content");
+    fs.writeFileSync(chromiumBinary, "chromium binary content");
 
     const shellDir = join(
       tempDir,
@@ -861,30 +861,30 @@ Deno.test("detectPlaywrightBinarySync - prioritizes headless_shell over chromium
       "chromium_headless_shell-1200",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(shellDir, { recursive: true });
+    fs.mkdirSync(shellDir, { recursive: true });
     const shellBinary = join(shellDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(shellBinary, "shell binary content");
+    fs.writeFileSync(shellBinary, "shell binary content");
 
     const detected = detectPlaywrightBinarySync();
     assertEquals(detected, shellBinary);
   } finally {
     if (originalHome) {
-      Deno.env.set("HOME", originalHome);
+      process.env["HOME"] = originalHome;
     } else {
-      Deno.env.delete("HOME");
+      delete process.env["HOME"];
     }
     try {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     } catch {
       // Ignore
     }
   }
 });
 
-Deno.test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set", () => {
-  const tempDir = Deno.makeTempDirSync();
-  const originalBrowsersPath = Deno.env.get("PLAYWRIGHT_BROWSERS_PATH");
-  Deno.env.set("PLAYWRIGHT_BROWSERS_PATH", tempDir);
+test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set", () => {
+  const tempDir = makeTempDirSync();
+  const originalBrowsersPath = process.env["PLAYWRIGHT_BROWSERS_PATH"];
+  process.env["PLAYWRIGHT_BROWSERS_PATH"] = tempDir;
 
   try {
     const shellDir = join(
@@ -892,20 +892,20 @@ Deno.test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set",
       "chromium_headless_shell-1300",
       "chrome-headless-shell-linux64",
     );
-    Deno.mkdirSync(shellDir, { recursive: true });
+    fs.mkdirSync(shellDir, { recursive: true });
     const shellBinary = join(shellDir, "chrome-headless-shell");
-    Deno.writeTextFileSync(shellBinary, "custom path binary content");
+    fs.writeFileSync(shellBinary, "custom path binary content");
 
     const detected = detectPlaywrightBinarySync();
     assertEquals(detected, shellBinary);
   } finally {
     if (originalBrowsersPath) {
-      Deno.env.set("PLAYWRIGHT_BROWSERS_PATH", originalBrowsersPath);
+      process.env["PLAYWRIGHT_BROWSERS_PATH"] = originalBrowsersPath;
     } else {
-      Deno.env.delete("PLAYWRIGHT_BROWSERS_PATH");
+      delete process.env["PLAYWRIGHT_BROWSERS_PATH"];
     }
     try {
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     } catch {
       // Ignore
     }
@@ -916,6 +916,11 @@ Deno.test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set",
 
 import { ensureEgressProxy, stopEgressProxy } from "@utils/egress-proxy.ts";
 import type { SandboxConfig } from "../../src/types/config.ts";
+import fs from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const createSandbox = (overrides: Partial<SandboxConfig> = {}): SandboxConfig => ({
   filterEnv: true,
@@ -930,7 +935,7 @@ const createSandbox = (overrides: Partial<SandboxConfig> = {}): SandboxConfig =>
   ...overrides,
 });
 
-Deno.test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
+test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
   ensureEgressProxy(0);
   try {
     const config = createTestConfig({
@@ -954,7 +959,7 @@ Deno.test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () =
   }
 });
 
-Deno.test("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () => {
+test("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () => {
   ensureEgressProxy(0);
   try {
     const config = createTestConfig({
@@ -978,45 +983,42 @@ Deno.test("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () =
 // curl bypasses the proxy and connects to the local upstream directly.
 const curlAvailable = (() => {
   try {
-    return new Deno.Command("curl", { args: ["--version"], stdout: "null", stderr: "null" })
-      .outputSync().success;
+    return spawnSync("curl", ["--version"], { stdio: "ignore" }).status === 0;
   } catch {
     return false;
   }
 })();
 
-Deno.test({
-  name: "curl - honors no_proxy for literal-IP and bare-hostname entries",
-  ignore: !curlAvailable,
-  fn: async () => {
-    const upstream = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-    const upstreamPort = (upstream.addr as Deno.NetAddr).port;
-    const serving = (async () => {
-      // Serve up to 2 sequential requests (one per curl invocation below).
-      for (let i = 0; i < 2; i++) {
-        const conn = await upstream.accept();
-        const buf = new Uint8Array(4096);
-        await conn.read(buf);
-        await conn.write(
-          new TextEncoder().encode(
-            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-          ),
-        );
-        conn.close();
-      }
-    })();
+test.skipIf(!curlAvailable)(
+  "curl - honors no_proxy for literal-IP and bare-hostname entries",
+  async () => {
+    // Serve each request with the minimal HTTP response curl needs.
+    const upstream = createServer((socket) => {
+      socket.on("error", () => {});
+      socket.once("data", () => {
+        socket.end("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+      });
+    });
+    const listening = Promise.withResolvers<void>();
+    upstream.listen(0, "127.0.0.1", listening.resolve);
+    await listening.promise;
+    const address = upstream.address();
+    const upstreamPort = typeof address === "object" && address !== null ? address.port : 0;
 
-    const runCurl = async (url: string, noProxy: string) => {
-      const out = await new Deno.Command("curl", {
-        args: ["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", url],
-        env: {
-          http_proxy: "http://127.0.0.1:9", // dead proxy: only a no_proxy bypass can succeed
-          no_proxy: noProxy,
+    // The request must run asynchronously: a synchronous child would block the
+    // event loop this in-process upstream needs to accept and answer.
+    const runCurl = (url: string, noProxy: string): Promise<string> => {
+      const settled = Promise.withResolvers<string>();
+      execFile(
+        "curl",
+        ["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", url],
+        {
+          // Dead proxy: only a no_proxy bypass can succeed.
+          env: { ...process.env, http_proxy: "http://127.0.0.1:9", no_proxy: noProxy },
         },
-        stdout: "piped",
-        stderr: "null",
-      }).output();
-      return new TextDecoder().decode(out.stdout);
+        (_error, stdout) => settled.resolve(stdout),
+      );
+      return settled.promise;
     };
 
     try {
@@ -1029,12 +1031,11 @@ Deno.test({
       assertEquals(viaHost, "200", "curl must bypass the proxy for a bare-hostname no_proxy entry");
     } finally {
       upstream.close();
-      await serving.catch(() => {});
     }
   },
-});
+);
 
-Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payload-file example + SKILL.md)", () => {
+test("getRetryPromptStrategy - retry prompt is instructive (causes + payload-file example + SKILL.md)", () => {
   const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   const msg = strategy.retryPromptMessage;
 
@@ -1102,7 +1103,7 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
 // trusted documents that own the outcome table. Mocked text evidence only —
 // it proves what the retry turn is told, never what an agent then did.
 
-Deno.test("getRetryPromptStrategy - every agent type and spawn shape gets the same qualified recovery policy", () => {
+test("getRetryPromptStrategy - every agent type and spawn shape gets the same qualified recovery policy", () => {
   const built: Array<{ label: string; msg: string }> = [];
   for (const type of ["opencode", "omp"] as const) {
     for (const sharedProcess of [false, true] as const) {
@@ -1166,7 +1167,7 @@ Deno.test("getRetryPromptStrategy - every agent type and spawn shape gets the sa
 
 // ============ Literal-first retry prompt (make-skill-staging-agent-portable) ============
 
-Deno.test("getRetryPromptStrategy - pooled ctx names literal session id + staging dir, no shell tokens", () => {
+test("getRetryPromptStrategy - pooled ctx names literal session id + staging dir, no shell tokens", () => {
   const stagingDir = "/data/workspaces/discord/123/tmp/sess_abc";
   const strategy = getRetryPromptStrategy("opencode", {
     sharedProcess: true,
@@ -1191,7 +1192,7 @@ Deno.test("getRetryPromptStrategy - pooled ctx names literal session id + stagin
   assertStringIncludes(msg, "never honored");
 });
 
-Deno.test("getRetryPromptStrategy - per-spawn ctx names the same literals (no token template exists)", () => {
+test("getRetryPromptStrategy - per-spawn ctx names the same literals (no token template exists)", () => {
   // Literal-first in BOTH spawn shapes: for the same session the guidance
   // section is identical whether or not the run is pooled.
   const perSpawn = getRetryPromptStrategy("opencode", {
@@ -1212,7 +1213,7 @@ Deno.test("getRetryPromptStrategy - per-spawn ctx names the same literals (no to
   assertFalse(perSpawn.split("\n---\n")[0].includes("$TMPDIR"));
 });
 
-Deno.test("getRetryPromptStrategy - rejects an empty or relative trusted root", () => {
+test("getRetryPromptStrategy - rejects an empty or relative trusted root", () => {
   for (
     const [label, skillsDir] of [
       ["empty", ""],

@@ -9,8 +9,7 @@
 // or a container.
 //
 // Usage — the suite replaces only the launch's executable and arguments:
-//   deno run --no-check --allow-read --allow-write --allow-env \
-//     <this file> <script.json> <record.jsonl>
+//   bun run --no-env-file <this file> <script.json> <record.jsonl>
 //
 // `script.json` fields (all optional):
 //   mode          session-mode value advertised as ACTIVE
@@ -39,6 +38,9 @@
 // permission answer and every filesystem error. It is the fixture's evidence,
 // not production behavior — and it deliberately keeps no plaintext of the
 // authored request.
+
+import fs from "node:fs";
+import { Readable } from "node:stream";
 
 interface EngineScript {
   mode?: string;
@@ -71,19 +73,16 @@ interface JsonRpcMessage {
 
 const encoder = new TextEncoder();
 
-const scriptPath = Deno.args[0];
-const recordPath = Deno.args[1];
-const script = JSON.parse(Deno.readTextFileSync(scriptPath)) as EngineScript;
+const scriptPath = process.argv[2];
+const recordPath = process.argv[3];
+const script = JSON.parse(fs.readFileSync(scriptPath, "utf8")) as EngineScript;
 
 function record(entry: Record<string, unknown>): void {
-  Deno.writeTextFileSync(recordPath, `${JSON.stringify(entry)}\n`, {
-    create: true,
-    append: true,
-  });
+  fs.appendFileSync(recordPath, `${JSON.stringify(entry)}\n`);
 }
 
 function send(message: JsonRpcMessage): void {
-  Deno.stdout.writeSync(encoder.encode(`${JSON.stringify(message)}\n`));
+  fs.writeSync(1, encoder.encode(`${JSON.stringify(message)}\n`));
 }
 
 function readText(value: unknown): string {
@@ -310,10 +309,10 @@ async function handle(message: JsonRpcMessage): Promise<void> {
 }
 
 if (typeof script.stderrMarker === "string") {
-  Deno.stderr.writeSync(encoder.encode(`${script.stderrMarker}\n`));
+  fs.writeSync(2, encoder.encode(`${script.stderrMarker}\n`));
 }
 
-const reader = Deno.stdin.readable.getReader();
+const reader = (Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>).getReader();
 const decoder = new TextDecoder();
 let buffer = "";
 while (true) {

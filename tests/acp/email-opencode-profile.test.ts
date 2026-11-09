@@ -14,7 +14,7 @@
 // No subprocess, no network and no engine execution happen here.
 
 import { assert, assertEquals, assertMatch, assertThrows } from "@std/assert";
-import { fromFileUrl, join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import {
   createAgentConfig,
   createEmailIntentAgentConfig,
@@ -29,6 +29,11 @@ import {
 } from "@acp/agent-factory.ts";
 import type { AgentConfig } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { fileURLToPath as fromFileUrl } from "node:url";
 
 // ---------------------------------------------------------------------------
 // Fixtures and helpers
@@ -87,7 +92,7 @@ function assetDocument(
   edit: (document: Record<string, unknown>) => void = () => {},
 ): Record<string, unknown> {
   const document = requireObject(
-    JSON.parse(Deno.readTextFileSync(SHIPPED_ASSET_PATH)),
+    JSON.parse(fs.readFileSync(SHIPPED_ASSET_PATH, "utf8")),
     "the authored deny-all document",
   );
   edit(document);
@@ -137,10 +142,10 @@ interface Workspace {
 async function withWorkspace(
   run: (ctx: Workspace) => void | Promise<void>,
 ): Promise<void> {
-  const root = await Deno.makeTempDir({ prefix: "email-intent-profile-" });
+  const root = await makeTempDir({ prefix: "email-intent-profile-" });
   try {
     const catalogPath = join(root, "catalog.json");
-    Deno.writeTextFileSync(catalogPath, JSON.stringify(catalogDocument()));
+    fs.writeFileSync(catalogPath, JSON.stringify(catalogDocument()));
     await run({
       root,
       home: join(root, "home"),
@@ -149,7 +154,7 @@ async function withWorkspace(
       readPaths: [],
     });
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 }
 
@@ -163,16 +168,16 @@ function seams(ctx: Workspace, env = profileEnv()): EmailIntentProfileOptions {
     readFile: (path) => {
       ctx.readPaths.push(path);
       if (path === SHIPPED_ASSET_PATH || path === EMAIL_INTENT_OPENCODE_CONFIG_PATH) {
-        return Deno.readTextFileSync(SHIPPED_ASSET_PATH);
+        return fs.readFileSync(SHIPPED_ASSET_PATH, "utf8");
       }
       if (
         path === SHIPPED_CATALOG_PATH ||
         path === EMAIL_INTENT_ORDINARY_CONFIG_PATH ||
         path === ctx.catalogPath
       ) {
-        return Deno.readTextFileSync(ctx.catalogPath);
+        return fs.readFileSync(ctx.catalogPath, "utf8");
       }
-      return Deno.readTextFileSync(path);
+      return fs.readFileSync(path, "utf8");
     },
     exists: (path) => {
       if (path === EMAIL_INTENT_OPENCODE_IMAGE_CONFIG_PATH) return false;
@@ -260,7 +265,7 @@ function createTestConfig(): Config {
 // Launch shape
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - launches the authored deny-all agent with its private roots", async () => {
+test("profile - launches the authored deny-all agent with its private roots", async () => {
   await withWorkspace((ctx) => {
     const config = launch(ctx);
     const home = resolve(ctx.home);
@@ -296,7 +301,7 @@ Deno.test("profile - launches the authored deny-all agent with its private roots
         resolve(ctx.cwd),
       ]
     ) {
-      assert(Deno.statSync(path).isDirectory, `${path} must be a private directory`);
+      assert(fs.statSync(path).isDirectory(), `${path} must be a private directory`);
     }
   });
 });
@@ -305,7 +310,7 @@ Deno.test("profile - launches the authored deny-all agent with its private roots
 // Composed engine configuration
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - composed configuration denies every native surface and adds only the selection", async () => {
+test("profile - composed configuration denies every native surface and adds only the selection", async () => {
   await withWorkspace((ctx) => {
     const document = composed(launch(ctx));
     const permission = agentPermission(document);
@@ -349,7 +354,7 @@ Deno.test("profile - composed configuration denies every native surface and adds
   });
 });
 
-Deno.test("profile - gemini selection binds the selected model only", async () => {
+test("profile - gemini selection binds the selected model only", async () => {
   await withWorkspace((ctx) => {
     const config = createEmailIntentAgentConfig(
       "opencode",
@@ -370,7 +375,7 @@ Deno.test("profile - gemini selection binds the selected model only", async () =
 // Environment provisioning
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - provisions only the selected model provider credential", async () => {
+test("profile - provisions only the selected model provider credential", async () => {
   await withWorkspace((ctx) => {
     const env = profileEnv({
       EMAIL_IMAP_PASSWORD: "mailbox-secret",
@@ -413,7 +418,7 @@ Deno.test("profile - provisions only the selected model provider credential", as
   });
 });
 
-Deno.test("profile - refuses credentials outside the model-provider family", async () => {
+test("profile - refuses credentials outside the model-provider family", async () => {
   await withWorkspace((ctx) => {
     const cases: readonly [string, RegExp][] = [
       ["HOME", /reserved variable "HOME"/],
@@ -424,7 +429,7 @@ Deno.test("profile - refuses credentials outside the model-provider family", asy
       ["SOME_PASSWORD", /excluded credential family/],
     ];
     for (const [name, expected] of cases) {
-      Deno.writeTextFileSync(
+      fs.writeFileSync(
         ctx.catalogPath,
         JSON.stringify(
           catalogDocument({
@@ -446,7 +451,7 @@ Deno.test("profile - refuses credentials outside the model-provider family", asy
   });
 });
 
-Deno.test("profile - refuses a launch whose model credential is unavailable", async () => {
+test("profile - refuses a launch whose model credential is unavailable", async () => {
   await withWorkspace((ctx) => {
     assertThrows(
       () => launch(ctx, { env: profileEnv({ OPENROUTER_API_KEY: "" }) }),
@@ -460,7 +465,7 @@ Deno.test("profile - refuses a launch whose model credential is unavailable", as
 // Ordinary launches stay unchanged
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - ordinary OpenCode launches carry no profile identity", () => {
+test("profile - ordinary OpenCode launches carry no profile identity", () => {
   const config = createAgentConfig("opencode", "/tmp/workspace", createTestConfig());
   assertEquals(config.executionProfile, undefined);
   assertEquals(config.env?.["OPENCODE_CONFIG_CONTENT"], undefined);
@@ -477,12 +482,12 @@ Deno.test("profile - ordinary OpenCode launches carry no profile identity", () =
 // Private-root refusals
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - refuses roots inside repository ancestry", async () => {
+test("profile - refuses roots inside repository ancestry", async () => {
   await withWorkspace((ctx) => {
     const repository = join(ctx.root, "checkout");
-    Deno.mkdirSync(join(repository, ".git"), { recursive: true });
+    fs.mkdirSync(join(repository, ".git"), { recursive: true });
     const inside = join(repository, "work");
-    Deno.mkdirSync(inside, { recursive: true });
+    fs.mkdirSync(inside, { recursive: true });
     assertRefused(() =>
       createEmailIntentAgentConfig(
         "opencode",
@@ -500,7 +505,7 @@ Deno.test("profile - refuses roots inside repository ancestry", async () => {
   });
 });
 
-Deno.test("profile - refuses relative, overlapping, symlinked and non-fresh roots", async () => {
+test("profile - refuses relative, overlapping, symlinked and non-fresh roots", async () => {
   await withWorkspace((ctx) => {
     assertRefused(() =>
       createEmailIntentAgentConfig(
@@ -518,8 +523,8 @@ Deno.test("profile - refuses relative, overlapping, symlinked and non-fresh root
       ), /overlaps the daemon home/);
 
     const occupied = join(ctx.root, "occupied");
-    Deno.mkdirSync(occupied, { recursive: true });
-    Deno.writeTextFileSync(join(occupied, "auth.json"), "{}");
+    fs.mkdirSync(occupied, { recursive: true });
+    fs.writeFileSync(join(occupied, "auth.json"), "{}");
     assertRefused(() =>
       createEmailIntentAgentConfig(
         "opencode",
@@ -529,9 +534,9 @@ Deno.test("profile - refuses relative, overlapping, symlinked and non-fresh root
       ), /not fresh/);
 
     const target = join(ctx.root, "target");
-    Deno.mkdirSync(target, { recursive: true });
+    fs.mkdirSync(target, { recursive: true });
     const link = join(ctx.root, "linked-home");
-    Deno.symlinkSync(target, link);
+    fs.symlinkSync(target, link);
     assertRefused(() =>
       createEmailIntentAgentConfig(
         "opencode",
@@ -546,7 +551,7 @@ Deno.test("profile - refuses relative, overlapping, symlinked and non-fresh root
 // Provider-selection refusals
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - refuses undeclared providers, unlisted models and file references", async () => {
+test("profile - refuses undeclared providers, unlisted models and file references", async () => {
   await withWorkspace((ctx) => {
     assertRefused(() =>
       createEmailIntentAgentConfig(
@@ -563,7 +568,7 @@ Deno.test("profile - refuses undeclared providers, unlisted models and file refe
         seams(ctx),
       ), /is not in the "openrouter" catalog/);
 
-    Deno.writeTextFileSync(
+    fs.writeFileSync(
       ctx.catalogPath,
       JSON.stringify(
         catalogDocument({
@@ -584,7 +589,7 @@ Deno.test("profile - refuses undeclared providers, unlisted models and file refe
 // Authored-document refusals (fail closed)
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - refuses an authored document that drops a surface or adds policy", async () => {
+test("profile - refuses an authored document that drops a surface or adds policy", async () => {
   await withWorkspace((ctx) => {
     const tampered = join(ctx.root, "tampered.json");
 
@@ -647,7 +652,7 @@ Deno.test("profile - refuses an authored document that drops a surface or adds p
     ];
 
     for (const [edit, expected] of cases) {
-      Deno.writeTextFileSync(tampered, JSON.stringify(assetDocument(edit)));
+      fs.writeFileSync(tampered, JSON.stringify(assetDocument(edit)));
       assertRefused(
         () => launch(ctx, { authoredConfigPath: tampered }),
         expected,
@@ -657,7 +662,7 @@ Deno.test("profile - refuses an authored document that drops a surface or adds p
   });
 });
 
-Deno.test("profile - refuses a missing authored document", async () => {
+test("profile - refuses a missing authored document", async () => {
   await withWorkspace((ctx) => {
     assertRefused(
       () => launch(ctx, { authoredConfigPath: join(ctx.root, "absent.json") }),
@@ -670,7 +675,7 @@ Deno.test("profile - refuses a missing authored document", async () => {
 // Asset and packaging resolution
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - resolves the installed image document and the Containerfile installs it there", async () => {
+test("profile - resolves the installed image document and the Containerfile installs it there", async () => {
   await withWorkspace((ctx) => {
     const config = createEmailIntentAgentConfig(
       "opencode",
@@ -682,9 +687,9 @@ Deno.test("profile - resolves the installed image document and the Containerfile
         readFile: (path) => {
           ctx.readPaths.push(path);
           if (path === EMAIL_INTENT_OPENCODE_IMAGE_CONFIG_PATH) {
-            return Deno.readTextFileSync(SHIPPED_ASSET_PATH);
+            return fs.readFileSync(SHIPPED_ASSET_PATH, "utf8");
           }
-          return Deno.readTextFileSync(ctx.catalogPath);
+          return fs.readFileSync(ctx.catalogPath, "utf8");
         },
         env: profileEnv(),
       },
@@ -700,8 +705,9 @@ Deno.test("profile - resolves the installed image document and the Containerfile
     assertEquals(composed(config)["default_agent"], EMAIL_INTENT_AGENT_NAME);
   });
 
-  const containerfile = Deno.readTextFileSync(
+  const containerfile = fs.readFileSync(
     new URL("../../Containerfile", import.meta.url).pathname,
+    "utf8",
   );
   assert(
     containerfile.includes(
@@ -731,7 +737,7 @@ Deno.test("profile - resolves the installed image document and the Containerfile
   );
 });
 
-Deno.test("profile - the deployed ordinary document is the catalog source when present", async () => {
+test("profile - the deployed ordinary document is the catalog source when present", async () => {
   await withWorkspace((ctx) => {
     const deployed = join(DAEMON_HOME, ".config", "opencode", "opencode.json");
     const config = createEmailIntentAgentConfig(
@@ -742,11 +748,11 @@ Deno.test("profile - the deployed ordinary document is the catalog source when p
         exists: (path) => path === deployed,
         readFile: (path) => {
           ctx.readPaths.push(path);
-          if (path === deployed) return Deno.readTextFileSync(SHIPPED_CATALOG_PATH);
+          if (path === deployed) return fs.readFileSync(SHIPPED_CATALOG_PATH, "utf8");
           if (path === EMAIL_INTENT_OPENCODE_CONFIG_PATH) {
-            return Deno.readTextFileSync(SHIPPED_ASSET_PATH);
+            return fs.readFileSync(SHIPPED_ASSET_PATH, "utf8");
           }
-          throw new Deno.errors.NotFound(path);
+          throw Object.assign(new Error(path), { code: "ENOENT" });
         },
         env: profileEnv(),
       },
@@ -762,7 +768,7 @@ Deno.test("profile - the deployed ordinary document is the catalog source when p
 // Backend dispatch
 // ---------------------------------------------------------------------------
 
-Deno.test("profile - falls back to the development-tree catalog outside an image", async () => {
+test("profile - falls back to the development-tree catalog outside an image", async () => {
   await withWorkspace((ctx) => {
     const config = createEmailIntentAgentConfig(
       "opencode",
@@ -773,12 +779,12 @@ Deno.test("profile - falls back to the development-tree catalog outside an image
         readFile: (path) => {
           ctx.readPaths.push(path);
           if (path === EMAIL_INTENT_OPENCODE_CONFIG_PATH) {
-            return Deno.readTextFileSync(SHIPPED_ASSET_PATH);
+            return fs.readFileSync(SHIPPED_ASSET_PATH, "utf8");
           }
           if (path === EMAIL_INTENT_ORDINARY_CONFIG_PATH) {
-            return Deno.readTextFileSync(SHIPPED_CATALOG_PATH);
+            return fs.readFileSync(SHIPPED_CATALOG_PATH, "utf8");
           }
-          throw new Deno.errors.NotFound(path);
+          throw Object.assign(new Error(path), { code: "ENOENT" });
         },
         env: profileEnv(),
       },

@@ -9,13 +9,17 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
 import { emptySkillList } from "./skill-inventory-fixture.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const createTestLogger = (): Logger => {
   return new Logger("test", { level: LogLevel.FATAL });
 };
 
 const createTestSkillRegistry = (): SkillRegistry => {
-  const tempDir = Deno.makeTempDirSync();
+  const tempDir = makeTempDirSync();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -24,8 +28,8 @@ const createTestSkillRegistry = (): SkillRegistry => {
   return new SkillRegistry(memoryStore);
 };
 
-Deno.test("ChatbotClient - getLastActivityTimestamp returns current time after construction", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - getLastActivityTimestamp returns current time after construction", () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -40,12 +44,12 @@ Deno.test("ChatbotClient - getLastActivityTimestamp returns current time after c
     // Should be within 1 second of now
     assert(Math.abs(ts - now) < 1000);
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("ChatbotClient - touchActivity updates timestamp without resetting reply state", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - touchActivity updates timestamp without resetting reply state", () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -65,12 +69,12 @@ Deno.test("ChatbotClient - touchActivity updates timestamp without resetting rep
     // Timestamp should be recent
     assert(Math.abs(client.getLastActivityTimestamp() - Date.now()) < 1000);
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("ChatbotClient - reset resets both reply state and activity timestamp", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - reset resets both reply state and activity timestamp", () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -88,12 +92,12 @@ Deno.test("ChatbotClient - reset resets both reply state and activity timestamp"
     assertEquals(client.hasReplySent(), false);
     assert(Math.abs(client.getLastActivityTimestamp() - Date.now()) < 1000);
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("ChatbotClient - sessionUpdate updates activity timestamp", async () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - sessionUpdate updates activity timestamp", async () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -122,11 +126,11 @@ Deno.test("ChatbotClient - sessionUpdate updates activity timestamp", async () =
     const after = client.getLastActivityTimestamp();
     assert(after >= before);
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdleTimeoutConfig - defaults are correct", () => {
+test("IdleTimeoutConfig - defaults are correct", () => {
   const defaults: IdleTimeoutConfig = {
     enabled: true,
     timeoutMs: 300000,
@@ -138,8 +142,8 @@ Deno.test("IdleTimeoutConfig - defaults are correct", () => {
   assertEquals(defaults.checkIntervalMs, 30000);
 });
 
-Deno.test("ChatbotClient - requestPermission updates activity timestamp", async () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - requestPermission updates activity timestamp", async () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -172,12 +176,12 @@ Deno.test("ChatbotClient - requestPermission updates activity timestamp", async 
     const after = client.getLastActivityTimestamp();
     assert(after > before, "requestPermission should update activity timestamp");
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("ChatbotClient - readTextFile updates activity timestamp", async () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - readTextFile updates activity timestamp", async () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -190,7 +194,7 @@ Deno.test("ChatbotClient - readTextFile updates activity timestamp", async () =>
 
     const testFile = `${tempDir}/test.txt`;
     client.setSessionContext("test-session", { cwd: tempDir, shellSessionId: "skill-session" });
-    await Deno.writeTextFile(testFile, "test content");
+    await fsp.writeFile(testFile, "test content");
 
     await new Promise((r) => setTimeout(r, 20));
     const before = client.getLastActivityTimestamp();
@@ -201,12 +205,12 @@ Deno.test("ChatbotClient - readTextFile updates activity timestamp", async () =>
     const after = client.getLastActivityTimestamp();
     assert(after > before, "readTextFile should update activity timestamp");
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("ChatbotClient - writeTextFile updates activity timestamp", async () => {
-  const tempDir = Deno.makeTempDirSync();
+test("ChatbotClient - writeTextFile updates activity timestamp", async () => {
+  const tempDir = makeTempDirSync();
   try {
     const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
@@ -217,7 +221,7 @@ Deno.test("ChatbotClient - writeTextFile updates activity timestamp", async () =
       nativeCalls: createFilesystemTestCalls(),
     }, emptySkillList());
     client.setSessionContext("test-session", { cwd: tempDir, shellSessionId: "skill-session" });
-    await Deno.mkdir(`${tempDir}/tmp/skill-session`, { recursive: true });
+    await fsp.mkdir(`${tempDir}/tmp/skill-session`, { recursive: true });
 
     await new Promise((r) => setTimeout(r, 20));
     const before = client.getLastActivityTimestamp();
@@ -232,11 +236,11 @@ Deno.test("ChatbotClient - writeTextFile updates activity timestamp", async () =
     const after = client.getLastActivityTimestamp();
     assert(after > before, "writeTextFile should update activity timestamp");
   } finally {
-    Deno.removeSync(tempDir, { recursive: true });
+    fs.rmSync(tempDir, { recursive: true });
   }
 });
 
-Deno.test("IdleTimeoutConfig - env var override parsing", () => {
+test("IdleTimeoutConfig - env var override parsing", () => {
   // Test that numeric string values parse correctly
   const timeoutMs = parseInt("300000", 10);
   assertEquals(timeoutMs, 300000);
