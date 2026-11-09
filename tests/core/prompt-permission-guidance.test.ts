@@ -16,8 +16,9 @@
 // no shell, agent, provider or platform process is launched.
 
 import { assert, assertFalse, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { createTemplateEngine, renderTemplate } from "@core/template-renderer.ts";
+import { test } from "bun:test";
 
 const PROMPTS_DIR = join(import.meta.dirname ?? ".", "..", "..", "prompts");
 const SKILLS_ROOT = "/srv/air/skills";
@@ -66,7 +67,7 @@ function render(entry: (typeof ENTRY_TEMPLATES)[number], vars: Record<string, un
 
 for (const entry of ENTRY_TEMPLATES) {
   for (const agentType of ["opencode", "omp"] as const) {
-    Deno.test(`permission guidance - ${entry.label} restricted ${agentType}`, async () => {
+    test(`permission guidance - ${entry.label} restricted ${agentType}`, async () => {
       const rendered = await render(entry, { agentType, yolo: false });
       const label = `${entry.label} restricted ${agentType}`;
 
@@ -138,38 +139,35 @@ for (const entry of ENTRY_TEMPLATES) {
 // ---------------------------------------------------------------------------
 
 for (const canWriteAgentWorkspace of [false, true]) {
-  Deno.test(
-    `permission guidance - reply restricted shared-workspace writes authorized=${canWriteAgentWorkspace}`,
-    async () => {
-      const rendered = await render(ENTRY_TEMPLATES[0], {
-        agentType: "opencode",
-        yolo: false,
-        canWriteAgentWorkspace,
-      });
-      const label = `shared-workspace writes authorized=${canWriteAgentWorkspace}`;
-      assertFalse(rendered.includes("Only read-only operations"), label);
-      // Staging writes are always permitted in restricted mode.
-      assertStringIncludes(
-        rendered,
-        "the write gate still accepts this session's staging directory",
-        label,
+  test(`permission guidance - reply restricted shared-workspace writes authorized=${canWriteAgentWorkspace}`, async () => {
+    const rendered = await render(ENTRY_TEMPLATES[0], {
+      agentType: "opencode",
+      yolo: false,
+      canWriteAgentWorkspace,
+    });
+    const label = `shared-workspace writes authorized=${canWriteAgentWorkspace}`;
+    assertFalse(rendered.includes("Only read-only operations"), label);
+    // Staging writes are always permitted in restricted mode.
+    assertStringIncludes(
+      rendered,
+      "the write gate still accepts this session's staging directory",
+      label,
+    );
+    if (canWriteAgentWorkspace) {
+      assertStringIncludes(rendered, "Writes to the shared agent workspace are permitted", label);
+      assertStringIncludes(rendered, "allowed-extension policy", label);
+      assertFalse(
+        rendered.includes("shared agent workspace is read-only"),
+        `${label}: an authorized session is not told the workspace is read-only`,
       );
-      if (canWriteAgentWorkspace) {
-        assertStringIncludes(rendered, "Writes to the shared agent workspace are permitted", label);
-        assertStringIncludes(rendered, "allowed-extension policy", label);
-        assertFalse(
-          rendered.includes("shared agent workspace is read-only"),
-          `${label}: an authorized session is not told the workspace is read-only`,
-        );
-      } else {
-        assertStringIncludes(rendered, "shared agent workspace is read-only", label);
-        assertFalse(
-          rendered.includes("Writes to the shared agent workspace are permitted"),
-          `${label}: no shared-workspace write grant without authorization`,
-        );
-      }
-    },
-  );
+    } else {
+      assertStringIncludes(rendered, "shared agent workspace is read-only", label);
+      assertFalse(
+        rendered.includes("Writes to the shared agent workspace are permitted"),
+        `${label}: no shared-workspace write grant without authorization`,
+      );
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +176,7 @@ for (const canWriteAgentWorkspace of [false, true]) {
 
 for (const entry of ENTRY_TEMPLATES) {
   for (const agentType of ["opencode", "omp"] as const) {
-    Deno.test(`permission guidance - ${entry.label} YOLO ${agentType}`, async () => {
+    test(`permission guidance - ${entry.label} YOLO ${agentType}`, async () => {
       const rendered = await render(entry, { agentType, yolo: true });
       const label = `${entry.label} YOLO ${agentType}`;
 
@@ -221,7 +219,7 @@ for (const entry of ENTRY_TEMPLATES) {
 // ---------------------------------------------------------------------------
 
 for (const yolo of [false, true]) {
-  Deno.test(`permission guidance - OMP stdout reading is a recommendation (YOLO=${yolo})`, async () => {
+  test(`permission guidance - OMP stdout reading is a recommendation (YOLO=${yolo})`, async () => {
     const rendered = await render(ENTRY_TEMPLATES[0], { agentType: "omp", yolo });
     assert(
       rendered.includes("recommended way to capture a command's output"),
@@ -240,7 +238,7 @@ for (const yolo of [false, true]) {
 // the OPTIONAL-variable rendering defaults, not a runtime shim.
 // ---------------------------------------------------------------------------
 
-Deno.test("permission guidance - absent engine and mode render the restricted OpenCode default", async () => {
+test("permission guidance - absent engine and mode render the restricted OpenCode default", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
     isDm: false,
     platform: "discord",

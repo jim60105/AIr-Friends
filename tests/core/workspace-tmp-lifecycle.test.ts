@@ -6,10 +6,12 @@
 // recognized workspace layout.
 //
 // The filesystem is the real one under a per-test temp root; the only stubbed
-// primitive is `Deno.removeSync`, used once to model a partial removal failure.
+// primitive is the unlink step `removePathSync` uses, once, to model a partial
+// removal failure.
 
 import { assert, assertEquals, assertFalse } from "@std/assert";
-import { dirname, join } from "@std/path";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   TMP_CLEANUP_MAX_DEPTH,
   TMP_CLEANUP_MAX_NODES,
@@ -17,17 +19,21 @@ import {
 } from "@core/workspace-manager.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 /** Create a fixture file (and its parents) with the given content. */
 function writeFixture(path: string, content = "payload"): void {
-  Deno.mkdirSync(dirname(path), { recursive: true });
-  Deno.writeTextFileSync(path, content);
+  fs.mkdirSync(dirname(path), { recursive: true });
+  fs.writeFileSync(path, content);
 }
 
 /** Absolute existence probe (a directory or a file; never a link target test). */
 function exists(path: string): boolean {
   try {
-    Deno.lstatSync(path);
+    fs.lstatSync(path);
     return true;
   } catch {
     return false;
@@ -42,7 +48,7 @@ async function withWorkspaceRoot(
     manager: WorkspaceManager;
   }) => void | Promise<void>,
 ): Promise<void> {
-  const repoPath = await Deno.makeTempDir();
+  const repoPath = await makeTempDir();
   try {
     await body({
       repoPath,
@@ -50,7 +56,7 @@ async function withWorkspaceRoot(
       manager: new WorkspaceManager({ repoPath, workspacesDir: "workspaces" }),
     });
   } finally {
-    await Deno.remove(repoPath, { recursive: true });
+    await fsp.rm(repoPath, { recursive: true });
   }
 }
 
@@ -62,7 +68,7 @@ function seedUserWorkspace(
 ): { workspacePath: string; tmpPath: string } {
   const workspacePath = join(repoPath, "workspaces", platform, userId);
   const tmpPath = join(workspacePath, "tmp");
-  Deno.mkdirSync(tmpPath, { recursive: true });
+  fs.mkdirSync(tmpPath, { recursive: true });
   writeFixture(join(workspacePath, "memory.public.jsonl"), "memory");
   writeFixture(join(workspacePath, "memory.private.jsonl"), "memory");
   return { workspacePath, tmpPath };
@@ -70,7 +76,7 @@ function seedUserWorkspace(
 
 const DEFAULT_LIMITS = { maxNodes: TMP_CLEANUP_MAX_NODES, maxDepth: TMP_CLEANUP_MAX_DEPTH };
 
-Deno.test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries and preserves both engines' state", async () => {
+test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries and preserves both engines' state", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { workspacePath, tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
 
@@ -88,38 +94,38 @@ Deno.test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries 
     writeFixture(join(sharedPayload, "libomp.so"), "runtime");
     writeFixture(join(tmpPath, "omp-agent", "restricted", "xdg-data", "omp", "sessions.db"), "db");
     writeFixture(join(tmpPath, "omp-agent", "native-yolo", "xdg-data", "omp", "sessions.db"), "db");
-    Deno.symlinkSync(sharedPayload, join(tmpPath, "omp-agent", "restricted", "natives"));
+    fs.symlinkSync(sharedPayload, join(tmpPath, "omp-agent", "restricted", "natives"));
     writeFixture(join(tmpPath, "opencode-data", "sess_abc", "tool-output", "out.txt"), "tools");
 
     // Identity is captured BEFORE the pass: a preserved subtree must keep its
     // inode, not merely a copy of its bytes at the same path.
     const identityBefore = ["omp-agent", "opencode-data"].map((name) => {
-      const stat = Deno.lstatSync(join(tmpPath, name));
+      const stat = fs.lstatSync(join(tmpPath, name));
       return { name, dev: stat.dev, ino: stat.ino };
     });
 
     // Every filesystem inspection inside the workspace is recorded, so "reserved
     // names are never enumerated or inspected" is observed directly rather than
     // inferred from the bytes still being present.
-    const originalLstatSync = Deno.lstatSync;
-    const originalReadDirSync = Deno.readDirSync;
+    const originalLstatSync = fs.lstatSync;
+    const originalOpenDirSync = fs.opendirSync;
     const inspected: string[] = [];
-    Deno.lstatSync = ((path: string | URL) => {
+    fs.lstatSync = ((path: string | URL) => {
       const target = String(path);
       if (target.startsWith(tmpPath)) inspected.push(target);
       return originalLstatSync(path);
-    }) as typeof Deno.lstatSync;
-    Deno.readDirSync = ((path: string | URL) => {
+    }) as typeof fs.lstatSync;
+    fs.opendirSync = ((path: string | URL) => {
       const target = String(path);
       if (target.startsWith(tmpPath)) inspected.push(target);
-      return originalReadDirSync(path);
-    }) as typeof Deno.readDirSync;
+      return originalOpenDirSync(path);
+    }) as typeof fs.opendirSync;
     let outcome;
     try {
       outcome = manager.cleanupTmpIfIdle(tmpPath, { limits: DEFAULT_LIMITS });
     } finally {
-      Deno.lstatSync = originalLstatSync;
-      Deno.readDirSync = originalReadDirSync;
+      fs.lstatSync = originalLstatSync;
+      fs.opendirSync = originalOpenDirSync;
     }
 
     assertEquals(outcome.status, "cleaned");
@@ -131,33 +137,35 @@ Deno.test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries 
     assertFalse(exists(join(tmpPath, "sess_abc")));
     assertFalse(exists(join(tmpPath, "browser-profile")));
     assertFalse(exists(join(tmpPath, "attachments")));
-    assertEquals(Deno.lstatSync(tmpPath).isDirectory, true);
+    assertEquals(fs.lstatSync(tmpPath).isDirectory(), true);
 
     // Reserved engine state keeps its paths, bytes and link identity.
     assertEquals(
-      Deno.readTextFileSync(
+      fs.readFileSync(
         join(tmpPath, "omp-agent", "restricted", "xdg-data", "omp", "sessions.db"),
+        "utf8",
       ),
       "db",
     );
     assertEquals(
-      Deno.readTextFileSync(
+      fs.readFileSync(
         join(tmpPath, "omp-agent", "native-yolo", "xdg-data", "omp", "sessions.db"),
+        "utf8",
       ),
       "db",
     );
     assertEquals(
-      Deno.readTextFileSync(join(tmpPath, "opencode-data", "sess_abc", "tool-output", "out.txt")),
+      fs.readFileSync(join(tmpPath, "opencode-data", "sess_abc", "tool-output", "out.txt"), "utf8"),
       "tools",
     );
     assertEquals(
-      Deno.lstatSync(join(tmpPath, "omp-agent", "restricted", "natives")).isSymlink,
+      fs.lstatSync(join(tmpPath, "omp-agent", "restricted", "natives")).isSymbolicLink(),
       true,
     );
     // The runtime payload the link points at is untouched.
-    assertEquals(Deno.readTextFileSync(join(sharedPayload, "libomp.so")), "runtime");
+    assertEquals(fs.readFileSync(join(sharedPayload, "libomp.so"), "utf8"), "runtime");
     for (const before of identityBefore) {
-      const after = Deno.lstatSync(join(tmpPath, before.name));
+      const after = fs.lstatSync(join(tmpPath, before.name));
       assertEquals(after.dev, before.dev, `${before.name} changed device`);
       assertEquals(after.ino, before.ino, `${before.name} changed identity`);
     }
@@ -173,33 +181,33 @@ Deno.test("cleanupTmpIfIdle - removes orphan staging/browser/conversion entries 
     );
 
     // Persistent workspace data never moves.
-    assertEquals(Deno.readTextFileSync(join(workspacePath, "memory.public.jsonl")), "memory");
+    assertEquals(fs.readFileSync(join(workspacePath, "memory.public.jsonl"), "utf8"), "memory");
   });
 });
 
-Deno.test("cleanupTmpIfIdle - reserved direct-child names are preserved whatever their type is", async () => {
+test("cleanupTmpIfIdle - reserved direct-child names are preserved whatever their type is", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     // A reserved name that is a symlink to outside data, and one that is a
     // plain file: both are preserved without being inspected or followed.
     const outside = join(repoPath, "outside-engine-state");
     writeFixture(join(outside, "state.db"), "outside");
-    Deno.symlinkSync(outside, join(tmpPath, "omp-agent"));
-    Deno.writeTextFileSync(join(tmpPath, "opencode-data"), "unexpected file");
+    fs.symlinkSync(outside, join(tmpPath, "omp-agent"));
+    fs.writeFileSync(join(tmpPath, "opencode-data"), "unexpected file");
     writeFixture(join(tmpPath, "disposable.txt"), "gone");
 
     const outcome = manager.cleanupTmpIfIdle(tmpPath);
 
     assertEquals(outcome.status, "cleaned");
     assertEquals(outcome.retained, 0);
-    assertEquals(Deno.lstatSync(join(tmpPath, "omp-agent")).isSymlink, true);
-    assertEquals(Deno.readTextFileSync(join(tmpPath, "opencode-data")), "unexpected file");
-    assertEquals(Deno.readTextFileSync(join(outside, "state.db")), "outside");
+    assertEquals(fs.lstatSync(join(tmpPath, "omp-agent")).isSymbolicLink(), true);
+    assertEquals(fs.readFileSync(join(tmpPath, "opencode-data"), "utf8"), "unexpected file");
+    assertEquals(fs.readFileSync(join(outside, "state.db"), "utf8"), "outside");
     assertFalse(exists(join(tmpPath, "disposable.txt")));
   });
 });
 
-Deno.test("cleanupTmpIfIdle - live temporary-use ownership blocks reclamation until the final release", async () => {
+test("cleanupTmpIfIdle - live temporary-use ownership blocks reclamation until the final release", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     writeFixture(join(tmpPath, "peer-staged.json"), "in use");
@@ -212,7 +220,7 @@ Deno.test("cleanupTmpIfIdle - live temporary-use ownership blocks reclamation un
     const blocked = manager.cleanupTmpIfIdle(tmpPath);
     assertEquals(blocked.status, "skipped");
     assertEquals(blocked.reason, "live-temporary-use");
-    assertEquals(Deno.readTextFileSync(join(tmpPath, "peer-staged.json")), "in use");
+    assertEquals(fs.readFileSync(join(tmpPath, "peer-staged.json"), "utf8"), "in use");
 
     // The first release is not the last one: nothing is reclaimed yet.
     assertEquals(manager.releaseTmpUse(tmpPath), null);
@@ -224,14 +232,14 @@ Deno.test("cleanupTmpIfIdle - live temporary-use ownership blocks reclamation un
     assertEquals(outcome?.status, "cleaned");
     assertEquals(manager.getTmpUseCount(tmpPath), 0);
     assertFalse(exists(join(tmpPath, "peer-staged.json")));
-    assertEquals(Deno.lstatSync(tmpPath).isDirectory, true);
+    assertEquals(fs.lstatSync(tmpPath).isDirectory(), true);
 
     // A stray release without an acquire never unlocks anything.
     assertEquals(manager.releaseTmpUse(tmpPath), null);
   });
 });
 
-Deno.test("cleanupTmpIfIdle - registry occupancy is a conservative extra check that expiry cannot weaken a live owner", async () => {
+test("cleanupTmpIfIdle - registry occupancy is a conservative extra check that expiry cannot weaken a live owner", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     writeFixture(join(tmpPath, "peer-staged.json"), "in use");
@@ -279,7 +287,7 @@ Deno.test("cleanupTmpIfIdle - registry occupancy is a conservative extra check t
   });
 });
 
-Deno.test("cleanupTmpIfIdle - unconfirmed producer teardown keeps the workspace protected for the bot lifetime", async () => {
+test("cleanupTmpIfIdle - unconfirmed producer teardown keeps the workspace protected for the bot lifetime", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     writeFixture(join(tmpPath, "staged.json"), "maybe in use");
@@ -293,17 +301,17 @@ Deno.test("cleanupTmpIfIdle - unconfirmed producer teardown keeps the workspace 
     const outcome = manager.releaseTmpUse(tmpPath);
     assertEquals(outcome?.reason, "uncertain-teardown");
     assertEquals(manager.isTmpUseUncertain(tmpPath), true);
-    assertEquals(Deno.readTextFileSync(join(tmpPath, "staged.json")), "maybe in use");
+    assertEquals(fs.readFileSync(join(tmpPath, "staged.json"), "utf8"), "maybe in use");
   });
 });
 
-Deno.test("cleanupTmpIfIdle - disposable symlinks are unlinked without visiting their targets", async () => {
+test("cleanupTmpIfIdle - disposable symlinks are unlinked without visiting their targets", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     const outside = join(repoPath, "outside-data");
     writeFixture(join(outside, "sentinel.txt"), "outside bytes");
-    Deno.symlinkSync(outside, join(tmpPath, "linked-dir"));
-    Deno.symlinkSync(join(outside, "sentinel.txt"), join(tmpPath, "linked-file"));
+    fs.symlinkSync(outside, join(tmpPath, "linked-dir"));
+    fs.symlinkSync(join(outside, "sentinel.txt"), join(tmpPath, "linked-file"));
 
     const outcome = manager.cleanupTmpIfIdle(tmpPath);
 
@@ -311,16 +319,16 @@ Deno.test("cleanupTmpIfIdle - disposable symlinks are unlinked without visiting 
     assertFalse(exists(join(tmpPath, "linked-dir")));
     assertFalse(exists(join(tmpPath, "linked-file")));
     // Traversal never followed either link.
-    assertEquals(Deno.readTextFileSync(join(outside, "sentinel.txt")), "outside bytes");
+    assertEquals(fs.readFileSync(join(outside, "sentinel.txt"), "utf8"), "outside bytes");
   });
 });
 
-Deno.test("cleanupTmpIfIdle - unexpected special nodes are preserved with a diagnostic", async () => {
+test("cleanupTmpIfIdle - unexpected special nodes are preserved with a diagnostic", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     const fifoPath = join(tmpPath, "special.fifo");
-    const mkfifo = new Deno.Command("mkfifo", { args: [fifoPath] }).outputSync();
-    if (!mkfifo.success) return; // No FIFO support on this host: nothing to assert.
+    const mkfifo = spawnSync("mkfifo", [fifoPath]);
+    if (mkfifo.error || mkfifo.status !== 0) return; // No FIFO support on this host: nothing to assert.
 
     writeFixture(join(tmpPath, "disposable.txt"), "gone");
     const outcome = manager.cleanupTmpIfIdle(tmpPath);
@@ -332,10 +340,10 @@ Deno.test("cleanupTmpIfIdle - unexpected special nodes are preserved with a diag
   });
 });
 
-Deno.test("cleanupTmpIfIdle - a missing target is harmless and unsafe ancestry is never a cleanup target", async () => {
+test("cleanupTmpIfIdle - a missing target is harmless and unsafe ancestry is never a cleanup target", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     // Missing workspace / tmp: nothing to do, no throw.
-    Deno.mkdirSync(join(repoPath, "workspaces", "discord"), { recursive: true });
+    fs.mkdirSync(join(repoPath, "workspaces", "discord"), { recursive: true });
     assertEquals(
       manager.cleanupTmpIfIdle(join(repoPath, "workspaces", "discord", "ghost", "tmp")).status,
       "absent",
@@ -345,17 +353,17 @@ Deno.test("cleanupTmpIfIdle - a missing target is harmless and unsafe ancestry i
     const { workspacePath } = seedUserWorkspace(repoPath, "discord", "u2");
     const outsideTmp = join(repoPath, "outside-tmp");
     writeFixture(join(outsideTmp, "keep.txt"), "outside");
-    Deno.removeSync(join(workspacePath, "tmp"), { recursive: true });
-    Deno.symlinkSync(outsideTmp, join(workspacePath, "tmp"));
+    fs.rmSync(join(workspacePath, "tmp"), { recursive: true });
+    fs.symlinkSync(outsideTmp, join(workspacePath, "tmp"));
     const linked = manager.cleanupTmpIfIdle(join(workspacePath, "tmp"));
     assertEquals(linked.status, "skipped");
     assertEquals(linked.reason, "linked-or-replaced-component");
-    assertEquals(Deno.readTextFileSync(join(outsideTmp, "keep.txt")), "outside");
+    assertEquals(fs.readFileSync(join(outsideTmp, "keep.txt"), "utf8"), "outside");
 
     // A linked user component leads outside the root: never traversed.
     const outsideWorkspace = join(repoPath, "outside-workspace");
     writeFixture(join(outsideWorkspace, "tmp", "keep.txt"), "outside");
-    Deno.symlinkSync(outsideWorkspace, join(repoPath, "workspaces", "discord", "u3"));
+    fs.symlinkSync(outsideWorkspace, join(repoPath, "workspaces", "discord", "u3"));
     const linkedUser = manager.cleanupTmpIfIdle(
       join(repoPath, "workspaces", "discord", "u3", "tmp"),
     );
@@ -371,34 +379,38 @@ Deno.test("cleanupTmpIfIdle - a missing target is harmless and unsafe ancestry i
   });
 });
 
-Deno.test("cleanupTmpIfIdle - a failed entry removal is retained while other candidates continue", async () => {
+test("cleanupTmpIfIdle - a failed entry removal is retained while other candidates continue", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     writeFixture(join(tmpPath, "blocked.txt"), "blocked");
     writeFixture(join(tmpPath, "free.txt"), "free");
 
-    const originalRemoveSync = Deno.removeSync;
+    // `removePathSync` unlinks a regular file, so the failing removal is stubbed
+    // at that exact step (the traversal lstat of the same path must still work).
+    const originalUnlinkSync = fs.unlinkSync;
     const blockedPath = join(tmpPath, "blocked.txt");
-    Deno.removeSync = ((path: string | URL, options?: Deno.RemoveOptions) => {
-      if (String(path) === blockedPath) throw new Deno.errors.PermissionDenied("mock eacces");
-      return originalRemoveSync(path, options);
-    }) as typeof Deno.removeSync;
+    fs.unlinkSync = ((path: string | URL) => {
+      if (String(path) === blockedPath) {
+        throw Object.assign(new Error("mock eacces"), { code: "EACCES" });
+      }
+      return originalUnlinkSync(path);
+    }) as typeof fs.unlinkSync;
     let outcome;
     try {
       outcome = manager.cleanupTmpIfIdle(tmpPath);
     } finally {
-      Deno.removeSync = originalRemoveSync;
+      fs.unlinkSync = originalUnlinkSync;
     }
 
     assertEquals(outcome.status, "cleaned");
     assertEquals(outcome.retained, 1);
     assert(exists(blockedPath), "the failed entry is retained");
     assertFalse(exists(join(tmpPath, "free.txt")), "other candidates still proceed");
-    assertEquals(Deno.lstatSync(tmpPath).isDirectory, true);
+    assertEquals(fs.lstatSync(tmpPath).isDirectory(), true);
   });
 });
 
-Deno.test("cleanupTmpIfIdle - traversal bounds retain the remainder and a later pass completes it", async () => {
+test("cleanupTmpIfIdle - traversal bounds retain the remainder and a later pass completes it", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     for (let i = 0; i < 12; i++) writeFixture(join(tmpPath, `entry-${i}.txt`), "x");
@@ -412,14 +424,14 @@ Deno.test("cleanupTmpIfIdle - traversal bounds retain the remainder and a later 
     const rest = manager.cleanupTmpIfIdle(tmpPath);
     assertEquals(rest.budgetExhausted, false);
     let remaining = 0;
-    for (const entry of Deno.readDirSync(tmpPath)) {
+    for (const entry of fs.readdirSync(tmpPath, { withFileTypes: true })) {
       if (entry.name.endsWith(".txt")) remaining++;
     }
     assertEquals(remaining, 0);
   });
 });
 
-Deno.test("cleanupTmpIfIdle - the depth bound retains the deep subtree and still reclaims shallow siblings", async () => {
+test("cleanupTmpIfIdle - the depth bound retains the deep subtree and still reclaims shallow siblings", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     const deep = join(tmpPath, "a", "b", "c", "leaf.txt");
@@ -441,7 +453,7 @@ Deno.test("cleanupTmpIfIdle - the depth bound retains the deep subtree and still
   });
 });
 
-Deno.test("reclaimOrphanTmpDirs - visits only recognized workspace shapes and never other runtime roots", async () => {
+test("reclaimOrphanTmpDirs - visits only recognized workspace shapes and never other runtime roots", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
     // User workspaces, an internal/synthetic platform, and channel workspaces.
     const user = seedUserWorkspace(repoPath, "discord", "u1");
@@ -480,26 +492,29 @@ Deno.test("reclaimOrphanTmpDirs - visits only recognized workspace shapes and ne
     assertFalse(exists(join(channelTmp, "session-staging.json")));
     // Reserved channel engine state survives, and every outside root is untouched.
     assertEquals(
-      Deno.readTextFileSync(join(channelTmp, "omp-agent", "restricted", "state.db")),
+      fs.readFileSync(join(channelTmp, "omp-agent", "restricted", "state.db"), "utf8"),
       "state",
     );
-    assertEquals(Deno.readTextFileSync(join(containerTmp, "keep.txt")), "container");
-    assertEquals(Deno.readTextFileSync(join(poolRoot, "sessions.db")), "pooled");
+    assertEquals(fs.readFileSync(join(containerTmp, "keep.txt"), "utf8"), "container");
+    assertEquals(fs.readFileSync(join(poolRoot, "sessions.db"), "utf8"), "pooled");
     assertEquals(
-      Deno.readTextFileSync(join(channelProcessTmp, "scratch.txt")),
+      fs.readFileSync(join(channelProcessTmp, "scratch.txt"), "utf8"),
       "channel process state",
     );
-    assertEquals(Deno.readTextFileSync(join(sharedAgentWorkspace, "index.md")), "shared notes");
-    assertEquals(Deno.readTextFileSync(join(repoPath, "tmp", "repo-root.txt")), "repo root");
+    assertEquals(fs.readFileSync(join(sharedAgentWorkspace, "index.md"), "utf8"), "shared notes");
+    assertEquals(fs.readFileSync(join(repoPath, "tmp", "repo-root.txt"), "utf8"), "repo root");
     assertEquals(
-      Deno.readTextFileSync(join(repoPath, "data", "backups", "tmp", "backup.txt")),
+      fs.readFileSync(join(repoPath, "data", "backups", "tmp", "backup.txt"), "utf8"),
       "backup",
     );
-    assertEquals(Deno.readTextFileSync(join(user.workspacePath, "memory.private.jsonl")), "memory");
+    assertEquals(
+      fs.readFileSync(join(user.workspacePath, "memory.private.jsonl"), "utf8"),
+      "memory",
+    );
   });
 });
 
-Deno.test("reclaimOrphanTmpDirs - a missing or linked root is a bounded no-op", async () => {
+test("reclaimOrphanTmpDirs - a missing or linked root is a bounded no-op", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
     // No workspace root yet: a no-op, never a failure.
     const empty = await manager.reclaimOrphanTmpDirs();
@@ -515,17 +530,17 @@ Deno.test("reclaimOrphanTmpDirs - a missing or linked root is a bounded no-op", 
     // keeps every byte.
     const outside = join(repoPath, "outside-platform");
     writeFixture(join(outside, "u1", "tmp", "keep.txt"), "outside");
-    Deno.mkdirSync(join(repoPath, "workspaces"), { recursive: true });
-    Deno.symlinkSync(outside, join(repoPath, "workspaces", "linked-platform"));
+    fs.mkdirSync(join(repoPath, "workspaces"), { recursive: true });
+    fs.symlinkSync(outside, join(repoPath, "workspaces", "linked-platform"));
 
     const report = await manager.reclaimOrphanTmpDirs();
     assertEquals(report.workspaces, 0);
     assertEquals(report.skipped, 1);
-    assertEquals(Deno.readTextFileSync(join(outside, "u1", "tmp", "keep.txt")), "outside");
+    assertEquals(fs.readFileSync(join(outside, "u1", "tmp", "keep.txt"), "utf8"), "outside");
   });
 });
 
-Deno.test("reclaimOrphanTmpDirs - a small injected budget defers the remainder to a later pass", async () => {
+test("reclaimOrphanTmpDirs - a small injected budget defers the remainder to a later pass", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     for (let i = 0; i < 10; i++) writeFixture(join(tmpPath, `entry-${i}.txt`), "x");
@@ -546,10 +561,10 @@ Deno.test("reclaimOrphanTmpDirs - a small injected budget defers the remainder t
 function wholeTree(root: string): string[] {
   const found: string[] = [];
   const walk = (dir: string, prefix: string) => {
-    for (const entry of Deno.readDirSync(dir)) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       found.push(rel);
-      if (entry.isDirectory) walk(join(dir, entry.name), rel);
+      if (entry.isDirectory()) walk(join(dir, entry.name), rel);
     }
   };
   walk(root, "");
@@ -559,7 +574,7 @@ function wholeTree(root: string): string[] {
 /** Count leftover disposable fixture entries of one tmp directory. */
 function countTxtEntries(tmpPath: string): number {
   let count = 0;
-  for (const entry of Deno.readDirSync(tmpPath)) {
+  for (const entry of fs.readdirSync(tmpPath, { withFileTypes: true })) {
     if (entry.name.endsWith(".txt")) count++;
   }
   return count;
@@ -570,7 +585,7 @@ function depthBelow(root: string, path: string): number {
   return path.slice(root.length).split("/").filter((part) => part !== "").length;
 }
 
-Deno.test("cleanupTmpIfIdle - a wide directory is consumed lazily, never past the node budget", async () => {
+test("cleanupTmpIfIdle - a wide directory is consumed lazily, never past the node budget", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     const total = 256;
@@ -581,25 +596,25 @@ Deno.test("cleanupTmpIfIdle - a wide directory is consumed lazily, never past th
     // Count how many directory entries the traversal actually pulls: the
     // iterator must be abandoned at the bound instead of materialising the
     // whole directory (design D4 "bounded work per workspace").
-    const originalReadDirSync = Deno.readDirSync;
+    const originalOpenDirSync = fs.opendirSync;
     let pulled = 0;
-    Deno.readDirSync = ((path: string | URL) => {
-      const inner = originalReadDirSync(path);
+    fs.opendirSync = ((path: string | URL) => {
+      const inner = originalOpenDirSync(path);
       if (!String(path).startsWith(tmpPath)) return inner;
-      const iterator: IterableIterator<Deno.DirEntry> = {
-        next: () => {
+      const counting = {
+        readSync: () => {
           pulled++;
-          return inner.next();
+          return inner.readSync();
         },
-        [Symbol.iterator]: () => iterator,
+        closeSync: () => inner.closeSync(),
       };
-      return iterator;
-    }) as typeof Deno.readDirSync;
+      return counting as unknown as fs.Dir;
+    }) as typeof fs.opendirSync;
     let outcome;
     try {
       outcome = manager.cleanupTmpIfIdle(tmpPath, { limits: { maxNodes: 4 } });
     } finally {
-      Deno.readDirSync = originalReadDirSync;
+      fs.opendirSync = originalOpenDirSync;
     }
 
     assertEquals(outcome.status, "cleaned");
@@ -611,27 +626,27 @@ Deno.test("cleanupTmpIfIdle - a wide directory is consumed lazily, never past th
   });
 });
 
-Deno.test("cleanupTmpIfIdle - failing inspections consume the node budget instead of running unbounded", async () => {
+test("cleanupTmpIfIdle - failing inspections consume the node budget instead of running unbounded", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     for (let i = 0; i < 64; i++) writeFixture(join(tmpPath, `denied-${i}.txt`), "x");
 
-    const originalLstatSync = Deno.lstatSync;
+    const originalLstatSync = fs.lstatSync;
     let attempts = 0;
-    Deno.lstatSync = ((path: string | URL) => {
+    fs.lstatSync = ((path: string | URL) => {
       // Only entries BELOW the tmp root fail: the tmp root itself must still be
       // recognizable ancestry for this test to reach the traversal at all.
       if (String(path).startsWith(`${tmpPath}/`)) {
         attempts++;
-        throw new Deno.errors.PermissionDenied("mock eacces");
+        throw Object.assign(new Error("mock eacces"), { code: "EACCES" });
       }
       return originalLstatSync(path);
-    }) as typeof Deno.lstatSync;
+    }) as typeof fs.lstatSync;
     let outcome;
     try {
       outcome = manager.cleanupTmpIfIdle(tmpPath, { limits: { maxNodes: 6 } });
     } finally {
-      Deno.lstatSync = originalLstatSync;
+      fs.lstatSync = originalLstatSync;
     }
 
     assertEquals(outcome.status, "cleaned");
@@ -644,7 +659,7 @@ Deno.test("cleanupTmpIfIdle - failing inspections consume the node budget instea
   });
 });
 
-Deno.test("cleanupTmpIfIdle - an over-deep branch never starves its shallow siblings", async () => {
+test("cleanupTmpIfIdle - an over-deep branch never starves its shallow siblings", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     // Three independent over-deep chains plus one shallow, eligible sibling. The
@@ -655,17 +670,17 @@ Deno.test("cleanupTmpIfIdle - an over-deep branch never starves its shallow sibl
     }
     writeFixture(join(tmpPath, "sibling.txt"), "shallow");
 
-    const originalLstatSync = Deno.lstatSync;
+    const originalLstatSync = fs.lstatSync;
     const attempted: string[] = [];
-    Deno.lstatSync = ((path: string | URL) => {
+    fs.lstatSync = ((path: string | URL) => {
       if (String(path).startsWith(`${tmpPath}/`)) attempted.push(String(path));
       return originalLstatSync(path);
-    }) as typeof Deno.lstatSync;
+    }) as typeof fs.lstatSync;
     let outcome;
     try {
       outcome = manager.cleanupTmpIfIdle(tmpPath, { limits: { maxDepth: 1 } });
     } finally {
-      Deno.lstatSync = originalLstatSync;
+      fs.lstatSync = originalLstatSync;
     }
 
     assertEquals(outcome.budgetExhausted, false);
@@ -681,7 +696,7 @@ Deno.test("cleanupTmpIfIdle - an over-deep branch never starves its shallow sibl
     assertEquals(outcome.retained, 3);
     assertFalse(exists(join(tmpPath, "sibling.txt")));
     for (const chain of ["d1", "d2", "d3"]) {
-      assertEquals(Deno.readTextFileSync(join(tmpPath, chain, "x", "y", "leaf.txt")), "deep");
+      assertEquals(fs.readFileSync(join(tmpPath, chain, "x", "y", "leaf.txt"), "utf8"), "deep");
     }
 
     // A later pass with the production limit reclaims the retained chains.
@@ -693,7 +708,7 @@ Deno.test("cleanupTmpIfIdle - an over-deep branch never starves its shallow sibl
   });
 });
 
-Deno.test("cleanupTmpIfIdle - inspection failures and vanished entries retain only the affected candidate", async () => {
+test("cleanupTmpIfIdle - inspection failures and vanished entries retain only the affected candidate", async () => {
   await withWorkspaceRoot(({ repoPath, manager }) => {
     const { tmpPath } = seedUserWorkspace(repoPath, "discord", "u1");
     const blocked = join(tmpPath, "blocked.txt");
@@ -702,19 +717,19 @@ Deno.test("cleanupTmpIfIdle - inspection failures and vanished entries retain on
     writeFixture(vanished, "vanished");
     writeFixture(join(tmpPath, "free.txt"), "free");
 
-    const originalLstatSync = Deno.lstatSync;
-    Deno.lstatSync = ((path: string | URL) => {
+    const originalLstatSync = fs.lstatSync;
+    fs.lstatSync = ((path: string | URL) => {
       const target = String(path);
-      if (target === blocked) throw new Deno.errors.PermissionDenied("mock eacces");
+      if (target === blocked) throw Object.assign(new Error("mock eacces"), { code: "EACCES" });
       // A directory entry that disappeared between enumeration and inspection.
-      if (target === vanished) throw new Deno.errors.NotFound("mock race");
+      if (target === vanished) throw Object.assign(new Error("mock race"), { code: "ENOENT" });
       return originalLstatSync(path);
-    }) as typeof Deno.lstatSync;
+    }) as typeof fs.lstatSync;
     let outcome;
     try {
       outcome = manager.cleanupTmpIfIdle(tmpPath);
     } finally {
-      Deno.lstatSync = originalLstatSync;
+      fs.lstatSync = originalLstatSync;
     }
 
     assertEquals(outcome.status, "cleaned");
@@ -723,17 +738,17 @@ Deno.test("cleanupTmpIfIdle - inspection failures and vanished entries retain on
     assertEquals(outcome.retained, 1);
     assert(exists(blocked), "the unreadable entry is retained");
     assertFalse(exists(join(tmpPath, "free.txt")));
-    assertEquals(Deno.lstatSync(tmpPath).isDirectory, true);
+    assertEquals(fs.lstatSync(tmpPath).isDirectory(), true);
   });
 });
 
-Deno.test("cleanupTmpIfIdle - a linked channel container is never enumerated", async () => {
+test("cleanupTmpIfIdle - a linked channel container is never enumerated", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
     const channelsPath = join(repoPath, "workspaces", "discord", "channels");
     const outsideChannels = join(repoPath, "outside-channels");
     writeFixture(join(outsideChannels, "chan1", "tmp", "keep.txt"), "outside");
-    Deno.mkdirSync(join(repoPath, "workspaces", "discord"), { recursive: true });
-    Deno.symlinkSync(outsideChannels, channelsPath);
+    fs.mkdirSync(join(repoPath, "workspaces", "discord"), { recursive: true });
+    fs.symlinkSync(outsideChannels, channelsPath);
 
     const report = await manager.reclaimOrphanTmpDirs();
 
@@ -742,28 +757,28 @@ Deno.test("cleanupTmpIfIdle - a linked channel container is never enumerated", a
     assertEquals(report.workspaces, 0);
     assertEquals(report.skipped, 1);
     assertEquals(
-      Deno.readTextFileSync(join(outsideChannels, "chan1", "tmp", "keep.txt")),
+      fs.readFileSync(join(outsideChannels, "chan1", "tmp", "keep.txt"), "utf8"),
       "outside",
     );
   });
 });
 
-Deno.test("reclaimOrphanTmpDirs - an unreadable workspace root is reported instead of silently skipped", async () => {
+test("reclaimOrphanTmpDirs - an unreadable workspace root is reported instead of silently skipped", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
-    Deno.mkdirSync(join(repoPath, "workspaces"), { recursive: true });
+    fs.mkdirSync(join(repoPath, "workspaces"), { recursive: true });
 
-    const originalLstatSync = Deno.lstatSync;
-    Deno.lstatSync = ((path: string | URL) => {
+    const originalLstatSync = fs.lstatSync;
+    fs.lstatSync = ((path: string | URL) => {
       if (String(path) === join(repoPath, "workspaces")) {
-        throw new Deno.errors.PermissionDenied("mock eacces");
+        throw Object.assign(new Error("mock eacces"), { code: "EACCES" });
       }
       return originalLstatSync(path);
-    }) as typeof Deno.lstatSync;
+    }) as typeof fs.lstatSync;
     let report;
     try {
       report = await manager.reclaimOrphanTmpDirs();
     } finally {
-      Deno.lstatSync = originalLstatSync;
+      fs.lstatSync = originalLstatSync;
     }
 
     assertEquals(report.workspaces, 0);
@@ -771,26 +786,26 @@ Deno.test("reclaimOrphanTmpDirs - an unreadable workspace root is reported inste
   });
 });
 
-Deno.test("reclaimOrphanTmpDirs - a root that cannot be enumerated is reported, not a silent zero", async () => {
+test("reclaimOrphanTmpDirs - a root that cannot be enumerated is reported, not a silent zero", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
     const workspacesRoot = join(repoPath, "workspaces");
-    Deno.mkdirSync(join(workspacesRoot, "discord", "u1", "tmp"), { recursive: true });
+    fs.mkdirSync(join(workspacesRoot, "discord", "u1", "tmp"), { recursive: true });
     writeFixture(join(workspacesRoot, "discord", "u1", "tmp", "orphan.txt"), "orphan");
 
-    const originalReadDirSync = Deno.readDirSync;
-    Deno.readDirSync = ((path: string | URL) => {
+    const originalReadDirSync = fs.readdirSync;
+    fs.readdirSync = ((path: string | URL, options?: unknown) => {
       // The root is inspectable and resolvable, but its enumeration fails: the
       // pass must report the skip instead of claiming it visited nothing.
       if (String(path) === workspacesRoot) {
-        throw new Deno.errors.PermissionDenied("mock eacces");
+        throw Object.assign(new Error("mock eacces"), { code: "EACCES" });
       }
-      return originalReadDirSync(path);
-    }) as typeof Deno.readDirSync;
+      return originalReadDirSync(path, options as never);
+    }) as typeof fs.readdirSync;
     let report;
     try {
       report = await manager.reclaimOrphanTmpDirs();
     } finally {
-      Deno.readDirSync = originalReadDirSync;
+      fs.readdirSync = originalReadDirSync;
     }
 
     assertEquals(report.workspaces, 0);
@@ -798,7 +813,7 @@ Deno.test("reclaimOrphanTmpDirs - a root that cannot be enumerated is reported, 
     assertEquals(report.skipped, 1);
     // Nothing was touched, so a later pass can still reclaim the orphan.
     assertEquals(
-      Deno.readTextFileSync(join(workspacesRoot, "discord", "u1", "tmp", "orphan.txt")),
+      fs.readFileSync(join(workspacesRoot, "discord", "u1", "tmp", "orphan.txt"), "utf8"),
       "orphan",
     );
   });
@@ -815,7 +830,7 @@ Deno.test("reclaimOrphanTmpDirs - a root that cannot be enumerated is reported, 
 /** One canonical email user id (the message store's owner-name shape). */
 const EMAIL_OWNER = `e_${"cd".repeat(32)}`;
 
-Deno.test("reclaimOrphanTmpDirs - an email workspace keeps memory, archive bytes and engine state, reclaiming tmp only", async () => {
+test("reclaimOrphanTmpDirs - an email workspace keeps memory, archive bytes and engine state, reclaiming tmp only", async () => {
   await withWorkspaceRoot(async ({ repoPath, manager }) => {
     const workspacePath = join(repoPath, "workspaces", "email", EMAIL_OWNER);
     const tmpPath = join(workspacePath, "tmp");
@@ -860,15 +875,16 @@ Deno.test("reclaimOrphanTmpDirs - an email workspace keeps memory, archive bytes
       assertFalse(exists(join(tmpPath, disposable)), `${disposable} is disposable staging`);
     }
     assertEquals(
-      Deno.readTextFileSync(
+      fs.readFileSync(
         join(tmpPath, "omp-agent", "restricted", "xdg-data", "omp", "sessions.db"),
+        "utf8",
       ),
       "engine state",
     );
 
     // Every durable byte is untouched: memory, archive, source, attachment.
     for (const [rel, content] of Object.entries({ ...memoryFiles, ...archiveFiles })) {
-      assertEquals(Deno.readTextFileSync(join(workspacePath, rel)), content, rel);
+      assertEquals(fs.readFileSync(join(workspacePath, rel), "utf8"), content, rel);
     }
   });
 });

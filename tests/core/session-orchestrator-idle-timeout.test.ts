@@ -11,16 +11,17 @@ import { SkillRegistry } from "@skills/registry.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { AgentConnectorOptions } from "@acp/types.ts";
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
+import fs from "node:fs";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /**
  * The ONE deployment-resolved skill-script root
  * (`unify-skill-root-and-inventory`): the repository `skills/` tree — what
  * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types.
  */
-const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
-  resolve(import.meta.dirname ?? ".", "../../skills"),
-);
+const RESOLVED_SKILLS_ROOT = fs.realpathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 /**
  * Test suite for SessionOrchestrator.promptWithIdleTimeoutHandling()
@@ -74,7 +75,7 @@ class MockAgentConnector {
 }
 
 function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup: () => void } {
-  const tempDir = Deno.makeTempDirSync();
+  const tempDir = makeTempDirSync();
   const config: Config = {
     platforms: {
       discord: { token: "test", enabled: true },
@@ -126,12 +127,12 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
     orchestrator,
     cleanup: () => {
       sessionRegistry.stop();
-      Deno.removeSync(tempDir, { recursive: true });
+      fs.rmSync(tempDir, { recursive: true });
     },
   };
 }
 
-Deno.test("promptWithIdleTimeoutHandling - returns response on successful prompt", async () => {
+test("promptWithIdleTimeoutHandling - returns response on successful prompt", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {
     const mockConnector = new MockAgentConnector();
@@ -151,7 +152,7 @@ Deno.test("promptWithIdleTimeoutHandling - returns response on successful prompt
   }
 });
 
-Deno.test("promptWithIdleTimeoutHandling - re-throws non-idle-timeout errors", async () => {
+test("promptWithIdleTimeoutHandling - re-throws non-idle-timeout errors", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {
     const mockConnector = new MockAgentConnector();
@@ -172,7 +173,7 @@ Deno.test("promptWithIdleTimeoutHandling - re-throws non-idle-timeout errors", a
   }
 });
 
-Deno.test("promptWithIdleTimeoutHandling - attempts reconnect on ACP connection dead", async () => {
+test("promptWithIdleTimeoutHandling - attempts reconnect on ACP connection dead", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {
     const mockConnector = new MockAgentConnector();
@@ -196,7 +197,7 @@ Deno.test("promptWithIdleTimeoutHandling - attempts reconnect on ACP connection 
   }
 });
 
-Deno.test("promptWithIdleTimeoutHandling - attempts reconnect on agent process exit", async () => {
+test("promptWithIdleTimeoutHandling - attempts reconnect on agent process exit", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {
     const mockConnector = new MockAgentConnector();
@@ -220,7 +221,7 @@ Deno.test("promptWithIdleTimeoutHandling - attempts reconnect on agent process e
   }
 });
 
-Deno.test("promptWithIdleTimeoutHandling - propagates crash-signal error directly without attempting reconnect (Decision 5)", async () => {
+test("promptWithIdleTimeoutHandling - propagates crash-signal error directly without attempting reconnect (Decision 5)", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {
     const mockConnector = new MockAgentConnector();
@@ -255,7 +256,7 @@ Deno.test("promptWithIdleTimeoutHandling - propagates crash-signal error directl
   }
 });
 
-Deno.test("promptWithIdleTimeoutHandling - returns null when resumed session also fails", async () => {
+test("promptWithIdleTimeoutHandling - returns null when resumed session also fails", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {
     const mockConnector = new MockAgentConnector();

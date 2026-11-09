@@ -18,6 +18,9 @@ import {
 } from "@core/skills-root.ts";
 import { containsUnquotedShellExpansion, tokenizeShellCommand } from "@acp/command-syntax.ts";
 import { ConfigError, ErrorCode } from "../../src/types/errors.ts";
+import fs from "node:fs";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** The supported agent types; the resolver selects no root per type. */
 const AGENT_TYPES = ["opencode", "omp"] as const;
@@ -30,7 +33,7 @@ function probe(existing: string[]) {
   return (path: string) => set.has(path);
 }
 
-Deno.test("unknown agent types are rejected before any root probe", () => {
+test("unknown agent types are rejected before any root probe", () => {
   const error = assertThrows(
     () => resolveTrustedSkillsRoot("claude", undefined, { directoryExists: () => true }),
   ) as ConfigError;
@@ -38,7 +41,7 @@ Deno.test("unknown agent types are rejected before any root probe", () => {
   assertEquals(error.message.includes("Unknown agent type"), true);
 });
 
-Deno.test("both agent types honor the same absolute configured installed root", () => {
+test("both agent types honor the same absolute configured installed root", () => {
   // `configuredSkillsDir` is the ONLY selection input (`unify-skill-root-and-
   // inventory` D1): no image constant, no catalog gate, no per-agent root.
   for (const agentType of AGENT_TYPES) {
@@ -59,7 +62,7 @@ Deno.test("both agent types honor the same absolute configured installed root", 
   }
 });
 
-Deno.test("both agent types resolve relative roots against the deployment cwd, never child HOME", () => {
+test("both agent types resolve relative roots against the deployment cwd, never child HOME", () => {
   // deploymentCwd is the deployment-side working directory seam; the resolver
   // has no HOME parameter at all — no code path here can consult one.
   for (const agentType of AGENT_TYPES) {
@@ -74,7 +77,7 @@ Deno.test("both agent types resolve relative roots against the deployment cwd, n
   }
 });
 
-Deno.test("both agent types fall back to the documented default name when unset or empty", () => {
+test("both agent types fall back to the documented default name when unset or empty", () => {
   for (const agentType of AGENT_TYPES) {
     for (const configured of [undefined, ""]) {
       assertEquals(
@@ -89,7 +92,7 @@ Deno.test("both agent types fall back to the documented default name when unset 
   }
 });
 
-Deno.test("both agent types with a missing configured root fail explicitly naming it", () => {
+test("both agent types with a missing configured root fail explicitly naming it", () => {
   for (const agentType of AGENT_TYPES) {
     const error = assertThrows(
       () =>
@@ -108,25 +111,25 @@ Deno.test("both agent types with a missing configured root fail explicitly namin
 
 // --- Canonical PHYSICAL observation (`unify-omp-skill-root-resolution` D1/1.1) ---
 
-Deno.test("observation carries the canonical realpath and a recheckable identity", () => {
+test("observation carries the canonical realpath and a recheckable identity", () => {
   // A real temp root behind a symlink: the returned spelling is the CANONICAL
   // realpath (what the inventory anchors to), not the link path.
-  const target = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-root-" }));
-  const base = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-base-" }));
-  Deno.symlinkSync(target, `${base}/link`);
+  const target = fs.realpathSync(makeTempDirSync({ prefix: "air-root-" }));
+  const base = fs.realpathSync(makeTempDirSync({ prefix: "air-base-" }));
+  fs.symlinkSync(target, `${base}/link`);
   try {
     const observation = observeTrustedSkillsRoot("opencode", `${base}/link`);
     assertEquals(observation.root, target);
-    const stat = Deno.statSync(target);
+    const stat = fs.statSync(target);
     assertEquals(observation.identity?.dev, stat.dev);
     assertEquals(observation.identity?.ino, stat.ino);
   } finally {
-    Deno.removeSync(base, { recursive: true });
-    Deno.removeSync(target, { recursive: true });
+    fs.rmSync(base, { recursive: true });
+    fs.rmSync(target, { recursive: true });
   }
 });
 
-Deno.test("observation omits identity when the host cannot record dev/ino", () => {
+test("observation omits identity when the host cannot record dev/ino", () => {
   const observation = observeTrustedSkillsRoot("opencode", "/virt/root", {
     directoryExists: () => true,
     observeDirectory: (path) => ({ root: path, identity: undefined }),
@@ -135,7 +138,7 @@ Deno.test("observation omits identity when the host cannot record dev/ino", () =
   assertEquals(observation.identity, undefined);
 });
 
-Deno.test("observation is canonical for the shared configured root for either agent type", () => {
+test("observation is canonical for the shared configured root for either agent type", () => {
   for (const agentType of AGENT_TYPES) {
     const observation = observeTrustedSkillsRoot(agentType, CONFIGURED_ROOT, {
       directoryExists: (p) => p === CONFIGURED_ROOT,
@@ -146,9 +149,9 @@ Deno.test("observation is canonical for the shared configured root for either ag
   }
 });
 
-Deno.test("observation is HOME-independent (relative anchors at the deployment cwd)", () => {
-  const originalHome = Deno.env.get("HOME");
-  Deno.env.set("HOME", "/some/other/home");
+test("observation is HOME-independent (relative anchors at the deployment cwd)", () => {
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = "/some/other/home";
   try {
     for (const agentType of AGENT_TYPES) {
       const observation = observeTrustedSkillsRoot(agentType, "skills", {
@@ -159,12 +162,12 @@ Deno.test("observation is HOME-independent (relative anchors at the deployment c
       assertEquals(observation.root, "/daemon/cwd/skills", agentType);
     }
   } finally {
-    if (originalHome === undefined) Deno.env.delete("HOME");
-    else Deno.env.set("HOME", originalHome);
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
   }
 });
 
-Deno.test("observation fails explicitly when canonical observation returns null", () => {
+test("observation fails explicitly when canonical observation returns null", () => {
   const error = assertThrows(
     () =>
       observeTrustedSkillsRoot("opencode", "/root/passes-probe", {
@@ -176,7 +179,7 @@ Deno.test("observation fails explicitly when canonical observation returns null"
   assertEquals(error.message.includes("failed canonical observation"), true);
 });
 
-Deno.test("a canonical observation that lands on the filesystem root is refused (B3)", () => {
+test("a canonical observation that lands on the filesystem root is refused (B3)", () => {
   // A configured root that realpaths to "/" can never be a read-only skill
   // tree — it contains every agent-writable mount by construction. The
   // resolver refuses it centrally so readiness, inventory and the mount all
@@ -199,7 +202,7 @@ Deno.test("a canonical observation that lands on the filesystem root is refused 
 // builder share, and the literal-presence assertion that refuses to deliver a
 // classified prompt rendering without the root.
 
-Deno.test("requireTrustedSkillsRoot accepts an absolute root and rejects absent, empty and relative ones", () => {
+test("requireTrustedSkillsRoot accepts an absolute root and rejects absent, empty and relative ones", () => {
   assertEquals(requireTrustedSkillsRoot(CONFIGURED_ROOT, "unit"), CONFIGURED_ROOT);
   for (
     const [label, value] of [
@@ -222,7 +225,7 @@ Deno.test("requireTrustedSkillsRoot accepts an absolute root and rejects absent,
   }
 });
 
-Deno.test("quoteShellArgument makes a hostile argument one literal token with no expansion", () => {
+test("quoteShellArgument makes a hostile argument one literal token with no expansion", () => {
   assertEquals(quoteShellArgument(CONFIGURED_ROOT), `'${CONFIGURED_ROOT}'`);
   // An embedded apostrophe is the POSIX quote-close / escaped-quote / reopen
   // triple — the only form `sh` accepts inside single quotes.
@@ -239,7 +242,7 @@ Deno.test("quoteShellArgument makes a hostile argument one literal token with no
   assertEquals(containsUnquotedShellExpansion(quoted), false);
 });
 
-Deno.test("skillScriptPath quotes the COMPLETE root-plus-script path, not just the root", () => {
+test("skillScriptPath quotes the COMPLETE root-plus-script path, not just the root", () => {
   assertEquals(
     skillScriptPath(CONFIGURED_ROOT, "send-reply"),
     `'${CONFIGURED_ROOT}/send-reply/scripts/send-reply.ts'`,
@@ -254,7 +257,7 @@ Deno.test("skillScriptPath quotes the COMPLETE root-plus-script path, not just t
   );
 });
 
-Deno.test("assertSkillsRootDelivered refuses a classified prompt without the literal root", () => {
+test("assertSkillsRootDelivered refuses a classified prompt without the literal root", () => {
   assertSkillsRootDelivered(`trusted root: ${CONFIGURED_ROOT}`, CONFIGURED_ROOT, "unit");
   const error = assertThrows(
     () => assertSkillsRootDelivered("a rootless mounted prompt", CONFIGURED_ROOT, "unit delivery"),

@@ -1,6 +1,8 @@
 // src/platforms/email/attachment-materializer.ts
 
 import { resolve } from "node:path";
+import fsp from "node:fs/promises";
+import { removePath } from "../../utils/fs-compat.ts";
 import type { LocalEmailAttachment } from "../../types/events.ts";
 import type { EmailMessageStore } from "./message-store.ts";
 import { assertSafePath, assertStagingRootBoundary, canonicalizeRoot } from "./durable-files.ts";
@@ -75,7 +77,7 @@ export async function materializeEmailAttachment(
 
   // 6. Create the private attachment directory, then re-validate the
   //    destination in case a component was replaced between the checks.
-  await Deno.mkdir(destDir, { recursive: true, mode: 0o700 });
+  await fsp.mkdir(destDir, { recursive: true, mode: 0o700 });
   await assertSafePath(canonicalStaging, relativeDest);
 
   // 7. Retrieve attachment bytes only after owner authorization and every
@@ -101,12 +103,12 @@ export async function materializeEmailAttachment(
   //    redirect the archived bytes outside the session.
   const scratchRel = `${destDirRel}/.${crypto.randomUUID()}.tmp`;
   const scratchPath = await assertSafePath(publishStaging, scratchRel);
-  await Deno.writeFile(scratchPath, bytes, { mode: 0o600, createNew: true });
+  await fsp.writeFile(scratchPath, bytes, { mode: 0o600, flag: "wx" });
   try {
-    await Deno.rename(scratchPath, safeDestPath);
+    await fsp.rename(scratchPath, safeDestPath);
   } catch (error) {
     try {
-      await Deno.remove(scratchPath);
+      await removePath(scratchPath);
     } catch { /* the scratch file may already be gone */ }
     throw error;
   }

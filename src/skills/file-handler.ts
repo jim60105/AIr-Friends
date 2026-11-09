@@ -1,6 +1,6 @@
 // src/skills/file-handler.ts
 
-import { isAbsolute, resolve } from "@std/path";
+import { isAbsolute, resolve } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import { ErrorCode, SkillError } from "../types/errors.ts";
 import { filesSentTotal } from "@utils/metrics.ts";

@@ -48,6 +48,8 @@ import {
 import { OMP_TOOL_CAPABILITY_MAP } from "./omp/tool-inventory.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import fs from "node:fs";
+import { runtimeOs } from "@utils/runtime-platform.ts";
 
 /**
  * Contracted authored native OMP settings documents (development-tree paths;
@@ -134,17 +136,17 @@ function buildBaseAgentConfig(
       const env: Record<string, string> = {};
 
       const opencodeApiKey = appConfig.agent.opencodeApiKey ??
-        Deno.env.get("OPENCODE_API_KEY");
+        process.env["OPENCODE_API_KEY"];
       if (opencodeApiKey) {
         env["OPENCODE_API_KEY"] = opencodeApiKey;
       }
       const openRouterApiKey = appConfig.agent.openRouterApiKey ??
-        Deno.env.get("OPENROUTER_API_KEY");
+        process.env["OPENROUTER_API_KEY"];
       if (openRouterApiKey) {
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
       const geminiApiKey = appConfig.agent.geminiApiKey ??
-        Deno.env.get("GEMINI_API_KEY");
+        process.env["GEMINI_API_KEY"];
       if (geminiApiKey) {
         env["GEMINI_API_KEY"] = geminiApiKey;
         env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
@@ -152,7 +154,7 @@ function buildBaseAgentConfig(
 
       const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
       for (const varName of inheritVars) {
-        const value = Deno.env.get(varName);
+        const value = process.env[varName];
         if (value !== undefined) {
           env[varName] = value;
         }
@@ -196,7 +198,7 @@ function buildBaseAgentConfig(
       }
 
       // Automatically detect and set AGENT_BROWSER_EXECUTABLE_PATH if not already set
-      let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+      let browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
       if (browserPath === undefined) {
         browserPath = detectPlaywrightBinarySync();
       }
@@ -321,7 +323,7 @@ function buildBaseAgentConfig(
         // unloadable specifier.
         const trustedExtensionPath = resolve(resolveOmpExtensionPath());
         try {
-          Deno.statSync(trustedExtensionPath);
+          fs.statSync(trustedExtensionPath);
         } catch {
           throw new Error(
             `Missing trusted extension module at "${trustedExtensionPath}" — ` +
@@ -336,12 +338,12 @@ function buildBaseAgentConfig(
       const env: Record<string, string> = {};
 
       // Provider credentials: GEMINI_API_KEY, OPENROUTER_API_KEY only
-      const geminiApiKey = appConfig.agent.geminiApiKey ?? Deno.env.get("GEMINI_API_KEY");
+      const geminiApiKey = appConfig.agent.geminiApiKey ?? process.env["GEMINI_API_KEY"];
       if (geminiApiKey) {
         env["GEMINI_API_KEY"] = geminiApiKey;
       }
       const openRouterApiKey = appConfig.agent.openRouterApiKey ??
-        Deno.env.get("OPENROUTER_API_KEY");
+        process.env["OPENROUTER_API_KEY"];
       if (openRouterApiKey) {
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
@@ -351,7 +353,7 @@ function buildBaseAgentConfig(
       // (`~/.omp/agent/models.yml`) and there is no daemon-owned home anymore.
       const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
-        const value = Deno.env.get(varName);
+        const value = process.env[varName];
         if (value !== undefined) {
           env[varName] = value;
         }
@@ -384,7 +386,7 @@ function buildBaseAgentConfig(
       }
 
       // Browser binary
-      let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+      let browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
       if (browserPath === undefined) {
         browserPath = detectPlaywrightBinarySync();
       }
@@ -632,7 +634,7 @@ export function getRetryPromptStrategy(
   // made an installed image (or any relocated tree) read the wrong tree.
   const readSkillDocument = (skill: string): string => {
     try {
-      return Deno.readTextFileSync(join(ctx.skillsDir, skill, "SKILL.md"));
+      return fs.readFileSync(join(ctx.skillsDir, skill, "SKILL.md"), "utf8");
     } catch (error) {
       throw new Error(
         `Retry prompt cannot read the trusted skill document ` +
@@ -714,16 +716,16 @@ export function getRetryPromptStrategy(
  */
 export function detectPlaywrightBinarySync(): string | undefined {
   const searchDirs: string[] = [];
-  const customBrowsersPath = Deno.env.get("PLAYWRIGHT_BROWSERS_PATH");
+  const customBrowsersPath = process.env["PLAYWRIGHT_BROWSERS_PATH"];
   if (customBrowsersPath && customBrowsersPath !== "0") {
     searchDirs.push(customBrowsersPath);
   }
 
-  const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE");
+  const home = process.env["HOME"] || process.env["USERPROFILE"];
   if (home) {
-    if (Deno.build.os === "darwin") {
+    if (runtimeOs() === "darwin") {
       searchDirs.push(join(home, "Library", "Caches", "ms-playwright"));
-    } else if (Deno.build.os === "windows") {
+    } else if (runtimeOs() === "windows") {
       searchDirs.push(join(home, "AppData", "Local", "ms-playwright"));
     } else {
       searchDirs.push(join(home, ".cache", "ms-playwright"));
@@ -736,8 +738,8 @@ export function detectPlaywrightBinarySync(): string | undefined {
 
   for (const cacheDir of searchDirs) {
     try {
-      const stat = Deno.statSync(cacheDir);
-      if (!stat.isDirectory) continue;
+      const stat = fs.statSync(cacheDir);
+      if (!stat.isDirectory()) continue;
 
       const found = findBinaryInDirSync(cacheDir);
       if (found) {
@@ -757,7 +759,7 @@ interface PlaywrightDirEntry {
 }
 
 function findBinaryInDirSync(dirPath: string): string | undefined {
-  const isWindows = Deno.build.os === "windows";
+  const isWindows = runtimeOs() === "windows";
   const shellBinaryName = isWindows ? "chrome-headless-shell.exe" : "chrome-headless-shell";
   const chromeBinaryName = isWindows ? "chrome.exe" : "chrome";
 
@@ -767,11 +769,11 @@ function findBinaryInDirSync(dirPath: string): string | undefined {
   const candidates: PlaywrightDirEntry[] = [];
 
   try {
-    for (const entry of Deno.readDirSync(dirPath)) {
-      let isDir = entry.isDirectory;
-      if (!isDir && entry.isSymlink) {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      let isDir = entry.isDirectory();
+      if (!isDir && entry.isSymbolicLink()) {
         try {
-          isDir = Deno.statSync(join(dirPath, entry.name)).isDirectory;
+          isDir = fs.statSync(join(dirPath, entry.name)).isDirectory();
         } catch {
           isDir = false;
         }
@@ -825,15 +827,15 @@ function findFileRecursiveSync(
 
   try {
     const subdirs: string[] = [];
-    for (const entry of Deno.readDirSync(dirPath)) {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
       const fullPath = join(dirPath, entry.name);
-      let isFile = entry.isFile;
-      let isDir = entry.isDirectory;
-      if (entry.isSymlink) {
+      let isFile = entry.isFile();
+      let isDir = entry.isDirectory();
+      if (entry.isSymbolicLink()) {
         try {
-          const stat = Deno.statSync(fullPath);
-          isFile = stat.isFile;
-          isDir = stat.isDirectory;
+          const stat = fs.statSync(fullPath);
+          isFile = stat.isFile();
+          isDir = stat.isDirectory();
         } catch {
           continue;
         }
@@ -1120,7 +1122,7 @@ function isProfileObject(value: unknown): value is ProfileObject {
 /** Real-filesystem existence probe used by the path resolvers. */
 function profileFileExists(path: string): boolean {
   try {
-    return Deno.statSync(path).isFile;
+    return fs.statSync(path).isFile();
   } catch {
     return false;
   }

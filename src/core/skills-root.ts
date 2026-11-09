@@ -76,13 +76,13 @@ function defaultObserveDirectory(
     // synthetic path) keeps the configured spelling with NO recorded
     // identity, which identity-requiring consumers then refuse.
     try {
-      const stat = Deno.statSync(path);
+      const stat = fs.statSync(path);
       // Some platforms report `null` dev/ino: no identity is then recorded,
       // which identity-requiring consumers refuse rather than trust.
       const identity = stat.dev !== null && stat.ino !== null
         ? { dev: stat.dev, ino: stat.ino }
         : undefined;
-      return { root: Deno.realPathSync(path), identity };
+      return { root: fs.realpathSync(path), identity };
     } catch {
       return { root: path };
     }
@@ -172,7 +172,7 @@ export function observeTrustedSkillsRoot(
     : "skills";
   const root = isAbsolute(configured)
     ? configured
-    : resolve(options.deploymentCwd ?? Deno.cwd(), configured);
+    : resolve(options.deploymentCwd ?? process.cwd(), configured);
   if (!directoryExists(root)) {
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,

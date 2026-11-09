@@ -2,7 +2,7 @@
 
 import { isAbsolute, join, relative, resolve, sep as SEPARATOR } from "node:path";
 import fsp from "node:fs/promises";
-import { isNotFoundError } from "../utils/fs-compat.ts";
+import { isNotFoundError, removePathSync } from "../utils/fs-compat.ts";
 import { createLogger } from "@utils/logger.ts";
 import type { Logger } from "@utils/logger.ts";
 import {
@@ -22,6 +22,8 @@ import type {
 import { MemoryFileType } from "../types/workspace.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 import { ErrorCode, WorkspaceError } from "../types/errors.ts";
+import fs from "node:fs";
+import type { Dir, Dirent, Stats } from "node:fs";
 
 const logger = createLogger("WorkspaceManager");
 
@@ -197,7 +199,7 @@ export class WorkspaceManager {
     } else {
       // Try to get creation time from directory stat
       try {
-        const stat = await Deno.stat(path);
+        const stat = await fsp.stat(path);
         createdAt = stat.birthtime ?? stat.mtime ?? undefined;
       } catch {
         // Ignore stat errors
@@ -264,7 +266,10 @@ export class WorkspaceManager {
     this.validateFileAccess(absolutePath, workspace);
 
     try {
-      return await fsp.readFile(absolutePath, "utf8");
+      const content = await fsp.readFile(absolutePath, "utf8");
+      // `Deno.readTextFile` strips a leading byte-order mark; `readFile` keeps
+      // it, so drop it to preserve the delivered text exactly.
+      return content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content;
     } catch (error) {
       if (isNotFoundError(error)) {
         throw new WorkspaceError(
@@ -292,7 +297,7 @@ export class WorkspaceManager {
     const parentDir = absolutePath.substring(0, absolutePath.lastIndexOf("/"));
     await ensureDirectory(parentDir);
 
-    await Deno.writeTextFile(absolutePath, content);
+    await fsp.writeFile(absolutePath, content);
   }
 
   /**
@@ -343,7 +348,7 @@ export class WorkspaceManager {
   private async initializeAgentWorkspaceFiles(workspacePath: string): Promise<void> {
     const readmePath = join(workspacePath, "README.md");
     if (!(await pathExists(readmePath))) {
-      await Deno.writeTextFile(
+      await fsp.writeFile(
         readmePath,
         `# Agent Workspace
 
@@ -366,7 +371,7 @@ This is your personal workspace for long-term knowledge and notes.
 
     const indexPath = join(workspacePath, "notes", "_index.md");
     if (!(await pathExists(indexPath))) {
-      await Deno.writeTextFile(indexPath, "# Notes Index\n\n");
+      await fsp.writeFile(indexPath, "# Notes Index\n\n");
     }
 
     logger.debug("Agent workspace files initialized", { workspacePath });
@@ -418,22 +423,22 @@ This is your personal workspace for long-term knowledge and notes.
   async listChannelWorkspaces(platform?: string): Promise<string[]> {
     const workspaces: string[] = [];
     try {
-      for await (const platformEntry of Deno.readDir(this.workspacesRoot)) {
-        if (!platformEntry.isDirectory) continue;
+      for (const platformEntry of await fsp.readdir(this.workspacesRoot, { withFileTypes: true })) {
+        if (!platformEntry.isDirectory()) continue;
         if (platform && platformEntry.name !== platform) continue;
 
         const channelsDir = join(this.workspacesRoot, platformEntry.name, CHANNELS_DIR);
         try {
-          for await (const channelEntry of Deno.readDir(channelsDir)) {
-            if (!channelEntry.isDirectory) continue;
+          for (const channelEntry of await fsp.readdir(channelsDir, { withFileTypes: true })) {
+            if (!channelEntry.isDirectory()) continue;
             workspaces.push(`${platformEntry.name}/${channelEntry.name}`);
           }
         } catch (error) {
-          if (!(error instanceof Deno.errors.NotFound)) throw error;
+          if (!(isNotFoundError(error))) throw error;
         }
       }
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      if (!(isNotFoundError(error))) throw error;
     }
     return workspaces;
   }
@@ -445,14 +450,14 @@ This is your personal workspace for long-term knowledge and notes.
     const workspaces: string[] = [];
 
     try {
-      for await (const platformEntry of Deno.readDir(this.workspacesRoot)) {
-        if (!platformEntry.isDirectory) continue;
+      for (const platformEntry of await fsp.readdir(this.workspacesRoot, { withFileTypes: true })) {
+        if (!platformEntry.isDirectory()) continue;
         if (platform && platformEntry.name !== platform) continue;
 
         const platformPath = join(this.workspacesRoot, platformEntry.name);
 
-        for await (const userEntry of Deno.readDir(platformPath)) {
-          if (!userEntry.isDirectory) continue;
+        for (const userEntry of await fsp.readdir(platformPath, { withFileTypes: true })) {
+          if (!userEntry.isDirectory()) continue;
 
           workspaces.push(
             `${platformEntry.name}/${userEntry.name}`,
@@ -641,11 +646,11 @@ This is your personal workspace for long-term knowledge and notes.
     // A root that simply does not exist yet is a harmless no-op (the first
     // session creates it); a root that exists but is a link or cannot be read
     // is unsafe ancestry and must be reported, not silently skipped.
-    let rootInfo: Deno.FileInfo;
+    let rootInfo: Stats;
     try {
-      rootInfo = Deno.lstatSync(this.workspacesRoot);
+      rootInfo = fs.lstatSync(this.workspacesRoot);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         log.debug("Workspace root absent — no orphan temporary reclamation needed");
         return report;
       }
@@ -656,7 +661,7 @@ This is your personal workspace for long-term knowledge and notes.
       report.skipped++;
       return report;
     }
-    if (rootInfo.isSymlink || !rootInfo.isDirectory) {
+    if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
       log.warn("Workspace root is a link or not a directory; skipping orphan reclamation", {
         path: this.workspacesRoot,
       });
@@ -676,8 +681,8 @@ This is your personal workspace for long-term knowledge and notes.
     let platformNames: string[];
     try {
       platformNames = [];
-      for (const entry of Deno.readDirSync(root)) {
-        if (entry.isSymlink) {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) {
           // A linked or replaced platform container is never a cleanup target.
           log.warn("Skipping workspace platform with a linked or replaced component", {
             path: join(root, entry.name),
@@ -685,10 +690,10 @@ This is your personal workspace for long-term knowledge and notes.
           report.skipped++;
           continue;
         }
-        if (entry.isDirectory) platformNames.push(entry.name);
+        if (entry.isDirectory()) platformNames.push(entry.name);
       }
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return report;
+      if (isNotFoundError(error)) return report;
       log.warn("Failed to enumerate the workspace root", {
         error: error instanceof Error ? error.message : String(error),
         path: root,
@@ -747,11 +752,11 @@ This is your personal workspace for long-term knowledge and notes.
     platformName: string,
     log: Logger,
   ): { tmpPaths: string[]; skipped: number } {
-    let entries: Deno.DirEntry[];
+    let entries: Dirent[];
     try {
-      entries = [...Deno.readDirSync(platformPath)];
+      entries = [...fs.readdirSync(platformPath, { withFileTypes: true })];
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
+      if (!(isNotFoundError(error))) {
         log.warn("Failed to enumerate a platform workspace directory", {
           error: error instanceof Error ? error.message : String(error),
           path: platformPath,
@@ -765,14 +770,14 @@ This is your personal workspace for long-term knowledge and notes.
     for (const entry of entries) {
       const name = entry.name;
       if (name !== CHANNELS_DIR) {
-        if (entry.isSymlink) {
+        if (entry.isSymbolicLink()) {
           log.warn("Skipping workspace with a linked or replaced component", {
             path: join(platformPath, name),
           });
           skipped++;
           continue;
         }
-        if (!entry.isDirectory) continue;
+        if (!entry.isDirectory()) continue;
         workspaceDirs.push(join(platformPath, name));
         continue;
       }
@@ -789,18 +794,18 @@ This is your personal workspace for long-term knowledge and notes.
         continue;
       }
       try {
-        for (const channel of Deno.readDirSync(channelsPath)) {
-          if (channel.isSymlink) {
+        for (const channel of fs.readdirSync(channelsPath, { withFileTypes: true })) {
+          if (channel.isSymbolicLink()) {
             log.warn("Skipping channel workspace with a linked or replaced component", {
               path: join(channelsPath, channel.name),
             });
             skipped++;
             continue;
           }
-          if (channel.isDirectory) workspaceDirs.push(join(channelsPath, channel.name));
+          if (channel.isDirectory()) workspaceDirs.push(join(channelsPath, channel.name));
         }
       } catch (error) {
-        if (!(error instanceof Deno.errors.NotFound)) {
+        if (!(isNotFoundError(error))) {
           log.warn("Failed to enumerate a channel workspace directory", {
             error: error instanceof Error ? error.message : String(error),
             path: channelsPath,
@@ -813,14 +818,14 @@ This is your personal workspace for long-term knowledge and notes.
     for (const workspaceDir of workspaceDirs) {
       let hasTmp = false;
       try {
-        for (const entry of Deno.readDirSync(workspaceDir)) {
+        for (const entry of fs.readdirSync(workspaceDir, { withFileTypes: true })) {
           if (entry.name === "tmp") {
             hasTmp = true;
             break;
           }
         }
       } catch (error) {
-        if (!(error instanceof Deno.errors.NotFound)) {
+        if (!(isNotFoundError(error))) {
           log.warn("Failed to inspect a workspace directory", {
             error: error instanceof Error ? error.message : String(error),
             path: workspaceDir,
@@ -845,9 +850,9 @@ This is your personal workspace for long-term knowledge and notes.
     // observe it instead of pinning this manager to "no workspace root".
     if (this.canonicalRoot !== undefined) return this.canonicalRoot;
     try {
-      const stat = Deno.lstatSync(this.workspacesRoot);
-      if (!stat.isDirectory || stat.isSymlink) return undefined;
-      this.canonicalRoot = Deno.realPathSync(this.workspacesRoot);
+      const stat = fs.lstatSync(this.workspacesRoot);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return undefined;
+      this.canonicalRoot = fs.realpathSync(this.workspacesRoot);
     } catch {
       return undefined;
     }
@@ -870,9 +875,9 @@ This is your personal workspace for long-term knowledge and notes.
       // and the trust-boundary policy treats a missing entry as a silent
       // no-op. Any other unresolvable root state stays unsafe ancestry.
       try {
-        Deno.lstatSync(this.workspacesRoot);
+        fs.lstatSync(this.workspacesRoot);
       } catch (error) {
-        if (error instanceof Deno.errors.NotFound) return { status: "absent" };
+        if (isNotFoundError(error)) return { status: "absent" };
       }
       return { status: "unsafe", reason: "workspace-root-unavailable" };
     }
@@ -889,14 +894,14 @@ This is your personal workspace for long-term knowledge and notes.
     let current = root;
     for (const part of parts) {
       current = join(current, part);
-      let stat: Deno.FileInfo;
+      let stat: Stats;
       try {
-        stat = Deno.lstatSync(current);
+        stat = fs.lstatSync(current);
       } catch (error) {
-        if (error instanceof Deno.errors.NotFound) return { status: "absent" };
+        if (isNotFoundError(error)) return { status: "absent" };
         return { status: "unsafe", reason: "unreadable-workspace-component" };
       }
-      if (stat.isSymlink || !stat.isDirectory) {
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
         return { status: "unsafe", reason: "linked-or-replaced-component" };
       }
     }
@@ -921,12 +926,15 @@ This is your personal workspace for long-term knowledge and notes.
     log: Logger,
   ): boolean {
     let emptied = true;
-    // The directory iterator is consumed LAZILY and abandoned the moment the
+    // The directory stream is consumed LAZILY and abandoned the moment the
     // budget is reached: materialising a whole directory (or walking a long
     // run of failing entries) would reintroduce the unbounded work the node
-    // bound exists to prevent (design D4).
+    // bound exists to prevent (design D4). `opendirSync`/`readSync` keeps the
+    // enumeration incremental, as `Deno.readDirSync` did.
+    let dirHandle: Dir | undefined;
     try {
-      for (const entry of Deno.readDirSync(dir)) {
+      dirHandle = fs.opendirSync(dir);
+      for (let entry = dirHandle.readSync(); entry !== null; entry = dirHandle.readSync()) {
         if (depth === 0 && RESERVED_TMP_ENTRIES[entry.name] === true) continue;
         // Every ATTEMPTED inspection consumes budget, including entries whose
         // `lstat` then fails: the bound limits the pass's work, not its luck.
@@ -937,11 +945,11 @@ This is your personal workspace for long-term knowledge and notes.
         state.examined++;
 
         const childPath = join(dir, entry.name);
-        let stat: Deno.FileInfo;
+        let stat: Stats;
         try {
-          stat = Deno.lstatSync(childPath);
+          stat = fs.lstatSync(childPath);
         } catch (error) {
-          if (error instanceof Deno.errors.NotFound) continue;
+          if (isNotFoundError(error)) continue;
           log.warn("Failed to inspect a workspace tmp entry", {
             error: error instanceof Error ? error.message : String(error),
             path: childPath,
@@ -951,7 +959,7 @@ This is your personal workspace for long-term knowledge and notes.
           continue;
         }
 
-        if (stat.isDirectory) {
+        if (stat.isDirectory()) {
           if (depth + 1 > state.maxDepth) {
             // The depth bound is an eligibility decision, NOT a work-budget
             // exhaustion: content deeper than the limit is intentionally
@@ -973,7 +981,7 @@ This is your personal workspace for long-term knowledge and notes.
           emptied = this.removeTmpEntry(childPath, state, log) && emptied;
           continue;
         }
-        if (stat.isSymlink || stat.isFile) {
+        if (stat.isSymbolicLink() || stat.isFile()) {
           emptied = this.removeTmpEntry(childPath, state, log) && emptied;
           continue;
         }
@@ -986,7 +994,7 @@ This is your personal workspace for long-term knowledge and notes.
         emptied = false;
       }
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
+      if (!(isNotFoundError(error))) {
         log.warn("Failed to read a workspace tmp directory", {
           error: error instanceof Error ? error.message : String(error),
           path: dir,
@@ -994,6 +1002,12 @@ This is your personal workspace for long-term knowledge and notes.
         state.retained++;
       }
       return false;
+    } finally {
+      try {
+        dirHandle?.closeSync();
+      } catch {
+        // The handle is already closed after a failed read; nothing to release.
+      }
     }
     return emptied && !state.budgetExhausted;
   }
@@ -1005,11 +1019,11 @@ This is your personal workspace for long-term knowledge and notes.
     log: Logger,
   ): boolean {
     try {
-      Deno.removeSync(path);
+      removePathSync(path);
       state.removed++;
       return true;
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         state.removed++;
         return true;
       }
@@ -1026,8 +1040,8 @@ This is your personal workspace for long-term knowledge and notes.
 /** Whether a path is an existing ordinary directory (never a link). */
 function isOrdinaryDirectory(path: string): boolean {
   try {
-    const stat = Deno.lstatSync(path);
-    return stat.isDirectory && !stat.isSymlink;
+    const stat = fs.lstatSync(path);
+    return stat.isDirectory() && !stat.isSymbolicLink();
   } catch {
     return false;
   }

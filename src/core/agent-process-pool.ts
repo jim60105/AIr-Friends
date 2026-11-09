@@ -36,7 +36,7 @@ import {
 import type { Config } from "../types/config.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { WorkspaceTmpUnreclaimableSink } from "./workspace-manager.ts";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 
 const logger = createLogger("AgentProcessPool");
 

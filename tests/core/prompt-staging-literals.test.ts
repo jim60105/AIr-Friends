@@ -36,7 +36,7 @@
 // correction for an already-known concrete error in the active session.
 
 import { assert, assertEquals, assertFalse, assertStringIncludes, assertThrows } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { tokenizeShellCommand } from "@acp/command-syntax.ts";
 import {
   createTemplateEngine,
@@ -45,6 +45,7 @@ import {
 } from "@core/template-renderer.ts";
 import { assertSkillsRootDelivered, requireTrustedSkillsRoot } from "@core/skills-root.ts";
 import { ConfigError, ErrorCode } from "../../src/types/errors.ts";
+import { test } from "bun:test";
 
 const PROMPTS_DIR = join(import.meta.dirname ?? ".", "..", "..", "prompts");
 
@@ -234,7 +235,7 @@ for (const root of [RESOLVED_SKILLS_ROOT]) {
       ],
     ] as const
   ) {
-    Deno.test(`prompt skills root - ${label} @ ${root}`, async () => {
+    test(`prompt skills root - ${label} @ ${root}`, async () => {
       const rendered = await renderTemplate(env, join(PROMPTS_DIR, template), {
         ...baseVars,
         skillsDir: root,
@@ -256,7 +257,7 @@ for (const root of [RESOLVED_SKILLS_ROOT]) {
 // Quoted complete executable + payload arguments (pointer-only payload flags)
 // ---------------------------------------------------------------------------
 
-Deno.test("prompt skills root - reply recipe quotes the complete executable and arguments", async () => {
+test("prompt skills root - reply recipe quotes the complete executable and arguments", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
     ...baseVars,
     ...stagingVars,
@@ -273,7 +274,7 @@ Deno.test("prompt skills root - reply recipe quotes the complete executable and 
   assertFalse(line.includes("hi"), "reply text stays in the payload file");
 });
 
-Deno.test("prompt skills root - spontaneous post recipe quotes the complete executable", async () => {
+test("prompt skills root - spontaneous post recipe quotes the complete executable", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_spontaneous.md"), {
     ...baseVars,
     ...stagingVars,
@@ -286,7 +287,7 @@ Deno.test("prompt skills root - spontaneous post recipe quotes the complete exec
   assertEquals(recipeArgument(line, "--message-file"), `${STAGING_DIR}/reply.md`);
 });
 
-Deno.test("prompt skills root - reminder recipe quotes the complete executable", async () => {
+test("prompt skills root - reminder recipe quotes the complete executable", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reminder.md"), {
     ...baseVars,
     isDm: true,
@@ -304,7 +305,7 @@ Deno.test("prompt skills root - reminder recipe quotes the complete executable",
   assertEquals(recipeArgument(line, "--message-file"), `${STAGING_DIR}/reply.md`);
 });
 
-Deno.test("prompt skills root - summary recipe quotes memory-save and its content file", async () => {
+test("prompt skills root - summary recipe quotes memory-save and its content file", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_summary.md"), {
     ...baseVars,
     ...stagingVars,
@@ -318,7 +319,7 @@ Deno.test("prompt skills root - summary recipe quotes memory-save and its conten
   assertEquals(recipeArgument(line, "--content-file"), `${STAGING_DIR}/summary.md`);
 });
 
-Deno.test("prompt skills root - maintenance recipe quotes memory-save and its content file", async () => {
+test("prompt skills root - maintenance recipe quotes memory-save and its content file", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_memory_maintenance.md"), {
     ...baseVars,
     workspaceKey: "discord/u1",
@@ -354,7 +355,7 @@ for (
     ["double quote", '/opt/air/a"b'],
   ] as const
 ) {
-  Deno.test(`prompt skills root - a root with a ${label} stays one literal argument`, async () => {
+  test(`prompt skills root - a root with a ${label} stays one literal argument`, async () => {
     const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
       ...baseVars,
       skillsDir: hostileValue,
@@ -375,7 +376,7 @@ for (
   });
 }
 
-Deno.test("prompt skills root - a staging dir with a space stays one literal argument", async () => {
+test("prompt skills root - a staging dir with a space stays one literal argument", async () => {
   const staging = "/data/my workspaces/discord/123/tmp/sess_literal_42";
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
     ...baseVars,
@@ -392,7 +393,7 @@ Deno.test("prompt skills root - a staging dir with a space stays one literal arg
 // renders without the literal root fails before delivery
 // ---------------------------------------------------------------------------
 
-Deno.test("prompt skills root - required root validation rejects absent, empty and relative roots", () => {
+test("prompt skills root - required root validation rejects absent, empty and relative roots", () => {
   for (
     const [label, value] of [
       ["absent", undefined],
@@ -415,7 +416,7 @@ Deno.test("prompt skills root - required root validation rejects absent, empty a
   assertEquals(requireTrustedSkillsRoot(RESOLVED_SKILLS_ROOT, "test"), RESOLVED_SKILLS_ROOT);
 });
 
-Deno.test("prompt skills root - a mounted classified template without the root fails before delivery", async () => {
+test("prompt skills root - a mounted classified template without the root fails before delivery", async () => {
   // An operator-mounted classified template that never interpolates the root
   // (the pre-change bundled shape) renders a rootless prompt.
   const rootless = await renderTemplateString(
@@ -436,7 +437,7 @@ Deno.test("prompt skills root - a mounted classified template without the root f
 // even when an operator mounts them without the staging pair (fallback forms
 // removed). The trusted root is still supplied: a classified render always
 // resolves one.
-Deno.test("prompt skills root - no staging token fallback even without the pair", async () => {
+test("prompt skills root - no staging token fallback even without the pair", async () => {
   for (const template of ["system_summary.md", "system_reminder.md"]) {
     const rendered = await renderTemplate(env, join(PROMPTS_DIR, template), {
       ...baseVars,
@@ -458,7 +459,7 @@ Deno.test("prompt skills root - no staging token fallback even without the pair"
 // A Skill-API-disabled session has NO literal session id: the recipe block is
 // omitted (it cannot name an id the skill library would honor) instead of
 // rendering an empty or placeholder argument, and the render must not fail.
-Deno.test("prompt skills root - summary without a session id renders the root and omits the recipe", async () => {
+test("prompt skills root - summary without a session id renders the root and omits the recipe", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_summary.md"), {
     ...baseVars,
     tmpDir: STAGING_DIR,
@@ -479,7 +480,7 @@ Deno.test("prompt skills root - summary without a session id renders the root an
 // Dashboard web-chat and generic renders acquire nothing
 // ---------------------------------------------------------------------------
 
-Deno.test("prompt skills root - dashboard web-chat keeps its skill prohibition and acquires no recipe", async () => {
+test("prompt skills root - dashboard web-chat keeps its skill prohibition and acquires no recipe", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_web_chat.md"), {
     ...baseVars,
     isDm: true,
@@ -489,7 +490,7 @@ Deno.test("prompt skills root - dashboard web-chat keeps its skill prohibition a
   assertFalse(rendered.includes("/scripts/"), "web-chat gets no skill invocation recipe");
 });
 
-Deno.test("prompt skills root - a generic render needs no root and gains no recipe", async () => {
+test("prompt skills root - a generic render needs no root and gains no recipe", async () => {
   const rendered = await renderTemplateString(env, "Generic {{ label }} prompt.", {
     label: "assistant",
   });
@@ -658,7 +659,7 @@ function assertRetrievalContract(rendered: string, label: string): void {
 for (const agentType of ["opencode", "omp"] as const) {
   for (const yolo of [false, true] as const) {
     const label = `reply ${agentType} ${yolo ? "YOLO" : "restricted"}`;
-    Deno.test(`prompt instructions - ${label} owns one conditional retrieval rule`, async () => {
+    test(`prompt instructions - ${label} owns one conditional retrieval rule`, async () => {
       const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
         ...baseVars,
         agentType,
@@ -675,7 +676,7 @@ for (const agentType of ["opencode", "omp"] as const) {
   }
 }
 
-Deno.test("prompt instructions - the retrieval rule follows context sufficiency, not message text", async () => {
+test("prompt instructions - the retrieval rule follows context sufficiency, not message text", async () => {
   const render = (userContextMessage: string) =>
     renderTemplate(env, join(PROMPTS_DIR, "system_reply.md"), {
       ...baseVars,
@@ -714,7 +715,7 @@ Deno.test("prompt instructions - the retrieval rule follows context sufficiency,
   assertStringIncludes(instructionSection(missingHistory), MISSING_HISTORY_TRIGGER);
 });
 
-Deno.test("prompt instructions - spontaneous posting keeps its purpose without narration mandates", async () => {
+test("prompt instructions - spontaneous posting keeps its purpose without narration mandates", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_spontaneous.md"), {
     ...baseVars,
     ...stagingVars,
@@ -739,7 +740,7 @@ Deno.test("prompt instructions - spontaneous posting keeps its purpose without n
   }
 });
 
-Deno.test("prompt instructions - dashboard chat stays direct and skill-free without narration mandates", async () => {
+test("prompt instructions - dashboard chat stays direct and skill-free without narration mandates", async () => {
   const rendered = await renderTemplate(env, join(PROMPTS_DIR, "system_web_chat.md"), {
     ...baseVars,
     isDm: true,

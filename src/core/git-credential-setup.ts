@@ -1,6 +1,7 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import { createLogger } from "@utils/logger.ts";
 import type { GitBackupConfig, GitCredentialConfig } from "../types/config.ts";
+import fsp from "node:fs/promises";
 
 const logger = createLogger("GitCredentialSetup");
 
@@ -44,7 +45,7 @@ export function resolveUsername(backupConfig?: GitBackupConfig): string {
  */
 export function resolvePassword(backupConfig?: GitBackupConfig): string {
   return backupConfig?.authPassword ??
-    Deno.env.get("GITHUB_TOKEN") ??
+    process.env["GITHUB_TOKEN"] ??
     "";
 }
 
@@ -82,13 +83,13 @@ export async function setupGitCredentials(
 
   const host = resolveHost(credentialConfig, backupConfig);
   const username = resolveUsername(backupConfig);
-  const home = Deno.env.get("HOME") ?? "/home/deno";
+  const home = process.env["HOME"] ?? "/home/deno";
   const credentialFilePath = join(home, ".git-credentials");
   const credentialContent = `${formatCredentialLine(host, username, password)}\n`;
 
   try {
-    await Deno.mkdir(home, { recursive: true });
-    await Deno.writeTextFile(credentialFilePath, credentialContent);
+    await fsp.mkdir(home, { recursive: true });
+    await fsp.writeFile(credentialFilePath, credentialContent);
   } catch (error) {
     logger.warn("Failed to write .git-credentials file, git credential store will not work", {
       error: (error as Error).message,
@@ -97,7 +98,7 @@ export async function setupGitCredentials(
   }
 
   try {
-    await Deno.chmod(credentialFilePath, 0o600);
+    await fsp.chmod(credentialFilePath, 0o600);
   } catch (error) {
     logger.warn("Failed to set .git-credentials file permissions", {
       error: (error as Error).message,
