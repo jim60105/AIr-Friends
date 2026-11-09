@@ -7,6 +7,10 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir, makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (): PlatformAdapter => {
@@ -35,8 +39,8 @@ const createMockPlatformAdapter = (): PlatformAdapter => {
   } as unknown as PlatformAdapter;
 };
 
-Deno.test("SkillRegistry - registers all skills", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("SkillRegistry - registers all skills", () => {
+  const tempDir = makeTempDirSync();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -54,11 +58,11 @@ Deno.test("SkillRegistry - registers all skills", () => {
   assertEquals(skills.includes("react-message"), true);
 
   // Cleanup
-  Deno.removeSync(tempDir, { recursive: true });
+  fs.rmSync(tempDir, { recursive: true });
 });
 
-Deno.test("SkillRegistry - hasSkill checks skill existence", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("SkillRegistry - hasSkill checks skill existence", () => {
+  const tempDir = makeTempDirSync();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -70,11 +74,11 @@ Deno.test("SkillRegistry - hasSkill checks skill existence", () => {
   assertEquals(registry.hasSkill("unknown-skill"), false);
 
   // Cleanup
-  Deno.removeSync(tempDir, { recursive: true });
+  fs.rmSync(tempDir, { recursive: true });
 });
 
-Deno.test("SkillRegistry - executeSkill executes known skill", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillRegistry - executeSkill executes known skill", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -94,8 +98,8 @@ Deno.test("SkillRegistry - executeSkill executes known skill", async () => {
   };
 
   // Create workspace directory
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await fsp.mkdir(workspace.path, { recursive: true });
+  await fsp.writeFile(`${workspace.path}/memory.public.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -117,11 +121,11 @@ Deno.test("SkillRegistry - executeSkill executes known skill", async () => {
   assertEquals(result.success, true);
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("SkillRegistry - executeSkill returns error for unknown skill", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillRegistry - executeSkill returns error for unknown skill", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -153,11 +157,11 @@ Deno.test("SkillRegistry - executeSkill returns error for unknown skill", async 
   assertEquals(result.error, "Unknown skill: unknown-skill");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });
 
-Deno.test("SkillRegistry - getReplyHandler returns reply handler", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("SkillRegistry - getReplyHandler returns reply handler", () => {
+  const tempDir = makeTempDirSync();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -169,11 +173,11 @@ Deno.test("SkillRegistry - getReplyHandler returns reply handler", () => {
   assertExists(replyHandler);
 
   // Cleanup
-  Deno.removeSync(tempDir, { recursive: true });
+  fs.rmSync(tempDir, { recursive: true });
 });
 
-Deno.test("SkillRegistry - getReactionHandler returns handler", () => {
-  const tempDir = Deno.makeTempDirSync();
+test("SkillRegistry - getReactionHandler returns handler", () => {
+  const tempDir = makeTempDirSync();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -185,11 +189,11 @@ Deno.test("SkillRegistry - getReactionHandler returns handler", () => {
   assertExists(reactionHandler);
 
   // Cleanup
-  Deno.removeSync(tempDir, { recursive: true });
+  fs.rmSync(tempDir, { recursive: true });
 });
 
-Deno.test("SkillRegistry - executeSkill handles handler exceptions", async () => {
-  const tempDir = await Deno.makeTempDir();
+test("SkillRegistry - executeSkill handles handler exceptions", async () => {
+  const tempDir = await makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
@@ -231,5 +235,5 @@ Deno.test("SkillRegistry - executeSkill handles handler exceptions", async () =>
   assertEquals(typeof result.error, "string");
 
   // Cleanup
-  await Deno.remove(tempDir, { recursive: true });
+  await fsp.rm(tempDir, { recursive: true });
 });

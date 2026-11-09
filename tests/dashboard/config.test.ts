@@ -3,17 +3,20 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { loadConfig } from "@core/config-loader.ts";
 import { ConfigError } from "../../src/types/errors.ts";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
 
 async function withTestConfig(
   configContent: string,
   fn: (dir: string) => Promise<void>,
 ): Promise<void> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${tempDir}/config.yaml`, configContent);
+    await fsp.writeFile(`${tempDir}/config.yaml`, configContent);
     await fn(tempDir);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 }
 
@@ -35,7 +38,7 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-Deno.test("Dashboard config - defaults applied when section missing", async () => {
+test("Dashboard config - defaults applied when section missing", async () => {
   await withTestConfig(minimalConfig, async (dir) => {
     const config = await loadConfig(dir);
     assertEquals(config.dashboard?.enabled, false);
@@ -44,7 +47,7 @@ Deno.test("Dashboard config - defaults applied when section missing", async () =
   });
 });
 
-Deno.test("Dashboard config - reject enabled: true with empty passphrase", async () => {
+test("Dashboard config - reject enabled: true with empty passphrase", async () => {
   const config = minimalConfig + `
 dashboard:
   enabled: true
@@ -59,7 +62,7 @@ dashboard:
   });
 });
 
-Deno.test("Dashboard config - reject enabled: true with missing passphrase", async () => {
+test("Dashboard config - reject enabled: true with missing passphrase", async () => {
   const config = minimalConfig + `
 dashboard:
   enabled: true
@@ -73,7 +76,7 @@ dashboard:
   });
 });
 
-Deno.test("Dashboard config - valid enabled config accepted", async () => {
+test("Dashboard config - valid enabled config accepted", async () => {
   const config = minimalConfig + `
 dashboard:
   enabled: true
@@ -92,7 +95,7 @@ dashboard:
   });
 });
 
-Deno.test("Dashboard config - F5: reject enabled with weak (short) passphrase", async () => {
+test("Dashboard config - F5: reject enabled with weak (short) passphrase", async () => {
   const config = minimalConfig + `
 dashboard:
   enabled: true
@@ -107,7 +110,7 @@ dashboard:
   });
 });
 
-Deno.test("Dashboard config - F8/F10/F5: new fields loaded from YAML", async () => {
+test("Dashboard config - F8/F10/F5: new fields loaded from YAML", async () => {
   const config = minimalConfig + `
 dashboard:
   enabled: true
@@ -126,13 +129,13 @@ dashboard:
   });
 });
 
-Deno.test("Dashboard config - env var overrides", async () => {
-  Deno.env.set("DASHBOARD_ENABLED", "true");
-  Deno.env.set("DASHBOARD_PORT", "7777");
-  Deno.env.set("DASHBOARD_PASSPHRASE", "env-secret-that-is-long");
-  Deno.env.set("DASHBOARD_HOST", "0.0.0.0");
-  Deno.env.set("DASHBOARD_BEHIND_HTTPS_PROXY", "true");
-  Deno.env.set("DASHBOARD_TRUSTED_PROXIES", "10.0.0.1, 10.0.0.2");
+test("Dashboard config - env var overrides", async () => {
+  process.env["DASHBOARD_ENABLED"] = "true";
+  process.env["DASHBOARD_PORT"] = "7777";
+  process.env["DASHBOARD_PASSPHRASE"] = "env-secret-that-is-long";
+  process.env["DASHBOARD_HOST"] = "0.0.0.0";
+  process.env["DASHBOARD_BEHIND_HTTPS_PROXY"] = "true";
+  process.env["DASHBOARD_TRUSTED_PROXIES"] = "10.0.0.1, 10.0.0.2";
   try {
     await withTestConfig(minimalConfig, async (dir) => {
       const config = await loadConfig(dir);
@@ -144,11 +147,11 @@ Deno.test("Dashboard config - env var overrides", async () => {
       assertEquals(config.dashboard?.trustedProxies, ["10.0.0.1", "10.0.0.2"]);
     });
   } finally {
-    Deno.env.delete("DASHBOARD_ENABLED");
-    Deno.env.delete("DASHBOARD_PORT");
-    Deno.env.delete("DASHBOARD_PASSPHRASE");
-    Deno.env.delete("DASHBOARD_HOST");
-    Deno.env.delete("DASHBOARD_BEHIND_HTTPS_PROXY");
-    Deno.env.delete("DASHBOARD_TRUSTED_PROXIES");
+    delete process.env["DASHBOARD_ENABLED"];
+    delete process.env["DASHBOARD_PORT"];
+    delete process.env["DASHBOARD_PASSPHRASE"];
+    delete process.env["DASHBOARD_HOST"];
+    delete process.env["DASHBOARD_BEHIND_HTTPS_PROXY"];
+    delete process.env["DASHBOARD_TRUSTED_PROXIES"];
   }
 });

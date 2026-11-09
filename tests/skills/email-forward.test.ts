@@ -16,7 +16,7 @@
 // The real-socket SMTP exchange lives in tests/skills/email-forward-smoke.test.ts.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import {
   EMAIL_COMPOSE_CODES,
   EMAIL_FORWARD_CODES,
@@ -62,6 +62,10 @@ import type {
 } from "../../src/platforms/email/smtp-client.ts";
 import { SmtpDiagnosticCode } from "../../src/platforms/email/smtp-client.ts";
 import { decodePartBody, latin1Decode, parseMimeParts } from "../helpers/mime-parts.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir, removePathSync } from "../../src/utils/fs-compat.ts";
 
 const SELF_ADDRESS = "user@example.org";
 const OWNER = normalizeEmailMailbox(SELF_ADDRESS).userId;
@@ -320,15 +324,15 @@ async function withSeededSource(
   }) => Promise<void> | void,
   seedOptions: { body?: string; withAttachments?: boolean } = {},
 ): Promise<void> {
-  const base = await Deno.makeTempDir();
+  const base = await makeTempDir();
   try {
     const store = new EmailMessageStore({ workspacesRoot: join(base, "workspaces") });
     const source = await seedSource(store, OWNER, seedOptions);
     const stagingDir = join(base, "tmp", SESSION_ID);
-    Deno.mkdirSync(stagingDir, { recursive: true });
+    fs.mkdirSync(stagingDir, { recursive: true });
     await body({ base, store, source, stagingDir });
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 }
 
@@ -356,7 +360,7 @@ function resultData(result: SkillResult): Record<string, unknown> {
 // Group A: grant binding, owner-scoped source access and combined limits
 // ---------------------------------------------------------------------------
 
-Deno.test("forward - a granted source is resolved through the owner scope into one draft", async () => {
+test("forward - a granted source is resolved through the owner scope into one draft", async () => {
   await withSeededSource(async ({ base, store, source }) => {
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService, forwardSourceStore: store });
@@ -416,7 +420,7 @@ Deno.test("forward - a granted source is resolved through the owner scope into o
   });
 });
 
-Deno.test("forward - a grant is required and its action, session, owner, work item, destination and source are all matched", async () => {
+test("forward - a grant is required and its action, session, owner, work item, destination and source are all matched", async () => {
   await withSeededSource(async ({ base, store, source }) => {
     const foreign = await seedSource(
       new EmailMessageStore({ workspacesRoot: join(base, "workspaces-other") }),
@@ -487,8 +491,8 @@ Deno.test("forward - a grant is required and its action, session, owner, work it
   });
 });
 
-Deno.test("forward - another owner's message is refused as a source without disclosing it", async () => {
-  const base = await Deno.makeTempDir();
+test("forward - another owner's message is refused as a source without disclosing it", async () => {
+  const base = await makeTempDir();
   try {
     const store = new EmailMessageStore({ workspacesRoot: join(base, "workspaces") });
     const foreignStore = new EmailMessageStore({ workspacesRoot: join(base, "workspaces-other") });
@@ -527,11 +531,11 @@ Deno.test("forward - another owner's message is refused as a source without disc
     assertEquals(unknown.code, EMAIL_FORWARD_CODES.SOURCE);
     assertEquals(mailService.drafts.length, 0);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("forward - a source is complete or it is refused: missing and changed archive material", async () => {
+test("forward - a source is complete or it is refused: missing and changed archive material", async () => {
   const mutations: Array<{
     label: string;
     mutate: (source: SeededSource) => void;
@@ -539,13 +543,13 @@ Deno.test("forward - a source is complete or it is refused: missing and changed 
   }> = [
     {
       label: "raw .eml removed",
-      mutate: (source) => Deno.removeSync(join(source.root, "source", `${source.recordId}.eml`)),
+      mutate: (source) => removePathSync(join(source.root, "source", `${source.recordId}.eml`)),
       expectedCode: EMAIL_FORWARD_CODES.SOURCE,
     },
     {
       label: "raw .eml truncated",
       mutate: (source) =>
-        Deno.writeFileSync(
+        fs.writeFileSync(
           join(source.root, "source", `${source.recordId}.eml`),
           source.sourceBytes.subarray(0, source.sourceBytes.byteLength - 20),
         ),
@@ -554,15 +558,13 @@ Deno.test("forward - a source is complete or it is refused: missing and changed 
     {
       label: "original attachment removed",
       mutate: (source) =>
-        Deno.removeSync(
-          join(source.root, "attachments", source.recordId, source.attachments[1].id),
-        ),
+        removePathSync(join(source.root, "attachments", source.recordId, source.attachments[1].id)),
       expectedCode: EMAIL_FORWARD_CODES.SOURCE,
     },
     {
       label: "original attachment changed",
       mutate: (source) =>
-        Deno.writeFileSync(
+        fs.writeFileSync(
           join(source.root, "attachments", source.recordId, source.attachments[0].id),
           new Uint8Array([1, 2, 3]),
         ),
@@ -587,7 +589,7 @@ Deno.test("forward - a source is complete or it is refused: missing and changed 
   }
 });
 
-Deno.test("forward - a failing source store and an unwired source store fail closed", async () => {
+test("forward - a failing source store and an unwired source store fail closed", async () => {
   await withSeededSource(async ({ base, store, source }) => {
     const throwing = new RecordingMailService();
     const throwingResult = await new EmailComposeHandler({
@@ -625,7 +627,7 @@ Deno.test("forward - a failing source store and an unwired source store fail clo
   });
 });
 
-Deno.test("forward - the combined accounting covers the raw source, every original attachment and every added file", async () => {
+test("forward - the combined accounting covers the raw source, every original attachment and every added file", async () => {
   const cases: Array<{
     label: string;
     limits: { maxFilesPerInvocation?: number; maxFileSizeMb?: number; maxTotalSizeMb?: number };
@@ -659,7 +661,7 @@ Deno.test("forward - the combined accounting covers the raw source, every origin
     await withSeededSource(
       async ({ base, store, source, stagingDir }) => {
         const addedPath = join(stagingDir, "added.txt");
-        Deno.writeTextFileSync(addedPath, "added-file-bytes");
+        fs.writeFileSync(addedPath, "added-file-bytes");
         const mailService = new RecordingMailService();
         const handler = new EmailComposeHandler({
           mailService,
@@ -685,7 +687,7 @@ Deno.test("forward - the combined accounting covers the raw source, every origin
   // A comfortable excess accepts the same forward WITH its added attachment.
   await withSeededSource(async ({ base, store, source, stagingDir }) => {
     const addedPath = join(stagingDir, "added.txt");
-    Deno.writeTextFileSync(addedPath, "added-file-bytes");
+    fs.writeFileSync(addedPath, "added-file-bytes");
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({
       mailService,
@@ -708,17 +710,17 @@ Deno.test("forward - the combined accounting covers the raw source, every origin
   });
 });
 
-Deno.test("forward - request shape, duplicate references and empty commentary", async () => {
+test("forward - request shape, duplicate references and empty commentary", async () => {
   await withSeededSource(async ({ base, store, source, stagingDir }) => {
     const addedPath = join(stagingDir, "added.txt");
-    Deno.writeTextFileSync(addedPath, "added-file-bytes");
+    fs.writeFileSync(addedPath, "added-file-bytes");
     // A staging-internal symlink alias of the SAME file: two spellings, one reference.
     const aliasPath = join(stagingDir, "alias.txt");
-    Deno.symlinkSync(addedPath, aliasPath);
+    fs.symlinkSync(addedPath, aliasPath);
     // An identifier-shaped extension the refusal must NOT echo back (the sentinel is private text
     // that the shape heuristic cannot tell apart from an extension name).
     const sentinelExtensionPath = join(stagingDir, `report.${SOURCE_BODY_SENTINEL}`);
-    Deno.writeTextFileSync(sentinelExtensionPath, "sentinel-extension-bytes");
+    fs.writeFileSync(sentinelExtensionPath, "sentinel-extension-bytes");
 
     const rejected: Array<{
       label: string;
@@ -814,7 +816,7 @@ Deno.test("forward - request shape, duplicate references and empty commentary", 
   });
 });
 
-Deno.test("forward - the audit projection records opaque identifiers and digests only", async () => {
+test("forward - the audit projection records opaque identifiers and digests only", async () => {
   const projected = await emailComposeAuditParams({
     grantId: GRANT_ID,
     request: {
@@ -979,8 +981,8 @@ function buildForwardHarness(base: string): ForwardHarness {
   return { service, smtp, imap, store };
 }
 
-Deno.test("forward - the captured wire message preserves the original bytes, order and signature once", async () => {
-  const base = await Deno.makeTempDir();
+test("forward - the captured wire message preserves the original bytes, order and signature once", async () => {
+  const base = await makeTempDir();
   try {
     const widgetHarness = buildForwardHarness(base);
     const source = await seedSource(widgetHarness.store, OWNER);
@@ -1049,12 +1051,12 @@ Deno.test("forward - the captured wire message preserves the original bytes, ord
     assertEquals(widgetHarness.imap.appended.length, 1);
     assertEquals(widgetHarness.imap.appended[0], widgetHarness.smtp.submissions[0].emlBytes);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("forward - the granted operation is idempotent and changed commentary never resends", async () => {
-  const base = await Deno.makeTempDir();
+test("forward - the granted operation is idempotent and changed commentary never resends", async () => {
+  const base = await makeTempDir();
   try {
     const harness = buildForwardHarness(base);
     const source = await seedSource(harness.store, OWNER);
@@ -1098,12 +1100,12 @@ Deno.test("forward - the granted operation is idempotent and changed commentary 
     );
     assertEquals(harness.imap.appended.length, 1);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("forward - source content grants no destination: an injected redirect reaches nobody else", async () => {
-  const base = await Deno.makeTempDir();
+test("forward - source content grants no destination: an injected redirect reaches nobody else", async () => {
+  const base = await makeTempDir();
   try {
     const harness = buildForwardHarness(base);
     const source = await seedSource(harness.store, OWNER);
@@ -1136,12 +1138,12 @@ Deno.test("forward - source content grants no destination: an injected redirect 
     assertEquals(redirected.code, EMAIL_COMPOSE_CODES.GRANT);
     assertEquals(harness.smtp.submissions.length, 1, "no second SMTP transaction is attempted");
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("forward - an attachment-only source is forwarded completely and a missing part sends nothing", async () => {
-  const base = await Deno.makeTempDir();
+test("forward - an attachment-only source is forwarded completely and a missing part sends nothing", async () => {
+  const base = await makeTempDir();
   try {
     const harness = buildForwardHarness(base);
     const source = await seedSource(harness.store, OWNER, { body: "" });
@@ -1172,7 +1174,7 @@ Deno.test("forward - an attachment-only source is forwarded completely and a mis
 
     // Delta specification "One attachment unavailable": no SMTP send, one safe incomplete-source
     // result, and the already-sent count does not move.
-    Deno.removeSync(join(source.root, "attachments", source.recordId, source.attachments[0].id));
+    removePathSync(join(source.root, "attachments", source.recordId, source.attachments[0].id));
     const failed = await handler.handleSendEmail(
       {
         grantId: GRANT_ID,
@@ -1185,12 +1187,12 @@ Deno.test("forward - an attachment-only source is forwarded completely and a mis
     assertStringIncludes(String(failed.error), "incomplete");
     assertEquals(harness.smtp.submissions.length, 1, "no SMTP send for an incomplete source");
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("forward - a rejected SMTP peer yields an explicit failure and the recorded result is reused", async () => {
-  const base = await Deno.makeTempDir();
+test("forward - a rejected SMTP peer yields an explicit failure and the recorded result is reused", async () => {
+  const base = await makeTempDir();
   try {
     const harness = buildForwardHarness(base);
     harness.smtp.mode = "failed";
@@ -1222,12 +1224,12 @@ Deno.test("forward - a rejected SMTP peer yields an explicit failure and the rec
       "a failed operation is never resubmitted blindly",
     );
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("compose - the row-20 path is unchanged: no forward source, its own slot and result shape", async () => {
-  const base = await Deno.makeTempDir();
+test("compose - the row-20 path is unchanged: no forward source, its own slot and result shape", async () => {
+  const base = await makeTempDir();
   try {
     const harness = buildForwardHarness(base);
     const source = await seedSource(harness.store, OWNER);
@@ -1254,18 +1256,18 @@ Deno.test("compose - the row-20 path is unchanged: no forward source, its own sl
     // A compose request never reaches the source store, even when it is wired.
     assertEquals(source.recordId.length > 0, true);
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
 
-Deno.test("compose - the row-20 result guidance and aggregate refusal text are unchanged", async () => {
-  const base = await Deno.makeTempDir();
+test("compose - the row-20 result guidance and aggregate refusal text are unchanged", async () => {
+  const base = await makeTempDir();
   try {
     const store = new EmailMessageStore({ workspacesRoot: join(base, "workspaces") });
     const stagingDir = join(base, "tmp", SESSION_ID);
-    Deno.mkdirSync(stagingDir, { recursive: true });
+    fs.mkdirSync(stagingDir, { recursive: true });
     const addedPath = join(stagingDir, "report.txt");
-    Deno.writeTextFileSync(addedPath, "compose-attachment-bytes");
+    fs.writeFileSync(addedPath, "compose-attachment-bytes");
 
     const mailService = new RecordingMailService();
     const handler = new EmailComposeHandler({ mailService, forwardSourceStore: store });
@@ -1302,6 +1304,6 @@ Deno.test("compose - the row-20 result guidance and aggregate refusal text are u
     assertEquals(refused.code, EMAIL_COMPOSE_CODES.ATTACHMENT);
     assertStringIncludes(String(refused.error), "The attachments total");
   } finally {
-    await Deno.remove(base, { recursive: true });
+    await fsp.rm(base, { recursive: true });
   }
 });
