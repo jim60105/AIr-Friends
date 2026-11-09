@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Relocated current time timestamp closer to instructions in system reply prompt
+
+## [0.37.0] - 2026-11-10
+
+### Changed
+
+- **BREAKING**: The runtime is Bun 1.4.2 on the digest-pinned `oven/bun:1.4.2-debian` base image. Deno is no longer used, in the repository or in the image.
+- **BREAKING**: The image home directory is `/home/air` (was `/home/deno`), and `AGENT_SKILLS_DIR` defaults to `/home/air/.agents/skills`.
+- **BREAKING**: `ENV` replaces `DENO_ENV`; `DENO_DIR` and `DENO_NO_UPDATE_CHECK` are removed.
+- **BREAKING**: Built-in skills are approved only by direct execution or the literal `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml <script>` form. `agent-config/opencode.json` routes `bun *` to ask and denies `bunx *`; every other flag is denied.
+- **BREAKING**: The readiness check reports `binary:bun` instead of `binary:deno`.
+- **BREAKING**: `scripts/omp/bundle-omp-extension.sh` takes two arguments: the source root and the output directory.
+- **BREAKING**: The 75% coverage floor is line coverage over `src/`. Bun 1.4.2 LCOV has no branch records, so the Deno-era branch floor does not apply.
+
+### Migration
+
+- In Helm values and ArgoCD parameters, set `env.ENV` instead of `env.DENO_ENV`, and move any custom `AGENT_SKILLS_DIR` under `/home/air` (the image default is `/home/air/.agents/skills`). A relative `AGENT_SKILLS_DIR` anchors at the working directory.
+- Deploy an image digest, never the mutable `latest` tag. Persisted `/app/data` formats are unchanged; keep the pre-cutover `/app/data` backup.
+- Rollback: deploy `ghcr.io/jim60105/air-friends@sha256:fad837549aaeeadb7ac6be51d58cdb2f25c3effb0dedc8abbf0eb32df93b0059` with the previous parameters (`env.DENO_ENV` and `AGENT_SKILLS_DIR=/home/deno/.agents/skills`). No data restore is expected.
+
+### Verification
+
+- Test parity against the Deno baseline on the final tree: 3,836 baseline tests, 3,825 matched, zero missing, zero failing, zero deferred, and 14 recorded exceptions (11 removed, 3 renamed with replacements). The suite ran 4,005 cases across 207 files with zero failures and 12 skips; the four trusted-config suites ran inside the final image, where `/opt/air/skill-bunfig.toml` exists.
+- Drill comparison, thresholded before the run: startup 1.308 s to 0.787 s, idle memory 109.589 MiB to 77.782 MiB, idle file descriptors 58.75 to 40, leftover processes 0 to 0, stop time 15 s to 0.087 s, stop exit 0 to 0, and restart-ready true to true — seven `ok` lines.
+- Rollback drill: the rollback image started on the state Bun wrote and its daemon-generated `skill-secret` matched the recorded attestation.
+- The image smoke passed all six checks on the final image: help, tools, skill-config, skill-run, in-image tests (40 passing) and the seccomp `openat2` fail-closed path. CI on the migration tip: https://github.com/jim60105/AIr-Friends/actions/runs/42670377760.
+- **Caveat — the live platform trial is deferred, not passed.** The owner deferred it on 2026-11-10: production holds the only live Discord bot instance and no test accounts or credentials exist. No live Discord, Misskey or Email reply, reminder firing, live memory recall, Skill API call from a skill, or OpenCode/OMP session has been verified. The drill measured the repository's development data, not production `/app/data`, and ran with every platform disabled (proven adapter-free by the zero-platform log guard), so its numbers are not production-representative. Verify those checks in a post-release maintenance window with test accounts; a failure there is a release incident handled with the rollback above.
+
 ## [0.36.1] - 2026-10-19
 
 ### Fixed
@@ -1264,7 +1291,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.36.1...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/jim60105/AIr-Friends/compare/v0.36.1...v0.37.0
 [0.36.1]: https://github.com/jim60105/AIr-Friends/compare/v0.36.0...v0.36.1
 [0.36.0]: https://github.com/jim60105/AIr-Friends/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/jim60105/AIr-Friends/compare/v0.34.1...v0.35.0
