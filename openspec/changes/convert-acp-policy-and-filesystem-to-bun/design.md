@@ -79,6 +79,7 @@ Retype the seam as `lstat(path: string): Stats; readDir(path: string): Dirent[];
 
 - [A converted test now fails for a reason other than a deferred symbol] → Fix the conversion, not the assertion. If the failure is a real Bun behavior difference, stop and report it with the failing test name; do not add an exception for a failing test.
 - [A `Dirent` from `readdirSync(..., { withFileTypes: true })` reports `isSymbolicLink()` differently from Deno's `isSymlink` for a symlink to a directory] → Both report the link itself, not the target; the inventory tests with symlinked scripts are the check.
+- [Bun 1.4.2 has no incremental directory enumeration, so the OMP artifact discovery bounds only bound the entries the loop inspects] → Verified in the pinned runtime source: `Dir#readOp`/`readSync` call the whole-directory `fs.readdir`/`readdirSync` on the first read, so `fsp.opendir` is still eager. The conversion keeps the streaming `for await ... opendir` shape (the `Deno.readDir` intent, and the same precedent as `workspace-manager.ts`'s `opendirSync/readSync`) and preserves every `bounds_exceeded` outcome; excluding a huge directory from allocation would need a native incremental seam, which is outside this slice.
 
 ## Design deviations (apply time)
 
