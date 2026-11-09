@@ -449,3 +449,17 @@ In shared-process mode the permission gate SHALL confine agent file access to th
 - **WHEN** the agent performs file access
 - **THEN** the permission gate SHALL confine access to the session's own workspace, the session-scoped payload staging dir (the rendered `tmpDir`), the pool-key-scoped data root (OpenCode tool-output), and the agent workspace
 - **AND** agent reads of the shared OpenCode DB or another session's tool-output files SHALL be rejected in restricted mode, so cross-USER visibility is impossible while cross-session visibility within the pool key is the accepted trade-off
+
+### Requirement: Pool Stop Terminates Every Pooled Agent
+
+Stopping the agent process pool SHALL disconnect every pooled agent and SHALL complete only after each disconnect finished, leaving no pooled agent process or descendant running.
+
+#### Scenario: Two live pool entries
+- **GIVEN** a pool with two live agent processes in different pool keys
+- **WHEN** the pool is stopped and the stop completes
+- **THEN** neither wrapper PID nor any of their descendants SHALL be alive
+
+#### Scenario: Stop with no entries
+- **GIVEN** a pool that never spawned
+- **WHEN** it is stopped
+- **THEN** the stop SHALL complete without spawning or signalling anything

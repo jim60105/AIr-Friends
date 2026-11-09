@@ -4,29 +4,44 @@
 // deadline cancellation, and per-session JWT + active pointer file hygiene.
 
 import { assert, assertEquals } from "@std/assert";
-import { exists } from "@std/fs";
+import {
+  isNotFoundError,
+  makeTempDir,
+  makeTempDirSync,
+  pathExists as exists,
+} from "../../src/utils/fs-compat.ts";
 import { AgentProcessPool } from "../../src/core/agent-process-pool.ts";
 import { poolEntryKey } from "../../src/core/agent-process-pool.ts";
-import type { ChildQuiescenceVerdict } from "../../src/utils/process-lifecycle.ts";
+import {
+  type ChildQuiescenceVerdict,
+  listDescendantPids,
+  processAlive,
+} from "../../src/utils/process-lifecycle.ts";
 import type { WorkspaceTmpUnreclaimableSink } from "../../src/core/workspace-manager.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
-import type { AgentConnector } from "../../src/acp/agent-connector.ts";
+import { AgentConnector } from "../../src/acp/agent-connector.ts";
+import { createAgentProcess } from "../../src/acp/agent-process.ts";
+import { Logger, LogLevel } from "@utils/logger.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { mockOmpNativeCache } from "../mocks/omp-mock-session.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { afterAll, test } from "bun:test";
 
 /**
  * One per-run deployment root. The pooled mode roots carry the reserved `natives` link, so a
  * fixed path would make a later run refuse the previous run's link to a by-then-deleted payload.
  */
-const TEST_REPO_ROOT = Deno.makeTempDirSync({ prefix: "air-pool-test-repo-" });
-globalThis.addEventListener("unload", () => {
+const TEST_REPO_ROOT = makeTempDirSync({ prefix: "air-pool-test-repo-" });
+afterAll(() => {
   try {
-    Deno.removeSync(TEST_REPO_ROOT, { recursive: true });
+    fs.rmSync(TEST_REPO_ROOT, { recursive: true });
   } catch {
     // Already gone.
   }
@@ -117,7 +132,7 @@ async function stopPool(pool: AgentProcessPool): Promise<void> {
   while (Date.now() < deadline && !pool.isIdle()) {
     await new Promise((r) => setTimeout(r, 20));
   }
-  pool.stop();
+  await pool.stop();
 }
 
 function makeConnectorOptions(): AgentConnectorOptions {
@@ -162,7 +177,7 @@ function registerSession(
   });
 }
 
-Deno.test("pool - lazy-spawns once and reuses the process for the same pool key", async () => {
+test("pool - lazy-spawns once and reuses the process for the same pool key", async () => {
   const registry = new SessionRegistry(1000);
   const factoryCalls: AgentConnectorOptions[] = [];
   const pool = new AgentProcessPool(
@@ -218,7 +233,7 @@ Deno.test("pool - lazy-spawns once and reuses the process for the same pool key"
   await stopPool(pool);
 });
 
-Deno.test("pool - serializes sessions from different pool keys (global execution lease)", async () => {
+test("pool - serializes sessions from different pool keys (global execution lease)", async () => {
   const registry = new SessionRegistry(1000);
   const running: string[] = [];
   const order: string[] = [];
@@ -282,7 +297,7 @@ Deno.test("pool - serializes sessions from different pool keys (global execution
   await stopPool(pool);
 });
 
-Deno.test("pool - interactive sessions take queue priority over maintenance (starvation guard)", async () => {
+test("pool - interactive sessions take queue priority over maintenance (starvation guard)", async () => {
   const registry = new SessionRegistry(1000);
   const order: string[] = [];
   const config = makeConfig();
@@ -367,7 +382,7 @@ Deno.test("pool - interactive sessions take queue priority over maintenance (sta
   await stopPool(pool);
 });
 
-Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
+test("pool - queue deadline cancels still-queued sessions", async () => {
   const registry = new SessionRegistry(1000);
   const config = makeConfig();
   // Short reclaim idle time so the pool's reclaim timer FIRES (completes) during
@@ -439,10 +454,10 @@ Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
   // Wait for the pool's idle-reclaim timer (30ms) to fire and complete, then
   // stop the pool.
   await new Promise((r) => setTimeout(r, 60));
-  pool.stop();
+  await pool.stop();
 });
 
-Deno.test("pool - issues per-session JWT and writes the active pointer while the lease is held", async () => {
+test("pool - issues per-session JWT and writes the active pointer while the lease is held", async () => {
   const config = makeConfig();
   config.agent.sharedProcess = {
     enabled: true,
@@ -451,7 +466,7 @@ Deno.test("pool - issues per-session JWT and writes the active pointer while the
   };
   const registry = new SessionRegistry(1000);
   const jwtDir = "/tmp/pool-test-jwt";
-  await Deno.mkdir(jwtDir, { recursive: true });
+  await fsp.mkdir(jwtDir, { recursive: true });
 
   let jwtWhileRunning: string | null = null;
   let pointerWhileRunning: string | null = null;
@@ -476,8 +491,8 @@ Deno.test("pool - issues per-session JWT and writes the active pointer while the
     },
     async () => {
       // Snapshot the JWT + pointer while this session holds the lease.
-      jwtWhileRunning = await Deno.readTextFile(`${jwtDir}/${sid}.jwt`);
-      const raw = await Deno.readTextFile(`${jwtDir}/active.json`);
+      jwtWhileRunning = await fsp.readFile(`${jwtDir}/${sid}.jwt`, "utf8");
+      const raw = await fsp.readFile(`${jwtDir}/active.json`, "utf8");
       pointerWhileRunning = JSON.parse(raw).sessionId;
       await new Promise((r) => setTimeout(r, 20));
       return "acp-1";
@@ -495,15 +510,15 @@ Deno.test("pool - issues per-session JWT and writes the active pointer while the
   // assertions after `await pool.run()` are the contract under test.
   assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
   // The cleared pointer is an empty file (owner-validated clear writes "").
-  const pointerRaw = await Deno.readTextFile(`${jwtDir}/active.json`);
+  const pointerRaw = await fsp.readFile(`${jwtDir}/active.json`, "utf8");
   const pointer = pointerRaw.trim() ? (JSON.parse(pointerRaw) as { sessionId?: string }) : {};
   assertEquals(pointer.sessionId, undefined);
 
   await stopPool(pool);
-  await Deno.remove(jwtDir, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
 });
 
-Deno.test("pool - relative jwtDir config writes JWT + pointer at the resolved absolute path", async () => {
+test("pool - relative jwtDir config writes JWT + pointer at the resolved absolute path", async () => {
   // Writer agreement (fix-pooled-skill-env-absolute-paths): a RELATIVE config
   // value must land at the same absolute location skill scripts read via
   // `$SKILL_JWT_DIR`. Uses the gitignored data/ root; cleaned up in `finally`.
@@ -546,12 +561,12 @@ Deno.test("pool - relative jwtDir config writes JWT + pointer at the resolved ab
         // RESOLVED (absolute) location, not the raw relative config string.
         let jwtOk = false;
         try {
-          const content = await Deno.readTextFile(`${resolvedJwtDir}/${sid}.jwt`);
+          const content = await fsp.readFile(`${resolvedJwtDir}/${sid}.jwt`, "utf8");
           jwtOk = content.trim().length > 0;
         } catch {
           jwtOk = false;
         }
-        const pointerRaw = await Deno.readTextFile(`${resolvedJwtDir}/active.json`);
+        const pointerRaw = await fsp.readFile(`${resolvedJwtDir}/active.json`, "utf8");
         leaseState.snapshot = {
           jwtOk,
           pointerSessionId: (JSON.parse(pointerRaw) as { sessionId?: string }).sessionId,
@@ -563,11 +578,11 @@ Deno.test("pool - relative jwtDir config writes JWT + pointer at the resolved ab
     assertEquals(leaseState.snapshot?.pointerSessionId, sid);
   } finally {
     await stopPool(pool);
-    await Deno.remove(resolvedJwtDir, { recursive: true }).catch(() => {});
+    await fsp.rm(resolvedJwtDir, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test("pool - JWT renewals during the lease never resurrect the JWT file after release", async () => {
+test("pool - JWT renewals during the lease never resurrect the JWT file after release", async () => {
   const config = makeConfig();
   const jwtDir = "/tmp/pool-test-jwt-renew";
   config.agent.sharedProcess = {
@@ -576,7 +591,7 @@ Deno.test("pool - JWT renewals during the lease never resurrect the JWT file aft
     queueDeadlineMs: 600000,
   };
   const registry = new SessionRegistry(1000);
-  await Deno.mkdir(jwtDir, { recursive: true });
+  await fsp.mkdir(jwtDir, { recursive: true });
 
   // Fast renewal interval so several renewals fire (and overlap) during the lease.
   const pool = new AgentProcessPool(
@@ -611,10 +626,10 @@ Deno.test("pool - JWT renewals during the lease never resurrect the JWT file aft
   const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
     try {
-      await Deno.stat(`${jwtDir}/${sid}.jwt`);
+      await fsp.stat(`${jwtDir}/${sid}.jwt`);
       await new Promise((r) => setTimeout(r, 20));
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) break;
+      if (isNotFoundError(error)) break;
       throw error;
     }
   }
@@ -622,25 +637,25 @@ Deno.test("pool - JWT renewals during the lease never resurrect the JWT file aft
   await new Promise((r) => setTimeout(r, 150));
   let exists = true;
   try {
-    await Deno.stat(`${jwtDir}/${sid}.jwt`);
+    await fsp.stat(`${jwtDir}/${sid}.jwt`);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) exists = false;
+    if (isNotFoundError(error)) exists = false;
     else throw error;
   }
   assert(!exists, "JWT file was resurrected by a late renewal after release");
 
   await stopPool(pool);
-  await Deno.remove(jwtDir, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
 });
 
-Deno.test("pool - poolEntryKey helper", () => {
+test("pool - poolEntryKey helper", () => {
   assertEquals(poolEntryKey("discord:123", "opencode", "restricted"), "discord:123");
   assertEquals(poolEntryKey("discord:123", "opencode", "native-yolo"), "discord:123");
   assertEquals(poolEntryKey("discord:123", "omp", "restricted"), "discord:123:restricted");
   assertEquals(poolEntryKey("discord:123", "omp", "native-yolo"), "discord:123:native-yolo");
 });
 
-Deno.test("pool - OMP same-mode reuse and cross-mode separation with dual-mode coexistence", async () => {
+test("pool - OMP same-mode reuse and cross-mode separation with dual-mode coexistence", async () => {
   const registry = new SessionRegistry(1000);
   const spawnedConfigs: AgentConnectorOptions[] = [];
   const pool = new AgentProcessPool(
@@ -720,7 +735,7 @@ Deno.test("pool - OMP same-mode reuse and cross-mode separation with dual-mode c
   await stopPool(pool);
 });
 
-Deno.test("pool - OMP lease preservation across mode-split entries", async () => {
+test("pool - OMP lease preservation across mode-split entries", async () => {
   const registry = new SessionRegistry(1000);
   const config = makeConfig();
   const pool = new AgentProcessPool(
@@ -795,7 +810,7 @@ Deno.test("pool - OMP lease preservation across mode-split entries", async () =>
   await stopPool(pool);
 });
 
-Deno.test("pool - OpenCode byte-identity regression", async () => {
+test("pool - OpenCode byte-identity regression", async () => {
   const registry = new SessionRegistry(1000);
   const spawned: AgentConnectorOptions[] = [];
   const pool = new AgentProcessPool(
@@ -848,7 +863,7 @@ Deno.test("pool - OpenCode byte-identity regression", async () => {
   await stopPool(pool);
 });
 
-Deno.test("pool - per-mode reclaim independence for OMP", async () => {
+test("pool - per-mode reclaim independence for OMP", async () => {
   const registry = new SessionRegistry(1000);
   const config = makeConfig();
   // Configure fast reclaim idle ms
@@ -984,7 +999,7 @@ class UncertainDrainPool extends AgentProcessPool {
  * the pointer is cleared (the owner-validated release writes an empty file).
  */
 async function readPointerSession(jwtDir: string): Promise<string | undefined> {
-  const raw = (await Deno.readTextFile(`${jwtDir}/active.json`)).trim();
+  const raw = (await fsp.readFile(`${jwtDir}/active.json`, "utf8")).trim();
   if (raw === "") return undefined;
   const parsed: unknown = JSON.parse(raw);
   if (parsed === null || typeof parsed !== "object" || !("sessionId" in parsed)) return undefined;
@@ -1011,346 +1026,570 @@ function poolRunOptions(overrides: {
   };
 }
 
-Deno.test({
-  name: "pool - the caller-visible result and the next queued session wait for the child drain",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const config = makeConfig();
-    const jwtDir = await Deno.makeTempDir();
-    config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
-    const registry = new SessionRegistry(1000);
-    const pool = new BlockingDrainPool(
-      config,
-      registry,
-      "test-secret-0123456789abcdef0123456789",
-      // The drain seam is only reached for a lease whose wrapper PID is
-      // observable; the seam replaces the observation entirely.
-      () => new PidStubConnector(123_456) as unknown as AgentConnector,
+test("pool - the caller-visible result and the next queued session wait for the child drain", async function () {
+  const config = makeConfig();
+  const jwtDir = await makeTempDir();
+  config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+  const registry = new SessionRegistry(1000);
+  const pool = new BlockingDrainPool(
+    config,
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    // The drain seam is only reached for a lease whose wrapper PID is
+    // observable; the seam replaces the observation entirely.
+    () => new PidStubConnector(123_456) as unknown as AgentConnector,
+  );
+  const events: string[] = [];
+  let settled = false;
+  try {
+    const sidA = registerSession(registry, { channelId: "discord/1" });
+    const runA = pool.run(
+      poolRunOptions({ channelId: "discord/1", shellSessionId: sidA }),
+      () => {
+        events.push("A:runner-end");
+        return Promise.resolve("acp-A");
+      },
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    // The release path is now blocked inside the drain, holding the lease.
+    await pool.drainEntered.promise;
+
+    // While the drain runs: this session's own pointer and JWT must still be
+    // present (a late tool child still needs them), the public result must not
+    // have settled, and the workspace's staged files are untouched.
+    assertEquals(await readPointerSession(jwtDir), sidA);
+    assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), true);
+    assertEquals(settled, false, "the result must not settle during the drain");
+
+    // A queued sibling must not start while the first session still holds the
+    // lease (global serialization survives the new settlement order).
+    const sidB = registerSession(registry, { channelId: "discord/2" });
+    const runB = pool.run(
+      poolRunOptions({ channelId: "discord/2", shellSessionId: sidB }),
+      async () => {
+        events.push("B:start");
+        // B holds the lease here: its own pointer must be visible, which is
+        // why the post-A assertion below accepts B's pointer as well as "".
+        assertEquals(await readPointerSession(jwtDir), sidB);
+        return "acp-B";
+      },
     );
-    const events: string[] = [];
-    let settled = false;
-    try {
-      const sidA = registerSession(registry, { channelId: "discord/1" });
-      const runA = pool.run(
-        poolRunOptions({ channelId: "discord/1", shellSessionId: sidA }),
-        () => {
-          events.push("A:runner-end");
-          return Promise.resolve("acp-A");
+    await Promise.resolve();
+    assertEquals(events.includes("A:runner-end"), true);
+    assertEquals(events.includes("B:start"), false, "the queued session must not start early");
+
+    pool.allowDrain.resolve();
+    const resultA = await runA;
+
+    assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
+    assertEquals(settled, true);
+    // The release completed BEFORE the result became visible to the caller.
+    // B's release/acquire may legitimately have advanced by now (the pointer
+    // is either cleared or B's), so the assertion is that A's is GONE.
+    assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
+    assert(
+      (await readPointerSession(jwtDir)) !== sidA,
+      "A's pointer must be cleared once A settled",
+    );
+
+    const resultB = await runB;
+    assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
+    assertEquals(events, ["A:runner-end", "B:start"]);
+    assertEquals(pool.drainCalls, 2);
+  } finally {
+    pool.allowDrain.resolve();
+    await stopPool(pool);
+    await fsp.rm(jwtDir, { recursive: true });
+  }
+});
+
+test("pool - a pointer-clear failure still deletes the JWT, keeps the result and frees the queue", async function () {
+  const config = makeConfig();
+  const jwtDir = await makeTempDir();
+  config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+  const registry = new SessionRegistry(1000);
+  const pool = new AgentProcessPool(
+    config,
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    () => new StubConnector() as unknown as AgentConnector,
+  );
+  // The pointer clear writes through the shared `node:fs/promises` object, so
+  // replacing its `rename` fails ONLY the owner-validated release write.
+  const originalRename = fsp.rename;
+  try {
+    const sidA = registerSession(registry, { channelId: "discord/7" });
+    const resultA = await pool.run(
+      poolRunOptions({ channelId: "discord/7", shellSessionId: sidA }),
+      () => {
+        // Acquisition already wrote the pointer: from here on, fail only the
+        // owner-validated CLEAR (the release step), never the acquire write.
+        fsp.rename =
+          ((from: Parameters<typeof fsp.rename>[0], to: Parameters<typeof fsp.rename>[1]) => {
+            if (String(to).endsWith("/active.json")) {
+              return Promise.reject(
+                Object.assign(new Error("mock pointer clear failure"), { code: "EACCES" }),
+              );
+            }
+            return originalRename(from, to);
+          }) as typeof fsp.rename;
+        return Promise.resolve("acp-A");
+      },
+    );
+    fsp.rename = originalRename;
+
+    // The computed result is unchanged by the release failure …
+    assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
+    // … the JWT deletion still ran (the failing pointer clear never skipped it) …
+    assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
+
+    // … and the refcount was released: the queued sibling still runs.
+    const sidB = registerSession(registry, { channelId: "discord/8" });
+    const resultB = await pool.run(
+      poolRunOptions({ channelId: "discord/8", shellSessionId: sidB }),
+      () => Promise.resolve("acp-B"),
+    );
+    assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
+  } finally {
+    fsp.rename = originalRename;
+    await stopPool(pool);
+    await fsp.rm(jwtDir, { recursive: true });
+  }
+});
+
+test("pool - a failed run plus a failed release keeps the primary classification and still deletes the JWT", async function () {
+  const config = makeConfig();
+  const jwtDir = await makeTempDir();
+  config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+  const registry = new SessionRegistry(1000);
+  const pool = new AgentProcessPool(
+    config,
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    () => new StubConnector() as unknown as AgentConnector,
+  );
+  const originalRename = fsp.rename;
+  try {
+    const sid = registerSession(registry, { channelId: "discord/9" });
+    const result = await pool.run(
+      poolRunOptions({ channelId: "discord/9", shellSessionId: sid }),
+      () => {
+        fsp.rename =
+          ((from: Parameters<typeof fsp.rename>[0], to: Parameters<typeof fsp.rename>[1]) => {
+            if (String(to).endsWith("/active.json")) {
+              return Promise.reject(
+                Object.assign(new Error("mock pointer clear failure"), { code: "EACCES" }),
+              );
+            }
+            return originalRename(from, to);
+          }) as typeof fsp.rename;
+        throw new Error("runner failed");
+      },
+    );
+    fsp.rename = originalRename;
+
+    // The runner failure stays the reported classification (never the release
+    // failure), and the session's credential file is still removed.
+    assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
+    assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
+  } finally {
+    fsp.rename = originalRename;
+    await stopPool(pool);
+    await fsp.rm(jwtDir, { recursive: true });
+  }
+});
+
+test("pool - a runner rejecting with `undefined` is still classified as a failed session", async function () {
+  const registry = new SessionRegistry(1000);
+  const pool = new AgentProcessPool(
+    makeConfig(),
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    () => new StubConnector() as unknown as AgentConnector,
+  );
+  try {
+    const sid = registerSession(registry, { channelId: "discord/3" });
+    const result = await pool.run(
+      poolRunOptions({ channelId: "discord/3", shellSessionId: sid }),
+      // `undefined` is a valid rejection reason, so it must never double as
+      // the "no failure" sentinel.
+      () => Promise.reject(undefined),
+    );
+    assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
+  } finally {
+    await stopPool(pool);
+    registry.stop();
+  }
+});
+
+test("pool - an uncertain drain verdict retains the owning workspace after the release", async function () {
+  const repoPath = await makeTempDir();
+  const jwtDir = await makeTempDir();
+  const registry = new SessionRegistry(1000);
+  try {
+    const manager = new WorkspaceManager({ repoPath, workspacesDir: "workspaces" });
+    const workspacePath = join(repoPath, "workspaces", "discord", "u1");
+    const tmpPath = join(workspacePath, "tmp");
+    const staged = join(tmpPath, "owner-session", "staged.json");
+    await fsp.mkdir(join(tmpPath, "owner-session"), { recursive: true });
+    await fsp.writeFile(staged, "staged payload");
+
+    for (const reason of ["enumeration-failed", "survivors-remain"] as const) {
+      const config = makeConfig();
+      config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
+      const pool = new UncertainDrainPool(
+        config,
+        registry,
+        "test-secret-0123456789abcdef0123456789",
+        () => new PidStubConnector(123_456) as unknown as AgentConnector,
+        30_000,
+        undefined,
+        manager,
+      );
+      pool.verdict = { status: "uncertain", reason };
+      try {
+        const sid = registerSession(registry, { channelId: "discord/u1" });
+        const result = await pool.run(
+          poolRunOptions({
+            channelId: "discord/u1",
+            shellSessionId: sid,
+            workspacePath,
+          }),
+          () => Promise.resolve("acp-uncertain"),
+        );
+
+        // The computed result and the pointer/JWT release are unaffected …
+        assertEquals(result, { acpSessionId: "acp-uncertain", cancelledByDeadline: false });
+        assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
+        // … and the owning workspace keeps its protection for this lifetime:
+        // a subsequent idle release must not touch the staged payload.
+        assertEquals(manager.isTmpUseUncertain(tmpPath), true);
+        manager.acquireTmpUse(tmpPath);
+        assertEquals(manager.releaseTmpUse(tmpPath)?.reason, "uncertain-teardown");
+        assertEquals(manager.getTmpUseCount(tmpPath), 0);
+        assertEquals(await exists(staged), true);
+      } finally {
+        await stopPool(pool);
+      }
+    }
+  } finally {
+    registry.stop();
+    await fsp.rm(repoPath, { recursive: true });
+    await fsp.rm(jwtDir, { recursive: true });
+  }
+});
+
+test("pool - a failed acquisition retains the workspace only once a producer generation started", async function () {
+  const registry = new SessionRegistry(1000);
+  const sink = new RecordingTmpSink();
+  let disconnectCalls = 0;
+  try {
+    for (const generations of [0, 1]) {
+      sink.marks.length = 0;
+      const connector = {
+        isConnected: false,
+        connect: () => Promise.reject(new Error("connect failed")),
+        disconnect: () => {
+          disconnectCalls++;
+          return Promise.resolve();
         },
-      ).then((result) => {
-        settled = true;
-        return result;
+        getProcessPid: () => undefined,
+        getProcessEvidence: () => ({ generations, pid: undefined }),
+      };
+      const pool = new AgentProcessPool(
+        makeConfig(),
+        registry,
+        "test-secret-0123456789abcdef0123456789",
+        () => connector as unknown as AgentConnector,
+        30_000,
+        undefined,
+        sink,
+      );
+      try {
+        const workspacePath = "/tmp/test/workspaces/discord/9";
+        const sid = registerSession(registry, { channelId: "discord/9" });
+        const disconnectCallsBefore = disconnectCalls;
+        const result = await pool.run(
+          poolRunOptions({
+            channelId: "discord/9",
+            shellSessionId: sid,
+            workspacePath,
+          }),
+          () => Promise.reject(new Error("the runner must never start")),
+        );
+
+        // The acquisition failure keeps the existing caller classification.
+        assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
+        if (generations === 0) {
+          // No producer ever started: nothing may be retained.
+          assertEquals(sink.marks, []);
+        } else {
+          // A wrapper generation started and was never drained: the owning
+          // workspace keeps its cleanup protection for this bot lifetime.
+          assertEquals(sink.marks, [{
+            tmpPath: `${workspacePath}/tmp`,
+            reason: "connect-failed",
+          }]);
+        }
+        // Best-effort teardown was still attempted in THIS case, without
+        // masking the acquisition error.
+        assertEquals(disconnectCalls, disconnectCallsBefore + 1);
+      } finally {
+        await stopPool(pool);
+      }
+    }
+  } finally {
+    registry.stop();
+  }
+});
+
+// Pool stop terminates every pooled agent (real wrapper + descendant processes).
+
+/**
+ * The pooled agent ignores SIGTERM and keeps a SIGTERM-ignoring child running,
+ * so only the connector's escalated tree teardown can reap it.
+ */
+const IGNORE_TERM_POOL_FIXTURE = `
+process.on("SIGTERM", () => {});
+Bun.spawn(["sh", "-c", "trap '' TERM; sleep 600"], { stdout: "ignore", stderr: "ignore" });
+setInterval(() => {}, 1000);
+`;
+
+/**
+ * A pooled connector that owns a REAL agent process tree and defers to the
+ * production connector's disconnect when the pool stops it.
+ */
+class FixtureConnector {
+  disconnected = false;
+  constructor(private readonly connector: AgentConnector) {}
+  get isConnected(): boolean {
+    return !this.disconnected;
+  }
+  connect(): Promise<void> {
+    return Promise.resolve();
+  }
+  async disconnect(): Promise<void> {
+    await this.connector.disconnect();
+    this.disconnected = true;
+  }
+  getProcessPid(): number | undefined {
+    // Release must not drain: the tree stays intact until pool.stop().
+    return undefined;
+  }
+}
+
+test("Pool Stop Terminates Every Pooled Agent - two live pool entries", async () => {
+  const registry = new SessionRegistry(1000);
+  const fixtureDir = await fsp.mkdtemp(join(tmpdir(), "pool-stop-tree-"));
+  const fixture = join(fixtureDir, "fixture.ts");
+  await fsp.writeFile(fixture, IGNORE_TERM_POOL_FIXTURE);
+  const logger = new Logger("test", { level: LogLevel.ERROR });
+  const connectors: FixtureConnector[] = [];
+  const wrappers: number[] = [];
+  const descendantsBeforeStop: number[] = [];
+  const pool = new AgentProcessPool(
+    makeConfig(),
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    (options) => {
+      const handle = createAgentProcess({
+        command: process.execPath,
+        args: ["run", "--no-env-file", fixture],
+        cwd: fixtureDir,
+        env: { PATH: process.env["PATH"] ?? "" },
       });
-
-      // The release path is now blocked inside the drain, holding the lease.
-      await pool.drainEntered.promise;
-
-      // While the drain runs: this session's own pointer and JWT must still be
-      // present (a late tool child still needs them), the public result must not
-      // have settled, and the workspace's staged files are untouched.
-      assertEquals(await readPointerSession(jwtDir), sidA);
-      assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), true);
-      assertEquals(settled, false, "the result must not settle during the drain");
-
-      // A queued sibling must not start while the first session still holds the
-      // lease (global serialization survives the new settlement order).
-      const sidB = registerSession(registry, { channelId: "discord/2" });
-      const runB = pool.run(
-        poolRunOptions({ channelId: "discord/2", shellSessionId: sidB }),
-        async () => {
-          events.push("B:start");
-          // B holds the lease here: its own pointer must be visible, which is
-          // why the post-A assertion below accepts B's pointer as well as "".
-          assertEquals(await readPointerSession(jwtDir), sidB);
-          return "acp-B";
-        },
-      );
-      await Promise.resolve();
-      assertEquals(events.includes("A:runner-end"), true);
-      assertEquals(events.includes("B:start"), false, "the queued session must not start early");
-
-      pool.allowDrain.resolve();
-      const resultA = await runA;
-
-      assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
-      assertEquals(settled, true);
-      // The release completed BEFORE the result became visible to the caller.
-      // B's release/acquire may legitimately have advanced by now (the pointer
-      // is either cleared or B's), so the assertion is that A's is GONE.
-      assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
-      assert(
-        (await readPointerSession(jwtDir)) !== sidA,
-        "A's pointer must be cleared once A settled",
-      );
-
-      const resultB = await runB;
-      assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
-      assertEquals(events, ["A:runner-end", "B:start"]);
-      assertEquals(pool.drainCalls, 2);
-    } finally {
-      pool.allowDrain.resolve();
-      await stopPool(pool);
-      await Deno.remove(jwtDir, { recursive: true });
-    }
-  },
-});
-
-Deno.test({
-  name:
-    "pool - a pointer-clear failure still deletes the JWT, keeps the result and frees the queue",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const config = makeConfig();
-    const jwtDir = await Deno.makeTempDir();
-    config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
-    const registry = new SessionRegistry(1000);
-    const pool = new AgentProcessPool(
-      config,
-      registry,
-      "test-secret-0123456789abcdef0123456789",
-      () => new StubConnector() as unknown as AgentConnector,
+      const connector = new AgentConnector({ ...options, logger });
+      connector["process"] = handle;
+      const fixtureConnector = new FixtureConnector(connector);
+      connectors.push(fixtureConnector);
+      wrappers.push(handle.pid);
+      return fixtureConnector as unknown as AgentConnector;
+    },
+  );
+  try {
+    const sidA = registerSession(registry, { channelId: "discord/1" });
+    const sidB = registerSession(registry, { channelId: "discord/2" });
+    await pool.run(
+      poolRunOptions({ channelId: "discord/1", shellSessionId: sidA }),
+      () => Promise.resolve("acp-A"),
     );
-    const originalRename = Deno.rename;
-    try {
-      const sidA = registerSession(registry, { channelId: "discord/7" });
-      const resultA = await pool.run(
-        poolRunOptions({ channelId: "discord/7", shellSessionId: sidA }),
-        () => {
-          // Acquisition already wrote the pointer: from here on, fail only the
-          // owner-validated CLEAR (the release step), never the acquire write.
-          Deno.rename = ((from: string | URL, to: string | URL) => {
-            if (String(to).endsWith("/active.json")) {
-              return Promise.reject(new Deno.errors.PermissionDenied("mock pointer clear failure"));
-            }
-            return originalRename(from, to);
-          }) as typeof Deno.rename;
-          return Promise.resolve("acp-A");
-        },
-      );
-      Deno.rename = originalRename;
-
-      // The computed result is unchanged by the release failure …
-      assertEquals(resultA, { acpSessionId: "acp-A", cancelledByDeadline: false });
-      // … the JWT deletion still ran (the failing pointer clear never skipped it) …
-      assertEquals(await exists(`${jwtDir}/${sidA}.jwt`), false);
-
-      // … and the refcount was released: the queued sibling still runs.
-      const sidB = registerSession(registry, { channelId: "discord/8" });
-      const resultB = await pool.run(
-        poolRunOptions({ channelId: "discord/8", shellSessionId: sidB }),
-        () => Promise.resolve("acp-B"),
-      );
-      assertEquals(resultB, { acpSessionId: "acp-B", cancelledByDeadline: false });
-    } finally {
-      Deno.rename = originalRename;
-      await stopPool(pool);
-      await Deno.remove(jwtDir, { recursive: true });
-    }
-  },
-});
-
-Deno.test({
-  name:
-    "pool - a failed run plus a failed release keeps the primary classification and still deletes the JWT",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const config = makeConfig();
-    const jwtDir = await Deno.makeTempDir();
-    config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
-    const registry = new SessionRegistry(1000);
-    const pool = new AgentProcessPool(
-      config,
-      registry,
-      "test-secret-0123456789abcdef0123456789",
-      () => new StubConnector() as unknown as AgentConnector,
+    await pool.run(
+      poolRunOptions({ channelId: "discord/2", shellSessionId: sidB }),
+      () => Promise.resolve("acp-B"),
     );
-    const originalRename = Deno.rename;
-    try {
-      const sid = registerSession(registry, { channelId: "discord/9" });
-      const result = await pool.run(
-        poolRunOptions({ channelId: "discord/9", shellSessionId: sid }),
-        () => {
-          Deno.rename = ((from: string | URL, to: string | URL) => {
-            if (String(to).endsWith("/active.json")) {
-              return Promise.reject(new Deno.errors.PermissionDenied("mock pointer clear failure"));
-            }
-            return originalRename(from, to);
-          }) as typeof Deno.rename;
-          throw new Error("runner failed");
-        },
-      );
-      Deno.rename = originalRename;
 
-      // The runner failure stays the reported classification (never the release
-      // failure), and the session's credential file is still removed.
-      assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
-      assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
-    } finally {
-      Deno.rename = originalRename;
-      await stopPool(pool);
-      await Deno.remove(jwtDir, { recursive: true });
+    // Two live entries in different pool keys, each with its own live tree.
+    assertEquals(wrappers.length, 2);
+    for (const pid of wrappers) {
+      const descendants = await waitForPoolDescendants(pid, 2);
+      assert(descendants.length > 0, `entry ${pid} must own a live descendant tree`);
+      descendantsBeforeStop.push(...descendants);
     }
-  },
+
+    await pool.stop();
+
+    // `stop()` resolved only after EVERY connector's disconnect finished.
+    assert(
+      connectors.every((connector) => connector.disconnected),
+      "stop must await each pooled connector's disconnect",
+    );
+    await waitForPoolGone([...wrappers, ...descendantsBeforeStop], 1_000);
+    for (const pid of [...wrappers, ...descendantsBeforeStop]) {
+      assertEquals(await processAlive(pid), false, `pooled process ${pid} survived stop`);
+    }
+  } finally {
+    for (
+      const pid of [...wrappers, ...descendantsBeforeStop, ...(await descendantsOrEmpty(wrappers))]
+    ) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    registry.stop();
+    await fsp.rm(fixtureDir, { recursive: true }).catch(() => {});
+  }
 });
 
-Deno.test({
-  name: "pool - a runner rejecting with `undefined` is still classified as a failed session",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const registry = new SessionRegistry(1000);
+test("Pool Stop Terminates Every Pooled Agent - stop with no entries", async () => {
+  const registry = new SessionRegistry(1000);
+  let factoryCalls = 0;
+  try {
     const pool = new AgentProcessPool(
       makeConfig(),
       registry,
       "test-secret-0123456789abcdef0123456789",
-      () => new StubConnector() as unknown as AgentConnector,
+      () => {
+        factoryCalls++;
+        return new StubConnector() as unknown as AgentConnector;
+      },
     );
-    try {
-      const sid = registerSession(registry, { channelId: "discord/3" });
-      const result = await pool.run(
-        poolRunOptions({ channelId: "discord/3", shellSessionId: sid }),
-        // `undefined` is a valid rejection reason, so it must never double as
-        // the "no failure" sentinel.
-        () => Promise.reject(undefined),
-      );
-      assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
-    } finally {
-      await stopPool(pool);
-      registry.stop();
-    }
-  },
+    await pool.stop();
+    assertEquals(factoryCalls, 0, "stopping an empty pool must not spawn anything");
+  } finally {
+    registry.stop();
+  }
 });
 
-Deno.test({
-  name: "pool - an uncertain drain verdict retains the owning workspace after the release",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const repoPath = await Deno.makeTempDir();
-    const jwtDir = await Deno.makeTempDir();
+test(
+  "Pool Stop Terminates Every Pooled Agent - an in-flight acquisition is disconnected before stop resolves",
+  async () => {
     const registry = new SessionRegistry(1000);
-    try {
-      const manager = new WorkspaceManager({ repoPath, workspacesDir: "workspaces" });
-      const workspacePath = join(repoPath, "workspaces", "discord", "u1");
-      const tmpPath = join(workspacePath, "tmp");
-      const staged = join(tmpPath, "owner-session", "staged.json");
-      await Deno.mkdir(join(tmpPath, "owner-session"), { recursive: true });
-      await Deno.writeTextFile(staged, "staged payload");
-
-      for (const reason of ["enumeration-failed", "survivors-remain"] as const) {
-        const config = makeConfig();
-        config.agent.sharedProcess = { enabled: true, jwtDir, queueDeadlineMs: 600000 };
-        const pool = new UncertainDrainPool(
-          config,
-          registry,
-          "test-secret-0123456789abcdef0123456789",
-          () => new PidStubConnector(123_456) as unknown as AgentConnector,
-          30_000,
-          undefined,
-          manager,
-        );
-        pool.verdict = { status: "uncertain", reason };
-        try {
-          const sid = registerSession(registry, { channelId: "discord/u1" });
-          const result = await pool.run(
-            poolRunOptions({
-              channelId: "discord/u1",
-              shellSessionId: sid,
-              workspacePath,
-            }),
-            () => Promise.resolve("acp-uncertain"),
-          );
-
-          // The computed result and the pointer/JWT release are unaffected …
-          assertEquals(result, { acpSessionId: "acp-uncertain", cancelledByDeadline: false });
-          assertEquals(await exists(`${jwtDir}/${sid}.jwt`), false);
-          // … and the owning workspace keeps its protection for this lifetime:
-          // a subsequent idle release must not touch the staged payload.
-          assertEquals(manager.isTmpUseUncertain(tmpPath), true);
-          manager.acquireTmpUse(tmpPath);
-          assertEquals(manager.releaseTmpUse(tmpPath)?.reason, "uncertain-teardown");
-          assertEquals(manager.getTmpUseCount(tmpPath), 0);
-          assertEquals(await exists(staged), true);
-        } finally {
-          await stopPool(pool);
-        }
-      }
-    } finally {
-      registry.stop();
-      await Deno.remove(repoPath, { recursive: true });
-      await Deno.remove(jwtDir, { recursive: true });
-    }
-  },
-});
-
-Deno.test({
-  name: "pool - a failed acquisition retains the workspace only once a producer generation started",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const registry = new SessionRegistry(1000);
-    const sink = new RecordingTmpSink();
-    let disconnectCalls = 0;
-    try {
-      for (const generations of [0, 1]) {
-        sink.marks.length = 0;
-        const connector = {
-          isConnected: false,
-          connect: () => Promise.reject(new Error("connect failed")),
+    const connectGate = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const pool = new AgentProcessPool(
+      makeConfig(),
+      registry,
+      "test-secret-0123456789abcdef0123456789",
+      () => {
+        events.push("spawned");
+        return {
+          isConnected: true,
+          connect: async () => {
+            events.push("connecting");
+            await connectGate.promise;
+            events.push("connected");
+          },
           disconnect: () => {
-            disconnectCalls++;
+            events.push("disconnected");
             return Promise.resolve();
           },
           getProcessPid: () => undefined,
-          getProcessEvidence: () => ({ generations, pid: undefined }),
-        };
-        const pool = new AgentProcessPool(
-          makeConfig(),
-          registry,
-          "test-secret-0123456789abcdef0123456789",
-          () => connector as unknown as AgentConnector,
-          30_000,
-          undefined,
-          sink,
-        );
-        try {
-          const workspacePath = "/tmp/test/workspaces/discord/9";
-          const sid = registerSession(registry, { channelId: "discord/9" });
-          const disconnectCallsBefore = disconnectCalls;
-          const result = await pool.run(
-            poolRunOptions({
-              channelId: "discord/9",
-              shellSessionId: sid,
-              workspacePath,
-            }),
-            () => Promise.reject(new Error("the runner must never start")),
-          );
+          getProcessEvidence: () => ({ generations: 1, pid: undefined }),
+        } as unknown as AgentConnector;
+      },
+    );
+    try {
+      const sid = registerSession(registry, { channelId: "discord/4" });
+      const runResult = pool.run(
+        poolRunOptions({ channelId: "discord/4", shellSessionId: sid }),
+        () => Promise.resolve("acp"),
+      );
+      await waitUntil(() => events.includes("connecting"));
 
-          // The acquisition failure keeps the existing caller classification.
-          assertEquals(result, { acpSessionId: null, cancelledByDeadline: true });
-          if (generations === 0) {
-            // No producer ever started: nothing may be retained.
-            assertEquals(sink.marks, []);
-          } else {
-            // A wrapper generation started and was never drained: the owning
-            // workspace keeps its cleanup protection for this bot lifetime.
-            assertEquals(sink.marks, [{
-              tmpPath: `${workspacePath}/tmp`,
-              reason: "connect-failed",
-            }]);
-          }
-          // Best-effort teardown was still attempted in THIS case, without
-          // masking the acquisition error.
-          assertEquals(disconnectCalls, disconnectCallsBefore + 1);
-        } finally {
-          await stopPool(pool);
-        }
-      }
+      let stopSettled = false;
+      const stopPromise = pool.stop().finally(() => {
+        stopSettled = true;
+      });
+      // With `connect()` still pending, stop must NOT resolve: the acquisition
+      // it is waiting for could otherwise publish a live agent after the
+      // disconnect pass. A timer turn lets a non-waiting stop settle.
+      await delay(0);
+      assertEquals(stopSettled, false);
+
+      connectGate.resolve();
+      await stopPromise;
+
+      // The barrier disconnects the late connector instead of publishing it,
+      // and stop resolves only after it is gone.
+      assertEquals(events, ["spawned", "connecting", "connected", "disconnected"]);
+      assertEquals(await runResult, { acpSessionId: null, cancelledByDeadline: true });
     } finally {
+      connectGate.resolve();
       registry.stop();
     }
   },
-});
+);
+
+/**
+ * Real delay: a spawned kernel process's arrival and death are OS events, not
+ * timers under test control, so these barriers poll the kernel within a bounded
+ * deadline (the sanctioned exception; no guessed single sleep).
+ */
+async function waitForPoolDescendants(pid: number, expected: number): Promise<number[]> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const descendants = await listDescendantPids(pid);
+    if (descendants.ok && descendants.pids.length >= expected) return descendants.pids;
+    await delay(10);
+  }
+  throw new Error(`pooled wrapper ${pid} never reached ${expected} descendants`);
+}
+
+/** Bounded wait until every PID is gone; throws naming the survivors. */
+async function waitForPoolGone(pids: number[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const alive: number[] = [];
+    for (const pid of pids) {
+      if (await processAlive(pid)) alive.push(pid);
+    }
+    if (alive.length === 0) return;
+    await delay(20);
+  }
+  const survivors: number[] = [];
+  for (const pid of pids) {
+    if (await processAlive(pid)) survivors.push(pid);
+  }
+  throw new Error(`pooled processes still alive after stop: ${survivors.join(", ")}`);
+}
+
+/** Bounded wait for an observable state (no wall-clock guess about its duration). */
+async function waitUntil(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("condition never became true");
+    await delay(1);
+  }
+}
+
+/** Best-effort descendant snapshot for teardown when a wrapper already exited. */
+async function descendantsOrEmpty(pids: number[]): Promise<number[]> {
+  const descendants: number[] = [];
+  for (const pid of pids) {
+    const found = await listDescendantPids(pid);
+    if (found.ok) descendants.push(...found.pids);
+  }
+  return descendants;
+}
+
+/** A small real delay for bounded kernel polling. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}

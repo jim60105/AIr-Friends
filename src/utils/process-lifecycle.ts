@@ -24,54 +24,16 @@ import { execFile } from "node:child_process";
 
 const logger = createLogger("ProcessLifecycle");
 
-/** Output ceiling for one observation command; both commands print a short PID list. */
+/** Output ceiling for one `pgrep` call; it prints a short PID list. */
 const MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024;
 
-interface CommandOutput {
-  code: number;
-  success: boolean;
-  stdout: Uint8Array;
-  stderr: Uint8Array;
-}
-
-/**
- * `Deno.Command(...).output()` semantics for the process-observation commands. A
- * signal-terminated or otherwise code-less child reports `-1`, never `1`: `listChildPids`
- * reads exit code 1 as a POSITIVE "no children" observation, so no uncertain outcome may
- * borrow that code. A missing binary rejects like the original throw.
- */
-function runCommand(command: string, args: string[]): Promise<CommandOutput> {
-  const pending = Promise.withResolvers<CommandOutput>();
-  execFile(command, args, { encoding: "buffer", maxBuffer: MAX_COMMAND_OUTPUT_BYTES }, (
-    error,
-    stdout,
-    stderr,
-  ) => {
-    if (error === null) {
-      pending.resolve({
-        code: 0,
-        success: true,
-        stdout: new Uint8Array(stdout),
-        stderr: new Uint8Array(stderr),
-      });
-      return;
-    }
-    if (typeof error.code === "string") {
-      pending.reject(error);
-      return;
-    }
-    pending.resolve({
-      code: typeof error.code === "number" ? error.code : -1,
-      success: false,
-      stdout: new Uint8Array(
-        typeof error.stdout === "string" ? Buffer.from(error.stdout) : error.stdout ?? stdout,
-      ),
-      stderr: new Uint8Array(
-        typeof error.stderr === "string" ? Buffer.from(error.stderr) : error.stderr ?? stderr,
-      ),
-    });
-  });
-  return pending.promise;
+/** Parse one PID per line from a `pgrep` listing. */
+function parsePidList(stdout: string): number[] {
+  return stdout
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => parseInt(line.trim(), 10));
 }
 
 /** Bounded wait for the agent's tool children to exit before clearing the pointer. */
@@ -131,13 +93,17 @@ export interface ChildDrainOptions {
   deps?: Partial<ChildDrainDeps>;
 }
 
-/** Whether a process is still alive (`kill -0`). */
-export async function processAlive(pid: number): Promise<boolean> {
+/**
+ * Whether a process is still alive (`kill -0` semantics). Any failure — a gone
+ * process (`ESRCH`) or an unreadable one (`EPERM`) — is not alive, exactly like
+ * the non-zero exit of the old `kill -0` command.
+ */
+export function processAlive(pid: number): Promise<boolean> {
   try {
-    const out = await runCommand("kill", ["-0", String(pid)]);
-    return out.code === 0;
+    process.kill(pid, 0);
+    return Promise.resolve(true);
   } catch {
-    return false;
+    return Promise.resolve(false);
   }
 }
 
@@ -261,26 +227,29 @@ export async function awaitChildQuiescence(
   return { status: "uncertain", reason: "survivors-remain" };
 }
 
-/** List the direct child PIDs of a process (via `pgrep -P`). */
+/**
+ * List the direct child PIDs of a process (via `pgrep -P`).
+ *
+ * `pgrep` exits 1 when nothing matched — a POSITIVE empty observation. Any
+ * other failure, including a signal-terminated `pgrep` or a missing binary
+ * (`ENOENT`, a string `error.code`), is an enumeration failure, never an empty
+ * child set.
+ */
 async function listChildPids(pid: number): Promise<{ ok: boolean; pids: number[] }> {
-  try {
-    const out = await runCommand("pgrep", ["-P", String(pid)]);
-    if (out.success) {
-      const pids = new TextDecoder()
-        .decode(out.stdout)
-        .trim()
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => parseInt(line.trim(), 10));
-      return { ok: true, pids };
-    }
-    // `pgrep` exits 1 when nothing matched (a positive empty observation); any
-    // other exit code is an enumeration failure, not an empty child set.
-    if (out.code === 1) return { ok: true, pids: [] };
-    return { ok: false, pids: [] };
-  } catch {
-    return { ok: false, pids: [] };
-  }
+  const { promise, resolve } = Promise.withResolvers<{ ok: boolean; pids: number[] }>();
+  execFile(
+    "pgrep",
+    ["-P", String(pid)],
+    { maxBuffer: MAX_COMMAND_OUTPUT_BYTES },
+    (error, stdout) => {
+      if (error === null) {
+        resolve({ ok: true, pids: parsePidList(stdout) });
+        return;
+      }
+      resolve({ ok: error.code === 1, pids: [] });
+    },
+  );
+  return await promise;
 }
 
 /**
@@ -335,24 +304,34 @@ async function collectToolPids(
     if (child !== agentPid) tools.add(child);
   }
   for (const child of children.pids) {
-    const descendants = await collectDescendantPids(child, deps);
+    const descendants = await collectDescendantPids(child, deps.listChildPids);
     if (!descendants.ok) return { ok: false, pids: [] };
     for (const descendant of descendants.pids) tools.add(descendant);
   }
   return { ok: true, pids: [...tools].sort((a, b) => a - b) };
 }
 
+/**
+ * All descendant PIDs of a process, in breadth-first discovery order: every
+ * parent appears before its children, while same-level order is unspecified.
+ */
+export async function listDescendantPids(
+  pid: number,
+): Promise<{ ok: boolean; pids: number[] }> {
+  return await collectDescendantPids(pid, listChildPids);
+}
+
 /** Recursively collect all descendant PIDs of a process (BFS over direct children). */
 async function collectDescendantPids(
   pid: number,
-  deps: ChildDrainDeps,
+  childrenOf: ChildDrainDeps["listChildPids"],
 ): Promise<{ ok: boolean; pids: number[] }> {
   const collected: number[] = [];
   let frontier = [pid];
   while (frontier.length > 0) {
     const next: number[] = [];
     for (const current of frontier) {
-      const children = await deps.listChildPids(current);
+      const children = await childrenOf(current);
       if (!children.ok) return { ok: false, pids: [] };
       next.push(...children.pids);
     }
@@ -362,13 +341,41 @@ async function collectDescendantPids(
   return { ok: true, pids: collected };
 }
 
+/**
+ * Send `signal` to every descendant of `rootPid`, then to the root itself.
+ *
+ * The descendant set is enumerated BEFORE any signal: once the wrapper dies its
+ * children re-parent away, so a walk started afterwards would miss them. The
+ * discovered order is reversed (breadth-first puts every parent before its
+ * children) so the deepest processes are signalled first. When enumeration
+ * fails the root is still signalled and `ok` is `false` — the caller must not
+ * treat that teardown as proven.
+ */
+export async function killProcessTree(
+  rootPid: number,
+  signal: "SIGTERM" | "SIGKILL",
+): Promise<{ ok: boolean; signalled: number[] }> {
+  const shortSignal = signal === "SIGTERM" ? "TERM" : "KILL";
+  const descendants = await listDescendantPids(rootPid);
+  if (!descendants.ok) {
+    await killPids([rootPid], shortSignal);
+    return { ok: false, signalled: [rootPid] };
+  }
+  const deepestFirst = [...descendants.pids].reverse();
+  await killPids(deepestFirst, shortSignal);
+  await killPids([rootPid], shortSignal);
+  return { ok: true, signalled: [...deepestFirst, rootPid] };
+}
+
 /** Send a signal to an explicit PID set (best-effort, non-fatal). */
-async function killPids(pids: number[], signal: "TERM" | "KILL"): Promise<void> {
+function killPids(pids: number[], signal: "TERM" | "KILL"): Promise<void> {
+  const processSignal = signal === "TERM" ? "SIGTERM" : "SIGKILL";
   for (const pid of pids) {
     try {
-      await runCommand("kill", [`-${signal}`, String(pid)]);
+      process.kill(pid, processSignal);
     } catch {
       // Best effort: the process may have exited between enumeration and here.
     }
   }
+  return Promise.resolve();
 }

@@ -25,7 +25,7 @@ None.
 
 ## Impact
 
-- Edited: `src/utils/process-lifecycle.ts`, `src/core/agent-process-pool.ts`, `src/acp/agent-connector.ts` (escalation call only), `src/core/agent-core.ts` (awaiting `stop()`), `tests/utils/process-lifecycle.test.ts`, `tests/core/agent-process-pool.test.ts`, `tests/core/omp-pool-modes.test.ts`, `tests/acp/agent-connector-process-monitor.test.ts` (two new tests).
+- Edited: `src/utils/process-lifecycle.ts`, `src/core/agent-process-pool.ts`, `src/acp/agent-connector.ts` (escalation call only), `src/core/agent-core.ts` (awaiting `stop()`), `tests/utils/process-lifecycle.test.ts`, `tests/core/agent-process-pool.test.ts`, `tests/core/omp-pool-modes.test.ts`, `tests/acp/agent-connector-process-monitor.test.ts` (two new tests), `migration/bun/baseline/parity-exceptions.json` (the two converted `t.step` containers are `describe` suites, disposed `removed` with the repo's established bare-suite reason).
 - Shutdown now waits up to about 4 seconds (2-second grace plus escalation) for live pooled agents.
 - P0 ownership: **P0-3** pool cleanup and children that outlive a wrapper SIGKILL (process level). Container stop and restart remain with `drill-bun-cutover-and-rollback`.
 - No human review document.

@@ -138,6 +138,14 @@ export class AgentProcessPool {
   private maintenanceQueue: QueuedSession[] = [];
   private interactiveSinceMaintenance = 0;
   private queueSweeper?: ReturnType<typeof setInterval>;
+  /**
+   * Shutdown barrier. Once set, no new session is dispatched and no acquisition
+   * may publish an entry, so `stop()`'s disconnect pass cannot miss a live
+   * pooled agent published by an acquisition that was already in flight.
+   */
+  private stopping = false;
+  /** Acquisitions that have not settled yet; `stop()` drains them before returning. */
+  private pendingAcquisitions = new Set<Promise<PoolEntry>>();
   private config: Config;
   private sessionRegistry: SessionRegistry;
   private skillApiSecret: string;
@@ -189,6 +197,7 @@ export class AgentProcessPool {
     options: PoolRunOptions,
     runner: (connector: AgentConnector, options: PoolRunOptions) => Promise<string | undefined>,
   ): Promise<PoolRunResult> {
+    if (this.stopping) throw new Error("Agent process pool is stopping");
     const item: QueuedSession = { options, runner, queuedAt: Date.now() };
     // Wire the result resolver BEFORE the item is queued, so a session that
     // starts immediately (lease free) still resolves its promise.
@@ -215,7 +224,7 @@ export class AgentProcessPool {
     // The single `inFlight` slot covers all entries regardless of agentType or
     // permissionMode. Interactive vs maintenance lanes, starvation guard, and
     // release lifecycle remain strictly serialized (verified by preservation tests).
-    if (this.inFlight !== null) return;
+    if (this.inFlight !== null || this.stopping) return;
 
     // Starvation guard: after MAINTENANCE_STARVE_LIMIT interactive sessions have
     // run back-to-back, a waiting maintenance job is served BEFORE the next
@@ -471,10 +480,21 @@ export class AgentProcessPool {
   }
 
   /** Lazy-spawn or reuse the pool key's live process (generation-checked). */
-  private async acquireProcess(
+  private acquireProcess(entryKey: string, options: PoolRunOptions): Promise<PoolEntry> {
+    const pending = this.acquireProcessInner(entryKey, options);
+    this.pendingAcquisitions.add(pending);
+    const settled = () => {
+      this.pendingAcquisitions.delete(pending);
+    };
+    pending.then(settled, settled);
+    return pending;
+  }
+
+  private async acquireProcessInner(
     entryKey: string,
     options: PoolRunOptions,
   ): Promise<PoolEntry> {
+    if (this.stopping) throw new Error("Agent process pool is stopping");
     let entry = this.entries.get(entryKey);
 
     // A reclaim in progress blocks new acquires until the old process fully exits
@@ -549,6 +569,13 @@ export class AgentProcessPool {
       reclaiming: false,
       processPid: connector.getProcessPid(),
     };
+    // Shutdown barrier: `stop()` may have begun while `connect()` was pending.
+    // Never publish an entry it already snapshotted; tear the fresh connector
+    // down here instead so no spawned agent survives the shutdown.
+    if (this.stopping) {
+      await connector.disconnect();
+      throw new Error("Agent process pool is stopping");
+    }
     this.entries.set(entryKey, entry);
     logger.info("Spawning shared agent process for pool entry {entryKey}", {
       entryKey,
@@ -745,20 +772,55 @@ export class AgentProcessPool {
    * Whether no session currently holds the execution lease. `inFlight` is nulled
    * in the `finally` block, i.e. AFTER the release path (pointer clear, JWT
    * delete, child-process drain) has completed. Tests use this to wait for
-   * full release before stopping the pool (keeps Deno leak tracking clean).
+   * full release before stopping the pool (keeps test teardown clean).
    */
   isIdle(): boolean {
     return this.inFlight === null;
   }
 
-  /** Stop the queue sweeper (called on shutdown). */
-  stop(): void {
+  /**
+   * Stop the queue sweeper and terminate every pooled agent (called on
+   * shutdown). Resolves only after each pooled connector's disconnect finished,
+   * so shutting down leaves no pooled agent or descendant running.
+   */
+  async stop(): Promise<void> {
+    // Barrier first: a session already queued must not be dispatched, and an
+    // acquisition already awaiting `connect()` must not publish an entry after
+    // the disconnect pass below (see `acquireProcess`).
+    this.stopping = true;
     if (this.queueSweeper) {
       clearInterval(this.queueSweeper);
       this.queueSweeper = undefined;
     }
+    this.cancelQueuedSessions();
     for (const entry of this.entries.values()) {
       if (entry.reclaimTimer) clearTimeout(entry.reclaimTimer);
+    }
+    // An acquisition already awaiting `connect()` tears its own fresh connector
+    // down at the publish barrier; wait for that before the final snapshot.
+    while (this.pendingAcquisitions.size > 0) {
+      await Promise.allSettled(this.pendingAcquisitions);
+    }
+    await Promise.allSettled(
+      [...this.entries.values()].map((entry) => entry.connector.disconnect()),
+    );
+    this.entries.clear();
+  }
+
+  /** Settle every still-queued session as cancelled; nothing may start after shutdown. */
+  private cancelQueuedSessions(): void {
+    for (const queue of [this.interactiveQueue, this.maintenanceQueue]) {
+      for (const item of queue.splice(0)) {
+        if (item.options.registrySessionId ?? item.options.shellSessionId) {
+          this.sessionRegistry.remove(
+            (item.options.registrySessionId ?? item.options.shellSessionId)!,
+          );
+        }
+        item.resolveResult?.(undefined, true);
+        logger.warn("Queue cancelled at pool shutdown for session {sessionId}", {
+          sessionId: item.options.shellSessionId,
+        });
+      }
     }
   }
 }

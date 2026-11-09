@@ -51,6 +51,12 @@ this.entries.clear();
 
 `AgentCore`'s shutdown awaits it. Update the pool tests' fakes and calls for the async signature.
 
+Shutdown barrier (review finding): a `stopping` flag is set before the disconnect pass, so no
+queued session is dispatched and no acquisition may publish an entry after the snapshot. A fresh
+connector whose `connect()` was already in flight is torn down by the publish check instead, and
+`stop()` drains pending acquisitions before the final disconnect pass, so it can never resolve
+while a spawned agent is still live.
+
 ### D5. Process-count tests
 
 Shared helper inside each new test: `descendants(pid)` uses `killProcessTree`'s collection path through an exported `listDescendantPids(pid)` (export the existing walk). Fixtures are small Bun scripts written to a temp directory:

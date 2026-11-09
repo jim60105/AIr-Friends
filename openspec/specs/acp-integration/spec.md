@@ -2496,3 +2496,17 @@ The real Linux backend SHALL report the errno the kernel set for each failed con
 - **GIVEN** a confinement root with one existing and one missing file
 - **WHEN** the real backend opens them alternately 10,000 times, yielding to the event loop every 100 calls
 - **THEN** every missing-file result SHALL report `ENOENT` and every existing-file result SHALL return a descriptor
+
+### Requirement: Escalated Disconnect Reaps The Agent Process Tree
+
+When a disconnect escalates to `SIGKILL`, the connector SHALL send `SIGKILL` to every descendant of the agent wrapper and to the wrapper, so no process started under that wrapper survives.
+
+#### Scenario: Child ignoring SIGTERM
+- **GIVEN** an agent whose child process ignores `SIGTERM` and keeps running
+- **WHEN** the connector disconnects and the 2-second grace period expires
+- **THEN** within 1 second after escalation, no process whose ancestor was the wrapper SHALL remain
+
+#### Scenario: Graceful exit is not escalated
+- **GIVEN** an agent that exits on `SIGTERM`
+- **WHEN** the connector disconnects
+- **THEN** no `SIGKILL` SHALL be sent
