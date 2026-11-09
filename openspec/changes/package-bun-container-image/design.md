@@ -86,3 +86,21 @@ Built with `podman build -f tests/image/Containerfile --build-arg IMAGE=<final> 
 
 - [`npx playwright install-deps` behaves differently on the Bun base] → Same Debian release family; the smoke's `agent-browser --version` and the in-image tests are the check. If the base's Debian release differs from the Deno base, record it in the task report.
 - [The in-image `omp` test needs network] → The OMP native-runtime suite already uses a loopback provider; run without network flags.
+
+## Recorded deviations
+
+- D4 check 5 (`in-image tests`) additionally mounts `scripts/omp` and `skills` read-only at
+  `/app/scripts/omp` and `/app/skills` and sets `OMP_NATIVE_ACCEPTANCE=1`.
+  `tests/integration/omp-native-runtime/native-runtime.integration.test.ts` statically imports
+  `../../../scripts/omp/prepare-native-cache.ts` and copies the tracked `skills/` tree from its
+  `REPO_ROOT` (`/app`), so the suite cannot load from the `tests/` mount alone. Acceptance mode
+  turns an unavailable native prerequisite into a named failure instead of a skip, so a passing
+  run proves the real `omp` dispatch rather than an unexercised leg.
+- Task 3.1: the image's `/app/config.yaml` is `config.example.yaml`, whose
+  `${AGENT_DEFAULT_TYPE}` / `${DISCORD_TOKEN}` placeholders make configuration load fail, so the
+  literal run exits before signal handlers are registered and its `podman stop` timing would be
+  vacuous. Evidence therefore pairs the literal run (Bun version line, no forbidden error
+  strings) with a live-daemon run that supplies `AGENT_DEFAULT_TYPE=opencode` and a
+  non-credential `DISCORD_TOKEN=smoke-invalid`, plus `--log-driver=k8s-file` because this host's
+  journald driver drops the piped startup records; that run reaches a retrying Discord adapter,
+  then `podman stop -t 15` logs the full graceful shutdown through `dumb-init` and exits 0.
