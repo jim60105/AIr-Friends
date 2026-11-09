@@ -13,7 +13,7 @@
 // is ever spawned.
 //
 import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import {
   createAgentConfig,
   getSessionModeOverride,
@@ -44,6 +44,11 @@ import {
   readOmpNativeCacheManifest,
   serializeOmpNativeCacheManifest,
 } from "../../src/utils/omp-native-cache.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { test } from "bun:test";
+import { isNotFoundError, makeTempDir } from "../../src/utils/fs-compat.ts";
 
 // The launch face of the trusted extension is the GENERATED bundle (C3):
 // the factory preflight fails closed without it, so this suite builds the
@@ -53,15 +58,13 @@ import {
 // gitignored generated output, never tracked.
 {
   const root = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
-  const built = await new Deno.Command(`${root}/scripts/omp/bundle-omp-extension.sh`, {
-    args: [root, `${root}/${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}`, `${root}/deno.lock`],
-    stdout: "null",
-    stderr: "piped",
-  }).output();
-  if (built.code !== 0) {
-    throw new Error(
-      `test prerequisite: bundle build failed: ${new TextDecoder().decode(built.stderr)}`,
-    );
+  const built = spawnSync(
+    `${root}/scripts/omp/bundle-omp-extension.sh`,
+    [root, `${root}/${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}`, `${root}/deno.lock`],
+    { encoding: "utf8" },
+  );
+  if (built.status !== 0) {
+    throw new Error(`test prerequisite: bundle build failed: ${built.stderr}`);
   }
 }
 
@@ -99,11 +102,11 @@ function fixtureAddonNames(platform: OmpNativeCachePlatform): string[] {
 function writeNativeCachePayload(base: string, platform: OmpNativeCachePlatform): OmpNativeCache {
   const cache = ompNativeCacheDescriptor(base, platform, "development");
   const names = fixtureAddonNames(platform);
-  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  fs.mkdirSync(cache.versionDir, { recursive: true });
   for (const name of names) {
-    Deno.writeTextFileSync(join(cache.versionDir, name), NATIVE_PAYLOAD_FIXTURE);
+    fs.writeFileSync(join(cache.versionDir, name), NATIVE_PAYLOAD_FIXTURE);
   }
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -137,19 +140,19 @@ function withAssetAbsent(assetPath: string, run: () => void): void {
   const backup = `${assetPath}.failclosed-backup`;
   let moved = false;
   try {
-    Deno.renameSync(assetPath, backup);
+    fs.renameSync(assetPath, backup);
     moved = true;
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    if (!(isNotFoundError(error))) throw error;
   }
   try {
     run();
   } finally {
-    if (moved) Deno.renameSync(backup, assetPath);
+    if (moved) fs.renameSync(backup, assetPath);
   }
 }
 
-Deno.test("omp-paths - native data roots are mode-distinct for identical inputs", () => {
+test("omp-paths - native data roots are mode-distinct for identical inputs", () => {
   const base = "/data/test";
   const restricted = ompXdgDataHome(base, "restricted");
   const yolo = ompXdgDataHome(base, "native-yolo");
@@ -158,15 +161,15 @@ Deno.test("omp-paths - native data roots are mode-distinct for identical inputs"
   assertEquals(restricted !== yolo, true);
 });
 
-Deno.test("getSessionModeOverride - returns null for omp in both yolo states", () => {
+test("getSessionModeOverride - returns null for omp in both yolo states", () => {
   assertEquals(getSessionModeOverride("omp", false), null);
   assertEquals(getSessionModeOverride("omp", true), null);
   assertEquals(getSessionModeOverride("opencode", true), "yolo");
   assertEquals(getSessionModeOverride("opencode", false), null);
 });
 
-Deno.test("agent-factory omp - fails closed when the trusted extension artifact is missing", async () => {
-  const root = await Deno.makeTempDir();
+test("agent-factory omp - fails closed when the trusted extension artifact is missing", async () => {
+  const root = await makeTempDir();
   try {
     const repoPath = join(root, "repo");
     const config = createTestConfig({
@@ -179,7 +182,7 @@ Deno.test("agent-factory omp - fails closed when the trusted extension artifact 
       writeNativeCachePayload(join(root, "native-cache"), ompNativeCachePlatform()),
     );
     const workingDir = join(root, "ws");
-    Deno.mkdirSync(workingDir, { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
     // C3: absence of the generated entry fails the preflight with the build
     // remedy — never a silent fallback to the raw Deno-only source tree (the
     // error text must name the bundling command).
@@ -197,17 +200,17 @@ Deno.test("agent-factory omp - fails closed when the trusted extension artifact 
       assertStringIncludes(thrown!.message, "deno task bundle:omp-extension");
     });
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });
 
-Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shapes", async () => {
-  const root = await Deno.makeTempDir();
+test("agent-factory omp - assembles both modes in per-spawn and pooled shapes", async () => {
+  const root = await makeTempDir();
   try {
     const workingDir = join(root, "ws");
     const repoPath = join(root, "repo");
-    Deno.mkdirSync(workingDir, { recursive: true });
-    Deno.mkdirSync(repoPath, { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
+    fs.mkdirSync(repoPath, { recursive: true });
     const config = createTestConfig({
       workspace: { repoPath, workspacesDir: join(root, "workspaces") },
     });
@@ -242,8 +245,8 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
     assert(bundlePath.startsWith("/"), `launch asset path must be absolute: ${bundlePath}`);
     assert(settingsPathFor("restricted").startsWith("/"), "settings path must be absolute");
     assert(promptPath.startsWith("/"), "prompt path must be absolute");
-    const homeModelsPath = Deno.env.get("HOME") !== undefined
-      ? resolve(join(Deno.env.get("HOME")!, ".omp", "agent", "models.yml"))
+    const homeModelsPath = process.env["HOME"] !== undefined
+      ? resolve(join(process.env["HOME"]!, ".omp", "agent", "models.yml"))
       : undefined;
 
     const countOf = (args: readonly string[], value: string): number =>
@@ -306,7 +309,7 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
         const xdgDataHome = ompXdgDataHome(expectedBaseRoot, mode);
         assertEquals(assembled.env?.["XDG_DATA_HOME"], xdgDataHome, label);
         assertEquals(
-          Deno.statSync(join(xdgDataHome, "omp")).isDirectory,
+          fs.statSync(join(xdgDataHome, "omp")).isDirectory(),
           true,
           `native data dir must exist: ${xdgDataHome}/omp`,
         );
@@ -316,23 +319,23 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
         // to `{installRoot}/natives`, and the loader appends 18.6.1 itself.
         const nativesLink = ompNativeCacheLinkPath(expectedBaseRoot, mode);
         assertEquals(nativesLink, join(xdgDataHome, "omp", "natives"), label);
-        assert(Deno.lstatSync(nativesLink).isSymlink, `${label}: natives must be a symlink`);
-        assertEquals(Deno.readLinkSync(nativesLink), payload.payloadDir, label);
+        assert(fs.lstatSync(nativesLink).isSymbolicLink(), `${label}: natives must be a symlink`);
+        assertEquals(fs.readlinkSync(nativesLink), payload.payloadDir, label);
         assertEquals(
-          Deno.statSync(join(nativesLink, OMP_NATIVE_CACHE_VERSION, fixtureAddon)).ino,
-          Deno.statSync(join(payload.versionDir, fixtureAddon)).ino,
+          fs.statSync(join(nativesLink, OMP_NATIVE_CACHE_VERSION, fixtureAddon)).ino,
+          fs.statSync(join(payload.versionDir, fixtureAddon)).ino,
           `${label}: the root consumes the shared payload bytes, never a local copy`,
         );
         // The mode application directory itself stays a real writable directory
         // (sessions, database, auth side files remain private to the mode).
         assert(
-          Deno.lstatSync(join(xdgDataHome, "omp")).isDirectory,
+          fs.lstatSync(join(xdgDataHome, "omp")).isDirectory(),
           `${label}: the omp application directory must stay a real directory`,
         );
 
         // HOME is inherited normally (native model configuration) and no
         // generated settings plan or daemon-owned home rides the launch.
-        assertEquals(assembled.env?.["HOME"], Deno.env.get("HOME"), label);
+        assertEquals(assembled.env?.["HOME"], process.env["HOME"], label);
         assertEquals(assembled.env?.["PI_CODING_AGENT_DIR"], undefined, label);
         assertEquals(assembled.env?.["settingsSourcePlan"], undefined, label);
 
@@ -393,17 +396,17 @@ Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shap
       true,
     );
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });
 
-Deno.test("agent-factory omp - refuses to spawn with the remedy when no prepared payload exists", async () => {
-  const root = await Deno.makeTempDir();
+test("agent-factory omp - refuses to spawn with the remedy when no prepared payload exists", async () => {
+  const root = await makeTempDir();
   try {
     const repoPath = join(root, "repo");
     const workingDir = join(root, "ws");
-    Deno.mkdirSync(repoPath, { recursive: true });
-    Deno.mkdirSync(workingDir, { recursive: true });
+    fs.mkdirSync(repoPath, { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
     const config = createTestConfig({
       workspace: { repoPath, workspacesDir: join(root, "workspaces") },
     });
@@ -429,31 +432,33 @@ Deno.test("agent-factory omp - refuses to spawn with the remedy when no prepared
         ? resolve(join(workingDir, "tmp"))
         : resolve(join(repoPath, "omp-pools", poolKey));
       // A failed preflight installs no reserved entry and downloads no bytes.
-      assertThrows(
-        () => Deno.lstatSync(ompNativeCacheLinkPath(baseRoot, "restricted")),
-        Deno.errors.NotFound,
-        undefined,
+      const absentReservedEntry = assertThrows(
+        () => fs.lstatSync(ompNativeCacheLinkPath(baseRoot, "restricted")),
+      );
+      assert(
+        isNotFoundError(absentReservedEntry),
         `${label}: no reserved entry may be installed`,
       );
-      assertThrows(
-        () => Deno.lstatSync(ompXdgDataHome(baseRoot, "restricted")),
-        Deno.errors.NotFound,
-        undefined,
+      const absentManagedDirectory = assertThrows(
+        () => fs.lstatSync(ompXdgDataHome(baseRoot, "restricted")),
+      );
+      assert(
+        isNotFoundError(absentManagedDirectory),
         `${label}: no managed directory may be created for a failed preflight`,
       );
     }
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });
 
-Deno.test("agent-factory omp - refuses an incomplete or identity-mismatched prepared payload", async () => {
-  const root = await Deno.makeTempDir();
+test("agent-factory omp - refuses an incomplete or identity-mismatched prepared payload", async () => {
+  const root = await makeTempDir();
   try {
     const repoPath = join(root, "repo");
     const workingDir = join(root, "ws");
-    Deno.mkdirSync(repoPath, { recursive: true });
-    Deno.mkdirSync(workingDir, { recursive: true });
+    fs.mkdirSync(repoPath, { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
     const platform = ompNativeCachePlatform();
     const config = createTestConfig({
       workspace: { repoPath, workspacesDir: join(root, "workspaces") },
@@ -461,7 +466,7 @@ Deno.test("agent-factory omp - refuses an incomplete or identity-mismatched prep
 
     // An installed root carrying no manifest: incomplete, never a fallback.
     const incompleteRoot = join(root, "incomplete-cache", platform);
-    Deno.mkdirSync(join(incompleteRoot, "natives"), { recursive: true });
+    fs.mkdirSync(join(incompleteRoot, "natives"), { recursive: true });
     config.agent.ompNativeCache = {
       installRoot: incompleteRoot,
       launchExecutableVersion: OMP_NATIVE_CACHE_VERSION,
@@ -486,7 +491,7 @@ Deno.test("agent-factory omp - refuses an incomplete or identity-mismatched prep
     const stale = writeNativeCachePayload(join(root, "stale-cache"), platform);
     const staleManifest = readOmpNativeCacheManifest(stale.manifestPath);
     assert(staleManifest !== null, "fixture manifest must be readable");
-    await Deno.writeTextFile(
+    await fsp.writeFile(
       stale.manifestPath,
       serializeOmpNativeCacheManifest({ ...staleManifest!, version: "18.6.0" }),
     );
@@ -515,30 +520,28 @@ Deno.test("agent-factory omp - refuses an incomplete or identity-mismatched prep
 
     // Every refused root stays untouched: no reserved entry, no local bytes.
     for (const poolKey of ["pool-incomplete", "pool-stale", "pool-launch"]) {
-      assertThrows(
+      const absentReservedEntry = assertThrows(
         () =>
-          Deno.lstatSync(
+          fs.lstatSync(
             ompNativeCacheLinkPath(resolve(join(repoPath, "omp-pools", poolKey)), "native-yolo"),
           ),
-        Deno.errors.NotFound,
-        undefined,
-        poolKey,
       );
+      assert(isNotFoundError(absentReservedEntry), poolKey);
     }
     // The refused payload itself was not modified.
     assertEquals(readOmpNativeCacheManifest(stale.manifestPath)?.version, "18.6.0");
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });
 
-Deno.test("agent-factory omp - refuses the reserved entry occupied by a legacy native directory", async () => {
-  const root = await Deno.makeTempDir();
+test("agent-factory omp - refuses the reserved entry occupied by a legacy native directory", async () => {
+  const root = await makeTempDir();
   try {
     const repoPath = join(root, "repo");
     const workingDir = join(root, "ws");
-    Deno.mkdirSync(repoPath, { recursive: true });
-    Deno.mkdirSync(workingDir, { recursive: true });
+    fs.mkdirSync(repoPath, { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
     const config = createTestConfig({
       workspace: { repoPath, workspacesDir: join(root, "workspaces") },
     });
@@ -553,8 +556,8 @@ Deno.test("agent-factory omp - refuses the reserved entry occupied by a legacy n
       "restricted",
     );
     const legacyAddon = join(legacyEntry, OMP_NATIVE_CACHE_VERSION, "pi_natives.legacy.node");
-    Deno.mkdirSync(join(legacyEntry, OMP_NATIVE_CACHE_VERSION), { recursive: true });
-    await Deno.writeTextFile(legacyAddon, "legacy native bytes");
+    fs.mkdirSync(join(legacyEntry, OMP_NATIVE_CACHE_VERSION), { recursive: true });
+    await fsp.writeFile(legacyAddon, "legacy native bytes");
 
     const error = assertThrows(
       () => createAgentConfig("omp", workingDir, config, false, undefined, "session-abc", poolKey),
@@ -567,9 +570,9 @@ Deno.test("agent-factory omp - refuses the reserved entry occupied by a legacy n
     assertStringIncludes(error.message, "never deletes or migrates legacy native copies");
 
     // The legacy directory is left untouched: not followed, deleted or migrated.
-    assert(Deno.lstatSync(legacyEntry).isDirectory);
-    assertEquals(await Deno.readTextFile(legacyAddon), "legacy native bytes");
+    assert(fs.lstatSync(legacyEntry).isDirectory());
+    assertEquals(await fsp.readFile(legacyAddon, "utf8"), "legacy native bytes");
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 });

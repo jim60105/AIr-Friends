@@ -54,6 +54,138 @@
       "name": "workspace cleanup retains staged files when a re-spawn superseded the drained wrapper",
       "disposition": "skipped",
       "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command` in `src/utils/process-lifecycle.ts` (`processAlive`/`listChildPids`), owned by `port-process-lifecycle-and-pool-to-bun`. The caught missing global makes the drain verdict `wrapper-not-observable` rather than the real superseded-generation observation, so the test is skipped until that change ports the site. Must be deleted, and the test un-skipped, by that owner."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - opencode: captures the bounded final text and reclaims its roots",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - omp: captures the bounded final text and reclaims its roots",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a permission attempt fails the interpretation closed with zero tool effect",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a tool-call notification fails the interpretation closed",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a write attempt is refused without creating the target file",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a read attempt is refused and discloses no content",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - an exceeded deadline returns unavailable and still reclaims",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - an output overflow past the 8 KiB bound returns no partial text",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - an exactly-8 KiB output is still complete",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - text that is not this prompt turn's answer is never returned",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a pre-prompt tool attempt still fails the interpretation closed",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - incomplete output (no captured text) returns unavailable",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - incomplete output (a non-end_turn stop reason) returns unavailable",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - incomplete output (blank captured text) returns unavailable",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a session that is not in the intent mode fails closed before any prompt",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a session advertising NO mode selector fails closed",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a mode selector offering another mode fails closed",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a mode selector advertising an EMPTY roster fails closed",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - a model pin the engine does not apply fails closed before dispatch",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - the requested model is pinned when the session advertises another",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - engine stderr is drained but never logged",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
+    },
+    {
+      "file": "tests/acp/email-intent-runtime.test.ts",
+      "name": "runtime - captured output never reaches a log record",
+      "disposition": "skipped",
+      "reason": "TEMPORARY, owner-owed deletion: blocked by `new Deno.Command(DUMB_INIT_PATH, ...)` at `src/acp/agent-connector.ts:320`, owned by `adopt-bun-agent-process-boundary` (requirement `acp-integration`: `AgentConnector Subprocess Management`). `EmailIntentRuntime.interpret` catches the missing global and returns `unavailable: session_failed` instead of letting a deferrable `ReferenceError: Deno is not defined` escape, so the test is skipped until that change ports the spawn boundary. That owner must delete this exception and restore the registration to `test.skipIf(SUBPROCESS_SKIP)`."
     }
   ]
 }

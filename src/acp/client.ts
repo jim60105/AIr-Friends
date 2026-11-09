@@ -380,7 +380,7 @@ export class ChatbotClient implements acp.Client {
     // MANDATORY internal input (`unify-skill-root-and-inventory` D2): the
     // connector derives the inventory from the deployment's ONE explicitly
     // resolved trusted root, shared by BOTH agent types. The historical
-    // `Deno.cwd()/skills` constructor default is removed — a caller can no
+    // `process.cwd()/skills` constructor default is removed — a caller can no
     // longer silently authorize a daemon- or session-relative tree.
     this.skillAutoApproveList = skillAutoApproveList;
   }
@@ -1307,7 +1307,7 @@ export class ChatbotClient implements acp.Client {
         sessionContextGeneration: registered?.generation ?? "",
         processTmpDir: this.config.processTmpDir,
         xdgDataHome: this.config.xdgDataHome,
-        home: Deno.env.get("HOME") ?? "/home/deno",
+        home: process.env["HOME"] ?? "/home/deno",
         runtimeEnv: {
           tmpDir: this.config.processTmpDir ?? resolve(sessionCwd, "tmp"),
           agentWorkspace: this.config.agentWorkspacePath,

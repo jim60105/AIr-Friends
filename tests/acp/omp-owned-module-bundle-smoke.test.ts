@@ -17,14 +17,16 @@
 
 import { assertEquals } from "@std/assert";
 import { OMP_TRUSTED_EXTENSION_BUNDLE_PATH } from "@utils/omp-paths.ts";
+import { spawnSync } from "node:child_process";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempFileSync, removePathSync } from "../../src/utils/fs-compat.ts";
 
 const repoRoot = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const driverPath = `${repoRoot}/tests/mocks/omp-bundle-smoke-driver.ts`;
 
 /** The declared DEVELOPMENT artifact path of THIS checkout. */
-const declaredArtifactPath = `${await Deno.realPath(
-  repoRoot,
-)}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`;
+const declaredArtifactPath = `${await fsp.realpath(repoRoot)}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`;
 
 /** One dispatched call: the callback verdict plus the fixture operations it ran. */
 interface SmokeCall {
@@ -55,82 +57,87 @@ interface SmokeResult {
  *
  * `allowEnv` controls whether the child may READ the process environment at
  * all: every ordinary launch classification does (the host-only intent marker
- * lives there), and the flag is withheld by the fail-closed case below.
+ * lives there), and the harness withholds it from the fail-closed case below by
+ * preloading a module that makes every `process.env` read throw — Bun has no
+ * permission flags, and an unreadable environment is the state under test.
  */
 async function runBundleSmoke(options: { allowEnv?: boolean } = {}): Promise<SmokeResult> {
   const buildTarget = `${repoRoot}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH.replace(/\/[^/]+$/, "")}`;
-  const build = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
-    args: [repoRoot, buildTarget, `${repoRoot}/deno.lock`],
-    cwd: repoRoot,
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const buildOutput = await build.output();
-  assertEquals(buildOutput.code, 0, new TextDecoder().decode(buildOutput.stderr));
+  const buildOutput = spawnSync(
+    `${repoRoot}/scripts/omp/bundle-omp-extension.sh`,
+    [repoRoot, buildTarget, `${repoRoot}/deno.lock`],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  assertEquals(buildOutput.status, 0, buildOutput.stderr);
 
-  const runner = new Deno.Command(Deno.execPath(), {
-    args: [
-      "run",
-      "--allow-read",
-      ...(options.allowEnv === false ? [] : ["--allow-env"]),
-      driverPath,
-      `file://${declaredArtifactPath}`,
-    ],
-    cwd: repoRoot,
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const output = await runner.output();
-  const stdout = new TextDecoder().decode(output.stdout);
-  const stderr = new TextDecoder().decode(output.stderr);
-  assertEquals(output.code, 0, `driver failed:\n${stderr}\n${stdout}`);
-  return JSON.parse(stdout) as SmokeResult;
+  let unreadableEnvModule: string | undefined;
+  try {
+    if (options.allowEnv === false) {
+      unreadableEnvModule = makeTempFileSync({ suffix: ".ts" });
+      await fsp.writeFile(
+        unreadableEnvModule,
+        'Object.defineProperty(process, "env", {\n' +
+          '  get() {\n    throw new Error("the launch environment is unreadable");\n  },\n' +
+          "});\n",
+      );
+    }
+    const output = spawnSync(
+      process.execPath,
+      [
+        "run",
+        "--no-env-file",
+        ...(unreadableEnvModule === undefined ? [] : ["--preload", unreadableEnvModule]),
+        driverPath,
+        `file://${declaredArtifactPath}`,
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    assertEquals(output.status, 0, `driver failed:\n${output.stderr}\n${output.stdout}`);
+    return JSON.parse(output.stdout) as SmokeResult;
+  } finally {
+    if (unreadableEnvModule !== undefined) removePathSync(unreadableEnvModule);
+  }
 }
 
-Deno.test({
-  name: "bundle smoke: the delivered extension dispatches mapped tools and blocks unmatched ones",
-  fn: async () => {
-    const result = await runBundleSmoke();
+test("bundle smoke: the delivered extension dispatches mapped tools and blocks unmatched ones", async () => {
+  const result = await runBundleSmoke();
 
-    // The default export registered exactly one pre-dispatch tool_call handler.
-    assertEquals(result.handlerCount, 1);
+  // The default export registered exactly one pre-dispatch tool_call handler.
+  assertEquals(result.handlerCount, 1);
 
-    // Every mapped capability continues to its native path, and the fixture
-    // dispatcher executes exactly one operation for each of them.
-    for (
-      const [name, call] of [
-        ["read", result.read],
-        ["grep", result.grep],
-        ["glob", result.glob],
-        ["find", result.find],
-        ["todo", result.todo],
-        ["web_search", result.web_search],
-        ["bash", result.bash],
-        ["edit", result.edit],
-        ["write", result.write],
-        ["delete", result.delete],
-        ["move", result.move],
-      ] as const
-    ) {
-      assertEquals(call.outcome, "dispatch", name);
-      assertEquals(call.executed, 1, `${name} must execute exactly one operation`);
-    }
+  // Every mapped capability continues to its native path, and the fixture
+  // dispatcher executes exactly one operation for each of them.
+  for (
+    const [name, call] of [
+      ["read", result.read],
+      ["grep", result.grep],
+      ["glob", result.glob],
+      ["find", result.find],
+      ["todo", result.todo],
+      ["web_search", result.web_search],
+      ["bash", result.bash],
+      ["edit", result.edit],
+      ["write", result.write],
+      ["delete", result.delete],
+      ["move", result.move],
+    ] as const
+  ) {
+    assertEquals(call.outcome, "dispatch", name);
+    assertEquals(call.executed, 1, `${name} must execute exactly one operation`);
+  }
 
-    // Unmatched names never execute — including prototype-shaped names, which
-    // the own-property membership check must treat as unknown.
-    for (
-      const [name, call] of [
-        ["unknownTool", result.unknownTool],
-        ["protoName", result.protoName],
-        ["toStringName", result.toStringName],
-      ] as const
-    ) {
-      assertEquals(call.outcome, "block", name);
-      assertEquals(call.executed, 0, `${name} must execute no operation`);
-    }
-  },
-  sanitizeOps: false,
-  sanitizeResources: false,
+  // Unmatched names never execute — including prototype-shaped names, which
+  // the own-property membership check must treat as unknown.
+  for (
+    const [name, call] of [
+      ["unknownTool", result.unknownTool],
+      ["protoName", result.protoName],
+      ["toStringName", result.toStringName],
+    ] as const
+  ) {
+    assertEquals(call.outcome, "block", name);
+    assertEquals(call.executed, 0, `${name} must execute no operation`);
+  }
 });
 
 /**
@@ -138,34 +145,29 @@ Deno.test({
  * own environment read is unavailable: an unobservable launch classification is
  * treated as an intent-profile launch, so every name is blocked.
  */
-Deno.test({
-  name: "bundle smoke: an unreadable process environment fails closed to deny-all",
-  fn: async () => {
-    const result = await runBundleSmoke({ allowEnv: false });
+test("bundle smoke: an unreadable process environment fails closed to deny-all", async () => {
+  const result = await runBundleSmoke({ allowEnv: false });
 
-    assertEquals(result.handlerCount, 1);
-    for (
-      const [name, call] of [
-        ["read", result.read],
-        ["grep", result.grep],
-        ["glob", result.glob],
-        ["find", result.find],
-        ["todo", result.todo],
-        ["web_search", result.web_search],
-        ["bash", result.bash],
-        ["edit", result.edit],
-        ["write", result.write],
-        ["delete", result.delete],
-        ["move", result.move],
-        ["unknownTool", result.unknownTool],
-        ["protoName", result.protoName],
-        ["toStringName", result.toStringName],
-      ] as const
-    ) {
-      assertEquals(call.outcome, "block", name);
-      assertEquals(call.executed, 0, `${name} must execute no operation`);
-    }
-  },
-  sanitizeOps: false,
-  sanitizeResources: false,
+  assertEquals(result.handlerCount, 1);
+  for (
+    const [name, call] of [
+      ["read", result.read],
+      ["grep", result.grep],
+      ["glob", result.glob],
+      ["find", result.find],
+      ["todo", result.todo],
+      ["web_search", result.web_search],
+      ["bash", result.bash],
+      ["edit", result.edit],
+      ["write", result.write],
+      ["delete", result.delete],
+      ["move", result.move],
+      ["unknownTool", result.unknownTool],
+      ["protoName", result.protoName],
+      ["toStringName", result.toStringName],
+    ] as const
+  ) {
+    assertEquals(call.outcome, "block", name);
+    assertEquals(call.executed, 0, `${name} must execute no operation`);
+  }
 });
