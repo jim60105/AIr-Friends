@@ -56,7 +56,9 @@ jobs:
         run: sudo sh scripts/install-skill-bunfig.sh
 
       - name: Run all tests
-        run: bun run test
+        # Same isolation/environment as CI: files cannot leak process-wide
+        # metrics or environment state into one another.
+        run: bun --no-env-file test --timeout=120000 --isolate tests/
 
   release:
     name: Create Release

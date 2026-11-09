@@ -77,8 +77,8 @@ bun run dev
 # Production
 bun run start
 
-# Run all tests
-bun run test
+# Run all tests as CI does (isolated, without loading a local .env)
+bun --no-env-file test --timeout=120000 --isolate tests/
 
 # Format code (REQUIRED before commit)
 bun run fmt
@@ -92,6 +92,12 @@ bun run check
 # Format check only (CI uses this)
 bun run fmt:check
 ```
+
+The full suite expects the generated trusted-extension bundle
+(`bun run bundle:omp-extension`) and a prepared OMP native cache
+(`bun run prepare:omp-natives --executable <pinned omp>`). CI builds both before
+running tests; the package scripts are convenience wrappers without those
+prerequisites.
 
 ### Bun Runtime Configuration
 
@@ -1477,7 +1483,9 @@ log line per token. Buffering is unaffected: chunks still accumulate in
 - Unit tests: `{module}.test.ts`
 - Integration tests: `{feature}.integration.test.ts`
 - Use `test()` from `bun:test` with `@std/assert`
-- Tests run one module at a time: `bun run test` and `bun run test:unit` deliberately pass no `--isolate`, because Bun shares `process.env` between test files in one process and the environment-override tests would observe another module's transient variables
+- Tests run one module at a time. CI runs each file with `--isolate` and
+  `--no-env-file` so the process-wide metrics registry and environment overrides
+  cannot leak between files; use that invocation for a full-suite check.
 - **Test coverage MUST be over 75%** — CI enforces this threshold; PRs below 75% coverage will fail
 
 ```typescript

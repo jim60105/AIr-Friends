@@ -51,6 +51,40 @@ const ONLY_TEST_RECORD = [
   "",
 ].join("\n");
 
+const AT_FLOOR = [
+  "TN:",
+  "SF:src/example.ts",
+  "LF:200",
+  "LH:150",
+  "end_of_record",
+  "",
+].join("\n");
+
+const BELOW_BY_ROUNDING = [
+  "TN:",
+  "SF:src/example.ts",
+  "LF:3",
+  "LH:2",
+  "end_of_record",
+  "",
+].join("\n");
+
+async function runCli(
+  args: readonly string[],
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  const proc = Bun.spawn([process.execPath, CLI, ...args], {
+    cwd: REPO_ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, code };
+}
+
 async function runFloor(
   lcov: string,
   floor: number,
@@ -59,17 +93,7 @@ async function runFloor(
   try {
     const path = join(dir, "lcov.info");
     await writeFile(path, lcov);
-    const proc = Bun.spawn([process.execPath, CLI, path, String(floor)], {
-      cwd: REPO_ROOT,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, code };
+    return await runCli([path, String(floor)]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -132,4 +156,33 @@ test("coverage floor - a src record with no found lines is an empty report", () 
   const report = ["TN:", "SF:src/empty.ts", "LF:0", "LH:0", "end_of_record", ""].join("\n");
 
   assertEquals(computeLineCoverage(report), null);
+});
+
+test("coverage floor - a percentage exactly at the floor is accepted", async () => {
+  assertEquals(computeLineCoverage(AT_FLOOR)?.percent, 75);
+
+  const result = await runFloor(AT_FLOOR, 75);
+  assertEquals(result.stdout.trim(), "75.00");
+  assertEquals(result.code, 0);
+});
+
+test("coverage floor - a rounded display still compares the real percentage", async () => {
+  const coverage = computeLineCoverage(BELOW_BY_ROUNDING);
+  assertEquals(coverage?.percent.toFixed(2), "66.67");
+
+  const result = await runFloor(BELOW_BY_ROUNDING, 67);
+  assertEquals(result.stdout.trim(), "66.67");
+  assertEquals(result.code, 1);
+});
+
+test("coverage floor - an out-of-range floor is a usage error", async () => {
+  const result = await runFloor(ABOVE_FLOOR, 101);
+  assertEquals(result.code, 2);
+  assertStringIncludes(result.stderr, "usage:");
+});
+
+test("coverage floor - an unreadable report exits 1 with the read error", async () => {
+  const result = await runCli([join(tmpdir(), "coverage-floor-missing", "lcov.info"), "75"]);
+  assertEquals(result.code, 1);
+  assertStringIncludes(result.stderr, "cannot read");
 });

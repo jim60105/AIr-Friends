@@ -9,7 +9,13 @@
 | `bun run test:coverage` + `scripts/coverage-floor.ts` | Line-coverage gate (75% floor over `src/` from `coverage/lcov.info`) over the same tree.                                                   |
 | `bun run fmt:check` / `lint` / `check`                | Formatting (dprint), lint (oxlint), and type (tsc) gate for `src/` + `tests/`.                                                             |
 
-Never run bare `bun test`; use the scripts above so the CI selection and timeout match.
+Never run bare `bun test`; use the scripts above or the CI-equivalent invocation.
+CI runs each set as `bun --no-env-file test --timeout=120000 --isolate <paths>`
+so the process-wide metrics registry and environment state cannot leak between
+files. The full suite first runs `bun run bundle:omp-extension` and
+`bun run prepare:omp-natives --executable <pinned omp>` to provide its generated
+extension and prepared native cache; the package scripts do not add those
+prerequisites.
 
 The packaging suite's local-architecture image scenario
 (`tests/utils/omp-packaging.test.ts`) is an explicit opt-in: it runs ONLY with
