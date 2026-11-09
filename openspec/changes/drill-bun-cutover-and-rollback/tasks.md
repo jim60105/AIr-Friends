@@ -4,12 +4,12 @@ Prerequisite: `migrate-ci-and-docs-to-bun` is applied and its CI run succeeded. 
 
 ## 1. Restart persistence (P0-8)
 
-- [ ] 1.1 Create `tests/integration/restart-persistence.integration.test.ts` per design D1. Verify: `bun test tests/integration/restart-persistence.integration.test.ts` passes with four tests named after the spec scenarios.
+- [x] 1.1 Create `tests/integration/restart-persistence.integration.test.ts` per design D1. Verify: `bun test tests/integration/restart-persistence.integration.test.ts` passes with four tests named after the spec scenarios.
 
 ## 2. Drill tooling
 
-- [ ] 2.1 Create `migration/bun/cutover/config.drill.yaml` and `drill.sh` per design D2. Verify: `sh migration/bun/cutover/drill.sh localhost/air-friends:bun-local <empty temp dir> smoke 1` writes `measurements/smoke.json` with one run whose `restartReady` is true; delete that file afterwards.
-- [ ] 2.2 Create `compare.ts` and `compare.spec.ts` per design D3. Verify: `cd migration/bun/cutover && bun test ./compare.spec.ts` passes (four scenarios).
+- [x] 2.1 Create `migration/bun/cutover/config.drill.yaml` and `drill.sh` per design D2. Verify: `sh migration/bun/cutover/drill.sh localhost/air-friends:bun-local <empty temp dir> smoke 1` writes `measurements/smoke.json` with one run whose `restartReady` is true; delete that file afterwards.
+- [x] 2.2 Create `compare.ts` and `compare.spec.ts` per design D3. Verify: `cd migration/bun/cutover && bun test ./compare.spec.ts` passes (four scenarios).
 
 ## 3. Drill on the data copy
 
