@@ -1,8 +1,11 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { buildBwrapConfinement } from "@acp/filesystem-confinement.ts";
+import fs from "node:fs";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
-Deno.test("buildBwrapConfinement - mounts a fresh /proc to hide the daemon environ", () => {
+test("buildBwrapConfinement - mounts a fresh /proc to hide the daemon environ", () => {
   const { command, args } = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
     "opencode",
@@ -14,7 +17,7 @@ Deno.test("buildBwrapConfinement - mounts a fresh /proc to hide the daemon envir
   assertEquals(args[procIdx + 1], "/proc");
 });
 
-Deno.test("buildBwrapConfinement - binds only this session's dirs writable", () => {
+test("buildBwrapConfinement - binds only this session's dirs writable", () => {
   const { args } = buildBwrapConfinement(
     {
       sessionWorkspace: "/app/data/workspaces/discord/123",
@@ -36,7 +39,7 @@ Deno.test("buildBwrapConfinement - binds only this session's dirs writable", () 
   assertEquals(joined.includes("--bind /app/data/workspaces /app/data/workspaces "), false);
 });
 
-Deno.test("buildBwrapConfinement - shared OpenCode data dir is NOT bound writable (session-scoped XDG_DATA_HOME)", () => {
+test("buildBwrapConfinement - shared OpenCode data dir is NOT bound writable (session-scoped XDG_DATA_HOME)", () => {
   const { args } = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
     "opencode",
@@ -49,7 +52,7 @@ Deno.test("buildBwrapConfinement - shared OpenCode data dir is NOT bound writabl
   assertEquals(joined.includes("/home/deno/.local/share/opencode"), false);
 });
 
-Deno.test("buildBwrapConfinement - shareNet controls network namespace", () => {
+test("buildBwrapConfinement - shareNet controls network namespace", () => {
   const shared = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
     "opencode",
@@ -65,7 +68,7 @@ Deno.test("buildBwrapConfinement - shareNet controls network namespace", () => {
   assertEquals(isolated.args.includes("--unshare-net"), true);
 });
 
-Deno.test("buildBwrapConfinement - inner command preserved after separator", () => {
+test("buildBwrapConfinement - inner command preserved after separator", () => {
   const { args } = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
     "dumb-init",
@@ -94,7 +97,7 @@ const roBindPairs = (args: string[]): Array<[string, string]> => {
   return pairs;
 };
 
-Deno.test("buildBwrapConfinement - the resolved root mounts read-only at its literal path for either agent type", () => {
+test("buildBwrapConfinement - the resolved root mounts read-only at its literal path for either agent type", () => {
   // The single resolved root is supplied identically for both agent types, so
   // the mount is identical too — no agent-specific image tree is privileged.
   for (const agentType of ["opencode", "omp"] as const) {
@@ -113,7 +116,7 @@ Deno.test("buildBwrapConfinement - the resolved root mounts read-only at its lit
   }
 });
 
-Deno.test("buildBwrapConfinement - OpenCode container root mounts ro while the legitimate personal-tree visibility stays", () => {
+test("buildBwrapConfinement - OpenCode container root mounts ro while the legitimate personal-tree visibility stays", () => {
   const { args } = buildBwrapConfinement(
     {
       sessionWorkspace: "/app/data/workspaces/discord/1",
@@ -141,7 +144,7 @@ Deno.test("buildBwrapConfinement - OpenCode container root mounts ro while the l
   assertEquals(args.lastIndexOf("--ro-bind-try"), args.indexOf("--") - 3);
 });
 
-Deno.test("buildBwrapConfinement - custom root mounts read-only at its literal path", () => {
+test("buildBwrapConfinement - custom root mounts read-only at its literal path", () => {
   const { args } = buildBwrapConfinement(
     {
       sessionWorkspace: "/srv/deploy/ws",
@@ -160,7 +163,7 @@ Deno.test("buildBwrapConfinement - custom root mounts read-only at its literal p
   );
 });
 
-Deno.test("buildBwrapConfinement - skill root under a writable parent binds read-only AFTER the parent", () => {
+test("buildBwrapConfinement - skill root under a writable parent binds read-only AFTER the parent", () => {
   // Development layout: the session workspace is writable and the deployment
   // skill tree descends from it. The child ro bind must come AFTER the parent
   // `--bind`, or the writable parent mount would win.
@@ -185,7 +188,7 @@ Deno.test("buildBwrapConfinement - skill root under a writable parent binds read
   assertEquals(child > parent, true);
 });
 
-Deno.test("buildBwrapConfinement - skill root equal to a writable mount is refused before spawn", () => {
+test("buildBwrapConfinement - skill root equal to a writable mount is refused before spawn", () => {
   assertThrows(
     () =>
       buildBwrapConfinement(
@@ -203,7 +206,7 @@ Deno.test("buildBwrapConfinement - skill root equal to a writable mount is refus
   );
 });
 
-Deno.test("buildBwrapConfinement - skill root containing the session TMPDIR is refused", () => {
+test("buildBwrapConfinement - skill root containing the session TMPDIR is refused", () => {
   assertThrows(
     () =>
       buildBwrapConfinement(
@@ -221,7 +224,7 @@ Deno.test("buildBwrapConfinement - skill root containing the session TMPDIR is r
   );
 });
 
-Deno.test("buildBwrapConfinement - skill root containing a writable runtime path is refused", () => {
+test("buildBwrapConfinement - skill root containing a writable runtime path is refused", () => {
   // `/home/deno` contains the default writable runtime `/home/deno/.cache`:
   // mounting it read-only would hole the read-only mount where the permission
   // layer still reports the grant — refused, not reordered.
@@ -237,7 +240,7 @@ Deno.test("buildBwrapConfinement - skill root containing a writable runtime path
   );
 });
 
-Deno.test("buildBwrapConfinement - skill root equal to the shared agent workspace is refused", () => {
+test("buildBwrapConfinement - skill root equal to the shared agent workspace is refused", () => {
   assertThrows(
     () =>
       buildBwrapConfinement(
@@ -256,7 +259,7 @@ Deno.test("buildBwrapConfinement - skill root equal to the shared agent workspac
   );
 });
 
-Deno.test("buildBwrapConfinement - no skill root invents no fallback mount", () => {
+test("buildBwrapConfinement - no skill root invents no fallback mount", () => {
   const { args } = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
     "opencode",
@@ -328,7 +331,7 @@ const selfBindSources = (args: string[], flag: string): string[] => {
   return sources;
 };
 
-Deno.test("buildBwrapConfinement - the shared payload binds read-only LAST, after every writable bind, shadow and the skill root", () => {
+test("buildBwrapConfinement - the shared payload binds read-only LAST, after every writable bind, shadow and the skill root", () => {
   const skillRoot = "/ws/skills";
   const shadowed = "/ws/tmp/omp-agent";
   const runtimeWritable = "/ws/tmp/omp-agent/restricted/xdg-data/omp";
@@ -394,7 +397,7 @@ Deno.test("buildBwrapConfinement - the shared payload binds read-only LAST, afte
   }
 });
 
-Deno.test("buildBwrapConfinement - a writable ancestor of the payload is allowed (development HOME cache)", () => {
+test("buildBwrapConfinement - a writable ancestor of the payload is allowed (development HOME cache)", () => {
   const writableCacheParent = "/srv/devhome/.cache";
   const { args } = buildBwrapConfinement(
     {
@@ -414,14 +417,14 @@ Deno.test("buildBwrapConfinement - a writable ancestor of the payload is allowed
   assertEquals(bindIndex(args, "--ro-bind", PAYLOAD) > ancestorIdx, true);
 });
 
-Deno.test("buildBwrapConfinement - the payload bind names the LITERAL target spelling, not the canonical path", () => {
-  const base = Deno.makeTempDirSync({ prefix: "air-omp-payload-literal-" });
+test("buildBwrapConfinement - the payload bind names the LITERAL target spelling, not the canonical path", () => {
+  const base = makeTempDirSync({ prefix: "air-omp-payload-literal-" });
   try {
     const realPayload = join(base, "real-natives");
-    Deno.mkdirSync(realPayload, { recursive: true });
+    fs.mkdirSync(realPayload, { recursive: true });
     const linkPayload = join(base, "natives-link");
-    Deno.symlinkSync(realPayload, linkPayload);
-    const canonical = Deno.realPathSync(linkPayload);
+    fs.symlinkSync(realPayload, linkPayload);
+    const canonical = fs.realpathSync(linkPayload);
     assertEquals(canonical !== linkPayload, true);
 
     const { args } = buildBwrapConfinement(
@@ -440,17 +443,17 @@ Deno.test("buildBwrapConfinement - the payload bind names the LITERAL target spe
     );
     assertEquals(args.includes(canonical), false);
   } finally {
-    Deno.removeSync(base, { recursive: true });
+    fs.rmSync(base, { recursive: true });
   }
 });
 
-Deno.test("buildBwrapConfinement - a writable alias physically resolving to the payload is refused", () => {
-  const base = Deno.makeTempDirSync({ prefix: "air-omp-payload-alias-" });
+test("buildBwrapConfinement - a writable alias physically resolving to the payload is refused", () => {
+  const base = makeTempDirSync({ prefix: "air-omp-payload-alias-" });
   try {
     const realPayload = join(base, "natives");
-    Deno.mkdirSync(realPayload, { recursive: true });
+    fs.mkdirSync(realPayload, { recursive: true });
     const alias = join(base, "natives-alias");
-    Deno.symlinkSync(realPayload, alias);
+    fs.symlinkSync(realPayload, alias);
     assertThrows(
       () =>
         buildBwrapConfinement(
@@ -468,11 +471,11 @@ Deno.test("buildBwrapConfinement - a writable alias physically resolving to the 
       "overlaps mandatory writable mount",
     );
   } finally {
-    Deno.removeSync(base, { recursive: true });
+    fs.rmSync(base, { recursive: true });
   }
 });
 
-Deno.test("buildBwrapConfinement - a writable nested inside the payload is refused", () => {
+test("buildBwrapConfinement - a writable nested inside the payload is refused", () => {
   // A nested writable (literal or through a physical alias) would silently hole
   // the read-only payload, so it is refused before any mount is emitted.
   assertThrows(
@@ -492,12 +495,12 @@ Deno.test("buildBwrapConfinement - a writable nested inside the payload is refus
     "overlaps mandatory writable mount",
   );
 
-  const base = Deno.makeTempDirSync({ prefix: "air-omp-payload-nested-" });
+  const base = makeTempDirSync({ prefix: "air-omp-payload-nested-" });
   try {
     const payload = join(base, "natives");
-    Deno.mkdirSync(join(payload, "child"), { recursive: true });
+    fs.mkdirSync(join(payload, "child"), { recursive: true });
     const escapingAlias = join(base, "elsewhere");
-    Deno.symlinkSync(join(payload, "child"), escapingAlias);
+    fs.symlinkSync(join(payload, "child"), escapingAlias);
     assertThrows(
       () =>
         buildBwrapConfinement(
@@ -515,11 +518,11 @@ Deno.test("buildBwrapConfinement - a writable nested inside the payload is refus
       "overlaps mandatory writable mount",
     );
   } finally {
-    Deno.removeSync(base, { recursive: true });
+    fs.rmSync(base, { recursive: true });
   }
 });
 
-Deno.test("buildBwrapConfinement - the skill-root overlap refusal is unchanged when a payload mount is present", () => {
+test("buildBwrapConfinement - the skill-root overlap refusal is unchanged when a payload mount is present", () => {
   assertThrows(
     () =>
       buildBwrapConfinement(
@@ -538,7 +541,7 @@ Deno.test("buildBwrapConfinement - the skill-root overlap refusal is unchanged w
   );
 });
 
-Deno.test("buildBwrapConfinement - an OpenCode launch emits no payload bind", () => {
+test("buildBwrapConfinement - an OpenCode launch emits no payload bind", () => {
   const { args } = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
     "opencode",

@@ -4,12 +4,15 @@
  * Implements OpenSpec change `secure-acp-filesystem-access`.
  */
 
+import { dlopen, type Library, ptr, read } from "bun:ffi";
+import fs from "node:fs";
 import type { CanonicalRootInfo, CanonicalTarget, ObservedIdentity } from "./filesystem-roots.ts";
 import type {
   FilesystemAccessFailure,
   FilesystemAccessFailureReason,
   FilesystemAccessResult,
 } from "./filesystem-access.ts";
+import { runtimeArch, runtimeOs } from "@utils/runtime-platform.ts";
 
 export interface LinuxArchitectureConstants {
   readonly SYS_openat2: bigint;
@@ -206,16 +209,17 @@ export function getRealLinuxNativeCalls(): {
   if (cachedRealNativeCalls) return { calls: cachedRealNativeCalls };
   if (cachedRealInitError) return { error: cachedRealInitError };
 
-  if (Deno.build.os !== "linux") {
+  const operatingSystem = runtimeOs();
+  if (operatingSystem !== "linux") {
     cachedRealInitError = {
       reason: "unsupported_platform",
       message:
-        `Operating system '${Deno.build.os}' is not supported. Supported platform is Linux x86_64 or aarch64.`,
+        `Operating system '${operatingSystem}' is not supported. Supported platform is Linux x86_64 or aarch64.`,
     };
     return { error: cachedRealInitError };
   }
 
-  const arch = Deno.build.arch;
+  const arch = runtimeArch();
   let constants: LinuxArchitectureConstants;
   if (arch === "x86_64") {
     constants = X86_64_CONSTANTS;
@@ -241,7 +245,7 @@ export function getRealLinuxNativeCalls(): {
 
   let realLibcPath: string;
   try {
-    realLibcPath = Deno.realPathSync(libcPath);
+    realLibcPath = fs.realpathSync(libcPath);
   } catch {
     cachedRealInitError = {
       reason: "secure_access_unavailable",
@@ -250,28 +254,20 @@ export function getRealLinuxNativeCalls(): {
     return { error: cachedRealInitError };
   }
 
-  let dylib: Deno.DynamicLibrary<{
-    syscall: { parameters: ["i64", "i64", "buffer", "buffer", "u64"]; result: "i64" };
-    open: { parameters: ["buffer", "i32", "u32"]; result: "i32" };
-    statx: { parameters: ["i32", "buffer", "i32", "u32", "buffer"]; result: "i32" };
-    read: { parameters: ["i32", "buffer", "usize"]; result: "isize" };
-    write: { parameters: ["i32", "buffer", "usize"]; result: "isize" };
-    ftruncate: { parameters: ["i32", "i64"]; result: "i32" };
-    close: { parameters: ["i32"]; result: "i32" };
-    __errno_location: { parameters: []; result: "pointer" };
-  }>;
+  const symbolSpec = {
+    syscall: { args: ["i64", "i64", "ptr", "ptr", "u64"], returns: "i64" },
+    open: { args: ["ptr", "i32", "u32"], returns: "i32" },
+    statx: { args: ["i32", "ptr", "i32", "u32", "ptr"], returns: "i32" },
+    read: { args: ["i32", "ptr", "u64"], returns: "i64" },
+    write: { args: ["i32", "ptr", "u64"], returns: "i64" },
+    ftruncate: { args: ["i32", "i64"], returns: "i32" },
+    close: { args: ["i32"], returns: "i32" },
+    __errno_location: { args: [], returns: "ptr" },
+  } as const;
+  let dylib: Library<typeof symbolSpec>;
 
   try {
-    dylib = Deno.dlopen(realLibcPath, {
-      syscall: { parameters: ["i64", "i64", "buffer", "buffer", "u64"], result: "i64" },
-      open: { parameters: ["buffer", "i32", "u32"], result: "i32" },
-      statx: { parameters: ["i32", "buffer", "i32", "u32", "buffer"], result: "i32" },
-      read: { parameters: ["i32", "buffer", "usize"], result: "isize" },
-      write: { parameters: ["i32", "buffer", "usize"], result: "isize" },
-      ftruncate: { parameters: ["i32", "i64"], result: "i32" },
-      close: { parameters: ["i32"], result: "i32" },
-      __errno_location: { parameters: [], result: "pointer" },
-    });
+    dylib = dlopen(realLibcPath, symbolSpec);
   } catch {
     cachedRealInitError = {
       reason: "secure_access_unavailable",
@@ -280,49 +276,45 @@ export function getRealLinuxNativeCalls(): {
     return { error: cachedRealInitError };
   }
 
-  const errnoPtr = dylib.symbols.__errno_location();
-  if (errnoPtr === null) {
+  const symbols = dylib.symbols;
+  if (symbols.__errno_location() === null) {
     cachedRealInitError = {
       reason: "secure_access_unavailable",
       message: "__errno_location returned null pointer.",
     };
     return { error: cachedRealInitError };
   }
-  const errnoView = new Deno.UnsafePointerView(errnoPtr);
 
-  const getImmediateErrno = (): number => errnoView.getInt32();
+  // Re-resolve the thread-local errno address on every failure: a cached
+  // pointer from another thread or call must never be trusted.
+  const getImmediateErrno = (): number => read.i32(symbols.__errno_location()!);
   const emptyCString = new Uint8Array([0]);
 
   cachedRealNativeCalls = {
     getArchitectureConstants: () => constants,
     open: (path: string, flags: number, mode: number) => {
       const cPath = encodeCString(path);
-      const fd = dylib.symbols.open(cPath, flags, mode);
+      const fd = symbols.open(ptr(cPath), flags, mode);
       const err = fd < 0 ? getImmediateErrno() : 0;
       return { fd, errno: err };
     },
     openat2: (dirfd: number, pathname: string, flags: bigint, mode: bigint, resolve: bigint) => {
       const cPath = encodeCString(pathname);
       const how = encodeOpenHow(flags, mode, resolve);
-      const res = dylib.symbols.syscall(
-        constants.SYS_openat2,
-        BigInt(dirfd),
-        cPath,
-        how,
-        24n,
+      const fd = Number(
+        symbols.syscall(constants.SYS_openat2, BigInt(dirfd), ptr(cPath), ptr(how), 24n),
       );
-      const fd = Number(res);
       const err = fd < 0 ? getImmediateErrno() : 0;
       return { fd, errno: err };
     },
     statx: (fd: number) => {
       const buf = new Uint8Array(256);
-      const res = dylib.symbols.statx(
+      const res = symbols.statx(
         fd,
-        emptyCString,
+        ptr(emptyCString),
         constants.AT_EMPTY_PATH,
         constants.STATX_BASIC_STATS,
-        buf,
+        ptr(buf),
       );
       if (res < 0) {
         return { errno: getImmediateErrno() };
@@ -330,24 +322,22 @@ export function getRealLinuxNativeCalls(): {
       return { statx: parseStatxBuffer(buf), errno: 0 };
     },
     read: (fd: number, buffer: Uint8Array) => {
-      const res = dylib.symbols.read(fd, buffer, BigInt(buffer.byteLength));
-      const bytesRead = Number(res);
+      const bytesRead = Number(symbols.read(fd, ptr(buffer), BigInt(buffer.byteLength)));
       const err = bytesRead < 0 ? getImmediateErrno() : 0;
       return { bytesRead, errno: err };
     },
     write: (fd: number, buffer: Uint8Array) => {
-      const res = dylib.symbols.write(fd, buffer, BigInt(buffer.byteLength));
-      const bytesWritten = Number(res);
+      const bytesWritten = Number(symbols.write(fd, ptr(buffer), BigInt(buffer.byteLength)));
       const err = bytesWritten < 0 ? getImmediateErrno() : 0;
       return { bytesWritten, errno: err };
     },
     ftruncate: (fd: number, length: bigint) => {
-      const res = dylib.symbols.ftruncate(fd, length);
+      const res = symbols.ftruncate(fd, length);
       const err = res < 0 ? getImmediateErrno() : 0;
       return { result: res, errno: err };
     },
     close: (fd: number) => {
-      const res = dylib.symbols.close(fd);
+      const res = symbols.close(fd);
       const err = res < 0 ? getImmediateErrno() : 0;
       return { result: res, errno: err };
     },

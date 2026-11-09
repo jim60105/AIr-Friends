@@ -1317,7 +1317,7 @@ Detectable root, observed ancestor or final-object identity mismatch before the 
 
 ### Requirement: Explicit Secure ACP Filesystem Platform Policy
 
-The initially supported secure backend SHALL require Linux little-endian x86_64/aarch64, GNU glibc at an explicitly owned supported system location, Linux constrained-open and descriptor-metadata support, exact usable identities and Deno FFI permission.
+The initially supported secure backend SHALL require Linux little-endian x86_64/aarch64, GNU glibc at an explicitly owned supported system location, Linux constrained-open and descriptor-metadata support, exact usable identities and a working runtime foreign-function interface to that libc.
 
 #### Scenario: Supported local filesystem uses the actual backend
 - **GIVEN** the supported system library, native ABI and constrained-open/metadata capability are actually available
@@ -2482,3 +2482,17 @@ The egress proxy SHALL resolve a hostname once per client request, validate ever
 - **GIVEN** a hostname with a public A record and a loopback AAAA record
 - **WHEN** a client issues `CONNECT` for it
 - **THEN** the proxy SHALL reply 403
+
+### Requirement: Real Backend Reports Kernel Errno
+
+The real Linux backend SHALL report the errno the kernel set for each failed constrained call, including across many alternating successes and failures with event-loop turns between them.
+
+#### Scenario: Symlink and escape errnos
+- **GIVEN** a confinement root containing a symbolic link and a directory escape path
+- **WHEN** the real backend opens each with resolve flags that forbid links and escapes
+- **THEN** it SHALL report `ELOOP` for the link and `EXDEV` for the escape
+
+#### Scenario: Alternating failures
+- **GIVEN** a confinement root with one existing and one missing file
+- **WHEN** the real backend opens them alternately 10,000 times, yielding to the event loop every 100 calls
+- **THEN** every missing-file result SHALL report `ENOENT` and every existing-file result SHALL return a descriptor

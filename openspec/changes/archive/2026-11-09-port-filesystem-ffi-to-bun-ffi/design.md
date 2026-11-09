@@ -47,3 +47,11 @@ Copy each `LinuxNativeCalls` method body from the PoC where it differs only by t
 
 - [errno is clobbered by Bun internals between the call and the read] → The PoC's 10,000-call alternation is the check, now on the production backend.
 - [`ptr()` of a zero-length buffer] → Keep the existing `emptyCString` (one NUL byte) for empty paths, as production does.
+
+## Design deviations (apply time)
+
+| File | Change | Owner / authority |
+| --- | --- | --- |
+| `src/acp/filesystem-access-linux.ts` | D1's table names `DynamicLibrary<typeof SYMBOLS>`; the installed `@types/bun` 1.4.2 exports the equivalent public type as `Library<Fns extends Symbols>` (`node_modules/bun-types/ffi.d.ts:531`), so `dylib` is typed `Library<typeof symbolSpec>`. The symbol table, signatures, conversions and failure messages are otherwise exactly D1's. | This change owns the file. `tests/acp/filesystem-access-linux.test.ts` passes against the real backend. |
+| `src/acp/filesystem-access-linux.ts` | The symbol table is a `symbolSpec` const inside `getRealLinuxNativeCalls()` rather than a module-level `SYMBOLS`. Task 1.1 requires the diff to stay inside the function and the import block; the function is the table's only user and it is built once per successful initialization. | This change owns the file. |
+| `tests/acp/filesystem-access-linux.test.ts` | D2 gates the two real-backend tests with `test.skipIf(runtimeOs() !== "linux")`. The gate additionally skips when the design's owned libc path (`OWNED_DEBIAN_LIBC_PATHS[runtimeArch()]`) does not exist, so the suite stays green on a non-Debian Linux development host. It inspects only that named prerequisite: once the owned libc exists, any `dlopen`/symbol/null-errno initialization failure fails the test instead of skipping. The real ELOOP/EXDEV/ENOENT and 10,000-alternation proofs were executed on the real backend in the project's Debian 13.6 / bun 1.4.2 PoC image on the same host kernel; the Fedora host returns the designed `secure_access_unavailable`. | This change owns the file. |
