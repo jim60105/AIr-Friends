@@ -41,10 +41,10 @@ const DEPLOYED_TEMPLATE = fs.readFileSync(
 const OTHER_ROOT = "/srv/deployment/shared-skills";
 
 /** The container default: the stock image's declared `AGENT_SKILLS_DIR`. */
-const CONTAINER_ROOT = "/home/deno/.agents/skills";
+const CONTAINER_ROOT = "/home/air/.agents/skills";
 
 /** The daemon home the shipped template's `~` spellings resolve against. */
-const CONTAINER_HOME = "/home/deno";
+const CONTAINER_HOME = "/home/air";
 
 /** Raw source text of every member of `object` except the named keys. */
 function rawSpansOfOtherMembers(
@@ -322,7 +322,7 @@ test("declaration - an over-broad root is refused", () => {
       CONTAINER_HOME,
       "/",
       "/home",
-      "/home/deno/.agents/skills/..",
+      "/home/air/.agents/skills/..",
       "/srv/skills*",
       "relative/skills",
       "",
@@ -612,7 +612,7 @@ test("declaration - an authored note inside an empty object survives the splice"
 test("declaration - the deployed document is the agent's own, whatever the daemon selectors say", () => {
   const selectors = (name: string) =>
     name === "HOME"
-      ? "/home/deno"
+      ? "/home/air"
       : name === "XDG_CONFIG_HOME"
       ? "/srv/config"
       : name === "OPENCODE_CONFIG_DIR"
@@ -627,7 +627,7 @@ test("declaration - the deployed document is the agent's own, whatever the daemo
   );
   assertEquals(opencodeDaemonHome({ env: selectors }), CONTAINER_HOME);
   assertEquals(
-    opencodeDaemonHome({ env: (name) => name === "HOME" ? "/home/deno/" : undefined }),
+    opencodeDaemonHome({ env: (name) => name === "HOME" ? "/home/air/" : undefined }),
     CONTAINER_HOME,
     "the observed home is canonicalized",
   );

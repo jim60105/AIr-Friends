@@ -9,7 +9,7 @@
 //
 // - the existing installed-root resolution — `agent.skillsDir` (env
 //   `AGENT_SKILLS_DIR`; the stock container deployment declares
-//   `/home/deno/.agents/skills`, the repository default is `skills`) —
+//   `/home/air/.agents/skills`, the repository default is `skills`) —
 //   relative roots resolved against the daemon/deployment process working
 //   directory, never the agent child's HOME.
 // - No skill-root constant exists anymore: `align-omp-skill-trust-to-shared-root`

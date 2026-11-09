@@ -2,6 +2,7 @@
 
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { loadConfig, loadSystemPrompt, normalizeIdentities } from "@core/config-loader.ts";
+import { getEnvironment } from "@utils/env.ts";
 import { ConfigError } from "../../src/types/errors.ts";
 import { ErrorCode } from "../../src/types/errors.ts";
 import { getDefaultAgentType } from "../../src/acp/agent-factory.ts";
@@ -613,14 +614,29 @@ workspace:
   workspacesDir: "workspaces"
 `;
 
-  process.env["AGENT_SKILLS_DIR"] = "/home/deno/.agents/skills";
+  process.env["AGENT_SKILLS_DIR"] = "/home/air/.agents/skills";
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
-      assertEquals(result.agent.skillsDir, "/home/deno/.agents/skills");
+      assertEquals(result.agent.skillsDir, "/home/air/.agents/skills");
     });
   } finally {
     delete process.env["AGENT_SKILLS_DIR"];
+  }
+});
+
+test("getEnvironment - DENO_ENV alone does not select the environment", () => {
+  const previousEnv = process.env["ENV"];
+  const previousDenoEnv = process.env["DENO_ENV"];
+  delete process.env["ENV"];
+  process.env["DENO_ENV"] = "production";
+  try {
+    assertEquals(getEnvironment(), "development");
+  } finally {
+    if (previousEnv === undefined) delete process.env["ENV"];
+    else process.env["ENV"] = previousEnv;
+    if (previousDenoEnv === undefined) delete process.env["DENO_ENV"];
+    else process.env["DENO_ENV"] = previousDenoEnv;
   }
 });
 

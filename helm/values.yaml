@@ -100,7 +100,7 @@ env:
   # Shared skills directory: the ONE trusted skill-script root for BOTH agent
   # types (opencode and omp) and the explicit external-install destination
   # (default: skills; relative values anchor at the deployment working directory).
-  AGENT_SKILLS_DIR: '/home/deno/.agents/skills'
+  AGENT_SKILLS_DIR: '/home/air/.agents/skills'
   #
   # OMP native discovery is authored SEPARATELY from AGENT_SKILLS_DIR: the native OMP
   # settings YAML declares the agent's own skill root in `skills.customDirectories`,
@@ -125,7 +125,7 @@ env:
   LOG_LEVEL: 'INFO'
 
   # Environment
-  DENO_ENV: 'development'
+  ENV: 'development'
 
   # Agent provider API keys
   # OpenCode API Key (optional)
@@ -401,7 +401,7 @@ serviceMonitor:
 
 # -- Extra environment variables to add to the container (list of name/value pairs).
 extraEnv: []
-#  - name: DENO_ENV
+#  - name: ENV
 #    value: "prod"
 
 # Persistent volume for bot data (workspaces and memory)

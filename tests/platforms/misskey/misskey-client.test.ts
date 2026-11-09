@@ -189,8 +189,7 @@ test("MisskeyClient.uploadFile - sends the SDK's multipart body and returns the 
 /**
  * Compile-time guard: a misspelled request field on a real endpoint must not
  * type-check. `includeReplies` on `users/notes` is the typo this change exists
- * to prevent (`deno test` type-checks test files, `deno task check` does not
- * read them).
+ * to prevent (`tsc --noEmit` type-checks test files; the test runner does not).
  */
 const requestWithMisspelledUsersNotesField: (client: MisskeyClient) => Promise<unknown> = (
   client,

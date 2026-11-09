@@ -133,7 +133,7 @@ export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|captio
  * Rejects absolute paths (`/etc/...`), home-anchored paths (`~/...`, `$HOME/...`),
  * and parent-traversal (`../`). Workspace-relative paths and non-path flags/values
  * are allowed. Used to keep a whitelisted command prefix from being used to read
- * sensitive files (e.g. `agent-browser /home/deno/.git-credentials`).
+ * sensitive files (e.g. `agent-browser /home/air/.git-credentials`).
  */
 export function referencesOutOfWorkspacePath(token: string): boolean {
   // F12 D5: an unquoted non-harness `$VAR` reference or unquoted brace token could
@@ -1307,7 +1307,7 @@ export class ChatbotClient implements acp.Client {
         sessionContextGeneration: registered?.generation ?? "",
         processTmpDir: this.config.processTmpDir,
         xdgDataHome: this.config.xdgDataHome,
-        home: process.env["HOME"] ?? "/home/deno",
+        home: process.env["HOME"] ?? "/home/air",
         runtimeEnv: {
           tmpDir: this.config.processTmpDir ?? resolve(sessionCwd, "tmp"),
           agentWorkspace: this.config.agentWorkspacePath,

@@ -6,7 +6,7 @@
 // (real filesystem, real factory/connector/sandbox/healthcheck code paths).
 //
 // The container shape (the stock image's configured
-// `/home/deno/.agents/skills`, shared by BOTH agent types since
+// `/home/air/.agents/skills`, shared by BOTH agent types since
 // `unify-skill-root-and-inventory`) is covered by the resolver suite
 // (`tests/core/skills-root.test.ts` — the one configured-root selection +
 // canonical observation through its injectable seams), the confinement suite
@@ -176,7 +176,7 @@ test("wiring identity - both agent types resolve a byte-identical canonical root
   // the injectable seam. The seam FABRICATES the identity, so this case proves
   // the SELECTION is that one configured value for both agent types (a
   // spelling-level proof, not an image evidence claim).
-  const stock = "/home/deno/.agents/skills";
+  const stock = "/home/air/.agents/skills";
   const seamOptions = {
     directoryExists: (path: string) => path === stock,
     observeDirectory: (path: string) => ({ root: path, identity: { dev: 7, ino: 11 } }),

@@ -377,7 +377,7 @@ test("ChatbotClient - requestPermission auto-approves skill shell execution", as
     // Provide explicit allow list matching the test command
     // Root-exact inventory over a REAL installed tree (the canonical absolute
     // script path is the only spelling that can be approved; the old suffix
-    // set that let `/home/deno/...` match is gone).
+    // set that let `/home/air/...` match is gone).
     const skill = skillFixture(["memory-save"]);
     const client = createRegisteredClient(skillRegistry, logger, config, skill.list);
 
@@ -2021,7 +2021,7 @@ test("ChatbotClient - requestPermission rejects unknown skill command", async ()
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            `${BUN_RUN} /home/deno/.agents/skills/malicious-tool/scripts/evil.ts --session-id xxx`,
+            `${BUN_RUN} /home/air/.agents/skills/malicious-tool/scripts/evil.ts --session-id xxx`,
           ],
         },
       },
@@ -2192,7 +2192,7 @@ test("matchesCommandPrefix - rejects when prefix is substring of first token", (
 
 test("F2 matchesCommandPrefix - rejects out-of-workspace absolute path argument", () => {
   assertEquals(
-    matchesCommandPrefix("agent-browser /home/deno/.git-credentials", "agent-browser"),
+    matchesCommandPrefix("agent-browser /home/air/.git-credentials", "agent-browser"),
     false,
   );
 });
@@ -2220,14 +2220,14 @@ test("F2 matchesCommandPrefix - allows workspace-relative and flag arguments", (
 
 test("F2 matchesCommandPrefix - rejects quoted absolute path argument", () => {
   assertEquals(
-    matchesCommandPrefix('agent-browser "/home/deno/.git-credentials"', "agent-browser"),
+    matchesCommandPrefix('agent-browser "/home/air/.git-credentials"', "agent-browser"),
     false,
   );
 });
 
 test("F2 matchesCommandPrefix - rejects flag-embedded absolute path argument", () => {
   assertEquals(
-    matchesCommandPrefix("agent-browser --file=/home/deno/.git-credentials", "agent-browser"),
+    matchesCommandPrefix("agent-browser --file=/home/air/.git-credentials", "agent-browser"),
     false,
   );
 });
@@ -6345,7 +6345,7 @@ test("ChatbotClient - requestPermission rejects shared/home-rooted and sibling-s
     // data dir (same user, different session id) are all rejected.
     for (
       const cmd of [
-        "cat /home/deno/.local/share/opencode/tool-output/tool_x",
+        "cat /home/air/.local/share/opencode/tool-output/tool_x",
         "cat $HOME/.local/share/opencode/tool-output/tool_x",
         `cat ${tempDir}/../456/tmp/opencode-data/sess_x/opencode/tool-output/tool_x`,
         `cat ${tempDir}/tmp/opencode-data/sess_other/opencode/tool-output/tool_x`,
@@ -6932,7 +6932,7 @@ test("ChatbotClient - rejection recorded on skill free-text flag denial", async 
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            '/home/deno/.agents/skills/send-reply/scripts/send-reply.ts --session-id x --message "text"',
+            '/home/air/.agents/skills/send-reply/scripts/send-reply.ts --session-id x --message "text"',
           ],
         },
       },

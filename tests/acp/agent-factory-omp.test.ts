@@ -197,7 +197,7 @@ test("agent-factory omp - fails closed when the trusted extension artifact is mi
       assert(thrown !== undefined, "missing generated entry must fail the preflight");
       assertStringIncludes(thrown!.message, "Missing trusted extension module");
       assertStringIncludes(thrown!.message, artifact);
-      assertStringIncludes(thrown!.message, "deno task bundle:omp-extension");
+      assertStringIncludes(thrown!.message, "bun run bundle:omp-extension");
     });
   } finally {
     await fsp.rm(root, { recursive: true });

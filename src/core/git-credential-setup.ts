@@ -134,7 +134,7 @@ export async function setupGitCredentials(
 
   const host = resolveHost(credentialConfig, backupConfig);
   const username = resolveUsername(backupConfig);
-  const home = process.env["HOME"] ?? "/home/deno";
+  const home = process.env["HOME"] ?? "/home/air";
   const credentialFilePath = join(home, ".git-credentials");
   const credentialContent = `${formatCredentialLine(host, username, password)}\n`;
 

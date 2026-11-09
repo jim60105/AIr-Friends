@@ -46,10 +46,10 @@ test("both agent types honor the same absolute configured installed root", () =>
   // inventory` D1): no image constant, no catalog gate, no per-agent root.
   for (const agentType of AGENT_TYPES) {
     assertEquals(
-      resolveTrustedSkillsRoot(agentType, "/home/deno/.agents/skills", {
-        directoryExists: probe(["/home/deno/.agents/skills"]),
+      resolveTrustedSkillsRoot(agentType, "/home/air/.agents/skills", {
+        directoryExists: probe(["/home/air/.agents/skills"]),
       }),
-      "/home/deno/.agents/skills",
+      "/home/air/.agents/skills",
       agentType,
     );
     assertEquals(
