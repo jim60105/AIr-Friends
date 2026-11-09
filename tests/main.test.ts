@@ -510,6 +510,8 @@ test("parseCliArgs - accepts the long config option", () => {
 
 test("parseCliArgs - accepts the short config alias", () => {
   assertEquals(parseCliArgs(["-c", "./my-config.yaml"]).config, "./my-config.yaml");
+  assertEquals(parseCliArgs(["-c=./my-config.yaml"]).config, "./my-config.yaml");
+  assertEquals(parseCliArgs(["-c="]).config, undefined);
 });
 
 test("parseCliArgs - bare config option keeps its empty-string value", () => {

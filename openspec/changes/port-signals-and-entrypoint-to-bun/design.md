@@ -56,7 +56,8 @@ returns `true`, where the old parser returned `""`) and for explicit boolean val
 arrives as the string `"false"`, and a separate `--yolo false` leaves `"false"` positional). The
 entry point therefore exports `parseCliArgs(argv)` and normalizes argv before parsing: a bare
 `--config`/`-c`, or one followed by a `-`-prefixed token, becomes `--config=` (the old empty-string
-value); a boolean flag followed by `true`/`false` becomes its `--flag=value` form; and only
+value); `-c=<path>` becomes `--config=<path>` (and `-c=` leaves the option unset, as before); a
+boolean flag followed by `true`/`false` becomes its `--flag=value` form; and only
 `undefined`, `false` and `"false"` read as false. This keeps the shipped `start:config` script and
 every explicit flag value working, and gives the argument-behavior tests a direct seam.
 

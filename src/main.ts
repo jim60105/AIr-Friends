@@ -62,6 +62,17 @@ function normalizeArgv(argv: readonly string[]): string[] {
       continue;
     }
 
+    // `-c=<path>` assigned a string to the short alias in the previous parser,
+    // where an empty assignment left the option unset; `parseArgs` would keep
+    // the leading `=`.
+    if (arg === "-c=") {
+      continue;
+    }
+    if (arg.startsWith("-c=")) {
+      normalized.push(`--config=${arg.slice(3)}`);
+      continue;
+    }
+
     normalized.push(arg);
   }
   return normalized;
