@@ -1,7 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "fast-xml-parser": "5.12.0"
-  }
-}

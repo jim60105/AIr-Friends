@@ -15,8 +15,8 @@ Prerequisite: `drill-bun-cutover-and-rollback` is applied and `migration/bun/cut
 
 ## 3. Remove migration material
 
-- [ ] 3.1 Delete `migration/bun/` and `.github/workflows/bun-poc-arm64.yml`, and remove `.parity/` from `.gitignore`. Verify: `git ls-files migration .github/workflows/bun-poc-arm64.yml` prints nothing, and `bun test --timeout=120000 tests/` still passes.
-- [ ] 3.2 Run design D1 (amended 2026-11-10; see the design's Recorded deviations). Verify: the five runtime-independence `git grep` checks all print nothing, and every reference-inventory hit is classified into the six recorded evidence classes with counts and examples in the task report; list any main-spec Deno mention found by `grep -rni deno openspec/specs` in the task report.
+- [x] 3.1 Delete `migration/bun/` and `.github/workflows/bun-poc-arm64.yml`, and remove `.parity/` from `.gitignore`. Verify: `git ls-files migration .github/workflows/bun-poc-arm64.yml` prints nothing, and `bun test --timeout=120000 tests/` still passes.
+- [x] 3.2 Run design D1 (amended 2026-11-10; see the design's Recorded deviations). Verify: the five runtime-independence `git grep` checks all print nothing, and every reference-inventory hit is classified into the six recorded evidence classes with counts and examples in the task report; list any main-spec Deno mention found by `grep -rni deno openspec/specs` in the task report.
 
 ## 4. Housekeeping
 

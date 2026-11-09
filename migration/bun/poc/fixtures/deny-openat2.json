@@ -1,1 +1,0 @@
-{ "defaultAction": "SCMP_ACT_ALLOW", "syscalls": [{ "names": ["openat2"], "action": "SCMP_ACT_ERRNO", "errnoRet": 38 }] }

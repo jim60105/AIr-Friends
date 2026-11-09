@@ -1,9 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@agentclientprotocol/sdk": "0.14.1",
-    "fast-xml-parser": "5.12.0",
-    "zod": "4.4.3"
-  }
-}
