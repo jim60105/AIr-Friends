@@ -28,6 +28,7 @@ import {
 import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import type { OmpNativeStateProvenance } from "./filesystem-roots.ts";
 import { resolveOmpSessionArtifacts } from "./omp/session-artifacts.ts";
+import { killProcessTree } from "@utils/process-lifecycle.ts";
 import {
   collectOptionValues,
   findOptionByCategory,
@@ -1136,7 +1137,10 @@ export class AgentConnector {
             timeoutMs: DISCONNECT_TIMEOUT_MS,
           });
           try {
-            this.process.kill("SIGKILL");
+            // A wrapper-only SIGKILL leaves its descendants running (dumb-init
+            // cannot forward SIGKILL), so signal the whole tree: descendants
+            // deepest first, then the wrapper.
+            await killProcessTree(this.process.pid, "SIGKILL");
           } catch {
             // Best effort — the process may have exited between the race and here.
           }

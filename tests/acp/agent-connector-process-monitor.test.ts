@@ -1,10 +1,22 @@
 // tests/acp/agent-connector-process-monitor.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 
-import type { AgentProcessExit, AgentProcessHandle } from "../../src/acp/agent-process.ts";
+import {
+  type AgentProcessExit,
+  type AgentProcessHandle,
+  createAgentProcess,
+} from "../../src/acp/agent-process.ts";
+import {
+  killProcessTree,
+  listDescendantPids,
+  processAlive,
+} from "../../src/utils/process-lifecycle.ts";
+import fsp from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
 import { test } from "bun:test";
 
@@ -272,3 +284,159 @@ test("intentionalShutdown - can be set and read", () => {
   connector["intentionalShutdown"] = false;
   assertEquals(connector["intentionalShutdown"], false);
 });
+
+// Escalated disconnect reaps the agent process tree (real descendant processes).
+
+const SIGKILL_WARNING = "Agent process did not exit within SIGTERM timeout, sending SIGKILL";
+
+/**
+ * The agent ignores SIGTERM and starts a grandchild that ignores it too, so a
+ * wrapper-only SIGKILL would leave both running (the Go record's
+ * `sigkillSurvivors`).
+ */
+const IGNORE_TERM_PARENT_FIXTURE = `
+process.on("SIGTERM", () => {});
+Bun.spawn(["sh", "-c", "trap '' TERM; sleep 600"], { stdout: "ignore", stderr: "ignore" });
+setInterval(() => {}, 1000);
+`;
+
+/** The agent exits on SIGTERM: the connector must not escalate. */
+const EXIT_ON_TERM_FIXTURE = `
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1000);
+`;
+
+/** One real agent process tree; the returned fixture dir is removed by teardown. */
+async function startFixture(
+  fixtureSource: string,
+  expectedDescendants: number,
+): Promise<{
+  connector: AgentConnector;
+  logs: LogEntry[];
+  pid: number;
+  descendants: number[];
+  fixtureDir: string;
+}> {
+  const fixtureDir = await fsp.mkdtemp(join(tmpdir(), "agent-connector-tree-"));
+  let handle: AgentProcessHandle | undefined;
+  try {
+    const fixture = join(fixtureDir, "fixture.ts");
+    await fsp.writeFile(fixture, fixtureSource);
+    const { logger, logs } = createCapturingLogger();
+    const connector = createConnector(logger);
+    handle = createAgentProcess({
+      command: process.execPath,
+      args: ["run", "--no-env-file", fixture],
+      cwd: fixtureDir,
+      env: { PATH: process.env["PATH"] ?? "" },
+    });
+    connector["process"] = handle;
+    const descendants = await waitForDescendants(handle.pid, expectedDescendants);
+    return { connector, logs, pid: handle.pid, descendants, fixtureDir };
+  } catch (error) {
+    // A readiness failure must not leak the spawned tree or the temp root.
+    if (handle !== undefined) await killProcessTree(handle.pid, "SIGKILL").catch(() => {});
+    await fsp.rm(fixtureDir, { recursive: true }).catch(() => {});
+    throw error;
+  }
+}
+
+test("Escalated Disconnect Reaps The Agent Process Tree - child ignoring SIGTERM", async () => {
+  // The wrapper's child is the agent fixture; beneath it is the SIGTERM-
+  // ignoring `sh -c` command (`sleep` may replace the shell via exec).
+  const fixture = await startFixture(IGNORE_TERM_PARENT_FIXTURE, 2);
+  try {
+    // Wrapper -> agent fixture -> sh -> sleep: all but the wrapper ignore
+    // SIGTERM, so only the escalated SIGKILL can reap them.
+    await fixture.connector.disconnect();
+
+    await waitForGone([fixture.pid, ...fixture.descendants], 1_000);
+    assertEquals(await processAlive(fixture.pid), false);
+    for (const pid of fixture.descendants) {
+      assertEquals(await processAlive(pid), false, `descendant ${pid} survived the escalation`);
+    }
+    assert(
+      fixture.logs.some((entry) => entry.level === "warn" && entry.message === SIGKILL_WARNING),
+      "the 2-second grace period must have expired before escalation",
+    );
+  } finally {
+    await killProcessTree(fixture.pid, "SIGKILL").catch(() => {});
+    // The wrapper may already be gone; the recorded descendants must still die.
+    for (const pid of fixture.descendants) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    await fsp.rm(fixture.fixtureDir, { recursive: true }).catch(() => {});
+  }
+});
+
+test("Escalated Disconnect Reaps The Agent Process Tree - graceful exit is not escalated", async () => {
+  const fixture = await startFixture(EXIT_ON_TERM_FIXTURE, 1);
+  try {
+    await fixture.connector.disconnect();
+
+    assertEquals(await processAlive(fixture.pid), false);
+    assertEquals(
+      fixture.logs.some((entry) => entry.level === "warn" && entry.message === SIGKILL_WARNING),
+      false,
+      "a SIGTERM exit inside the grace period must never escalate",
+    );
+    for (const pid of fixture.descendants) {
+      assertEquals(await processAlive(pid), false, `descendant ${pid} must exit with the agent`);
+    }
+  } finally {
+    await killProcessTree(fixture.pid, "SIGKILL").catch(() => {});
+    // The wrapper may already be gone; the recorded descendants must still die.
+    for (const pid of fixture.descendants) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    await fsp.rm(fixture.fixtureDir, { recursive: true }).catch(() => {});
+  }
+});
+
+/**
+ * Real delay: a spawned kernel process's arrival and death are OS events, not
+ * timers under test control, so these barriers poll the kernel within a bounded
+ * deadline (the sanctioned exception; no guessed single sleep).
+ */
+async function waitForDescendants(pid: number, expected: number): Promise<number[]> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const descendants = await listDescendantPids(pid);
+    if (descendants.ok && descendants.pids.length >= expected) return descendants.pids;
+    await delay(10);
+  }
+  throw new Error(`wrapper ${pid} never reached ${expected} descendants`);
+}
+
+/** Bounded wait until every PID is gone; throws naming the survivors. */
+async function waitForGone(pids: number[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const alive: number[] = [];
+    for (const pid of pids) {
+      if (await processAlive(pid)) alive.push(pid);
+    }
+    if (alive.length === 0) return;
+    await delay(20);
+  }
+  const survivors: number[] = [];
+  for (const pid of pids) {
+    if (await processAlive(pid)) survivors.push(pid);
+  }
+  throw new Error(`processes still alive after teardown: ${survivors.join(", ")}`);
+}
+
+/** A small real delay for bounded kernel polling. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
