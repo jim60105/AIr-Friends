@@ -268,7 +268,7 @@ The system SHALL provide HTTP health check endpoints when `health.enabled` is `t
 
 - **GIVEN** the health check server is running
 - **WHEN** `GET /ready` or `GET /readyz` is requested
-- **THEN** the response SHALL check: platform connections, skill script existence, required binaries (rg, deno, git), Skill API connectivity (when `skillApi.enabled`), and workspace directory writability
+- **THEN** the response SHALL check: platform connections, skill script existence, required binaries (rg, bun, git), Skill API connectivity (when `skillApi.enabled`), and workspace directory writability
 - **AND** HTTP 200 SHALL be returned only when all checks pass
 - **AND** readiness results SHALL be cached for 30 seconds to avoid excessive subprocess spawning
 

@@ -6,6 +6,9 @@ import { CompletedSessionStore } from "../../src/dashboard/completed-session-sto
 import type { ActiveSession, SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { AuditConfig, Config, DashboardConfig } from "../../src/types/config.ts";
 import type { Registry } from "prom-client";
+import fsp from "node:fs/promises";
+import { makeTempDir } from "../../src/utils/fs-compat.ts";
+import { test } from "bun:test";
 
 // --- Helpers ---
 
@@ -112,9 +115,9 @@ async function createTestServer(overrides?: {
     ...overrides?.dashboard,
   };
 
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   const agentWorkspacePath = `${tempDir}/agent-workspace`;
-  await Deno.mkdir(agentWorkspacePath, { recursive: true });
+  await fsp.mkdir(agentWorkspacePath, { recursive: true });
 
   const server = new DashboardServer({
     config: dashboardConfig,
@@ -155,7 +158,7 @@ async function createTestServer(overrides?: {
     auditBasePath: `${tempDir}/audit`,
     cleanup: async () => {
       await server.stop();
-      await Deno.remove(tempDir, { recursive: true });
+      await fsp.rm(tempDir, { recursive: true });
     },
   };
 }
@@ -177,12 +180,7 @@ async function loginAndGetCookie(baseUrl: string): Promise<string> {
 // Auth flow tests (Task 13.7)
 // ============================
 
-Deno.test({
-  name:
-    "DashboardServer - POST /api/chat/connect with agentType 'omp' passes validation (fails at connection)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/connect with agentType 'omp' passes validation (fails at connection)", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -198,11 +196,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - login with correct passphrase returns 200 + Set-Cookie",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - login with correct passphrase returns 200 + Set-Cookie", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -221,11 +215,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - login with wrong passphrase returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - login with wrong passphrase returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -240,11 +230,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - protected endpoint without cookie returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - protected endpoint without cookie returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/sessions/active`);
@@ -255,11 +241,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - protected endpoint with valid cookie returns 200",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - protected endpoint with valid cookie returns 200", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -273,11 +255,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - logout clears cookie",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - logout clears cookie", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -294,11 +272,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - access endpoint after logout returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - access endpoint after logout returns 401", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -319,11 +293,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/auth/status without cookie returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/auth/status without cookie returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/status`);
@@ -334,11 +304,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/auth/status with cookie returns 200",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/auth/status with cookie returns 200", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -357,11 +323,7 @@ Deno.test({
 // Session monitor APIs (Task 13.2)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/active without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/active without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/sessions/active`);
@@ -372,11 +334,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/active with auth, empty returns []",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/active with auth, empty returns []", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -391,11 +349,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/active with sessions returns data",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/active with sessions returns data", async () => {
   const mockSession: ActiveSession = {
     id: "sess_test1",
     callerToken: "tok_test1",
@@ -446,11 +400,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/history without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/history without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/sessions/history`);
@@ -461,11 +411,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/history with auth, empty returns []",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/history with auth, empty returns []", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -480,11 +426,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/history with entries returns data",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/history with entries returns data", async () => {
   const store = new CompletedSessionStore();
   store.add({
     auditSessionId: "sess_s1",
@@ -511,11 +453,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/stats without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/stats without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/stats`);
@@ -526,11 +464,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/stats with auth returns stats object",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/stats with auth returns stats object", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -546,11 +480,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/:id/audit without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/:id/audit without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/sessions/nonexistent/audit`);
@@ -561,11 +491,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/:id/audit not found returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/:id/audit not found returns 404", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -583,11 +509,7 @@ Deno.test({
 // Workspace browser (Task 13.3)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/tree without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/tree without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/workspace/tree`);
@@ -598,11 +520,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/tree with auth returns tree",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/tree with auth returns tree", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -618,11 +536,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/workspace/file?path=test.md`);
@@ -633,11 +547,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file valid .md returns 200",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file valid .md returns 200", async () => {
   // Need to create a file in the workspace
   const dashboardConfig: DashboardConfig = {
     enabled: true,
@@ -647,10 +557,10 @@ Deno.test({
     behindHttpsProxy: false,
     trustedProxies: [],
   };
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   const wsPath = `${tempDir}/agent-workspace`;
-  await Deno.mkdir(wsPath, { recursive: true });
-  await Deno.writeTextFile(`${wsPath}/test.md`, "# Hello");
+  await fsp.mkdir(wsPath, { recursive: true });
+  await fsp.writeFile(`${wsPath}/test.md`, "# Hello");
 
   const server = new DashboardServer({
     config: dashboardConfig,
@@ -685,15 +595,11 @@ Deno.test({
     assertEquals(body.content, "# Hello");
   } finally {
     await server.stop();
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file disallowed extension returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file disallowed extension returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -707,11 +613,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file not found returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file not found returns 404", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -725,11 +627,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - path traversal with ../ returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - path traversal with ../ returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -743,11 +641,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - path traversal with absolute path returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - path traversal with absolute path returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -764,11 +658,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - path traversal with encoded %2F.. returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - path traversal with encoded %2F.. returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -790,11 +680,7 @@ Deno.test({
 // Chat (Task 13.4)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/connect without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/connect without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
@@ -809,11 +695,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/connect with invalid agentType returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/connect with invalid agentType returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -830,12 +712,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name:
-    "DashboardServer - POST /api/chat/connect with omitted agentType uses the configured default (fails at connection)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/connect with omitted agentType uses the configured default (fails at connection)", async () => {
   const config = createMinimalConfig();
   config.agent.defaultAgentType = "omp";
   const t = await createTestServer({ appConfig: config });
@@ -857,11 +734,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/disconnect without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/disconnect without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/chat/disconnect`, {
@@ -876,11 +749,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/disconnect idempotent returns 200",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/disconnect idempotent returns 200", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -901,11 +770,7 @@ Deno.test({
 // Restart (Task 13.5)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - POST /api/restart without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/restart without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/restart`, {
@@ -920,11 +785,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/restart with confirm: false returns warning",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/restart with confirm: false returns warning", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -942,11 +803,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/restart with invalid body returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/restart with invalid body returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -966,17 +823,13 @@ Deno.test({
 // Workspace file path normalization (Task 1.2)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file with leading slash is normalized and served",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file with leading slash is normalized and served", async () => {
   const t = await createTestServer();
   try {
     // Create a file inside the agent workspace
     const notesDir = `${t.agentWorkspacePath}/notes`;
-    await Deno.mkdir(notesDir, { recursive: true });
-    await Deno.writeTextFile(`${notesDir}/test.md`, "# Leading slash test");
+    await fsp.mkdir(notesDir, { recursive: true });
+    await fsp.writeFile(`${notesDir}/test.md`, "# Leading slash test");
 
     const cookie = await loginAndGetCookie(t.baseUrl);
     const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/notes/test.md`, {
@@ -990,11 +843,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - path traversal with leading slash /../ returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - path traversal with leading slash /../ returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1012,11 +861,7 @@ Deno.test({
 // Model config endpoint (Task 3.3)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - GET /api/config/models returns default model",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/config/models returns default model", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1031,12 +876,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name:
-    "DashboardServer - GET /api/config/models returns unique models from routing rules + default",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/config/models returns unique models from routing rules + default", async () => {
   const config = createMinimalConfig();
   config.agent.modelRouting = {
     enabled: true,
@@ -1067,11 +907,7 @@ Deno.test({
 // Audit session ID in history (Task 4.4)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - GET /api/sessions/history includes auditSessionId",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/sessions/history includes auditSessionId", async () => {
   const store = new CompletedSessionStore();
   store.add({
     auditSessionId: "skill_sess_abc123",
@@ -1102,11 +938,7 @@ Deno.test({
 // Security headers (Task 13.8)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - responses include security headers",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - responses include security headers", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1123,11 +955,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - security headers on error responses",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - security headers on error responses", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/sessions/active`);
@@ -1143,11 +971,7 @@ Deno.test({
 // Rate limiting (Task 13.8)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - login rate limiting returns 429",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - login rate limiting returns 429", async () => {
   const t = await createTestServer();
   try {
     // Send 7 failed attempts (exceeds default limit of 5+1)
@@ -1177,11 +1001,7 @@ Deno.test({
 // Session ID validation (Task 13.8)
 // ============================
 
-Deno.test({
-  name: "DashboardServer - audit rejects invalid sessionId format",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - audit rejects invalid sessionId format", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1209,11 +1029,7 @@ Deno.test({
 // Additional coverage tests
 // ============================
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file missing path param returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file missing path param returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1228,11 +1044,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file empty path after normalization returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file empty path after normalization returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1247,14 +1059,10 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/file with .txt extension works",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/file with .txt extension works", async () => {
   const t = await createTestServer();
   try {
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/note.txt`, "plain text");
+    await fsp.writeFile(`${t.agentWorkspacePath}/note.txt`, "plain text");
     const cookie = await loginAndGetCookie(t.baseUrl);
     const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/note.txt`, {
       headers: { Cookie: cookie },
@@ -1268,16 +1076,12 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/workspace/tree with files returns children",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/workspace/tree with files returns children", async () => {
   const t = await createTestServer();
   try {
-    await Deno.mkdir(`${t.agentWorkspacePath}/notes`, { recursive: true });
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/notes/topic.md`, "# Topic");
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/readme.md`, "readme");
+    await fsp.mkdir(`${t.agentWorkspacePath}/notes`, { recursive: true });
+    await fsp.writeFile(`${t.agentWorkspacePath}/notes/topic.md`, "# Topic");
+    await fsp.writeFile(`${t.agentWorkspacePath}/readme.md`, "readme");
     const cookie = await loginAndGetCookie(t.baseUrl);
     const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
       headers: { Cookie: cookie },
@@ -1298,11 +1102,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - buildDirectoryTree truncates at maxDepth",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - buildDirectoryTree truncates at maxDepth", async () => {
   const t = await createTestServer();
   try {
     // Create deeply nested dirs beyond default maxDepth (10)
@@ -1310,8 +1110,8 @@ Deno.test({
     for (let i = 0; i < 12; i++) {
       deepPath = `${deepPath}/level${i}`;
     }
-    await Deno.mkdir(deepPath, { recursive: true });
-    await Deno.writeTextFile(`${deepPath}/deep.md`, "deep content");
+    await fsp.mkdir(deepPath, { recursive: true });
+    await fsp.writeFile(`${deepPath}/deep.md`, "deep content");
 
     const cookie = await loginAndGetCookie(t.baseUrl);
     const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
@@ -1335,23 +1135,18 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name:
-    "DashboardServer - workspace tree sorts directories before files, alphabetically case-insensitive",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - workspace tree sorts directories before files, alphabetically case-insensitive", async () => {
   const t = await createTestServer();
   try {
     // Create files and directories with intentionally unsorted names
-    await Deno.mkdir(`${t.agentWorkspacePath}/Zebra`, { recursive: true });
-    await Deno.mkdir(`${t.agentWorkspacePath}/alpha`, { recursive: true });
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/Beta.md`, "b");
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/gamma.md`, "g");
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/Alpha.md`, "a");
+    await fsp.mkdir(`${t.agentWorkspacePath}/Zebra`, { recursive: true });
+    await fsp.mkdir(`${t.agentWorkspacePath}/alpha`, { recursive: true });
+    await fsp.writeFile(`${t.agentWorkspacePath}/Beta.md`, "b");
+    await fsp.writeFile(`${t.agentWorkspacePath}/gamma.md`, "g");
+    await fsp.writeFile(`${t.agentWorkspacePath}/Alpha.md`, "a");
     // Nested: verify recursive sorting
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/alpha/zebra.md`, "z");
-    await Deno.writeTextFile(`${t.agentWorkspacePath}/alpha/apple.md`, "a");
+    await fsp.writeFile(`${t.agentWorkspacePath}/alpha/zebra.md`, "z");
+    await fsp.writeFile(`${t.agentWorkspacePath}/alpha/apple.md`, "a");
 
     const cookie = await loginAndGetCookie(t.baseUrl);
     const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
@@ -1378,11 +1173,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/stats without metrics registry returns zeroes",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/stats without metrics registry returns zeroes", async () => {
   const t = await createTestServer({ metricsRegistry: null });
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1400,11 +1191,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/stats with metrics data returns aggregated values",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/stats with metrics data returns aggregated values", async () => {
   const mockRegistry = {
     getMetricsAsJSON: () =>
       Promise.resolve([
@@ -1438,11 +1225,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/stats handles metrics error",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/stats handles metrics error", async () => {
   const mockRegistry = {
     getMetricsAsJSON: () => Promise.reject(new Error("metrics broken")),
   } as unknown as Registry;
@@ -1460,11 +1243,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - audit with valid sess_ format but audit disabled returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - audit with valid sess_ format but audit disabled returns 404", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1479,11 +1258,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - audit with invalid format (no sess_ prefix) returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - audit with invalid format (no sess_ prefix) returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1498,11 +1273,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/config/models without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/config/models without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/config/models`);
@@ -1513,11 +1284,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/restart missing confirm field returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/restart missing confirm field returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1534,11 +1301,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - static file serves index.html at root",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - static file serves index.html at root", async () => {
   const t = await createTestServer();
   try {
     // Unauthenticated static file requests should still work (login page)
@@ -1554,11 +1317,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - static file 404 for nonexistent path",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - static file 404 for nonexistent path", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/nonexistent-file.xyz`);
@@ -1572,11 +1331,7 @@ Deno.test({
 
 // ============ Static-file path traversal regression ============
 
-Deno.test({
-  name: "DashboardServer - static file path traversal with encoded dots is rejected (404)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - static file path traversal with encoded dots is rejected (404)", async () => {
   const t = await createTestServer();
   try {
     // Encoded traversal survives URL parsing so the handler's boundary check is exercised.
@@ -1589,11 +1344,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - static file serves an existing asset (200)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - static file serves an existing asset (200)", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/js/app.js`);
@@ -1606,11 +1357,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - login with invalid JSON body returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - login with invalid JSON body returns 400", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -1626,11 +1373,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - login with missing passphrase returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - login with missing passphrase returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -1646,11 +1389,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - unknown API endpoint with auth returns 404 (static fallback)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - unknown API endpoint with auth returns 404 (static fallback)", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1665,11 +1404,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - /login path serves index.html (static)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - /login path serves index.html (static)", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/login`);
@@ -1682,11 +1417,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/message without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/message without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/chat/message`, {
@@ -1701,11 +1432,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/chat/stream without auth returns 401",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/chat/stream without auth returns 401", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/chat/stream?chatSessionId=x`);
@@ -1716,11 +1443,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/message with no active session returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/message with no active session returns 404", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1737,11 +1460,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/message with invalid body returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/message with invalid body returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1757,11 +1476,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/message missing fields returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/message missing fields returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1778,11 +1493,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - GET /api/chat/stream with no active session returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - GET /api/chat/stream with no active session returns 404", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1796,11 +1507,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/disconnect with invalid body returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/disconnect with invalid body returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1816,11 +1523,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/disconnect missing chatSessionId returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/disconnect missing chatSessionId returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1837,11 +1540,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/connect with invalid body returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/connect with invalid body returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -1858,19 +1557,15 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - audit with enabled config and existing file returns entries",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
-  const tempDir = await Deno.makeTempDir();
+test("DashboardServer - audit with enabled config and existing file returns entries", async () => {
+  const tempDir = await makeTempDir();
   const agentWorkspacePath = `${tempDir}/agent-workspace`;
-  await Deno.mkdir(agentWorkspacePath, { recursive: true });
+  await fsp.mkdir(agentWorkspacePath, { recursive: true });
   const auditBasePath = `${tempDir}/audit`;
   const auditDir = `${auditBasePath}/discord/user1`;
-  await Deno.mkdir(auditDir, { recursive: true });
+  await fsp.mkdir(auditDir, { recursive: true });
   const entry = { phase: "session_end", ts: "2024-01-01T00:00:00Z" };
-  await Deno.writeTextFile(`${auditDir}/sess_test123.jsonl`, JSON.stringify(entry) + "\n");
+  await fsp.writeFile(`${auditDir}/sess_test123.jsonl`, JSON.stringify(entry) + "\n");
 
   const dashboardConfig: DashboardConfig = {
     enabled: true,
@@ -1914,20 +1609,16 @@ Deno.test({
     assertEquals(body[0].phase, "session_end");
   } finally {
     await server.stop();
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test({
-  name: "DashboardServer - audit enabled but file not found returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
-  const tempDir = await Deno.makeTempDir();
+test("DashboardServer - audit enabled but file not found returns 404", async () => {
+  const tempDir = await makeTempDir();
   const agentWorkspacePath = `${tempDir}/agent-workspace`;
-  await Deno.mkdir(agentWorkspacePath, { recursive: true });
+  await fsp.mkdir(agentWorkspacePath, { recursive: true });
   const auditBasePath = `${tempDir}/audit`;
-  await Deno.mkdir(auditBasePath, { recursive: true });
+  await fsp.mkdir(auditBasePath, { recursive: true });
 
   const dashboardConfig: DashboardConfig = {
     enabled: true,
@@ -1970,16 +1661,12 @@ Deno.test({
     assertEquals(body.error, "Audit log not found");
   } finally {
     await server.stop();
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test({
-  name: "DashboardServer - workspace tree with nonexistent workspace returns empty",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
-  const tempDir = await Deno.makeTempDir();
+test("DashboardServer - workspace tree with nonexistent workspace returns empty", async () => {
+  const tempDir = await makeTempDir();
   const nonexistentPath = `${tempDir}/does-not-exist`;
 
   const dashboardConfig: DashboardConfig = {
@@ -2023,15 +1710,11 @@ Deno.test({
     assertEquals(body.children, []);
   } finally {
     await server.stop();
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/message with text/plain content type",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/message with text/plain content type", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2048,11 +1731,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/disconnect with text/plain content type",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/disconnect with text/plain content type", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2068,11 +1747,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/message text/plain invalid JSON returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/message text/plain invalid JSON returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2088,11 +1763,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/disconnect text/plain invalid JSON returns 400",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/disconnect text/plain invalid JSON returns 400", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2108,22 +1779,14 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - server stop is idempotent",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - server stop is idempotent", async () => {
   const t = await createTestServer();
   await t.cleanup();
   // Double stop should not throw
   await t.server.stop();
 });
 
-Deno.test({
-  name: "DashboardServer - authenticated static CSS file returns correct content type",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - authenticated static CSS file returns correct content type", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2139,11 +1802,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - authenticated static JS file returns correct content type",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - authenticated static JS file returns correct content type", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2163,11 +1822,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - authenticated root path serves index.html",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - authenticated root path serves index.html", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2182,13 +1837,9 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - POST /api/chat/connect with valid type fails gracefully (no agent)",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - POST /api/chat/connect with valid type fails gracefully (no agent)", async () => {
   const config = createMinimalConfig();
-  const tempWorkspace = await Deno.makeTempDir();
+  const tempWorkspace = await makeTempDir();
   config.workspace = { repoPath: tempWorkspace, workspacesDir: "workspaces" };
   const t = await createTestServer({ appConfig: config });
   try {
@@ -2204,15 +1855,11 @@ Deno.test({
     assertEquals(body.error, "Failed to connect to agent");
   } finally {
     await t.cleanup();
-    await Deno.remove(tempWorkspace, { recursive: true }).catch(() => {});
+    await fsp.rm(tempWorkspace, { recursive: true }).catch(() => {});
   }
 });
 
-Deno.test({
-  name: "DashboardServer - login with x-forwarded-for header records IP",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - login with x-forwarded-for header records IP", async () => {
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -2230,11 +1877,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - F8: default host binds localhost and serves requests",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - F8: default host binds localhost and serves requests", async () => {
   // createTestServer uses host "127.0.0.1" by default; a request over localhost succeeds.
   const t = await createTestServer();
   try {
@@ -2247,11 +1890,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - F8: explicit 0.0.0.0 host is honored and serves requests",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - F8: explicit 0.0.0.0 host is honored and serves requests", async () => {
   const t = await createTestServer({ dashboard: { host: "0.0.0.0" } });
   try {
     // When bound to 0.0.0.0, the server is still reachable via loopback.
@@ -2263,11 +1902,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - F10: spoofed X-Forwarded-Proto https does NOT set Secure cookie",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - F10: spoofed X-Forwarded-Proto https does NOT set Secure cookie", async () => {
   // behindHttpsProxy defaults to false; the Secure flag must NOT be derived from the header.
   const t = await createTestServer();
   try {
@@ -2288,11 +1923,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - F10: Secure cookie set when behindHttpsProxy is true",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - F10: Secure cookie set when behindHttpsProxy is true", async () => {
   const t = await createTestServer({ dashboard: { behindHttpsProxy: true } });
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -2309,11 +1940,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - F5: X-Forwarded-For ignored for rate-limit key when proxy untrusted",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - F5: X-Forwarded-For ignored for rate-limit key when proxy untrusted", async () => {
   // With no trustedProxies, header rotation must still be counted against the real IP,
   // so the limit is reached despite unique X-Forwarded-For values each time.
   const t = await createTestServer();
@@ -2344,11 +1971,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - F5: trusted proxy X-Forwarded-For honored for rate-limit key",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - F5: trusted proxy X-Forwarded-For honored for rate-limit key", async () => {
   // Trust the loopback proxy (127.0.0.1). Then distinct X-Forwarded-For values are keyed
   // separately, so 6 attempts across 6 distinct forwarded IPs stay under the per-IP limit.
   const t = await createTestServer({ dashboard: { trustedProxies: ["127.0.0.1", "::1"] } });
@@ -2373,11 +1996,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - active sessions maps spontaneous type correctly",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - active sessions maps spontaneous type correctly", async () => {
   const mockSession: ActiveSession = {
     id: "sess_spont",
     callerToken: "tok_spont",
@@ -2417,11 +2036,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - restart with confirm: false and active sessions shows warning count",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - restart with confirm: false and active sessions shows warning count", async () => {
   const mockSession: ActiveSession = {
     id: "sess_active",
     callerToken: "tok_active",
@@ -2473,19 +2088,15 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - buildDirectoryTree maxEntries truncation",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - buildDirectoryTree maxEntries truncation", async () => {
   const t = await createTestServer();
   try {
     // Create >1000 files to hit maxEntries limit
     const dir = `${t.agentWorkspacePath}/many`;
-    await Deno.mkdir(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
     const promises = [];
     for (let i = 0; i < 1002; i++) {
-      promises.push(Deno.writeTextFile(`${dir}/file${i}.md`, `${i}`));
+      promises.push(fsp.writeFile(`${dir}/file${i}.md`, `${i}`));
     }
     await Promise.all(promises);
 
@@ -2503,11 +2114,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - chat message with active session but wrong ID returns 404",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - chat message with active session but wrong ID returns 404", async () => {
   const t = await createTestServer();
   try {
     // Inject a fake chat session to test more code paths
@@ -2550,11 +2157,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - chat message with disconnected session returns 410",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - chat message with disconnected session returns 410", async () => {
   const t = await createTestServer();
   try {
     const serverAny = t.server as unknown as {
@@ -2594,11 +2197,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - chat connect returns 409 when session already active",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - chat connect returns 409 when session already active", async () => {
   const t = await createTestServer();
   try {
     const serverAny = t.server as unknown as {
@@ -2638,11 +2237,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - chat stream with matching session returns SSE stream",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - chat stream with matching session returns SSE stream", async () => {
   const t = await createTestServer();
   try {
     const serverAny = t.server as unknown as {
@@ -2690,11 +2285,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - chat disconnect with matching session cleans up",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - chat disconnect with matching session cleans up", async () => {
   const t = await createTestServer();
   try {
     const serverAny = t.server as unknown as {
@@ -2735,11 +2326,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - stop cleans up active chat session",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - stop cleans up active chat session", async () => {
   const t = await createTestServer();
   const serverAny = t.server as unknown as {
     chatSession: {
@@ -2777,11 +2364,7 @@ Deno.test({
 /** One canonical email user id (the message store's owner-name shape). */
 const EMAIL_OWNER = `e_${"12".repeat(32)}`;
 
-Deno.test({
-  name: "DashboardServer - an email session appears in the authenticated active and history views",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - an email session appears in the authenticated active and history views", async () => {
   const activeSession: ActiveSession = {
     id: "sess_email1",
     callerToken: "tok_email1",
@@ -2863,19 +2446,15 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - an email audit log resolves through the authenticated admin history",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - an email audit log resolves through the authenticated admin history", async () => {
   const t = await createTestServer({
     auditConfig: { enabled: true, retentionDays: 7, hashContent: false, includedPhases: [] },
   });
   try {
     const auditDir = `${t.auditBasePath}/email/${EMAIL_OWNER}`;
-    await Deno.mkdir(auditDir, { recursive: true });
+    await fsp.mkdir(auditDir, { recursive: true });
     const entry = { phase: "session_end", ts: "2026-10-17T00:00:00Z" };
-    await Deno.writeTextFile(`${auditDir}/sess_emailaudit.jsonl`, JSON.stringify(entry) + "\n");
+    await fsp.writeFile(`${auditDir}/sess_emailaudit.jsonl`, JSON.stringify(entry) + "\n");
 
     const cookie = await loginAndGetCookie(t.baseUrl);
     const res = await fetch(`${t.baseUrl}/api/sessions/sess_emailaudit/audit`, {
@@ -2894,11 +2473,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - the channel selector passes every platform key through unchanged",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - the channel selector passes every platform key through unchanged", async () => {
   const keys = ["discord/chan1", "misskey/chan2", `email/mail_${EMAIL_OWNER}_th-1`];
   const t = await createTestServer({ workspaceManager: createMockWorkspaceManager(keys) });
   try {
@@ -2915,11 +2490,7 @@ Deno.test({
   }
 });
 
-Deno.test({
-  name: "DashboardServer - no mail workflow endpoint exists and none appears in the served UI",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("DashboardServer - no mail workflow endpoint exists and none appears in the served UI", async () => {
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
@@ -2943,7 +2514,7 @@ Deno.test({
     const publicDir = new URL("../../src/dashboard/public/", import.meta.url);
     const uiFiles = ["index.html", "js/sessions.js", "style.css"];
     for (const file of uiFiles) {
-      const source = await Deno.readTextFile(new URL(file, publicDir));
+      const source = await fsp.readFile(new URL(file, publicDir), "utf8");
       for (const forbidden of ["/api/mail", "/api/email", "mail/send"]) {
         assertEquals(
           source.includes(forbidden),
@@ -2952,8 +2523,9 @@ Deno.test({
         );
       }
     }
-    const serverSource = await Deno.readTextFile(
+    const serverSource = await fsp.readFile(
       new URL("../../src/dashboard/server.ts", import.meta.url),
+      "utf8",
     );
     for (const forbidden of ['"/api/mail', '"/api/email']) {
       assertEquals(

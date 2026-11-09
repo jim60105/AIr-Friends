@@ -1,7 +1,7 @@
 // src/dashboard/server.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { join, normalize, relative, resolve } from "@std/path";
+import { join, normalize, relative, resolve } from "node:path";
 import {
   canonicalizeHost,
   clearSessionCookie,
@@ -28,8 +28,25 @@ import type { SkillRegistry } from "@skills/registry.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { Registry } from "prom-client";
+import fsp from "node:fs/promises";
+import { isNotFoundError } from "../utils/fs-compat.ts";
+import type { Server } from "bun";
 
 const logger = createLogger("DashboardServer");
+
+/**
+ * The connection facts the dashboard needs, in the shape the rate limiter and
+ * login throttling already read (`Deno.ServeHandlerInfo`'s `remoteAddr`).
+ */
+export interface ClientInfo {
+  remoteAddr?: { hostname: string; port: number };
+}
+
+/** Build `ClientInfo` from Bun's per-request socket address. */
+export function toClientInfo(req: Request, server: Server<undefined>): ClientInfo {
+  const ip = server.requestIP(req);
+  return ip ? { remoteAddr: { hostname: ip.address, port: ip.port } } : {};
+}
 
 /**
  * Platform-aware containment check. `target` is inside `base` when the relative
@@ -103,7 +120,7 @@ export interface DashboardServerDeps {
  * workspace browsing, chat, and restart capabilities.
  */
 export class DashboardServer {
-  private server: Deno.HttpServer | null = null;
+  private server: Server<undefined> | null = null;
   private deps: DashboardServerDeps;
   private chatSession: ChatSession | null = null;
   private loginRateLimiter = new LoginRateLimiter();
@@ -118,16 +135,15 @@ export class DashboardServer {
   start(): void {
     const port = this.deps.config.port;
     const hostname = this.deps.config.host;
-    this.server = Deno.serve(
-      {
-        port,
-        hostname,
-        onListen: (addr) => {
-          this.actualPort = addr.port;
-        },
-      },
-      (req, info) => this.handleRequest(req, info),
-    );
+    this.server = Bun.serve({
+      port,
+      hostname,
+      // Deno had no idle timeout; disabling Bun's 10s default keeps the SSE
+      // stream and slow requests alive exactly as before.
+      idleTimeout: 0,
+      fetch: (req, server) => this.handleRequest(req, toClientInfo(req, server)),
+    });
+    this.actualPort = this.server.port ?? port;
     logger.info("Dashboard server started on {hostname}:{port}", {
       hostname,
       port: this.actualPort ?? port,
@@ -157,7 +173,7 @@ export class DashboardServer {
       await this.disconnectChat();
     }
     if (this.server) {
-      await this.server.shutdown();
+      await this.server.stop();
       this.server = null;
       this.actualPort = null;
       logger.info("Dashboard server stopped");
@@ -173,7 +189,7 @@ export class DashboardServer {
     return this.actualPort ?? this.deps.config.port;
   }
 
-  private async handleRequest(req: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {
+  private async handleRequest(req: Request, info?: ClientInfo): Promise<Response> {
     const url = new URL(req.url);
     // Sanitize the request-URL path before it is used as a file path: decode
     // percent-encoding, reject any `..` segment (Path Traversal protection), and
@@ -316,7 +332,7 @@ export class DashboardServer {
    * Otherwise the header is ignored and the real socket address is used, so header
    * rotation cannot bypass the per-key limit.
    */
-  private resolveRateLimitKey(req: Request, info?: Deno.ServeHandlerInfo): string {
+  private resolveRateLimitKey(req: Request, info?: ClientInfo): string {
     const remoteAddr = info?.remoteAddr;
     const realHost = remoteAddr && "hostname" in remoteAddr
       ? canonicalizeHost(remoteAddr.hostname)
@@ -332,7 +348,7 @@ export class DashboardServer {
     return realHost;
   }
 
-  private async handleLogin(req: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {
+  private async handleLogin(req: Request, info?: ClientInfo): Promise<Response> {
     try {
       const key = this.resolveRateLimitKey(req, info);
 
@@ -484,12 +500,12 @@ export class DashboardServer {
         return this.json({ error: "Audit log not found" }, 404);
       }
 
-      const content = await Deno.readTextFile(entries);
+      const content = await fsp.readFile(entries, "utf8");
       const lines = content.trim().split("\n").filter((l) => l.length > 0);
       const parsed = lines.map((line) => JSON.parse(line));
       return this.json(parsed);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         return this.json({ error: "Audit log not found" }, 404);
       }
       throw error;
@@ -499,9 +515,9 @@ export class DashboardServer {
   /** Recursively search for an audit file by name */
   private async findAuditFile(dir: string, filename: string): Promise<string | null> {
     try {
-      for await (const entry of Deno.readDir(dir)) {
+      for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
         const fullPath = join(dir, entry.name);
-        if (entry.isDirectory) {
+        if (entry.isDirectory()) {
           const found = await this.findAuditFile(fullPath, filename);
           if (found) return found;
         } else if (entry.name === filename) {
@@ -522,7 +538,7 @@ export class DashboardServer {
       const tree = await this.buildDirectoryTree(wsPath, wsPath);
       return this.json(tree);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         return this.json({ name: "agent-workspace", path: "/", type: "directory", children: [] });
       }
       throw error;
@@ -542,13 +558,13 @@ export class DashboardServer {
       return { name: "…", path: "", type: "file", truncated: true };
     }
 
-    const stat = await Deno.stat(currentPath);
+    const stat = await fsp.stat(currentPath);
     const name = currentPath === rootPath ? "agent-workspace" : currentPath.split("/").pop() ?? "";
     const relativePath = currentPath === rootPath
       ? "/"
       : "/" + currentPath.substring(rootPath.length + 1);
 
-    if (!stat.isDirectory) {
+    if (!stat.isDirectory()) {
       return {
         name,
         path: relativePath,
@@ -563,7 +579,7 @@ export class DashboardServer {
     }
 
     const children: Record<string, unknown>[] = [];
-    for await (const entry of Deno.readDir(currentPath)) {
+    for (const entry of await fsp.readdir(currentPath, { withFileTypes: true })) {
       const childPath = join(currentPath, entry.name);
       children.push(
         await this.buildDirectoryTree(
@@ -626,11 +642,11 @@ export class DashboardServer {
     }
 
     try {
-      const content = await Deno.readTextFile(fullPath);
-      const stat = await Deno.stat(fullPath);
+      const content = await fsp.readFile(fullPath, "utf8");
+      const stat = await fsp.stat(fullPath);
       return this.json({ path: normalizedPath, content, size: stat.size });
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(error)) {
         return this.json({ error: "File not found" }, 404);
       }
       throw error;
@@ -668,7 +684,7 @@ export class DashboardServer {
         "dashboard",
         "web-chat",
       );
-      await Deno.mkdir(workspacePath, { recursive: true });
+      await fsp.mkdir(workspacePath, { recursive: true });
 
       const agentWorkspacePath = this.deps.agentWorkspacePath;
 
@@ -793,7 +809,7 @@ export class DashboardServer {
         this.deps.appConfig.agent.skillsDir,
       );
       try {
-        const promptFile = join(Deno.cwd(), "prompts", "system_web_chat.md");
+        const promptFile = join(process.cwd(), "prompts", "system_web_chat.md");
         const variables: TemplateVariables = {
           isDm: true,
           platform: "internal",
@@ -1033,7 +1049,7 @@ export class DashboardServer {
 
     // Send SIGTERM to trigger graceful shutdown
     setTimeout(() => {
-      Deno.kill(Deno.pid, "SIGTERM");
+      process.kill(process.pid, "SIGTERM");
     }, 100);
 
     return this.json({ success: true, message: "Restart initiated" });
@@ -1070,12 +1086,12 @@ export class DashboardServer {
       // Resolve symlinks: verify the real (resolved) path still lives inside
       // the real static dir, so a symlink inside `public/` pointing outside
       // cannot leak a file from elsewhere on disk.
-      const realStaticDir = await Deno.realPath(staticDir);
-      const realFull = await Deno.realPath(fullPath);
+      const realStaticDir = await fsp.realpath(staticDir);
+      const realFull = await fsp.realpath(fullPath);
       if (!isWithinDir(realStaticDir, realFull)) {
         return new Response("Not Found", { status: 404 });
       }
-      const content = await Deno.readFile(fullPath);
+      const content = await fsp.readFile(fullPath);
       const contentType = this.getContentType(filePath);
       return new Response(content, {
         headers: { "Content-Type": contentType },
