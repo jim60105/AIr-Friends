@@ -79,7 +79,7 @@ export function createAgentConfig(
   // builds its script inventory from it. The observation is identical for both
   // agent types (the resolver has no agent-type selection), so a dashboard
   // agent-type override flows through this same call and lands on the same root.
-  // No consumer re-derives from HOME, `Deno.cwd()/skills` or an image tree, and
+  // No consumer re-derives from HOME, `process.cwd()/skills` or an image tree, and
   // an unresolvable root fails here explicitly before the child is ever spawned.
   const skillsRoot = observeTrustedSkillsRoot(type, appConfig.agent.skillsDir);
 
@@ -991,7 +991,7 @@ export interface EmailIntentTemporaryRoots {
 export interface EmailIntentProfileOptions {
   /** Injectable existence probe; defaults to the real filesystem. */
   readonly exists?: (path: string) => boolean;
-  /** Injectable whole-document reader; defaults to `Deno.readTextFileSync`. */
+  /** Injectable whole-document reader; defaults to `fs.readFileSync`. */
   readonly readFile?: (path: string) => string;
   /**
    * Injectable environment accessor; defaults to the process environment.
