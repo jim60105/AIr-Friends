@@ -206,6 +206,7 @@ export function compareMeasurements(
   const descriptors = maximum(bun.runs.map((run) => run.idleFds));
   const leftovers = maximum(bun.runs.map((run) => run.leftoverProcesses));
   const stop = maximum(bun.runs.map((run) => run.stopSeconds));
+  const stopExit = maximum(bun.runs.map((run) => run.stopExit));
   const restartsReady = bun.runs.every((run) => run.restartReady);
 
   const lines = [
@@ -214,6 +215,7 @@ export function compareMeasurements(
     metricLine("idleFds", thresholds.idleFds, descriptors, descriptors <= thresholds.idleFds),
     metricLine("leftoverProcesses", 0, leftovers, leftovers === 0),
     metricLine("stopSeconds", 15, stop, stop < 15),
+    metricLine("stopExit", 0, stopExit, stopExit === 0),
     metricLine("restartReady", true, restartsReady, restartsReady),
   ];
 

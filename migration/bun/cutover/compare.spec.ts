@@ -63,7 +63,7 @@ test("Thresholds committed first", () => {
   });
 
   assertEquals(result.exitCode, 0);
-  assertEquals(result.lines.length, 6);
+  assertEquals(result.lines.length, 7);
   assertEquals(
     result.lines.map((line) => line.split(" ")[0]),
     [
@@ -72,6 +72,7 @@ test("Thresholds committed first", () => {
       "idleFds",
       "leftoverProcesses",
       "stopSeconds",
+      "stopExit",
       "restartReady",
     ],
   );
@@ -100,7 +101,7 @@ test("Within thresholds", () => {
   });
 
   assertEquals(result.exitCode, 0);
-  assertEquals(result.lines.length, 6);
+  assertEquals(result.lines.length, 7);
   assert(result.lines.every((line) => line.endsWith(" ok")));
 });
 
@@ -117,4 +118,11 @@ test("One metric over", () => {
   assertEquals(memoryLine, "idleMemoryMiB 125 150 FAIL");
   assertStringIncludes(memoryLine, "125");
   assertStringIncludes(memoryLine, "150");
+
+  const failedStop = measurement("bun", [run({ stopExit: 1 })]);
+  const stopResult = compareMeasurements(deno, failedStop, thresholds, {
+    thresholdsCommittedAt: "2026-11-10T11:00:00.000Z",
+  });
+  assertEquals(stopResult.exitCode, 1);
+  assert(stopResult.lines.includes("stopExit 0 1 FAIL"));
 });

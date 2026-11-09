@@ -88,7 +88,9 @@ cleanup() {
   fi
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Start the image in the background with the deployment posture. The
 # keep-id mapping makes the host-owned scratch writable as container UID 1000

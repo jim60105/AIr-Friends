@@ -128,11 +128,14 @@ idleMemoryMiB 109.589 77.782 ok
 idleFds 58.75 40 ok
 leftoverProcesses 0 0 ok
 stopSeconds 15 0.087 ok
+stopExit 0 0 ok
 restartReady true true ok
 ```
 
 The thresholds file was committed before `measurements/bun.json` was created;
-`compare.ts` verified the committed blob and the order before comparing.
+`compare.ts` verified the committed blob and the order before comparing. A
+nonzero `stopExit` in any Bun run fails the comparison, as do the other
+metrics.
 
 ### Rollback drill
 
