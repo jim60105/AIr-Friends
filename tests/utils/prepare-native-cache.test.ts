@@ -9,8 +9,8 @@
 // The real pinned executable is exercised by the documented native acceptance run; this suite
 // never claims native success.
 
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { join } from "node:path";
 import {
   assertExpectedAddons,
   defaultCacheBase,
@@ -26,6 +26,10 @@ import {
   ompNativeCacheDescriptor,
   resolveOmpNativeCache,
 } from "@utils/omp-native-cache.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { test } from "bun:test";
+import { makeTempDir, makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** The loader appends the package version beneath the linked `natives` directory. */
 const VERSION_DIR = "18.6.1";
@@ -45,20 +49,19 @@ function stubSource(options: { version?: string; response?: string | null } = {}
     ? JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1 } })
     : options.response;
   const body = response === null ? "" : `console.log(${JSON.stringify(response)});\n`;
-  return `#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env
-const mode = Deno.args[0];
+  return `#!/usr/bin/env -S bun run --no-env-file
+import fs from "node:fs";
+const mode = process.argv[2];
 if (mode === "--version") {
   console.log(${JSON.stringify(version)});
-  Deno.exit(0);
-}
-if (mode === "acp") {
-  const xdg = Deno.env.get("XDG_DATA_HOME") ?? "";
+} else if (mode === "acp") {
+  const xdg = process.env["XDG_DATA_HOME"] ?? "";
   const dir = xdg + "/omp/natives/18.6.1";
   for (const name of ${JSON.stringify(X64_ADDONS)}) {
     try {
-      Deno.mkdirSync(dir, { recursive: true });
-      if (!(() => { try { return Deno.statSync(dir + "/" + name).isFile; } catch { return false; } })()) {
-        Deno.writeTextFileSync(dir + "/" + name, "stub-addon");
+      fs.mkdirSync(dir, { recursive: true });
+      if (!(() => { try { return fs.statSync(dir + "/" + name).isFile(); } catch { return false; } })()) {
+        fs.writeFileSync(dir + "/" + name, "stub-addon");
       }
     } catch {
       // Write-protected payload: the real loader tolerates this and loads existing files.
@@ -66,16 +69,13 @@ if (mode === "acp") {
   }
   // Consume the request line before answering, as the real agent does.
   let buffer = "";
-  const reader = Deno.stdin.readable.getReader();
-  while (!buffer.includes("\\n")) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += new TextDecoder().decode(value);
+  for await (const chunk of process.stdin) {
+    buffer += new TextDecoder().decode(chunk);
+    if (buffer.includes("\\n")) break;
   }
-  reader.releaseLock();
-${body}  Deno.exit(0);
+${body}} else {
+  process.exit(2);
 }
-Deno.exit(2);
 `;
 }
 
@@ -88,10 +88,10 @@ interface StubEnv {
 async function makeStubEnv(
   options: { version?: string; response?: string | null } = {},
 ): Promise<StubEnv> {
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   const executable = `${tempDir}/omp-stub`;
-  await Deno.writeTextFile(executable, stubSource(options));
-  await Deno.chmod(executable, 0o755);
+  await fsp.writeFile(executable, stubSource(options));
+  await fsp.chmod(executable, 0o755);
   return { tempDir, executable, cacheBase: `${tempDir}/cache` };
 }
 
@@ -106,7 +106,7 @@ async function prepareStub(env: StubEnv, overrides: Partial<{ lockWaitMs: number
   });
 }
 
-Deno.test("prepareOmpNativeCache - publishes the addon payload plus a sidecar manifest and no probe state", async () => {
+test("prepareOmpNativeCache - publishes the addon payload plus a sidecar manifest and no probe state", async () => {
   const env = await makeStubEnv();
   try {
     const result = await prepareStub(env);
@@ -117,59 +117,60 @@ Deno.test("prepareOmpNativeCache - publishes the addon payload plus a sidecar ma
     assertEquals(result.manifest.version, "18.6.1");
     assertEquals(result.manifest.platform, "linux-x64");
     for (const file of result.manifest.files) {
-      const info = await Deno.stat(`${result.payloadDir}/18.6.1/${file.name}`);
+      const info = await fsp.stat(`${result.payloadDir}/18.6.1/${file.name}`);
       assertEquals(info.size, file.size, `${file.name} size matches the manifest`);
     }
 
     // Only the payload and its manifest are published: probe HOME/cwd/sessions are gone.
-    const published = [...Deno.readDirSync(`${env.cacheBase}/linux-x64`)].map((e) => e.name).sort();
+    const published = [...fs.readdirSync(`${env.cacheBase}/linux-x64`, { withFileTypes: true })]
+      .map((e) => e.name).sort();
     assertEquals(published, ["native-manifest.json", "natives"]);
-    const leftovers = [...Deno.readDirSync(env.cacheBase)].filter((e) =>
+    const leftovers = [...fs.readdirSync(env.cacheBase, { withFileTypes: true })].filter((e) =>
       e.name.startsWith(".staging-") || e.name.includes("prepare-omp-natives")
     );
     assertEquals(leftovers, []);
   } finally {
-    await Deno.remove(env.tempDir, { recursive: true });
+    await fsp.rm(env.tempDir, { recursive: true });
   }
 });
 
-Deno.test("prepareOmpNativeCache - a complete matching payload is reused without rewriting it", async () => {
+test("prepareOmpNativeCache - a complete matching payload is reused without rewriting it", async () => {
   const env = await makeStubEnv();
   try {
     const first = await prepareStub(env);
-    const before = await Deno.stat(`${first.payloadDir}/${VERSION_DIR}/${X64_ADDONS[0]}`);
+    const before = await fsp.stat(`${first.payloadDir}/${VERSION_DIR}/${X64_ADDONS[0]}`);
 
     const second = await prepareStub(env);
 
     assertEquals(second.reused, true);
-    const after = await Deno.stat(`${second.payloadDir}/${VERSION_DIR}/${X64_ADDONS[0]}`);
+    const after = await fsp.stat(`${second.payloadDir}/${VERSION_DIR}/${X64_ADDONS[0]}`);
     assertEquals(after.size, before.size);
     assertEquals(after.mtime?.getTime(), before.mtime?.getTime());
     assertEquals(after.ino, before.ino);
   } finally {
-    await Deno.remove(env.tempDir, { recursive: true });
+    await fsp.rm(env.tempDir, { recursive: true });
   }
 });
 
-Deno.test("prepareOmpNativeCache - an incomplete destination is refused, never overwritten", async () => {
+test("prepareOmpNativeCache - an incomplete destination is refused, never overwritten", async () => {
   const env = await makeStubEnv();
   try {
-    await Deno.mkdir(`${env.cacheBase}/linux-x64/${VERSION_DIR}`, { recursive: true });
-    await Deno.writeTextFile(`${env.cacheBase}/linux-x64/${VERSION_DIR}/${X64_ADDONS[0]}`, "short");
+    await fsp.mkdir(`${env.cacheBase}/linux-x64/${VERSION_DIR}`, { recursive: true });
+    await fsp.writeFile(`${env.cacheBase}/linux-x64/${VERSION_DIR}/${X64_ADDONS[0]}`, "short");
 
     const error = await assertRejects(() => prepareStub(env), Error);
     assertStringIncludes(error.message, "Refusing to overwrite");
     // The half-written destination is untouched.
     assertEquals(
-      await Deno.readTextFile(`${env.cacheBase}/linux-x64/${VERSION_DIR}/${X64_ADDONS[0]}`),
+      await fsp.readFile(`${env.cacheBase}/linux-x64/${VERSION_DIR}/${X64_ADDONS[0]}`, "utf8"),
       "short",
     );
   } finally {
-    await Deno.remove(env.tempDir, { recursive: true });
+    await fsp.rm(env.tempDir, { recursive: true });
   }
 });
 
-Deno.test("prepareOmpNativeCache - identity preflight fails closed on a wrong version or checksum", async () => {
+test("prepareOmpNativeCache - identity preflight fails closed on a wrong version or checksum", async () => {
   const wrongVersion = await makeStubEnv({ version: "omp/18.10.3" });
   try {
     const wrongVersionSha = await sha256File(wrongVersion.executable);
@@ -186,7 +187,7 @@ Deno.test("prepareOmpNativeCache - identity preflight fails closed on a wrong ve
     );
     assertStringIncludes(error.message, "18.6.1");
   } finally {
-    await Deno.remove(wrongVersion.tempDir, { recursive: true });
+    await fsp.rm(wrongVersion.tempDir, { recursive: true });
   }
 
   const env = await makeStubEnv();
@@ -206,13 +207,13 @@ Deno.test("prepareOmpNativeCache - identity preflight fails closed on a wrong ve
       error.message,
       "refusing to prepare a native payload from unverified bytes",
     );
-    assertEquals(await Deno.stat(env.cacheBase).then(() => true).catch(() => false), false);
+    assertEquals(await fsp.stat(env.cacheBase).then(() => true).catch(() => false), false);
   } finally {
-    await Deno.remove(env.tempDir, { recursive: true });
+    await fsp.rm(env.tempDir, { recursive: true });
   }
 });
 
-Deno.test("prepareOmpNativeCache - a failed or absent handshake is never accepted as preparation", async () => {
+test("prepareOmpNativeCache - a failed or absent handshake is never accepted as preparation", async () => {
   const errorResponse = await makeStubEnv({
     response: JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "nope" } }),
   });
@@ -220,7 +221,7 @@ Deno.test("prepareOmpNativeCache - a failed or absent handshake is never accepte
     const error = await assertRejects(() => prepareStub(errorResponse), Error);
     assertStringIncludes(error.message, "initialize returned an error");
   } finally {
-    await Deno.remove(errorResponse.tempDir, { recursive: true });
+    await fsp.rm(errorResponse.tempDir, { recursive: true });
   }
 
   const silent = await makeStubEnv({ response: null });
@@ -228,7 +229,7 @@ Deno.test("prepareOmpNativeCache - a failed or absent handshake is never accepte
     const error = await assertRejects(() => prepareStub(silent), Error);
     assertStringIncludes(error.message, "no JSON-RPC initialize response");
   } finally {
-    await Deno.remove(silent.tempDir, { recursive: true });
+    await fsp.rm(silent.tempDir, { recursive: true });
   }
 
   // `--version` alone never satisfies the handshake.
@@ -255,14 +256,14 @@ Deno.test("prepareOmpNativeCache - a failed or absent handshake is never accepte
       });
       assertEquals(missing.ok, false);
     } finally {
-      await Deno.remove(never.tempDir, { recursive: true });
+      await fsp.rm(never.tempDir, { recursive: true });
     }
   } finally {
-    await Deno.remove(env.tempDir, { recursive: true });
+    await fsp.rm(env.tempDir, { recursive: true });
   }
 });
 
-Deno.test("prepareOmpNativeCache - unsupported identity, missing executable and a held lock fail closed", async () => {
+test("prepareOmpNativeCache - unsupported identity, missing executable and a held lock fail closed", async () => {
   const env = await makeStubEnv();
   try {
     const platformError = await assertRejects(
@@ -290,15 +291,35 @@ Deno.test("prepareOmpNativeCache - unsupported identity, missing executable and 
     );
     assertStringIncludes(missingError.message, "was not found");
 
-    await Deno.mkdir(`${env.cacheBase}/.prepare-omp-natives.lock`, { recursive: true });
+    await fsp.mkdir(`${env.cacheBase}/.prepare-omp-natives.lock`, { recursive: true });
     const lockError = await assertRejects(() => prepareStub(env, { lockWaitMs: 0 }), Error);
     assertStringIncludes(lockError.message, "already running");
   } finally {
-    await Deno.remove(env.tempDir, { recursive: true });
+    await fsp.rm(env.tempDir, { recursive: true });
   }
 });
 
-Deno.test("native payload helpers - expected addon sets and non-regular entries are enforced", async () => {
+test("runAcpInitialize - an unspawnable executable fails closed instead of raising", async () => {
+  // `spawn` reports a missing executable through `error`; the bounded handshake must turn
+  // that into a normal failure result with no unhandled error escaping the probe.
+  const tempDir = await makeTempDir();
+  try {
+    const outcome = await runAcpInitialize({
+      executable: `${tempDir}/absent-omp`,
+      home: `${tempDir}/home`,
+      cwd: `${tempDir}/cwd`,
+      xdgDataHome: `${tempDir}/xdg`,
+      timeoutMs: 500,
+    });
+    assert(outcome.ok === false);
+    assertStringIncludes(outcome.reason, "failed to start");
+    assertStringIncludes(outcome.reason, "absent-omp");
+  } finally {
+    await fsp.rm(tempDir, { recursive: true });
+  }
+});
+
+test("native payload helpers - expected addon sets and non-regular entries are enforced", async () => {
   assertExpectedAddons("linux-x64", [...X64_ADDONS]);
   const missing = (() => {
     try {
@@ -312,10 +333,10 @@ Deno.test("native payload helpers - expected addon sets and non-regular entries 
   assertStringIncludes(missing!.message, X64_ADDONS[1]);
   assertExpectedAddons("linux-arm64", ["pi_natives.linux-arm64.node"]);
 
-  const tempDir = await Deno.makeTempDir();
+  const tempDir = await makeTempDir();
   try {
-    await Deno.writeTextFile(`${tempDir}/pi_natives.linux-x64-modern.node`, "x");
-    await Deno.symlink("/nowhere", `${tempDir}/pi_natives.linux-x64-baseline.node`);
+    await fsp.writeFile(`${tempDir}/pi_natives.linux-x64-modern.node`, "x");
+    await fsp.symlink("/nowhere", `${tempDir}/pi_natives.linux-x64-baseline.node`);
     const error = (() => {
       try {
         listRegularFiles(tempDir);
@@ -327,19 +348,19 @@ Deno.test("native payload helpers - expected addon sets and non-regular entries 
     assertEquals(error !== null, true);
     assertStringIncludes(error!.message, "non-regular entry");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await fsp.rm(tempDir, { recursive: true });
   }
 });
 
-Deno.test("resolveOnPath - resolves names, paths and misses", () => {
-  const tempDir = Deno.env.get("TMPDIR") ?? "/tmp";
+test("resolveOnPath - resolves names, paths and misses", () => {
+  const tempDir = process.env["TMPDIR"] ?? "/tmp";
   assertEquals(resolveOnPath("definitely-not-a-real-binary-xyz", tempDir), undefined);
   assertEquals(resolveOnPath(`${tempDir}/not-here-either`), undefined);
   assertEquals(resolveOnPath("git", "/usr/bin:/bin"), "/usr/bin/git");
 });
 
-Deno.test("defaultCacheBase - the CLI default is exactly the root the launch resolver reads", () => {
-  const absentImageBase = `${Deno.makeTempDirSync()}/not-an-installed-image`;
+test("defaultCacheBase - the CLI default is exactly the root the launch resolver reads", () => {
+  const absentImageBase = `${makeTempDirSync()}/not-an-installed-image`;
   const platform: OmpNativeCachePlatform = "linux-x64";
 
   // Development branch: the published install root and the resolved install root must be the
