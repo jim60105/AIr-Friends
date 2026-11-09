@@ -20,7 +20,7 @@ Prerequisite: `drill-bun-cutover-and-rollback` is applied and `migration/bun/cut
 
 ## 4. Housekeeping
 
-- [ ] 4.1 Verify: `openspec validate cut-over-to-bun-release --strict` exits 0, and `git status --porcelain` lists only the files in `proposal.md` Impact and this change directory.
+- [x] 4.1 Verify: `openspec validate cut-over-to-bun-release --strict` exits 0, and `git status --porcelain` lists only the files in `proposal.md` Impact, `tests/acp/agent-factory-omp.test.ts`, `tests/acp/omp-owned-module-bundle-smoke.test.ts` (the recorded out-of-Impact fix) and this change directory.
 
 ## Workflow follow-up
 

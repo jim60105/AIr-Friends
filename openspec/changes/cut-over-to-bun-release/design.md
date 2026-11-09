@@ -97,6 +97,12 @@ The existing `[Unreleased]` item stays under `[Unreleased]`.
   `--no-env-file --isolate` in a minimal environment and an isolated `XDG_CACHE_HOME` holding the
   pinned `18.6.1` payload. The two JUnit reports were merged into one report for parity. The image
   smoke and the final image ran exactly as task 1.3 states. CI runs the literal commands.
+- **Out-of-Impact edit (owner: `cut-over-to-bun-release`).** `tests/acp/agent-factory-omp.test.ts`
+  (the `bundle-omp-extension.sh` call at the former line 63) and
+  `tests/acp/omp-owned-module-bundle-smoke.test.ts` (the call at the former line 68) passed the
+  removed `deno.lock` path as an ignored third argument. The amended D1 inventory flagged those
+  references and they fit none of the recorded evidence classes, so the argument is removed; the
+  wrapper's documented interface is exactly the two arguments. No assertion changes.
 
 ## Risks / Trade-offs
 
