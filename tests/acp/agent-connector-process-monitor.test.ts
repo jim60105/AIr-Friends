@@ -4,7 +4,9 @@ import { assertEquals } from "@std/assert";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 
+import type { AgentProcessExit, AgentProcessHandle } from "../../src/acp/agent-process.ts";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
+import { test } from "bun:test";
 
 /**
  * Test suite for AgentConnector process exit monitoring and intentionalShutdown flag.
@@ -61,7 +63,7 @@ function createConnector(
 
 // A1. monitorProcessExit tests
 
-Deno.test("monitorProcessExit - no ERROR when process === null (already disconnected)", async () => {
+test("monitorProcessExit - no ERROR when process === null (already disconnected)", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -74,13 +76,13 @@ Deno.test("monitorProcessExit - no ERROR when process === null (already disconne
   assertEquals(errorLogs.length, 0);
 });
 
-Deno.test("monitorProcessExit - logs ERROR when process exits and intentionalShutdown is false", async () => {
+test("monitorProcessExit - logs ERROR when process exits and intentionalShutdown is false", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   // Create a mock process that resolves immediately (simulating unexpected exit)
   const mockStatus = Promise.resolve({ code: 1, signal: null, success: false });
-  connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
   connector["intentionalShutdown"] = false;
 
   connector["monitorProcessExit"](logger);
@@ -92,12 +94,12 @@ Deno.test("monitorProcessExit - logs ERROR when process exits and intentionalShu
   assertEquals(errorLogs[0].message, "Agent process exited unexpectedly");
 });
 
-Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown is true", async () => {
+test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown is true", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
-  connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
   connector["intentionalShutdown"] = true;
 
   connector["monitorProcessExit"](logger);
@@ -112,12 +114,12 @@ Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown 
   assertEquals(debugLogs[0].message, "Agent process exited after intentional shutdown");
 });
 
-Deno.test("monitorProcessExit - catch branch silently ignores process.status errors", async () => {
+test("monitorProcessExit - catch branch silently ignores process.status errors", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   const mockStatus = Promise.reject(new Error("process already killed"));
-  connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
 
   connector["monitorProcessExit"](logger);
 
@@ -130,7 +132,7 @@ Deno.test("monitorProcessExit - catch branch silently ignores process.status err
 
 // A3. isProcessAlive tests
 
-Deno.test("isProcessAlive - returns false when process is null", async () => {
+test("isProcessAlive - returns false when process is null", async () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -138,43 +140,33 @@ Deno.test("isProcessAlive - returns false when process is null", async () => {
   assertEquals(alive, false);
 });
 
-Deno.test({
-  name: "isProcessAlive - returns false when process has exited",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const { logger } = createCapturingLogger();
-    const connector = createConnector(logger);
+test("isProcessAlive - returns false when process has exited", async () => {
+  const { logger } = createCapturingLogger();
+  const connector = createConnector(logger);
 
-    // Process that already resolved (exited)
-    const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
-    connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  // Process that already resolved (exited)
+  const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
 
-    const alive = await connector["isProcessAlive"]();
-    assertEquals(alive, false);
-  },
+  const alive = await connector["isProcessAlive"]();
+  assertEquals(alive, false);
 });
 
-Deno.test({
-  name: "isProcessAlive - returns true when process is still running",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const { logger } = createCapturingLogger();
-    const connector = createConnector(logger);
+test("isProcessAlive - returns true when process is still running", async () => {
+  const { logger } = createCapturingLogger();
+  const connector = createConnector(logger);
 
-    // Process that never resolves (still running)
-    const mockStatus = new Promise<Deno.CommandStatus>(() => {});
-    connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
+  // Process that never resolves (still running)
+  const mockStatus = Promise.withResolvers<AgentProcessExit>().promise;
+  connector["process"] = { exited: mockStatus } as unknown as AgentProcessHandle;
 
-    const alive = await connector["isProcessAlive"]();
-    assertEquals(alive, true);
-  },
+  const alive = await connector["isProcessAlive"]();
+  assertEquals(alive, true);
 });
 
 // A4. clearIdleMonitor tests
 
-Deno.test("clearIdleMonitor - clears interval and sets to null", () => {
+test("clearIdleMonitor - clears interval and sets to null", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -185,7 +177,7 @@ Deno.test("clearIdleMonitor - clears interval and sets to null", () => {
   assertEquals(connector["currentIdleMonitorIntervalId"], null);
 });
 
-Deno.test("clearIdleMonitor - safe to call multiple times", () => {
+test("clearIdleMonitor - safe to call multiple times", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
@@ -196,7 +188,7 @@ Deno.test("clearIdleMonitor - safe to call multiple times", () => {
 
 // A8. idle timeout config getter tests
 
-Deno.test("idleTimeoutMs - uses config value when provided", () => {
+test("idleTimeoutMs - uses config value when provided", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: true,
@@ -207,14 +199,14 @@ Deno.test("idleTimeoutMs - uses config value when provided", () => {
   assertEquals(connector["idleTimeoutMs"], 60000);
 });
 
-Deno.test("idleTimeoutMs - uses default when not configured", () => {
+test("idleTimeoutMs - uses default when not configured", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["idleTimeoutMs"], 5 * 60 * 1000);
 });
 
-Deno.test("idleCheckIntervalMs - uses config value when provided", () => {
+test("idleCheckIntervalMs - uses config value when provided", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: true,
@@ -225,21 +217,21 @@ Deno.test("idleCheckIntervalMs - uses config value when provided", () => {
   assertEquals(connector["idleCheckIntervalMs"], 10000);
 });
 
-Deno.test("idleCheckIntervalMs - uses default when not configured", () => {
+test("idleCheckIntervalMs - uses default when not configured", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["idleCheckIntervalMs"], 30 * 1000);
 });
 
-Deno.test("idleTimeoutEnabled - defaults to true when not configured", () => {
+test("idleTimeoutEnabled - defaults to true when not configured", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["idleTimeoutEnabled"], true);
 });
 
-Deno.test("idleTimeoutEnabled - returns false when enabled is false", () => {
+test("idleTimeoutEnabled - returns false when enabled is false", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: false,
@@ -250,7 +242,7 @@ Deno.test("idleTimeoutEnabled - returns false when enabled is false", () => {
   assertEquals(connector["idleTimeoutEnabled"], false);
 });
 
-Deno.test("idleTimeoutEnabled - returns true when enabled is true", () => {
+test("idleTimeoutEnabled - returns true when enabled is true", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger, {
     enabled: true,
@@ -263,14 +255,14 @@ Deno.test("idleTimeoutEnabled - returns true when enabled is true", () => {
 
 // intentionalShutdown flag reset tests
 
-Deno.test("intentionalShutdown - defaults to false", () => {
+test("intentionalShutdown - defaults to false", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
   assertEquals(connector["intentionalShutdown"], false);
 });
 
-Deno.test("intentionalShutdown - can be set and read", () => {
+test("intentionalShutdown - can be set and read", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
