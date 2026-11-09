@@ -2,18 +2,19 @@
 
 import { assertEquals, assertMatch } from "@std/assert";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
+import { test } from "bun:test";
 
-Deno.test("sha256Hash - produces correct hex digest", async () => {
+test("sha256Hash - produces correct hex digest", async () => {
   const hash = await sha256Hash("hello");
   assertEquals(hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
 });
 
-Deno.test("sha256Hash - empty string", async () => {
+test("sha256Hash - empty string", async () => {
   const hash = await sha256Hash("");
   assertEquals(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 });
 
-Deno.test("sanitizeSkillParams - hashes content fields when hashContent is true", async () => {
+test("sanitizeSkillParams - hashes content fields when hashContent is true", async () => {
   const params = {
     content: "secret data",
     visibility: "public",
@@ -26,7 +27,7 @@ Deno.test("sanitizeSkillParams - hashes content fields when hashContent is true"
   assertEquals(result.visibility, "public");
 });
 
-Deno.test("sanitizeSkillParams - passes through when hashContent is false", async () => {
+test("sanitizeSkillParams - passes through when hashContent is false", async () => {
   const params = {
     content: "secret data",
     visibility: "public",
@@ -37,7 +38,7 @@ Deno.test("sanitizeSkillParams - passes through when hashContent is false", asyn
   assertEquals(result.visibility, "public");
 });
 
-Deno.test("sanitizeSkillParams - only hashes known content fields", async () => {
+test("sanitizeSkillParams - only hashes known content fields", async () => {
   const params = {
     content: "user text",
     message: "reply message",
@@ -60,7 +61,7 @@ Deno.test("sanitizeSkillParams - only hashes known content fields", async () => 
   assertEquals(result.id, "abc123");
 });
 
-Deno.test("sanitizeSkillParams - does not hash non-string content fields", async () => {
+test("sanitizeSkillParams - does not hash non-string content fields", async () => {
   const params = {
     content: 42,
     query: true,
@@ -71,7 +72,7 @@ Deno.test("sanitizeSkillParams - does not hash non-string content fields", async
   assertEquals(result.query, true);
 });
 
-Deno.test("sanitizeSkillParams - recursively hashes nested content fields", async () => {
+test("sanitizeSkillParams - recursively hashes nested content fields", async () => {
   const params = {
     outer: "plain",
     nested: {

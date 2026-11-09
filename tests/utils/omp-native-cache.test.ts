@@ -12,7 +12,7 @@
 // for the prepared payload and no OMP process is ever spawned.
 
 import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import {
   assertOmpLaunchExecutableAgreement,
   assertOmpNativeCacheComplete,
@@ -45,6 +45,10 @@ import {
   serializeOmpNativeCacheManifest,
 } from "../../src/utils/omp-native-cache.ts";
 import { getMinimumOmpVersion } from "@utils/omp-version.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { describe, test } from "bun:test";
+import { isNotFoundError, makeTempDir, removePathSync } from "../../src/utils/fs-compat.ts";
 
 /** Byte length of every fixture addon file (payload size is irrelevant here). */
 const FIXTURE_BYTES = 12;
@@ -60,11 +64,11 @@ function requiredAddonNames(platform: OmpNativeCachePlatform): string[] {
 
 /** Run `body` against a fresh real temporary directory, always cleaning it up. */
 async function withTempRoot(body: (root: string) => Promise<void> | void): Promise<void> {
-  const root = await Deno.makeTempDir();
+  const root = await makeTempDir();
   try {
     await body(root);
   } finally {
-    await Deno.remove(root, { recursive: true });
+    await fsp.rm(root, { recursive: true });
   }
 }
 
@@ -90,21 +94,21 @@ function writePreparedPayload(
 ): OmpNativeCache {
   const cache = ompNativeCacheDescriptor(base, platform, "development");
   if (!options.omitVersionDir) {
-    Deno.mkdirSync(cache.versionDir, { recursive: true });
+    fs.mkdirSync(cache.versionDir, { recursive: true });
     const addons = options.addons ?? requiredAddonNames(platform);
     for (const name of addons) {
       const path = join(cache.versionDir, name);
       if (options.directories?.includes(name)) {
-        Deno.mkdirSync(path);
+        fs.mkdirSync(path);
       } else {
-        Deno.writeTextFileSync(path, "n".repeat(FIXTURE_BYTES));
+        fs.writeFileSync(path, "n".repeat(FIXTURE_BYTES));
       }
     }
   }
   if (!options.omitManifest) {
-    Deno.mkdirSync(cache.installRoot, { recursive: true });
+    fs.mkdirSync(cache.installRoot, { recursive: true });
     const published = options.addons ?? requiredAddonNames(platform);
-    Deno.writeTextFileSync(
+    fs.writeFileSync(
       cache.manifestPath,
       serializeOmpNativeCacheManifest({
         version: options.manifestVersion ?? OMP_NATIVE_CACHE_VERSION,
@@ -122,7 +126,7 @@ function writePreparedPayload(
 // Identity and layout
 // ---------------------------------------------------------------------------
 
-Deno.test("ompNativeCachePlatform - maps the two supported targets and refuses the rest", () => {
+test("ompNativeCachePlatform - maps the two supported targets and refuses the rest", () => {
   assertEquals(ompNativeCachePlatform("x86_64", "linux"), "linux-x64");
   assertEquals(ompNativeCachePlatform("aarch64", "linux"), "linux-arm64");
 
@@ -135,11 +139,11 @@ Deno.test("ompNativeCachePlatform - maps the two supported targets and refuses t
   assertThrows(() => ompNativeCachePlatform("aarch64", "darwin"), Error);
 });
 
-Deno.test("cache identity follows the 18.6.1 pin, never the AGENT_OMP_MIN_VERSION override", async () => {
-  const original = Deno.env.get("AGENT_OMP_MIN_VERSION");
+test("cache identity follows the 18.6.1 pin, never the AGENT_OMP_MIN_VERSION override", async () => {
+  const original = process.env["AGENT_OMP_MIN_VERSION"];
   await withTempRoot((root) => {
     try {
-      Deno.env.set("AGENT_OMP_MIN_VERSION", "20.1.0");
+      process.env["AGENT_OMP_MIN_VERSION"] = "20.1.0";
       // The operator override moves the bootstrap compatibility minimum...
       assertEquals(getMinimumOmpVersion(), "20.1.0");
       // ...but the cache identity stays pinned.
@@ -157,13 +161,13 @@ Deno.test("cache identity follows the 18.6.1 pin, never the AGENT_OMP_MIN_VERSIO
       assertStringIncludes(error.message, "identity mismatch");
       assertStringIncludes(error.message, "20.1.0");
     } finally {
-      if (original === undefined) Deno.env.delete("AGENT_OMP_MIN_VERSION");
-      else Deno.env.set("AGENT_OMP_MIN_VERSION", original);
+      if (original === undefined) delete process.env["AGENT_OMP_MIN_VERSION"];
+      else process.env["AGENT_OMP_MIN_VERSION"] = original;
     }
   });
 });
 
-Deno.test("published layout constants pin the image and development conventions", () => {
+test("published layout constants pin the image and development conventions", () => {
   assertEquals(OMP_IMAGE_NATIVE_CACHE_ROOT, "/opt/air/omp/native-cache");
   assertEquals(OMP_DEVELOPMENT_NATIVE_CACHE_RELATIVE, join("air-friends", "omp"));
   assertEquals(OMP_NATIVE_CACHE_PAYLOAD_DIR_NAME, "natives");
@@ -187,7 +191,7 @@ Deno.test("published layout constants pin the image and development conventions"
   assertEquals(image.manifestPath.startsWith(`${image.payloadDir}/`), false);
 });
 
-Deno.test("ompNativeCacheExpectedAddons - exact x64 variants, one arm64 addon required", () => {
+test("ompNativeCacheExpectedAddons - exact x64 variants, one arm64 addon required", () => {
   const x64 = ompNativeCacheExpectedAddons("linux-x64");
   assertEquals(x64.exact, OMP_NATIVE_CACHE_X64_ADDONS);
   assertEquals(x64.exact, [
@@ -214,7 +218,7 @@ Deno.test("ompNativeCacheExpectedAddons - exact x64 variants, one arm64 addon re
   assertStringIncludes(armMissing[0], "at least one file matching");
 });
 
-Deno.test("resolveOmpNativeCache - the installed image root wins, development only without one", async () => {
+test("resolveOmpNativeCache - the installed image root wins, development only without one", async () => {
   await withTempRoot((root) => {
     const imageBase = join(root, "opt", "air", "omp", "native-cache");
     const developmentBase = join(root, "home", ".cache", OMP_DEVELOPMENT_NATIVE_CACHE_RELATIVE);
@@ -229,7 +233,7 @@ Deno.test("resolveOmpNativeCache - the installed image root wins, development on
     assertEquals(development.installRoot, resolve(join(developmentBase, "linux-x64")));
 
     // Another platform's installed root never satisfies this platform.
-    Deno.mkdirSync(join(imageBase, "linux-arm64"), { recursive: true });
+    fs.mkdirSync(join(imageBase, "linux-arm64"), { recursive: true });
     assertEquals(
       resolveOmpNativeCache({ platform: "linux-x64", imageBase, developmentBase }).mode,
       "development",
@@ -237,7 +241,7 @@ Deno.test("resolveOmpNativeCache - the installed image root wins, development on
 
     // An INSTALLED root for this platform wins — even an incomplete one, where
     // development bytes exist and must NOT be substituted.
-    Deno.mkdirSync(join(imageBase, "linux-x64", "natives"), { recursive: true });
+    fs.mkdirSync(join(imageBase, "linux-x64", "natives"), { recursive: true });
     writePreparedPayload(developmentBase, "linux-x64");
     const installed = resolveOmpNativeCache({ platform: "linux-x64", imageBase, developmentBase });
     assertEquals(installed.mode, "image");
@@ -253,8 +257,8 @@ Deno.test("resolveOmpNativeCache - the installed image root wins, development on
     // A real file (not a directory) at the installed root still counts as
     // installed, so the preflight — never a silent fallback — reports it.
     const fileBase = join(root, "file-image");
-    Deno.mkdirSync(fileBase, { recursive: true });
-    Deno.writeTextFileSync(join(fileBase, "linux-x64"), "not a directory\n");
+    fs.mkdirSync(fileBase, { recursive: true });
+    fs.writeFileSync(join(fileBase, "linux-x64"), "not a directory\n");
     assertEquals(
       resolveOmpNativeCache({ platform: "linux-x64", imageBase: fileBase, developmentBase }).mode,
       "image",
@@ -262,7 +266,7 @@ Deno.test("resolveOmpNativeCache - the installed image root wins, development on
   });
 });
 
-Deno.test("ompDevelopmentNativeCacheBase - XDG_CACHE_HOME, then HOME/.cache, else a named failure", () => {
+test("ompDevelopmentNativeCacheBase - XDG_CACHE_HOME, then HOME/.cache, else a named failure", () => {
   const env = (values: Record<string, string>) => ({
     get: (key: string): string | undefined => values[key],
   });
@@ -284,7 +288,7 @@ Deno.test("ompDevelopmentNativeCacheBase - XDG_CACHE_HOME, then HOME/.cache, els
   assertStringIncludes(error.message, OMP_IMAGE_NATIVE_CACHE_ROOT);
 });
 
-Deno.test("ompNativeCacheFromSelection - a seam root must be this platform's root", () => {
+test("ompNativeCacheFromSelection - a seam root must be this platform's root", () => {
   const matching = ompNativeCacheFromSelection(
     { installRoot: "/cache/omp/linux-x64" },
     "linux-x64",
@@ -312,7 +316,7 @@ Deno.test("ompNativeCacheFromSelection - a seam root must be this platform's roo
 // Location guard
 // ---------------------------------------------------------------------------
 
-Deno.test("forbidden native-cache locations are refused with the operator remedy", () => {
+test("forbidden native-cache locations are refused with the operator remedy", () => {
   const repo = "/data/air-friends";
   const roots = ompNativeCacheForbiddenRoots({ repoPath: repo, workspacesDir: "workspaces" });
   assertEquals(roots, [
@@ -368,7 +372,7 @@ Deno.test("forbidden native-cache locations are refused with the operator remedy
 // Manifest contract
 // ---------------------------------------------------------------------------
 
-Deno.test("manifest - deterministic serialisation round-trips through reading", async () => {
+test("manifest - deterministic serialisation round-trips through reading", async () => {
   await withTempRoot(async (root) => {
     const manifest: OmpNativeCacheManifest = {
       version: OMP_NATIVE_CACHE_VERSION,
@@ -386,7 +390,7 @@ Deno.test("manifest - deterministic serialisation round-trips through reading", 
     assertEquals(serializeOmpNativeCacheManifest(manifest), text, "serialisation is stable");
 
     const path = join(root, OMP_NATIVE_CACHE_MANIFEST_NAME);
-    await Deno.writeTextFile(path, text);
+    await fsp.writeFile(path, text);
     const read = readOmpNativeCacheManifest(path);
     assertEquals(read, {
       version: OMP_NATIVE_CACHE_VERSION,
@@ -398,7 +402,7 @@ Deno.test("manifest - deterministic serialisation round-trips through reading", 
   });
 });
 
-Deno.test("manifest - structurally invalid documents are rejected, never trusted", async () => {
+test("manifest - structurally invalid documents are rejected, never trusted", async () => {
   await withTempRoot(async (root) => {
     const path = join(root, OMP_NATIVE_CACHE_MANIFEST_NAME);
     assertEquals(readOmpNativeCacheManifest(join(root, "absent.json")), null);
@@ -432,11 +436,11 @@ Deno.test("manifest - structurally invalid documents are rejected, never trusted
       ],
     ];
     for (const [label, text] of cases) {
-      await Deno.writeTextFile(path, text);
+      await fsp.writeFile(path, text);
       assertEquals(readOmpNativeCacheManifest(path), null, label);
     }
 
-    await Deno.writeTextFile(path, JSON.stringify(valid));
+    await fsp.writeFile(path, JSON.stringify(valid));
     assertEquals(readOmpNativeCacheManifest(path), valid);
   });
 });
@@ -445,8 +449,8 @@ Deno.test("manifest - structurally invalid documents are rejected, never trusted
 // Payload completeness
 // ---------------------------------------------------------------------------
 
-Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names every mismatch", async (t) => {
-  await t.step("complete payload returns its manifest", async () => {
+describe("assertOmpNativeCacheComplete - accepts a matching payload and names every mismatch", () => {
+  test("complete payload returns its manifest", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64");
       const manifest = assertOmpNativeCacheComplete(cache);
@@ -459,7 +463,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("absent payload directory", async () => {
+  test("absent payload directory", async () => {
     await withTempRoot((root) => {
       const cache = ompNativeCacheDescriptor(root, "linux-x64", "development");
       const error = assertThrows(() => assertOmpNativeCacheComplete(cache), Error);
@@ -469,16 +473,16 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("payload directory replaced by a regular file", async () => {
+  test("payload directory replaced by a regular file", async () => {
     await withTempRoot((root) => {
       const cache = ompNativeCacheDescriptor(root, "linux-x64", "development");
-      Deno.mkdirSync(cache.installRoot, { recursive: true });
-      Deno.writeTextFileSync(cache.payloadDir, "not a directory\n");
+      fs.mkdirSync(cache.installRoot, { recursive: true });
+      fs.writeFileSync(cache.payloadDir, "not a directory\n");
       assertThrows(() => assertOmpNativeCacheComplete(cache), Error, "is missing");
     });
   });
 
-  await t.step("missing manifest", async () => {
+  test("missing manifest", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", { omitManifest: true });
       const error = assertThrows(() => assertOmpNativeCacheComplete(cache), Error);
@@ -488,15 +492,15 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("structurally invalid manifest", async () => {
+  test("structurally invalid manifest", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64");
-      Deno.writeTextFileSync(cache.manifestPath, '{"version": 18}\n');
+      fs.writeFileSync(cache.manifestPath, '{"version": 18}\n');
       assertThrows(() => assertOmpNativeCacheComplete(cache), Error, "invalid");
     });
   });
 
-  await t.step("version mismatch", async () => {
+  test("version mismatch", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", { manifestVersion: "18.6.0" });
       const error = assertThrows(() => assertOmpNativeCacheComplete(cache), Error);
@@ -506,7 +510,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("platform mismatch", async () => {
+  test("platform mismatch", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", { manifestPlatform: "linux-arm64" });
       const error = assertThrows(() => assertOmpNativeCacheComplete(cache), Error);
@@ -515,7 +519,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("executable identity mismatch", async () => {
+  test("executable identity mismatch", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", { executableSha256: "0".repeat(64) });
       const error = assertThrows(() => assertOmpNativeCacheComplete(cache), Error);
@@ -525,7 +529,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("expected addon file absent from the manifest", async () => {
+  test("expected addon file absent from the manifest", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", {
         addons: [OMP_NATIVE_CACHE_X64_ADDONS[0]],
@@ -537,10 +541,10 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("recorded file absent from disk", async () => {
+  test("recorded file absent from disk", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64");
-      Deno.removeSync(join(cache.versionDir, OMP_NATIVE_CACHE_X64_ADDONS[0]));
+      removePathSync(join(cache.versionDir, OMP_NATIVE_CACHE_X64_ADDONS[0]));
       const error = assertThrows(() => assertOmpNativeCacheComplete(cache), Error);
       assertStringIncludes(error.message, OMP_NATIVE_CACHE_X64_ADDONS[0]);
       assertStringIncludes(error.message, "wrong size");
@@ -548,7 +552,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("recorded file size mismatch", async () => {
+  test("recorded file size mismatch", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", {
         manifestFiles: [
@@ -562,7 +566,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("recorded entry is not a regular file", async () => {
+  test("recorded entry is not a regular file", async () => {
     await withTempRoot((root) => {
       const cache = writePreparedPayload(root, "linux-x64", {
         directories: [OMP_NATIVE_CACHE_X64_ADDONS[0]],
@@ -571,7 +575,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
     });
   });
 
-  await t.step("arm64 payload completeness follows the pattern requirement", async () => {
+  test("arm64 payload completeness follows the pattern requirement", async () => {
     await withTempRoot((root) => {
       const complete = writePreparedPayload(root, "linux-arm64");
       assertEquals(assertOmpNativeCacheComplete(complete).platform, "linux-arm64");
@@ -588,7 +592,7 @@ Deno.test("assertOmpNativeCacheComplete - accepts a matching payload and names e
 // Launch-executable agreement
 // ---------------------------------------------------------------------------
 
-Deno.test("assertOmpLaunchExecutableAgreement - pin agreement, absent probe, mismatch", () => {
+test("assertOmpLaunchExecutableAgreement - pin agreement, absent probe, mismatch", () => {
   const cache = ompNativeCacheDescriptor("/cache", "linux-x64", "development");
 
   // Agreeing observations in either shape.
@@ -621,11 +625,11 @@ Deno.test("assertOmpLaunchExecutableAgreement - pin agreement, absent probe, mis
 /** Create a real payload directory used only as a link target. */
 function makePayloadTarget(root: string, name = "payload"): string {
   const target = join(root, name, "linux-x64", "natives");
-  Deno.mkdirSync(target, { recursive: true });
+  fs.mkdirSync(target, { recursive: true });
   return target;
 }
 
-Deno.test("installOmpNativeCacheLink - fresh install, idempotent reuse, no temporary litter", async () => {
+test("installOmpNativeCacheLink - fresh install, idempotent reuse, no temporary litter", async () => {
   await withTempRoot(async (root) => {
     const baseRoot = join(root, "omp-pools", "pool-key");
     const target = makePayloadTarget(root);
@@ -641,17 +645,19 @@ Deno.test("installOmpNativeCacheLink - fresh install, idempotent reuse, no tempo
       cache: { payloadDir: target },
     });
     assertEquals(installed, linkPath);
-    const info = Deno.lstatSync(linkPath);
-    assert(info.isSymlink, "the reserved entry must be a symlink");
-    assertEquals(Deno.readLinkSync(linkPath), target);
+    const info = fs.lstatSync(linkPath);
+    assert(info.isSymbolicLink(), "the reserved entry must be a symlink");
+    assertEquals(fs.readlinkSync(linkPath), target);
     // The mode application directory stays a real, writable private directory.
-    assert(Deno.statSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp")).isDirectory);
-    await Deno.writeTextFile(
+    assert(fs.statSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp")).isDirectory());
+    await fsp.writeFile(
       join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp", "db.sqlite"),
       "x",
     );
     assertEquals(
-      [...Deno.readDirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"))]
+      [...fs.readdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+        withFileTypes: true,
+      })]
         .map((entry) => entry.name)
         .sort(),
       ["db.sqlite", "natives"],
@@ -662,9 +668,11 @@ Deno.test("installOmpNativeCacheLink - fresh install, idempotent reuse, no tempo
       installOmpNativeCacheLink({ baseRoot, mode: "restricted", cache: { payloadDir: target } }),
       linkPath,
     );
-    assertEquals(Deno.readLinkSync(linkPath), target);
+    assertEquals(fs.readlinkSync(linkPath), target);
     const entries = [
-      ...Deno.readDirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp")),
+      ...fs.readdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+        withFileTypes: true,
+      }),
     ]
       .map((entry) => entry.name)
       .filter((name) => name !== "db.sqlite")
@@ -677,17 +685,17 @@ Deno.test("installOmpNativeCacheLink - fresh install, idempotent reuse, no tempo
       mode: "native-yolo",
       cache: { payloadDir: target },
     });
-    assertEquals(Deno.readLinkSync(yoloLink), target);
+    assertEquals(fs.readlinkSync(yoloLink), target);
     assert(yoloLink !== linkPath);
   });
 });
 
-Deno.test("installOmpNativeCacheLink - an identical link written by a concurrent creator is success", async () => {
+test("installOmpNativeCacheLink - an identical link written by a concurrent creator is success", async () => {
   await withTempRoot(async (root) => {
     const baseRoot = join(root, "omp-pools", "pool-race");
     const target = makePayloadTarget(root);
     const linkPath = ompNativeCacheLinkPath(baseRoot, "restricted");
-    Deno.mkdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+    fs.mkdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
       recursive: true,
     });
 
@@ -707,25 +715,27 @@ Deno.test("installOmpNativeCacheLink - an identical link written by a concurrent
       ),
     );
     for (const result of results) assertEquals(result, linkPath);
-    assertEquals(Deno.readLinkSync(linkPath), target);
+    assertEquals(fs.readlinkSync(linkPath), target);
     assertEquals(
-      [...Deno.readDirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"))]
+      [...fs.readdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+        withFileTypes: true,
+      })]
         .map((entry) => entry.name),
       ["natives"],
     );
 
     // A pre-existing exact managed link (the state a winning racer leaves) is
     // reused rather than replaced or refused.
-    const inodeBefore = Deno.lstatSync(linkPath).ino;
+    const inodeBefore = fs.lstatSync(linkPath).ino;
     assertEquals(
       installOmpNativeCacheLink({ baseRoot, mode: "restricted", cache: { payloadDir: target } }),
       linkPath,
     );
-    assertEquals(Deno.lstatSync(linkPath).ino, inodeBefore);
+    assertEquals(fs.lstatSync(linkPath).ino, inodeBefore);
   });
 });
 
-Deno.test("installOmpNativeCacheLink - dangling and differently targeted links are refused", async () => {
+test("installOmpNativeCacheLink - dangling and differently targeted links are refused", async () => {
   await withTempRoot((root) => {
     const target = makePayloadTarget(root);
     const other = makePayloadTarget(root, "other");
@@ -733,10 +743,10 @@ Deno.test("installOmpNativeCacheLink - dangling and differently targeted links a
     // Dangling link.
     const danglingRoot = join(root, "dangling");
     const danglingLink = ompNativeCacheLinkPath(danglingRoot, "restricted");
-    Deno.mkdirSync(join(danglingRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+    fs.mkdirSync(join(danglingRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
       recursive: true,
     });
-    Deno.symlinkSync(join(root, "vanished"), danglingLink);
+    fs.symlinkSync(join(root, "vanished"), danglingLink);
     const danglingError = assertThrows(
       () =>
         installOmpNativeCacheLink({
@@ -749,15 +759,15 @@ Deno.test("installOmpNativeCacheLink - dangling and differently targeted links a
     assertStringIncludes(danglingError.message, danglingLink);
     assertStringIncludes(danglingError.message, join(root, "vanished"));
     assertStringIncludes(danglingError.message, target);
-    assertEquals(Deno.readLinkSync(danglingLink), join(root, "vanished"), "link left untouched");
+    assertEquals(fs.readlinkSync(danglingLink), join(root, "vanished"), "link left untouched");
 
     // Different target.
     const otherRoot = join(root, "other-target");
     const otherLink = ompNativeCacheLinkPath(otherRoot, "restricted");
-    Deno.mkdirSync(join(otherRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+    fs.mkdirSync(join(otherRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
       recursive: true,
     });
-    Deno.symlinkSync(other, otherLink);
+    fs.symlinkSync(other, otherLink);
     const otherError = assertThrows(
       () =>
         installOmpNativeCacheLink({
@@ -770,19 +780,19 @@ Deno.test("installOmpNativeCacheLink - dangling and differently targeted links a
     assertStringIncludes(otherError.message, otherLink);
     assertStringIncludes(otherError.message, other);
     assertStringIncludes(otherError.message, "not to the selected shared payload");
-    assertEquals(Deno.readLinkSync(otherLink), other, "link left untouched");
+    assertEquals(fs.readlinkSync(otherLink), other, "link left untouched");
   });
 });
 
-Deno.test("installOmpNativeCacheLink - a regular file at the reserved entry is refused", async () => {
+test("installOmpNativeCacheLink - a regular file at the reserved entry is refused", async () => {
   await withTempRoot(async (root) => {
     const baseRoot = join(root, "occupied-file");
     const target = makePayloadTarget(root);
     const linkPath = ompNativeCacheLinkPath(baseRoot, "restricted");
-    Deno.mkdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
+    fs.mkdirSync(join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp"), {
       recursive: true,
     });
-    await Deno.writeTextFile(linkPath, "not a link\n");
+    await fsp.writeFile(linkPath, "not a link\n");
 
     const error = assertThrows(
       () =>
@@ -791,12 +801,12 @@ Deno.test("installOmpNativeCacheLink - a regular file at the reserved entry is r
     );
     assertStringIncludes(error.message, linkPath);
     assertStringIncludes(error.message, "non-symlink file");
-    assert(Deno.lstatSync(linkPath).isFile, "the occupying file is left untouched");
-    assertEquals(await Deno.readTextFile(linkPath), "not a link\n");
+    assert(fs.lstatSync(linkPath).isFile(), "the occupying file is left untouched");
+    assertEquals(await fsp.readFile(linkPath, "utf8"), "not a link\n");
   });
 });
 
-Deno.test("installOmpNativeCacheLink - an occupied legacy directory is refused, named and preserved", async () => {
+test("installOmpNativeCacheLink - an occupied legacy directory is refused, named and preserved", async () => {
   await withTempRoot(async (root) => {
     const baseRoot = join(root, "omp-pools", "legacy-pool");
     const target = makePayloadTarget(root);
@@ -808,8 +818,8 @@ Deno.test("installOmpNativeCacheLink - an occupied legacy directory is refused, 
       OMP_NATIVE_CACHE_VERSION,
       "pi_natives.linux-x64-modern.node",
     );
-    Deno.mkdirSync(join(linkPath, OMP_NATIVE_CACHE_VERSION), { recursive: true });
-    await Deno.writeTextFile(legacyAddon, "legacy native bytes");
+    fs.mkdirSync(join(linkPath, OMP_NATIVE_CACHE_VERSION), { recursive: true });
+    await fsp.writeFile(legacyAddon, "legacy native bytes");
 
     const error = assertThrows(
       () =>
@@ -824,20 +834,20 @@ Deno.test("installOmpNativeCacheLink - an occupied legacy directory is refused, 
     assertStringIncludes(error.message, "never deletes or migrates legacy native copies");
 
     // The legacy directory is left untouched: neither followed, deleted nor migrated.
-    assert(Deno.lstatSync(linkPath).isDirectory, "legacy directory preserved as a directory");
-    assertEquals(await Deno.readTextFile(legacyAddon), "legacy native bytes");
+    assert(fs.lstatSync(linkPath).isDirectory(), "legacy directory preserved as a directory");
+    assertEquals(await fsp.readFile(legacyAddon, "utf8"), "legacy native bytes");
     assertEquals(
-      [...Deno.readDirSync(linkPath)].map((entry) => entry.name),
+      [...fs.readdirSync(linkPath, { withFileTypes: true })].map((entry) => entry.name),
       [OMP_NATIVE_CACHE_VERSION],
     );
   });
 });
 
-Deno.test("installOmpNativeCacheLink - symlinked or escaping managed parents are refused", async () => {
+test("installOmpNativeCacheLink - symlinked or escaping managed parents are refused", async () => {
   await withTempRoot(async (root) => {
     const target = makePayloadTarget(root);
     const escape = join(root, "escape");
-    Deno.mkdirSync(escape, { recursive: true });
+    fs.mkdirSync(escape, { recursive: true });
 
     const cases: ReadonlyArray<readonly [string, readonly string[]]> = [
       ["omp-agent", ["omp-agent"]],
@@ -848,10 +858,10 @@ Deno.test("installOmpNativeCacheLink - symlinked or escaping managed parents are
     for (const [label, components] of cases) {
       const baseRoot = join(root, `parent-${label}`);
       const parent = join(baseRoot, ...components);
-      Deno.mkdirSync(parent, { recursive: true });
+      fs.mkdirSync(parent, { recursive: true });
       // Replace the deepest managed component with a symlink out of the root.
-      Deno.removeSync(parent);
-      Deno.symlinkSync(escape, parent);
+      removePathSync(parent);
+      fs.symlinkSync(escape, parent);
 
       const error = assertThrows(
         () =>
@@ -865,14 +875,14 @@ Deno.test("installOmpNativeCacheLink - symlinked or escaping managed parents are
       assertStringIncludes(error.message, parent, label);
       assertStringIncludes(error.message, "symbolic link", label);
       // Nothing was created through the escaping component.
-      assertEquals([...Deno.readDirSync(escape)].length, 0, label);
+      assertEquals([...fs.readdirSync(escape, { withFileTypes: true })].length, 0, label);
     }
 
     // A non-directory managed parent is refused too.
     const fileBase = join(root, "parent-file");
     const fileParent = join(fileBase, "omp-agent", "restricted", "xdg-data", "omp");
-    Deno.mkdirSync(join(fileBase, "omp-agent", "restricted", "xdg-data"), { recursive: true });
-    await Deno.writeTextFile(fileParent, "occupied\n");
+    fs.mkdirSync(join(fileBase, "omp-agent", "restricted", "xdg-data"), { recursive: true });
+    await fsp.writeFile(fileParent, "occupied\n");
     const fileError = assertThrows(
       () =>
         installOmpNativeCacheLink({
@@ -884,7 +894,7 @@ Deno.test("installOmpNativeCacheLink - symlinked or escaping managed parents are
     );
     assertStringIncludes(fileError.message, fileParent);
     assertStringIncludes(fileError.message, "not a directory");
-    assertEquals(await Deno.readTextFile(fileParent), "occupied\n");
+    assertEquals(await fsp.readFile(fileParent, "utf8"), "occupied\n");
   });
 });
 
@@ -892,7 +902,7 @@ Deno.test("installOmpNativeCacheLink - symlinked or escaping managed parents are
 // End-to-end root preparation
 // ---------------------------------------------------------------------------
 
-Deno.test("prepareOmpNativeCacheRoot - installs the shared payload link over a temp payload", async () => {
+test("prepareOmpNativeCacheRoot - installs the shared payload link over a temp payload", async () => {
   await withTempRoot((root) => {
     const installBase = join(root, "cache");
     const platform = ompNativeCachePlatform();
@@ -912,14 +922,14 @@ Deno.test("prepareOmpNativeCacheRoot - installs the shared payload link over a t
     assertEquals(prepared.payloadDir, cache.payloadDir);
 
     const linkPath = ompNativeCacheLinkPath(baseRoot, "restricted");
-    assert(Deno.lstatSync(linkPath).isSymlink);
-    assertEquals(Deno.readLinkSync(linkPath), cache.payloadDir);
+    assert(fs.lstatSync(linkPath).isSymbolicLink());
+    assertEquals(fs.readlinkSync(linkPath), cache.payloadDir);
     // The extracted version directory is reachable THROUGH the link, i.e. the
     // root consumes shared bytes rather than a channel-local copy.
     const addon = requiredAddonNames(platform)[0];
     assertEquals(
-      Deno.statSync(join(linkPath, OMP_NATIVE_CACHE_VERSION, addon)).ino,
-      Deno.statSync(join(cache.versionDir, addon)).ino,
+      fs.statSync(join(linkPath, OMP_NATIVE_CACHE_VERSION, addon)).ino,
+      fs.statSync(join(cache.versionDir, addon)).ino,
     );
 
     // Per-spawn shape: {workingDir}/tmp, mode-distinct reserved entries.
@@ -935,20 +945,20 @@ Deno.test("prepareOmpNativeCacheRoot - installs the shared payload link over a t
     });
     assertEquals(perSpawn.payloadDir, cache.payloadDir);
     assertEquals(
-      Deno.readLinkSync(ompNativeCacheLinkPath(perSpawnBase, "native-yolo")),
+      fs.readlinkSync(ompNativeCacheLinkPath(perSpawnBase, "native-yolo")),
       cache.payloadDir,
     );
   });
 });
 
-Deno.test("prepareOmpNativeCacheRoot - fails before spawn and leaves existing state untouched", async () => {
+test("prepareOmpNativeCacheRoot - fails before spawn and leaves existing state untouched", async () => {
   await withTempRoot(async (root) => {
     const platform = ompNativeCachePlatform();
     const baseRoot = join(root, "omp-pools", "pool-key");
     const privateDir = join(baseRoot, "omp-agent", "restricted", "xdg-data", "omp");
     const privateState = join(privateDir, "db.sqlite");
-    Deno.mkdirSync(privateDir, { recursive: true });
-    await Deno.writeTextFile(privateState, "private\n");
+    fs.mkdirSync(privateDir, { recursive: true });
+    await fsp.writeFile(privateState, "private\n");
 
     // Absent payload.
     const absent = assertThrows(
@@ -1018,18 +1028,22 @@ Deno.test("prepareOmpNativeCacheRoot - fails before spawn and leaves existing st
     assertStringIncludes(forbidden.message, "Refusing");
 
     // Nothing was linked and the pre-existing private state is byte-identical.
-    assertThrows(
-      () => Deno.lstatSync(join(privateDir, "natives")),
-      Deno.errors.NotFound,
+    const missingEntry = assertThrows(
+      () => fs.lstatSync(join(privateDir, "natives")),
+      Error,
       undefined,
       "no reserved entry may be installed when the preflight fails",
     );
-    assertEquals(await Deno.readTextFile(privateState), "private\n");
-    assertEquals([...Deno.readDirSync(privateDir)].map((entry) => entry.name), ["db.sqlite"]);
+    assert(isNotFoundError(missingEntry));
+    assertEquals(await fsp.readFile(privateState, "utf8"), "private\n");
+    assertEquals(
+      [...fs.readdirSync(privateDir, { withFileTypes: true })].map((entry) => entry.name),
+      ["db.sqlite"],
+    );
   });
 });
 
-Deno.test("prepareOmpNativeCacheRoot - an absent probe outcome falls through to the payload check", async () => {
+test("prepareOmpNativeCacheRoot - an absent probe outcome falls through to the payload check", async () => {
   await withTempRoot((root) => {
     const installBase = join(root, "cache");
     const platform = ompNativeCachePlatform();
@@ -1047,7 +1061,7 @@ Deno.test("prepareOmpNativeCacheRoot - an absent probe outcome falls through to 
     });
     assertEquals(prepared.payloadDir, cache.payloadDir);
     assertEquals(
-      Deno.readLinkSync(ompNativeCacheLinkPath(baseRoot, "restricted")),
+      fs.readlinkSync(ompNativeCacheLinkPath(baseRoot, "restricted")),
       cache.payloadDir,
     );
 

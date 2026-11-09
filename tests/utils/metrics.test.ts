@@ -10,8 +10,9 @@ import {
   sessionDurationSeconds,
   sessionsTotal,
 } from "../../src/utils/metrics.ts";
+import { test } from "bun:test";
 
-Deno.test("metrics registry - exports all registered metrics", async () => {
+test("metrics registry - exports all registered metrics", async () => {
   const output = await metricsRegistry.metrics();
   assertStringIncludes(output, "airfriends_sessions_total");
   assertStringIncludes(output, "airfriends_messages_received_total");
@@ -24,25 +25,25 @@ Deno.test("metrics registry - exports all registered metrics", async () => {
   assertStringIncludes(output, "airfriends_files_sent_total");
 });
 
-Deno.test("metrics - counter increments correctly", async () => {
+test("metrics - counter increments correctly", async () => {
   sessionsTotal.labels("discord", "message", "success").inc();
   const output = await metricsRegistry.metrics();
   assertStringIncludes(output, "airfriends_sessions_total{");
 });
 
-Deno.test("metrics - histogram observes correctly", async () => {
+test("metrics - histogram observes correctly", async () => {
   sessionDurationSeconds.labels("discord", "message", "success").observe(5.2);
   const output = await metricsRegistry.metrics();
   assertStringIncludes(output, "airfriends_session_duration_seconds_bucket");
 });
 
-Deno.test("metrics - messages received counter", async () => {
+test("metrics - messages received counter", async () => {
   messagesReceivedTotal.labels("discord").inc();
   const output = await metricsRegistry.metrics();
   assertStringIncludes(output, "airfriends_messages_received_total{");
 });
 
-Deno.test("metrics - files sent counter increments per delivered file", async () => {
+test("metrics - files sent counter increments per delivered file", async () => {
   filesSentTotal.labels("misskey").inc(3);
   const output = await metricsRegistry.metrics();
   assertStringIncludes(
@@ -51,7 +52,7 @@ Deno.test("metrics - files sent counter increments per delivered file", async ()
   );
 });
 
-Deno.test("metrics - self-research no-note counter registered and increments exactly once", async () => {
+test("metrics - self-research no-note counter registered and increments exactly once", async () => {
   selfResearchNoNoteTotal.reset();
   const before = (await selfResearchNoNoteTotal.get()).values[0].value;
   selfResearchNoNoteTotal.inc();
@@ -67,7 +68,7 @@ Deno.test("metrics - self-research no-note counter registered and increments exa
 // alone. A canonical email user id (`e_<sha256>`) must never become a label value:
 // that would multiply series per sender and leak private identity into the registry.
 
-Deno.test("metrics - email sessions, messages and replies are labelled by platform only", async () => {
+test("metrics - email sessions, messages and replies are labelled by platform only", async () => {
   messagesReceivedTotal.labels("email").inc();
   repliesSentTotal.labels("email").inc();
   sessionsTotal.labels("email", "message", "success").inc();
@@ -87,7 +88,7 @@ Deno.test("metrics - email sessions, messages and replies are labelled by platfo
   );
 });
 
-Deno.test("metrics - no platform metric carries a user- or address-bearing label", async () => {
+test("metrics - no platform metric carries a user- or address-bearing label", async () => {
   // The rendered label sets are the contract: a cardinality-bearing label (user,
   // address, mailbox, channel) fails here instead of exploding the registry.
   const output = await metricsRegistry.metrics();

@@ -37,12 +37,14 @@ import {
 } from "@utils/omp-native-cache.ts";
 import type { AgentConfig, ClientConfig, OmpPermissionMode } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
-import { join } from "@std/path";
+import { join } from "node:path";
 import {
   createMockAcpConnection,
   type MockAcpConnection,
   type MockAcpConnectionScript,
 } from "./mock-acp-connection.ts";
+import fs from "node:fs";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 /** The silent connector logger used across the mock suites. */
 export const SILENT_LOGGER = {
@@ -65,12 +67,12 @@ let mockNativeCache: OmpNativeCacheSelection | undefined;
 export function mockOmpNativeCache(): OmpNativeCacheSelection {
   if (mockNativeCache !== undefined) return mockNativeCache;
   const platform = ompNativeCachePlatform();
-  const cacheBase = Deno.makeTempDirSync({ prefix: "air-omp-mock-native-cache-" });
+  const cacheBase = makeTempDirSync({ prefix: "air-omp-mock-native-cache-" });
   // Best-effort: the payload is process-scoped, so one directory per test process is bounded
   // even where the runtime does not deliver this event.
-  globalThis.addEventListener("unload", () => {
+  process.on("exit", () => {
     try {
-      Deno.removeSync(cacheBase, { recursive: true });
+      fs.rmSync(cacheBase, { recursive: true });
     } catch {
       // Already gone.
     }
@@ -78,11 +80,11 @@ export function mockOmpNativeCache(): OmpNativeCacheSelection {
   const cache = ompNativeCacheDescriptor(cacheBase, platform, "development");
   const { exact } = ompNativeCacheExpectedAddons(platform);
   const names = exact.length > 0 ? [...exact] : ["pi_natives.synthetic-linux-arm64.node"];
-  Deno.mkdirSync(cache.versionDir, { recursive: true });
+  fs.mkdirSync(cache.versionDir, { recursive: true });
   for (const name of names) {
-    Deno.writeTextFileSync(join(cache.versionDir, name), "mock-native-payload");
+    fs.writeFileSync(join(cache.versionDir, name), "mock-native-payload");
   }
-  Deno.writeTextFileSync(
+  fs.writeFileSync(
     cache.manifestPath,
     serializeOmpNativeCacheManifest({
       version: OMP_NATIVE_CACHE_VERSION,
@@ -169,8 +171,9 @@ export function buildOmpFactoryAgentConfig(params: {
 /**
  * The OMP subprocess swap helper (sibling of the OpenCode useMockAgent, which
  * stays untouched): point the factory-built config at the mock agent over
- * stdio. `--allow-run` is added ONLY for the crash-witness tests (the mock
- * side-process spawn needs it); OpenCode tests keep their own arg list.
+ * stdio. The launch is the Bun form (`bun run --no-env-file <mock>`); the
+ * `allowRun` flag stays accepted for the crash-witness callers but is a no-op,
+ * because Bun needs no permission flag for the mock's side-process spawn.
  */
 export function useMockOmpAgent(
   agentConfig: AgentConfig,
@@ -184,14 +187,10 @@ export function useMockOmpAgent(
     allowRun?: boolean;
   },
 ): AgentConfig {
-  agentConfig.command = Deno.execPath();
+  agentConfig.command = process.execPath;
   agentConfig.args = [
     "run",
-    "--no-check",
-    "--allow-env",
-    "--allow-read",
-    "--allow-write",
-    ...(params.allowRun ? ["--allow-run"] : []),
+    "--no-env-file",
     new URL("./mock-acp-agent.ts", import.meta.url).pathname,
   ];
   agentConfig.env = {
@@ -320,12 +319,16 @@ export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession 
 /** True while `pid` answers `kill -0` (ESRCH => dead; EPERM => alive-but-foreign). */
 export function processAlive(pid: number): boolean {
   try {
-    Deno.kill(pid, 0);
+    process.kill(pid, 0);
     return true;
   } catch (error) {
-    // Deno maps ESRCH to Deno.errors.NotFound and EPERM to PermissionDenied.
-    if (error instanceof Deno.errors.NotFound) return false;
-    if (error instanceof Deno.errors.PermissionDenied) return true;
+    // Node maps ESRCH and EPERM to those `code`s directly (Deno reported them
+    // as NotFound and PermissionDenied).
+    const code = error !== null && typeof error === "object" && "code" in error
+      ? error.code
+      : undefined;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
     throw error;
   }
 }

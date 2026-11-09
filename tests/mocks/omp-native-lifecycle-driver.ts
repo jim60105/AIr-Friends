@@ -24,6 +24,7 @@ import { SkillRegistry } from "../../src/skills/registry.ts";
 import { Logger, LogLevel } from "../../src/utils/logger.ts";
 import type { AgentType } from "../../src/acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
+import fsp from "node:fs/promises";
 
 /** Everything the driver needs: the real config plus the scenario identity. */
 export interface DriverParams {
@@ -158,21 +159,21 @@ async function run(params: DriverParams): Promise<DriverResult> {
 }
 
 if (import.meta.main) {
-  const paramsPath = Deno.args[0];
+  const paramsPath = process.argv[2];
   if (paramsPath === undefined) {
     console.error("usage: omp-native-lifecycle-driver.ts <params.json>");
-    Deno.exit(2);
+    process.exit(2);
   }
-  const params = asDriverParams(JSON.parse(await Deno.readTextFile(paramsPath)));
+  const params = asDriverParams(JSON.parse(await fsp.readFile(paramsPath, "utf8")));
   if (params === null) {
     console.error("invalid driver params");
-    Deno.exit(2);
+    process.exit(2);
   }
   try {
     const result = await run(params);
-    await Deno.writeTextFile(params.resultPath, JSON.stringify(result));
+    await fsp.writeFile(params.resultPath, JSON.stringify(result));
   } catch (error) {
     console.error(`driver failed: ${error instanceof Error ? error.message : String(error)}`);
-    Deno.exit(1);
+    process.exit(1);
   }
 }

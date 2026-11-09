@@ -5,7 +5,7 @@
 // full pool/lease/JWT/recovery flow without spending model tokens.
 //
 // Launched by the AgentConnector as:
-//   dumb-init -- deno run --no-check --allow-env --allow-read --allow-write --allow-net <this file>
+//   dumb-init -- bun run --no-env-file <this file>
 //
 // The agent environment (set by the pool) provides:
 //   SESSION_ID     - current session identifier
@@ -108,7 +108,10 @@
 //                                  data (client-side rejection composition),
 //                                  never swallowed.
 
-const PROMPT_DELAY_MS = parseInt(Deno.env.get("MOCK_PROMPT_DELAY_MS") ?? "12000", 10);
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import { Readable } from "node:stream";
+const PROMPT_DELAY_MS = parseInt(process.env["MOCK_PROMPT_DELAY_MS"] ?? "12000", 10);
 
 /** Per-process-connection generation marker for the RPC record (survives slicing). */
 const MOCK_CONNECTION_GEN = `gen-${crypto.randomUUID()}`;
@@ -123,9 +126,9 @@ interface MockState {
 }
 
 function stateFile(): string {
-  const override = Deno.env.get("MOCK_STATE_FILE");
+  const override = process.env["MOCK_STATE_FILE"];
   if (override) return override;
-  const tmpDir = Deno.env.get("TMPDIR") ?? "/tmp";
+  const tmpDir = process.env["TMPDIR"] ?? "/tmp";
   const sessionId = resolveMockSessionId();
   return `${tmpDir}/${sessionId}/mock-state.json`;
 }
@@ -142,11 +145,11 @@ function stateFile(): string {
  * broken pooled identity can never silently hijack the mock's state file.
  */
 function resolveMockSessionId(): string {
-  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const jwtDir = process.env["SKILL_JWT_DIR"];
   const readPointer = (): string | undefined => {
     if (!jwtDir) return undefined;
     try {
-      const parsed = JSON.parse(Deno.readTextFileSync(`${jwtDir}/active.json`)) as {
+      const parsed = JSON.parse(fs.readFileSync(`${jwtDir}/active.json`, "utf8")) as {
         sessionId?: unknown;
       };
       if (typeof parsed.sessionId === "string" && parsed.sessionId.length > 0) {
@@ -157,7 +160,7 @@ function resolveMockSessionId(): string {
     }
     return undefined;
   };
-  if (Deno.env.get("SKILL_SHARED_PROCESS") === "1") {
+  if (process.env["SKILL_SHARED_PROCESS"] === "1") {
     const pointer = readPointer();
     if (pointer === undefined) {
       throw new Error(
@@ -168,7 +171,7 @@ function resolveMockSessionId(): string {
     }
     return pointer;
   }
-  return Deno.env.get("SESSION_ID") ?? readPointer() ?? "mock";
+  return process.env["SESSION_ID"] ?? readPointer() ?? "mock";
 }
 
 function stateDir(): string {
@@ -178,7 +181,7 @@ function stateDir(): string {
 
 function loadState(): MockState {
   try {
-    return JSON.parse(Deno.readTextFileSync(stateFile())) as MockState;
+    return JSON.parse(fs.readFileSync(stateFile(), "utf8")) as MockState;
   } catch {
     return { memorySaveDone: false, replySent: false };
   }
@@ -187,18 +190,18 @@ function loadState(): MockState {
 function saveState(state: MockState): void {
   const file = stateFile();
   const dir = file.slice(0, file.lastIndexOf("/"));
-  Deno.mkdirSync(dir, { recursive: true });
-  Deno.writeFileSync(file, new TextEncoder().encode(JSON.stringify(state)));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, new TextEncoder().encode(JSON.stringify(state)));
 }
 
 async function callSkillApi(
   endpoint: string,
   parameters: Record<string, unknown>,
 ): Promise<unknown> {
-  const skillApiUrl = Deno.env.get("SKILL_API_URL") ?? "http://127.0.0.1:3001";
-  const skillJwtDir = Deno.env.get("SKILL_JWT_DIR") ?? "data/skill-jwt";
+  const skillApiUrl = process.env["SKILL_API_URL"] ?? "http://127.0.0.1:3001";
+  const skillJwtDir = process.env["SKILL_JWT_DIR"] ?? "data/skill-jwt";
   const sessionId = resolveMockSessionId();
-  const jwt = Deno.readTextFileSync(`${skillJwtDir}/${sessionId}.jwt`).trim();
+  const jwt = fs.readFileSync(`${skillJwtDir}/${sessionId}.jwt`, "utf8").trim();
   const res = await fetch(`${skillApiUrl}/api/skill/${endpoint}`, {
     method: "POST",
     headers: {
@@ -230,12 +233,12 @@ interface ContentBlock {
 type OmpCatalogKind = "grouped" | "flat" | "miss" | "none";
 
 function ompCatalogKind(): OmpCatalogKind | undefined {
-  const raw = Deno.env.get("MOCK_OMP_CONFIG_CATALOG");
+  const raw = process.env["MOCK_OMP_CONFIG_CATALOG"];
   return raw === "grouped" || raw === "flat" || raw === "miss" || raw === "none" ? raw : undefined;
 }
 
 function ompLoadCatalogKind(): OmpCatalogKind | undefined {
-  const raw = Deno.env.get("MOCK_OMP_LOAD_CONFIG_CATALOG");
+  const raw = process.env["MOCK_OMP_LOAD_CONFIG_CATALOG"];
   return raw === "grouped" || raw === "flat" || raw === "miss" || raw === "none"
     ? raw
     : ompCatalogKind();
@@ -421,7 +424,17 @@ function describeRpcError(error: unknown): string {
 }
 
 function writeJsonLine(value: unknown): void {
-  Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify(value) + "\n"));
+  writeStdout(new TextEncoder().encode(JSON.stringify(value) + "\n"));
+}
+
+/** Blocking write-all to fd 1: `fs.writeSync` may return a short count. */
+function writeStdout(bytes: Uint8Array): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = fs.writeSync(1, bytes, offset, bytes.length - offset);
+    if (written <= 0) throw new Error("mock stdout write made no progress");
+    offset += written;
+  }
 }
 
 /** Single shared stdin iterator (module-level so an in-turn outbound-request
@@ -484,11 +497,11 @@ async function sendAcpRequestAndAwait(
             acpExpectationFailures += 1;
             return "failed";
           }
-          Deno.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
-          Deno.writeTextFileSync(target, Deno.readTextFileSync(path));
+          fs.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+          fs.writeFileSync(target, fs.readFileSync(path, "utf8"));
         } else if (req.method === "fs/read_text_file") {
-          Deno.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
-          Deno.writeTextFileSync(target, extractResultContent(msg.result));
+          fs.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+          fs.writeFileSync(target, extractResultContent(msg.result));
         }
       }
       return settled;
@@ -558,17 +571,17 @@ interface SkillFixtureContext {
  * step then records an explicit failure instead of spawning unexpanded.
  */
 function resolveSkillFixtureContext(acpSessionId: string): SkillFixtureContext | undefined {
-  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const jwtDir = process.env["SKILL_JWT_DIR"];
   if (!jwtDir) return undefined;
   try {
-    const pointer = JSON.parse(Deno.readTextFileSync(`${jwtDir}/active.json`)) as {
+    const pointer = JSON.parse(fs.readFileSync(`${jwtDir}/active.json`, "utf8")) as {
       sessionId?: string;
       staging?: string;
     };
     if (typeof pointer.sessionId === "string" && pointer.sessionId.length > 0) {
       const root = typeof pointer.staging === "string" && pointer.staging.length > 0
         ? pointer.staging
-        : Deno.env.get("MOCK_STAGING_BASE");
+        : process.env["MOCK_STAGING_BASE"];
       if (root) {
         return {
           sessionId: pointer.sessionId,
@@ -581,8 +594,8 @@ function resolveSkillFixtureContext(acpSessionId: string): SkillFixtureContext |
     // pointer absent/empty: per-spawn tier below
   }
   try {
-    const base = Deno.env.get("MOCK_STAGING_BASE") ?? `${Deno.cwd()}/tmp`;
-    const jwtNames = [...Deno.readDirSync(jwtDir)]
+    const base = process.env["MOCK_STAGING_BASE"] ?? `${process.cwd()}/tmp`;
+    const jwtNames = [...fs.readdirSync(jwtDir, { withFileTypes: true })]
       .filter((e) => e.name.endsWith(".jwt"))
       .map((e) => e.name);
     if (jwtNames.length !== 1) return undefined;
@@ -606,8 +619,8 @@ function expandSkillTokens(value: string, ctx: SkillFixtureContext): string {
 }
 
 function appendSkillRecord(target: string, line: Record<string, unknown>): void {
-  Deno.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
-  Deno.writeTextFileSync(target, JSON.stringify(line) + "\n", { create: true, append: true });
+  fs.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+  fs.appendFileSync(target, JSON.stringify(line) + "\n");
 }
 
 /** Emit the completion/settlement notification for this step (exit codes +
@@ -631,7 +644,7 @@ function flushAcpNote(
       },
     },
   }) + "\n";
-  Deno.stdout.writeSync(new TextEncoder().encode(note));
+  writeStdout(new TextEncoder().encode(note));
 }
 
 /**
@@ -644,11 +657,11 @@ function flushAcpNote(
  * settled wrong (sendAcpRequestAndAwait's hard-failure paths).
  */
 async function runSkillCallStep(acpSessionId: string): Promise<number> {
-  const callsTarget = Deno.env.get("MOCK_SKILL_CALLS_FILE");
+  const callsTarget = process.env["MOCK_SKILL_CALLS_FILE"];
   if (!callsTarget) return 0;
   let steps: MockSkillCallStep[] = [];
   try {
-    const parsed = JSON.parse(Deno.readTextFileSync(callsTarget));
+    const parsed = JSON.parse(fs.readFileSync(callsTarget, "utf8"));
     if (Array.isArray(parsed)) steps = parsed as MockSkillCallStep[];
   } catch {
     return 0;
@@ -669,7 +682,7 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
     } else if (invocations.length > 0 || (step.acpRequests?.length ?? 0) > 0) {
       // A token-bearing step cannot run without its identity context: record
       // the explicit failure instead of spawning with an unexpanded token.
-      const recordTarget = Deno.env.get("MOCK_SKILL_RECORD_FILE");
+      const recordTarget = process.env["MOCK_SKILL_RECORD_FILE"];
       if (recordTarget) {
         const cause = "skill fixture context unavailable (no JWT/pointer material yet)";
         for (const invocation of invocations) {
@@ -678,7 +691,7 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
             seq: index + 1,
             script: invocation.script,
             argv: invocation.argv ?? [],
-            cwd: invocation.cwd ?? Deno.cwd(),
+            cwd: invocation.cwd ?? process.cwd(),
             code: 112,
             stdout: "",
             stderr: cause,
@@ -693,7 +706,7 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
             seq: index + 1,
             script: "acp-requests",
             argv: [],
-            cwd: Deno.cwd(),
+            cwd: process.cwd(),
             code: 112,
             stdout: "",
             stderr: cause,
@@ -710,8 +723,8 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
     ? step.stagePayload
     : [step.stagePayload];
   for (const payload of staged) {
-    Deno.mkdirSync(payload.file.slice(0, payload.file.lastIndexOf("/")), { recursive: true });
-    Deno.writeTextFileSync(payload.file, payload.content);
+    fs.mkdirSync(payload.file.slice(0, payload.file.lastIndexOf("/")), { recursive: true });
+    fs.writeFileSync(payload.file, payload.content);
   }
 
   // Real agent->client ACP requests first (before any spawn): each crosses
@@ -755,45 +768,41 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
   }
 
   let baseEnv: Record<string, string> = {};
-  const envTarget = Deno.env.get("MOCK_SKILL_ENV_FILE");
+  const envTarget = process.env["MOCK_SKILL_ENV_FILE"];
   if (envTarget) {
     try {
-      baseEnv = JSON.parse(Deno.readTextFileSync(envTarget)) as Record<string, string>;
+      baseEnv = JSON.parse(fs.readFileSync(envTarget, "utf8")) as Record<string, string>;
     } catch {
       baseEnv = {};
     }
   }
-  const recordTarget = Deno.env.get("MOCK_SKILL_RECORD_FILE");
+  const recordTarget = process.env["MOCK_SKILL_RECORD_FILE"];
   const codes: number[] = [];
   for (const invocation of spawn) {
     // oxlint-disable-next-line unicorn/no-useless-fallback-in-spread
     const env = { ...baseEnv, ...(invocation.env ?? {}) };
-    const run = await new Deno.Command(Deno.execPath(), {
-      args: [
-        "run",
-        "--no-check",
-        "--allow-net",
-        "--allow-env",
-        "--allow-read",
-        "--allow-write",
-        invocation.script,
-        ...(invocation.argv ?? []),
-      ],
-      cwd: invocation.cwd ?? Deno.cwd(),
+    const cwd = invocation.cwd ?? process.cwd();
+    const run = await runScript(process.execPath, [
+      "run",
+      "--no-env-file",
+      invocation.script,
+      ...(invocation.argv ?? []),
+    ], {
+      cwd,
       env,
-      clearEnv: true,
-    }).output();
-    codes.push(run.code);
+    });
+    const code = run.code;
+    codes.push(code);
     if (recordTarget) {
       appendSkillRecord(recordTarget, {
         gen: MOCK_CONNECTION_GEN,
         seq: index + 1,
         script: invocation.script,
         argv: invocation.argv ?? [],
-        cwd: invocation.cwd ?? Deno.cwd(),
-        code: run.code,
-        stdout: new TextDecoder().decode(run.stdout),
-        stderr: new TextDecoder().decode(run.stderr),
+        cwd,
+        code,
+        stdout: run.stdout,
+        stderr: run.stderr,
       });
     }
   }
@@ -802,20 +811,51 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
   return spawn.length;
 }
 
+/**
+ * Spawn a Bun child and collect its exit like `Deno.Command.output()`: every
+ * stdout/stderr byte, the awaited exit, and no inherited environment (`env`
+ * replaces the whole environment, Deno's `clearEnv: true`). Async on purpose so
+ * the mock's stdin loop keeps consuming ACP lines while a script runs.
+ */
+async function runScript(
+  command: string,
+  args: string[],
+  options: { cwd: string; env: Record<string, string> },
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const child = spawn(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+  const exited = Promise.withResolvers<number>();
+  child.on("error", exited.reject);
+  child.on("close", (exitCode) => exited.resolve(exitCode ?? 1));
+  const code = await exited.promise;
+  return {
+    code,
+    stdout: Buffer.concat(stdout).toString(),
+    stderr: Buffer.concat(stderr).toString(),
+  };
+}
+
 function recordRpc(method: string, params: unknown): void {
-  const target = Deno.env.get("MOCK_OMP_RECORD_RPC");
+  const target = process.env["MOCK_OMP_RECORD_RPC"];
   if (!target) return;
   rpcRecordSeq += 1;
   const line = JSON.stringify({
     gen: MOCK_CONNECTION_GEN,
     seq: rpcRecordSeq,
-    pid: Deno.pid,
+    pid: process.pid,
     method,
     params,
   }) + "\n";
   try {
-    Deno.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
-    Deno.writeTextFileSync(target, line, { create: true, append: true });
+    fs.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+    fs.appendFileSync(target, line);
   } catch {
     // Recording is diagnostic only; never crash the mock over it.
   }
@@ -829,27 +869,26 @@ function recordRpc(method: string, params: unknown): void {
  * its own liveness observation. No timers, no sleep.
  */
 function crashProcessTree(): void {
-  const crashSidebro = Deno.env.get("MOCK_SIDEBRO") === "1";
+  const crashSidebro = process.env["MOCK_SIDEBRO"] === "1";
   if (crashSidebro) {
     let sidePid: number | undefined;
     try {
-      const side = new Deno.Command("sleep", { args: ["600"], stdout: "null", stderr: "null" })
-        .spawn();
+      const side = spawn("sleep", ["600"], { stdio: "ignore" });
       sidePid = side.pid;
-      Deno.mkdirSync(stateDir(), { recursive: true });
-      Deno.writeTextFileSync(`${stateDir()}/mock-sidebro.pid`, String(sidePid));
+      fs.mkdirSync(stateDir(), { recursive: true });
+      fs.writeFileSync(`${stateDir()}/mock-sidebro.pid`, String(sidePid));
     } catch {
       // Sidebro is an optional witness; never prevent the crash itself.
     }
     if (sidePid !== undefined) {
       try {
-        Deno.kill(sidePid, "SIGKILL");
+        process.kill(sidePid, "SIGKILL");
       } catch {
         // Already gone.
       }
     }
   }
-  Deno.kill(Deno.pid, "SIGKILL");
+  process.kill(process.pid, "SIGKILL");
 }
 
 /** Emit a genuine session/update config_option_update notification (OMP opt-in). */
@@ -866,7 +905,7 @@ function emitConfigOptionUpdate(catalog: unknown[], acpSessionId: string): void 
       },
     },
   }) + "\n";
-  Deno.stdout.writeSync(new TextEncoder().encode(notification));
+  writeStdout(new TextEncoder().encode(notification));
 }
 
 async function handlePrompt(
@@ -878,7 +917,7 @@ async function handlePrompt(
     .join("\n");
   const wantsSkills = text.includes("memory-save");
 
-  const crashTrigger = Deno.env.get("MOCK_CRASH_ON_PROMPT");
+  const crashTrigger = process.env["MOCK_CRASH_ON_PROMPT"];
   if (crashTrigger && text.includes(crashTrigger)) {
     crashProcessTree();
     // Unreachable: SIGKILL is already queued; the loop dies before responding.
@@ -958,7 +997,7 @@ async function* readLines(
 }
 
 async function main(): Promise<void> {
-  const lines = readLines(Deno.stdin.readable);
+  const lines = readLines(Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>);
   stdinIterator = lines[Symbol.asyncIterator]();
   for await (const line of lines) {
     const trimmed = line.trim();
@@ -1059,7 +1098,7 @@ async function main(): Promise<void> {
     if (id !== undefined) {
       if (method === "session/prompt" && result === undefined) continue; // error answered above
       const response = JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
-      Deno.stdout.writeSync(new TextEncoder().encode(response));
+      writeStdout(new TextEncoder().encode(response));
     }
   }
 }

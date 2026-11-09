@@ -4,6 +4,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { MisskeyClient } from "@platforms/misskey/misskey-client.ts";
 import { ErrorCode, PlatformError } from "../../../src/types/errors.ts";
 import { MisskeyAdapterConfig } from "@platforms/misskey/misskey-config.ts";
+import { test } from "bun:test";
 
 function createTestConfig(): MisskeyAdapterConfig {
   return {
@@ -33,7 +34,7 @@ function createClient(
   return client;
 }
 
-Deno.test("MisskeyClient.request - throws PlatformError on non-JSON response", async () => {
+test("MisskeyClient.request - throws PlatformError on non-JSON response", async () => {
   const syntaxError = new SyntaxError(
     "Unexpected token 'B', \"Bad Gateway\" is not valid JSON",
   );
@@ -49,7 +50,7 @@ Deno.test("MisskeyClient.request - throws PlatformError on non-JSON response", a
   assertEquals(error.isRetryable, true);
 });
 
-Deno.test("MisskeyClient.request - passes through normal API errors unchanged", async () => {
+test("MisskeyClient.request - passes through normal API errors unchanged", async () => {
   const apiError = new Error("AUTHENTICATION_FAILED");
   const client = createClient({
     apiRequest: () => Promise.reject(apiError),
@@ -62,7 +63,7 @@ Deno.test("MisskeyClient.request - passes through normal API errors unchanged", 
   );
 });
 
-Deno.test("MisskeyClient.request - does not catch non-JSON SyntaxError", async () => {
+test("MisskeyClient.request - does not catch non-JSON SyntaxError", async () => {
   const syntaxError = new SyntaxError("Unexpected identifier");
   const client = createClient({
     apiRequest: () => Promise.reject(syntaxError),
@@ -75,7 +76,7 @@ Deno.test("MisskeyClient.request - does not catch non-JSON SyntaxError", async (
   );
 });
 
-Deno.test("MisskeyClient.uploadFile - throws PlatformError on 502 response", async () => {
+test("MisskeyClient.uploadFile - throws PlatformError on 502 response", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () =>
     Promise.resolve(
@@ -95,7 +96,7 @@ Deno.test("MisskeyClient.uploadFile - throws PlatformError on 502 response", asy
   }
 });
 
-Deno.test("MisskeyClient.uploadFile - throws PlatformError(API_ERROR) on 400 response", async () => {
+test("MisskeyClient.uploadFile - throws PlatformError(API_ERROR) on 400 response", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () =>
     Promise.resolve(
@@ -115,7 +116,7 @@ Deno.test("MisskeyClient.uploadFile - throws PlatformError(API_ERROR) on 400 res
   }
 });
 
-Deno.test("MisskeyClient.uploadFile - reports the status and body of a JSON API error", async () => {
+test("MisskeyClient.uploadFile - reports the status and body of a JSON API error", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () =>
     Promise.resolve(
@@ -140,7 +141,7 @@ Deno.test("MisskeyClient.uploadFile - reports the status and body of a JSON API 
   }
 });
 
-Deno.test("MisskeyClient.uploadFile - sends the SDK's multipart body and returns the file id and url", async () => {
+test("MisskeyClient.uploadFile - sends the SDK's multipart body and returns the file id and url", async () => {
   const originalFetch = globalThis.fetch;
   let requestUrl: string | undefined;
   let requestInit: RequestInit | undefined;
@@ -187,7 +188,7 @@ const requestWithMisspelledUsersNotesField: (client: MisskeyClient) => Promise<u
   return client.request("users/notes", { userId: "user1", includeReplies: false });
 };
 
-Deno.test("MisskeyClient.request - rejects an unknown request field at compile time", () => {
+test("MisskeyClient.request - rejects an unknown request field at compile time", () => {
   // The fixture above is never called; referencing it keeps it in the module
   // (and therefore type-checked) instead of leaving it commented out.
   assertEquals(typeof requestWithMisspelledUsersNotesField, "function");
@@ -207,7 +208,7 @@ function sharedApiOf(client: MisskeyClient): ClientInternals {
   return client as unknown as ClientInternals;
 }
 
-Deno.test("MisskeyClient.request - a signaled call applies the signal to the transport fetch", async () => {
+test("MisskeyClient.request - a signaled call applies the signal to the transport fetch", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
   let seenSignal: AbortSignal | null | undefined;
@@ -235,7 +236,7 @@ Deno.test("MisskeyClient.request - a signaled call applies the signal to the tra
   }
 });
 
-Deno.test("MisskeyClient.request - aborting the signal cancels the pending response body read", async () => {
+test("MisskeyClient.request - aborting the signal cancels the pending response body read", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
 
@@ -261,7 +262,7 @@ Deno.test("MisskeyClient.request - aborting the signal cancels the pending respo
   }
 });
 
-Deno.test("MisskeyClient.request - a signaled call leaves the shared SDK client untouched", async () => {
+test("MisskeyClient.request - a signaled call leaves the shared SDK client untouched", async () => {
   const originalFetch = globalThis.fetch;
   let transports = 0;
 
@@ -296,6 +297,6 @@ const requestWithSignalParameter: (client: MisskeyClient) => Promise<unknown> = 
   return client.request("notes/show", { noteId: "n1", signal: new AbortController().signal });
 };
 
-Deno.test("MisskeyClient.request - rejects a signal inside the endpoint parameters at compile time", () => {
+test("MisskeyClient.request - rejects a signal inside the endpoint parameters at compile time", () => {
   assertEquals(typeof requestWithSignalParameter, "function");
 });
