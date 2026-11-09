@@ -11,9 +11,10 @@
 //     <target>/index.js — the single file development launch and image
 //     installation both consume (src/utils/omp-paths.ts exports the mapping).
 //     The frozen-lock guarantee moves to the caller: <src>/bun.lock and
-//     <src>/node_modules must come from `bun install --frozen-lockfile`, and
-//     this script refuses to build until both exist, so no runtime download
-//     occurs at load.
+//     <src>/node_modules must be the product of
+//     `bun install --frozen-lockfile`. This script only verifies that both
+//     exist before building — the frozen install itself is the caller's
+//     responsibility — and no runtime download occurs at load.
 //   - The extension closure is the small capability-admission module only, so
 //     it carries no external dependency edge at all. Documented native builtins
 //     (`node:`/`bun:`) stay external because the native runtime provides them.
@@ -64,7 +65,7 @@ for (const required of ["bun.lock", "node_modules"]) {
 }
 
 const bundlePath = `${target}/${BUNDLE_NAME}`;
-const stagingPath = `${bundlePath}.tmp`;
+const stagingPath = `${bundlePath}.${process.pid}.tmp`;
 await mkdir(target, { recursive: true });
 await rm(stagingPath, { force: true });
 
@@ -78,7 +79,7 @@ const bundle = spawnSync(
     `--outfile=${stagingPath}`,
     ENTRY,
   ],
-  { cwd: src, encoding: "utf8" },
+  { cwd: src, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
 );
 if (bundle.status !== 0) {
   console.error(`bun build failed:\n${bundle.stderr || bundle.error?.message || ""}`);
@@ -86,7 +87,16 @@ if (bundle.status !== 0) {
   process.exit(1);
 }
 
-const emitted = await readFile(stagingPath, "utf8");
+let emitted: string;
+try {
+  emitted = await readFile(stagingPath, "utf8");
+} catch (error) {
+  console.error(
+    `bun build produced no readable artifact:\n${error instanceof Error ? error.message : String(error)}`,
+  );
+  await rm(stagingPath, { force: true });
+  process.exit(1);
+}
 
 const problems: string[] = auditEmittedBundle(emitted);
 const externals = emittedExternals(emitted);
@@ -99,7 +109,15 @@ if (problems.length) {
   process.exit(1);
 }
 
-await rename(stagingPath, bundlePath);
+try {
+  await rename(stagingPath, bundlePath);
+} catch (error) {
+  console.error(
+    `could not publish ${bundlePath}:\n${error instanceof Error ? error.message : String(error)}`,
+  );
+  await rm(stagingPath, { force: true });
+  process.exit(1);
+}
 
 console.log(
   `bundled ${ENTRY} -> ${bundlePath} ` +
