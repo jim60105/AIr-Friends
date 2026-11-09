@@ -49,6 +49,7 @@ import { OMP_TOOL_CAPABILITY_MAP } from "./omp/tool-inventory.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import fs from "node:fs";
+import type { Stats } from "node:fs";
 import { runtimeOs } from "@utils/runtime-platform.ts";
 
 /**
@@ -1464,7 +1465,7 @@ function repositoryAncestor(path: string): string | undefined {
   let current = path;
   while (true) {
     try {
-      Deno.lstatSync(join(current, ".git"));
+      fs.lstatSync(join(current, ".git"));
       return current;
     } catch {
       const parent = dirname(current);
@@ -1483,7 +1484,7 @@ function assertNoSymlinkRedirect(
   let existing = path;
   while (true) {
     try {
-      const physical = Deno.realPathSync(existing);
+      const physical = fs.realpathSync(existing);
       if (physical !== existing) {
         refuseEmailIntentProfile(
           `the private ${label} "${path}" resolves through a symlink to "${physical}"`,
@@ -1509,31 +1510,31 @@ function prepareFreshPrivateDirectory(
   label: string,
   prefix: string = EMAIL_INTENT_OPENCODE_PREFIX,
 ): void {
-  let info: Deno.FileInfo | undefined;
+  let info: Stats | undefined;
   try {
-    info = Deno.lstatSync(path);
+    info = fs.lstatSync(path);
   } catch {
     info = undefined;
   }
   if (info !== undefined) {
-    if (info.isSymlink) {
+    if (info.isSymbolicLink()) {
       refuseEmailIntentProfile(`the private ${label} "${path}" must not be a symlink`, prefix);
     }
-    if (!info.isDirectory) {
+    if (!info.isDirectory()) {
       refuseEmailIntentProfile(
         `the private ${label} "${path}" exists and is not a directory`,
         prefix,
       );
     }
-    if (Deno.readDirSync(path).next().done !== true) {
+    if (fs.readdirSync(path, { withFileTypes: true }).length !== 0) {
       refuseEmailIntentProfile(
         `the private ${label} "${path}" is not fresh: it already contains entries`,
         prefix,
       );
     }
   }
-  Deno.mkdirSync(path, { recursive: true, mode: 0o700 });
-  Deno.chmodSync(path, 0o700);
+  fs.mkdirSync(path, { recursive: true, mode: 0o700 });
+  fs.chmodSync(path, 0o700);
 }
 
 /**
@@ -1589,9 +1590,9 @@ function buildEmailIntentOpencodeConfig(
   temporaryRoots: EmailIntentTemporaryRoots,
   options: EmailIntentProfileOptions,
 ): AgentConfig {
-  const env = options.env ?? ((name: string) => Deno.env.get(name));
+  const env = options.env ?? ((name: string) => process.env[name]);
   const exists = options.exists ?? profileFileExists;
-  const readFile = options.readFile ?? ((path: string) => Deno.readTextFileSync(path));
+  const readFile = options.readFile ?? ((path: string) => fs.readFileSync(path, "utf8"));
 
   if (selection.providerID === "" || !/^[A-Za-z0-9._-]+$/.test(selection.providerID)) {
     refuseEmailIntentProfile(
@@ -2061,9 +2062,9 @@ function writeEmailIntentOmpModels(home: string, bytes: string): string {
   prepareFreshPrivateDirectory(join(home, ".omp"), "HOME/.omp", prefix);
   prepareFreshPrivateDirectory(join(home, ".omp", "agent"), "HOME/.omp/agent", prefix);
   const target = ompHomeModelsPath(home);
-  Deno.writeTextFileSync(target, bytes, { mode: 0o600 });
-  Deno.chmodSync(target, 0o600);
-  if (Deno.readTextFileSync(target) !== bytes) {
+  fs.writeFileSync(target, bytes, { mode: 0o600 });
+  fs.chmodSync(target, 0o600);
+  if (fs.readFileSync(target, "utf8") !== bytes) {
     refuseEmailIntentProfile(
       `the private model configuration "${target}" does not carry the authored bytes`,
       prefix,
@@ -2073,9 +2074,9 @@ function writeEmailIntentOmpModels(home: string, bytes: string): string {
 }
 
 /** The reserved `natives` entry of one private native data root, or `undefined`. */
-function readPathEntry(path: string): Deno.FileInfo | undefined {
+function readPathEntry(path: string): Stats | undefined {
   try {
-    return Deno.lstatSync(path);
+    return fs.lstatSync(path);
   } catch {
     return undefined;
   }
@@ -2101,9 +2102,9 @@ function installEmailIntentOmpNativesLink(home: string, payloadDir: string): str
   const linkPath = ompIntentNativesLinkPath(home);
   const existing = readPathEntry(linkPath);
   if (existing !== undefined) {
-    const held = existing.isSymlink
-      ? `a symbolic link to "${Deno.readLinkSync(linkPath)}"`
-      : existing.isDirectory
+    const held = existing.isSymbolicLink()
+      ? `a symbolic link to "${fs.readlinkSync(linkPath)}"`
+      : existing.isDirectory()
       ? "a real directory"
       : "a non-symlink file";
     refuseEmailIntentProfile(
@@ -2113,11 +2114,11 @@ function installEmailIntentOmpNativesLink(home: string, payloadDir: string): str
       prefix,
     );
   }
-  const temporary = `${linkPath}.link-${Deno.pid}-${crypto.randomUUID()}`;
-  Deno.symlinkSync(payloadDir, temporary);
-  Deno.renameSync(temporary, linkPath);
+  const temporary = `${linkPath}.link-${process.pid}-${crypto.randomUUID()}`;
+  fs.symlinkSync(payloadDir, temporary);
+  fs.renameSync(temporary, linkPath);
   const installed = readPathEntry(linkPath);
-  const installedTarget = installed?.isSymlink ? Deno.readLinkSync(linkPath) : null;
+  const installedTarget = installed?.isSymbolicLink() ? fs.readlinkSync(linkPath) : null;
   if (installedTarget !== payloadDir) {
     refuseEmailIntentProfile(
       `Refusing the native runtime cache entry "${linkPath}": it holds ` +
@@ -2157,8 +2158,8 @@ function prepareEmailIntentOmpNativeData(
   // entry, so the installer below is the single owner of what may live at that
   // entry — the same split the ordinary mode root uses.
   const appDir = ompIntentNativeDataDir(home);
-  Deno.mkdirSync(appDir, { recursive: true, mode: 0o700 });
-  Deno.chmodSync(appDir, 0o700);
+  fs.mkdirSync(appDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(appDir, 0o700);
   installEmailIntentOmpNativesLink(home, cache.payloadDir);
   return cache;
 }
@@ -2194,9 +2195,9 @@ function buildEmailIntentOmpConfig(
   options: EmailIntentProfileOptions,
 ): AgentConfig {
   const prefix = EMAIL_INTENT_OMP_PREFIX;
-  const env = options.env ?? ((name: string) => Deno.env.get(name));
+  const env = options.env ?? ((name: string) => process.env[name]);
   const exists = options.exists ?? profileFileExists;
-  const readFile = options.readFile ?? ((path: string) => Deno.readTextFileSync(path));
+  const readFile = options.readFile ?? ((path: string) => fs.readFileSync(path, "utf8"));
 
   assertEmailIntentOmpSelection(selection);
 
