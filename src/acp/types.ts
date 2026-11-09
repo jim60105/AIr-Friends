@@ -194,7 +194,7 @@ export interface AgentConfig {
    * MANDATORY internal render input every downstream consumer shares — the
    * connector's script inventory, the bwrap read-only mount, and (identity to
    * the same resolver) prompt/retry rendering. A launch without it cannot
-   * build a permission inventory; there is no HOME or `Deno.cwd()/skills`
+   * build a permission inventory; there is no HOME or process-cwd-relative `skills`
    * fallback.
    */
   skillsRoot?: SkillsRootObservation;

@@ -31,7 +31,7 @@
  * ever sets — it is not a configuration field, not an `ENV_MAPPINGS` entry and
  * not reachable from a prompt or a tool request (a tool cannot mutate its own
  * engine process's environment), and every ordinary launch builds its child
- * environment from scratch, so no inherited `Deno.env` can leak it in.
+ * environment from scratch, so no inherited runtime environment can leak it in.
  *
  * The classification FAILS CLOSED ({@link observeOmpLaunchMarker}): only a
  * POSITIVELY OBSERVED absent marker is the ordinary launch. When the runtime

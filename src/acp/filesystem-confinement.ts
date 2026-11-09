@@ -24,6 +24,7 @@
 // probe fails, rather than spawning the agent unconfined.
 
 /** Runtime paths the agent needs to READ (interpreters, binaries, config, CA certs). */
+import fs from "node:fs";
 export const DEFAULT_CONFINEMENT_READONLY_PATHS: readonly string[] = [
   "/usr",
   "/bin",
@@ -136,7 +137,7 @@ function containsPath(root: string, path: string): boolean {
  * bwrap `--bind-try` would create/mount it at that path. */
 function canonicalSource(path: string): string {
   try {
-    return Deno.realPathSync(path);
+    return fs.realpathSync(path);
   } catch {
     return path;
   }
