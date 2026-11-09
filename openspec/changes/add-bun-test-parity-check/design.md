@@ -28,7 +28,7 @@ cd migration/bun/baseline
 bun run --no-env-file parity.ts --junit <path> --scope <prefix> [--scope <prefix>...] [--allow-deferred]
 ```
 
-`<path>` is resolved against the repository root (two levels up from this directory) when relative, never against the working directory: `--junit .parity/x.xml` run from `migration/bun/baseline` reads `<repo>/.parity/x.xml`. Every parity command in this batch relies on this. A baseline test is in scope when its `file` starts with any `--scope` value. No `--scope` means the whole baseline. Exit codes: 0 pass, 1 parity failure, 2 usage or unreadable input.
+`<path>` is resolved against the repository root (three levels up from this directory) when relative, never against the working directory: `--junit .parity/x.xml` run from `migration/bun/baseline` reads `<repo>/.parity/x.xml`. Every parity command in this batch relies on this. A baseline test is in scope when its `file` starts with any `--scope` value. No `--scope` means the whole baseline. Exit codes: 0 pass, 1 parity failure, 2 usage or unreadable input.
 
 Standard producer, run from the repository root:
 
