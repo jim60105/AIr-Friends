@@ -6,7 +6,7 @@
 
 ## 本機開發環境設定
 
-1. **安裝 Deno**：確認本機安裝 Deno 2.x 以上版本。
+1. **安裝 Bun**：確認本機安裝 Bun 1.4.2（版本固定於 `package.json` 的 `packageManager`）。
 2. **複製專案庫**。
 
    ```bash
@@ -17,7 +17,7 @@
 3. **啟動熱重載開發伺服器**。
 
    ```bash
-   deno task dev
+   bun run dev
    ```
 
 ---
@@ -28,23 +28,27 @@
 
 ```bash
 # 格式化檢查
-deno fmt src/ tests/
+bun run fmt
 
 # 靜態程式碼檢查 (Linter)
-deno lint src/ tests/
+bun run lint
 
 # 型別檢查
-deno check src/main.ts
+bun run check
 
 # 執行所有自動化測試
-deno task test
+bun run test
 ```
 
-其中 `deno task ci` 會依序執行格式檢查、Lint、型別檢查與測試，等同一套 CI 流程。
+CI 依序執行 `bun run fmt:check`、`bun run lint`、`bun run check` 與測試。
+
+### 受信任的技能設定
+
+技能腳本以 shebang 載入 `/opt/air/skill-bunfig.toml` 這份空的唯讀設定，避免 Bun 從技能所在的工作目錄探索 `bunfig.toml`。容器映像檔已內建該檔案；本機驗證需以 root 執行 `sh scripts/install-skill-bunfig.sh`，非 root 主機請改在 rootless 容器中執行（腳本會印出完整指令）。
 
 ### 匯入路徑別名規範
 
-專案在 `deno.json` 中配置了路徑別名，請優先使用別名進行匯入。
+專案在 `tsconfig.json` 中配置了路徑別名，請優先使用別名進行匯入。
 
 - `@core/` → `./src/core/`
 - `@platforms/` → `./src/platforms/`

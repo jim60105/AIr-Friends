@@ -8,7 +8,7 @@
 
 在過去的指令列工具呼叫中，若直接將使用者輸入以命令列參數拼接至 Shell 指令，極易引發 Shell 注入漏洞（Command Injection）。AIr-Friends 因此規定所有技能必須遵循安全檔案酬載契約。
 
-代理人先以編輯或寫入工具，將自由文字內容寫入當前工作階段的暫存目錄，例如 `{stagingDir}/content.md`；執行腳本時僅傳遞該檔案路徑，例如 `deno run -A skills/my-skill/scripts/my-skill.ts --session-id "<id>" --content-file "{stagingDir}/content.md"`；腳本再讀取並解析該檔案，進行型別與欄位檢驗。請避免透過環境變數或命令列字串傳遞非安全字元。
+代理人先以編輯或寫入工具，將自由文字內容寫入當前工作階段的暫存目錄，例如 `{stagingDir}/content.md`；執行腳本時僅傳遞該檔案路徑，例如 `bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml skills/my-skill/scripts/my-skill.ts --session-id "<id>" --content-file "{stagingDir}/content.md"`；腳本再讀取並解析該檔案，進行型別與欄位檢驗。請避免透過環境變數或命令列字串傳遞非安全字元。
 
 共用程式庫位於 `skills/lib/`。`skills/lib/payload.ts` 提供酬載路徑的解析與邊界檢查，`skills/lib/client.ts` 提供 Skill API 呼叫與錯誤輸出，腳本以相對路徑匯入即可。
 

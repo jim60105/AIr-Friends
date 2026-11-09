@@ -57,7 +57,6 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { test } from "bun:test";
 import { makeTempDir } from "../../src/utils/fs-compat.ts";
-import { runtimeArch } from "../../src/utils/runtime-platform.ts";
 import { fileURLToPath as fromFileUrl } from "node:url";
 
 // ---------------------------------------------------------------------------
@@ -150,7 +149,9 @@ function provisionNativeCache(base: string): NativeCacheFixture {
   const cache = ompNativeCacheDescriptor(base, platform, "development");
   fs.mkdirSync(cache.versionDir, { recursive: true, mode: 0o700 });
   const expected = ompNativeCacheExpectedAddons(platform);
-  const names = [...expected.exact, `pi_natives.fixture.linux-${runtimeArch()}.node`];
+  // The platform identity is spelled `linux-arm64`; use it verbatim so the
+  // arm64 pattern requirement is satisfied without a real binary.
+  const names = [...expected.exact, `pi_natives.fixture.${platform}.node`];
   const files = names.map((name) => {
     const bytes = `fixture addon ${name}`;
     fs.writeFileSync(join(cache.versionDir, name), bytes);

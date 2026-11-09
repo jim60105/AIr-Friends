@@ -332,7 +332,7 @@ test.skipIf(!RUN_IMAGE_SCENARIO)(
         " /opt/air/omp/config/native-yolo.yml" +
         " /opt/air/omp/prompt/SYSTEM.md" +
         " /opt/air/omp/extension/index.js" +
-        " /home/deno/.omp/agent/models.yml" +
+        " /home/air/.omp/agent/models.yml" +
         " /licenses/omp/LICENSE" +
         " /licenses/omp/THIRD-PARTY-NOTICES.txt; do",
         '  test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }',
@@ -361,7 +361,7 @@ test.skipIf(!RUN_IMAGE_SCENARIO)(
       [
         "set -e",
         "files='/opt/air/omp/config/restricted.yml /opt/air/omp/config/native-yolo.yml" +
-        " /opt/air/omp/prompt/SYSTEM.md /home/deno/.omp/agent/models.yml'",
+        " /opt/air/omp/prompt/SYSTEM.md /home/air/.omp/agent/models.yml'",
         'before="$(sha256sum $files)"',
         "omp config list >/dev/null",
         "printf '%s\\n' \"$ACP_INIT\" | omp acp" +

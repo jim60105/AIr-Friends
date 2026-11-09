@@ -42,7 +42,7 @@ volumes:
 
 ## 2. systemd 系統服務部署
 
-若要在 Linux 主機原生執行（由主機的 Deno 執行環境驅動），可建立 systemd 服務單元檔。
+若要在 Linux 主機原生執行（由主機的 Bun 1.4.2 執行環境驅動），可建立 systemd 服務單元檔。
 
 建立 `/etc/systemd/system/air-friends.service`。
 
@@ -57,7 +57,7 @@ User=airfriends
 Group=airfriends
 WorkingDirectory=/opt/air-friends
 EnvironmentFile=/opt/air-friends/.env
-ExecStart=/usr/bin/deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --allow-sys src/main.ts
+ExecStart=/usr/local/bin/bun run --no-env-file --config=/opt/air-friends/bunfig.toml src/main.ts
 Restart=always
 RestartSec=10
 LimitNOFILE=65535

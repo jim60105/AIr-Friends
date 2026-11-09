@@ -811,10 +811,10 @@ interface EndpointHarness {
   registry: SessionRegistry;
   sessionId: string;
   auditPath: string;
+  port: number;
 }
 
 async function withEndpoint(
-  port: number,
   mailService: EmailComposeMailService,
   options: { grants?: readonly DestinationGrant[]; fenced?: boolean; audit?: boolean },
   body: (harness: EndpointHarness) => Promise<void>,
@@ -858,12 +858,12 @@ async function withEndpoint(
   const server = new SkillAPIServer(
     registry,
     skillRegistry,
-    { port, host: "127.0.0.1" },
+    { port: 0, host: "127.0.0.1" },
     TEST_SKILL_SECRET,
   );
-  server.start();
+  const port = server.start();
   try {
-    await body({ server, registry, sessionId, auditPath });
+    await body({ server, registry, sessionId, auditPath, port });
   } finally {
     await server.stop();
     registry.stop();
@@ -905,9 +905,8 @@ async function skillApiMetricValue(skill: string, status: string): Promise<numbe
 }
 
 test("endpoint - send-email requires the session JWT, honors the fence and reports the submission", async () => {
-  const port = 34901;
   const mailService = new RecordingMailService();
-  await withEndpoint(port, mailService, {}, async ({ registry, sessionId, auditPath }) => {
+  await withEndpoint(mailService, {}, async ({ registry, sessionId, auditPath, port }) => {
     const ok = await postCompose(port, registry, sessionId, {
       grantId: "grant-1",
       request: request(),
@@ -949,13 +948,11 @@ test("endpoint - send-email requires the session JWT, honors the fence and repor
 });
 
 test("endpoint - a recovery-fenced session cannot compose", async () => {
-  const port = 34902;
   const mailService = new RecordingMailService();
   await withEndpoint(
-    port,
     mailService,
     { fenced: true },
-    async ({ registry, sessionId }) => {
+    async ({ registry, sessionId, port }) => {
       const response = await postCompose(port, registry, sessionId, {
         grantId: "grant-1",
         request: request(),
@@ -967,9 +964,8 @@ test("endpoint - a recovery-fenced session cannot compose", async () => {
 });
 
 test("endpoint - the in-flight lease is held for the whole durable submission", async () => {
-  const port = 34903;
   const mailService = new DeferredMailService();
-  await withEndpoint(port, mailService, {}, async ({ registry, sessionId }) => {
+  await withEndpoint(mailService, {}, async ({ registry, sessionId, port }) => {
     const pending = postCompose(port, registry, sessionId, {
       grantId: "grant-1",
       request: request(),
@@ -989,7 +985,6 @@ test("endpoint - the in-flight lease is held for the whole durable submission", 
 });
 
 test("endpoint - an unknown outcome is reported once and is not cached for a blind retry", async () => {
-  const port = 34904;
   const mailService = new RecordingMailService();
   mailService.outcome = {
     operationId: `op_${"c".repeat(24)}`,
@@ -997,7 +992,7 @@ test("endpoint - an unknown outcome is reported once and is not cached for a bli
     reused: false,
     safeCode: "CONNECTION_LOST",
   };
-  await withEndpoint(port, mailService, {}, async ({ registry, sessionId }) => {
+  await withEndpoint(mailService, {}, async ({ registry, sessionId, port }) => {
     const first = await postCompose(port, registry, sessionId, {
       grantId: "grant-1",
       request: request(),

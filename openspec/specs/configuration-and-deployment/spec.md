@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the Deno 2.x runtime environment, YAML configuration system with environment variable overrides, container deployment strategy, project structure conventions, and external skill auto-installation.
+Defines the Bun runtime environment, YAML configuration system with environment variable overrides, container deployment strategy, project structure conventions, and external skill auto-installation.
 
 ## Requirements
 
