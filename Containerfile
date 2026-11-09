@@ -174,32 +174,22 @@ RUN case "${TARGETARCH}" in \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
     mkdir -p /omp/out /omp/licenses && \
-    # Asset allowlist WITHIN the exact tag only: select the unique executable
-    # asset named exactly `omp-linux-${OMP_ARCH}` or matching
-    # `omp-linux-${OMP_ARCH}-<variant>`. The base image's floating `debian` tag
-    # can move the libc the binary runs against, so the exact filename is
-    # allowlisted (rule above), not pinned; uniqueness + the pinned digest keep
-    # any asset-name/content change under the same tag failing closed at the
-    # checksum step. Zero matches or >1 match aborts the build naming the count.
-    # Downloads use the SAME API listing's per-asset browser_download_url (not a
-    # re-derived download URL), so uniqueness and the fetched bytes bind to one
-    # listing response; the pinned digests stay the fail-closed content check.
-    # Observed asset name (echoed below; also recorded in docs/agent/acp-engine.md):
-    #   v18.6.1 publishes plain `omp-linux-x64` / `omp-linux-arm64` names.
-    listing="$(curl -fsSL "https://api.github.com/repos/can1357/oh-my-pi/releases/tags/v${OMP_VERSION}")" && \
-    sel="$(printf '%s' "${listing}" | jq -r '.assets[].name' | grep -E "^omp-linux-${OMP_ARCH}[^/]*$" || true)" && \
-    count="$(printf '%s\n' "${sel}" | sed '/^$/d' | wc -l)" && \
-    if [ "${count}" != "1" ]; then \
-      echo "OMP asset selection failed for arch ${OMP_ARCH}: expected exactly 1 asset match, found ${count}" && exit 1; \
-    fi && \
-    asset="$(printf '%s\n' "${sel}" | sed '/^$/d')" && \
-    echo "observed OMP executable asset name: ${asset}" && \
-    asset_url="$(printf '%s' "${listing}" | jq -r --arg n "${asset}" '.assets[] | select(.name==$n) | .browser_download_url')" && \
-    license_url="$(printf '%s' "${listing}" | jq -r '.assets[] | select(.name=="LICENSE") | .browser_download_url')" && \
-    notices_url="$(printf '%s' "${listing}" | jq -r '.assets[] | select(.name=="THIRD-PARTY-NOTICES.txt") | .browser_download_url')" && \
-    curl -fsSL "${asset_url}" -o /tmp/omp.bin && \
-    curl -fsSL "${license_url}" -o /tmp/LICENSE && \
-    curl -fsSL "${notices_url}" -o /tmp/THIRD-PARTY-NOTICES.txt && \
+    # Deterministic release-download URLs for the exact tag: v18.6.1 publishes
+    # plain `omp-linux-x64` / `omp-linux-arm64`, LICENSE and
+    # THIRD-PARTY-NOTICES.txt names. This host is not the rate-limited
+    # api.github.com endpoint, so the build does not depend on an
+    # unauthenticated release-listing request. The pinned digests remain the
+    # fail-closed content check: a moved or tampered asset fails sha256sum.
+    asset_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/omp-linux-${OMP_ARCH}" && \
+    license_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/LICENSE" && \
+    notices_url="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/THIRD-PARTY-NOTICES.txt" && \
+    echo "downloading pinned OMP executable: ${asset_url}" && \
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+      "${asset_url}" -o /tmp/omp.bin && \
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+      "${license_url}" -o /tmp/LICENSE && \
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+      "${notices_url}" -o /tmp/THIRD-PARTY-NOTICES.txt && \
     # Fail closed: every checksum verifies BEFORE any install/COPY consumption.
     echo "${OMP_SHA256}  /tmp/omp.bin" | sha256sum -c - && \
     echo "${OMP_LICENSE_SHA256}  /tmp/LICENSE" | sha256sum -c - && \
