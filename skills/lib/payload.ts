@@ -18,7 +18,9 @@
 // `$TMPDIR`/`$SESSION_ID` itself; the resolution below consumes only the
 // pointer, the CLI argument, and the script cwd.
 
-import { isAbsolute, resolve, SEPARATOR } from "jsr:@std/path@^1.0.0";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { isAbsolute, resolve, sep as SEPARATOR } from "node:path";
 import { SKILL_SESSION_UNRESOLVED, unresolvedSessionPointerMessage } from "./client.ts";
 
 /**
@@ -141,12 +143,12 @@ export function resolvePayloadBase(
   sessionId: string,
   options: { requireSessionMatch?: boolean } = {},
 ): string {
-  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
-  const shared = Deno.env.get("SKILL_SHARED_PROCESS") === "1";
+  const jwtDir = process.env["SKILL_JWT_DIR"];
+  const shared = process.env["SKILL_SHARED_PROCESS"] === "1";
   if (jwtDir) {
     let parsed: unknown;
     try {
-      const raw = Deno.readTextFileSync(`${jwtDir}/active.json`);
+      const raw = fs.readFileSync(`${jwtDir}/active.json`, "utf8");
       parsed = JSON.parse(raw);
     } catch {
       parsed = undefined;
@@ -185,7 +187,7 @@ export function resolvePayloadBase(
  *
  * - The resolved path must be inside the session staging base (boundary-safe,
  *   so `{base}-2`/`{base}2` siblings are rejected).
- * - When the file exists, its REAL path (`Deno.realPath`) is re-checked for
+ * - When the file exists, its REAL path (`realpathSync`) is re-checked for
  *   containment so a symlink escaping the staging directory (e.g. pointing at
  *   `/etc/passwd` or into another session's directory) is rejected.
  *
@@ -217,7 +219,7 @@ export function resolvePayloadPath(
 
   let realPath: string;
   try {
-    realPath = Deno.realPathSync(resolved);
+    realPath = fs.realpathSync(resolved);
   } catch {
     throw new PayloadError("SKILL_PAYLOAD_NOT_FOUND", notFoundMessage(payloadPath, options));
   }
@@ -275,7 +277,7 @@ export async function readPayloadArg(
 ): Promise<string | undefined> {
   const fileFlag = `--${flagName}-file`;
   const required = options.required ?? true;
-  const cwd = options.cwd ?? Deno.cwd();
+  const cwd = options.cwd ?? process.cwd();
   const extraFreeTextFlags = options.extraFreeTextFlags ?? [];
 
   let value: string | undefined;
@@ -317,7 +319,7 @@ export async function readPayloadArg(
 
   let content: string;
   try {
-    content = await Deno.readTextFile(path);
+    content = await fsp.readFile(path, "utf8");
   } catch {
     throw new PayloadError(
       "SKILL_PAYLOAD_NOT_FOUND",
@@ -332,7 +334,7 @@ export async function readPayloadArg(
   // Best-effort: the payload is consumed; remove it so it cannot be re-sent or
   // confuse a later session. Failures are ignored (read-only filesystem, etc.).
   try {
-    await Deno.remove(path);
+    await fsp.unlink(path);
   } catch {
     // Ignore deletion failures.
   }

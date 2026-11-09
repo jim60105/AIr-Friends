@@ -26,7 +26,7 @@ None.
 
 - Edited: 16 skill scripts, `skills/lib/client.ts`, `skills/lib/payload.ts`, five test files. New: `scripts/install-skill-bunfig.sh`, `tests/skills/skill-args.test.ts`.
 - **BREAKING** for custom deployments that run a built-in skill with `deno run`: they must use the shebang or the literal `bun run` form. The approval gate change that enforces this is `enforce-bun-skill-approval-grammar`.
-- Development hosts need `/opt/air/skill-bunfig.toml` (one `sudo` command, `scripts/install-skill-bunfig.sh`). The image provides it (`package-bun-container-image`).
+- Development hosts need `/opt/air/skill-bunfig.toml` (created by `scripts/install-skill-bunfig.sh`; on an unprivileged host run it inside a rootless container). The image provides it (`package-bun-container-image`).
 - P0 ownership: **P0-6** shebang half (the injection suite and gate are `enforce-bun-skill-approval-grammar`).
 - No human review document.
 

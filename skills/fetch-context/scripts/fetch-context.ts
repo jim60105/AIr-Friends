@@ -1,6 +1,6 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 import {
   callSkillApi,
   exitWithError,
@@ -10,17 +10,48 @@ import {
 } from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
+export interface FetchContextArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  type?: string;
+  limit: number;
+}
+
+export function parseFetchContextArgs(argv: string[]): FetchContextArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      type: { type: "string", short: "t" },
+      limit: { type: "string" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  // The previous parser returned the declared default 20 when `--limit` was
+  // absent and an empty value when the flag had no argument; keep both shapes.
+  const limit = values.limit === undefined
+    ? 20
+    : typeof values.limit === "string"
+      ? Number(values.limit)
+      : 0;
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    type: typeof values.type === "string" ? values.type : undefined,
+    limit,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "type"],
-      alias: { s: "session-id", a: "api-url", t: "type" },
-      default: { limit: 20 },
-    });
+    const { type, limit } = parseFetchContextArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
-
-    const type = args.type;
     if (!type) {
       exitWithError("Missing required argument: --type");
     }
@@ -30,7 +61,7 @@ async function main() {
       exitWithError(`Invalid type. Must be one of: ${validTypes.join(", ")}`);
     }
 
-    const query = await readPayloadArg(Deno.args, "query", {
+    const query = await readPayloadArg(argv, "query", {
       sessionId,
       alias: "q",
       required: false,
@@ -47,8 +78,8 @@ async function main() {
       params.query = query;
     }
 
-    if (args.limit) {
-      params.limit = Number(args.limit);
+    if (limit) {
+      params.limit = limit;
     }
 
     const result = await callSkillApi(apiUrl, "fetch-context", sessionId, params);
@@ -56,7 +87,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -70,4 +101,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

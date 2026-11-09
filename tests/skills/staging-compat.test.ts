@@ -10,10 +10,17 @@
 // LOGIC itself is unchanged by this change — these tests pin it.
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { resolveSessionPath, type SessionContext } from "@acp/filesystem-roots.ts";
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
-const SCRIPT_URL = new URL("../../skills/send-reply/scripts/send-reply.ts", import.meta.url);
+const SCRIPT_PATH = fileURLToPath(
+  new URL("../../skills/send-reply/scripts/send-reply.ts", import.meta.url),
+);
 
 /**
  * Accept one HTTP request on a one-shot mock API, run the real send-reply
@@ -24,73 +31,66 @@ async function deliverOnce(opts: {
   cwd: string;
   env: Record<string, string>;
 }): Promise<{ code: number; stderr: string; body: unknown }> {
-  const listener = Deno.listen({ port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
-  const { promise: bodyPromise, resolve: resolveBody } = Promise.withResolvers<unknown>();
-  (async () => {
-    const conn = await listener.accept();
-    const reader = conn.readable.getReader();
-    let text = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      text += new TextDecoder().decode(value);
-      if (text.includes("\r\n\r\n")) break;
-    }
-    resolveBody(JSON.parse(text.split("\r\n\r\n").slice(1).join("\r\n\r\n")));
-    const payload = `{"success":true,"data":{"messageId":"m_ok"}}`;
-    const writer = conn.writable.getWriter();
-    await writer.write(
-      new TextEncoder().encode(
-        `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${payload.length}\r\nconnection: close\r\n\r\n${payload}`,
-      ),
-    );
-    writer.releaseLock();
-    await conn.writable.close();
-  })().catch(() => resolveBody({}));
+  const { promise: bodyPromise, resolve: settleBody } = Promise.withResolvers<unknown>();
+  let settled = false;
+  const resolveBody = (value: unknown): void => {
+    if (settled) return;
+    settled = true;
+    settleBody(value);
+  };
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      try {
+        resolveBody(await req.json());
+      } catch {
+        resolveBody({});
+      }
+      return Response.json({ success: true, data: { messageId: "m_ok" } });
+    },
+  });
+  const port = server.port;
 
-  const run = await new Deno.Command(Deno.execPath(), {
-    args: [
-      "run",
-      "--allow-net",
-      "--allow-env",
-      "--allow-read",
-      "--allow-write",
-      SCRIPT_URL.href,
-      ...opts.args,
-      "--api-url",
-      `http://127.0.0.1:${port}`,
-    ],
+  const run = Bun.spawn([SCRIPT_PATH, ...opts.args, "--api-url", `http://127.0.0.1:${port}`], {
     cwd: opts.cwd,
-    env: { PATH: Deno.env.get("PATH") ?? "", HOME: Deno.env.get("HOME") ?? "/tmp", ...opts.env },
-    clearEnv: true,
-  }).output();
-  const body = await bodyPromise;
-  listener.close();
-  return { code: run.code, stderr: new TextDecoder().decode(run.stderr), body };
+    env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "/tmp", ...opts.env },
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  try {
+    const [stderr, code] = await Promise.all([
+      new Response(run.stderr).text(),
+      run.exited,
+    ]);
+    resolveBody({});
+    return { code, stderr, body: await bodyPromise };
+  } finally {
+    await server.stop(true);
+  }
 }
 
 function exists(path: string): boolean {
   try {
-    Deno.statSync(path);
+    fs.statSync(path);
     return true;
   } catch {
     return false;
   }
 }
 
-Deno.test("compat - per-spawn legacy shell-EXPANDED token path still resolves, reads, deletes", async () => {
+test("compat - per-spawn legacy shell-EXPANDED token path still resolves, reads, deletes", async () => {
   // What bash hands the script when an older prompt still instructs
   // `--message-file "$TMPDIR/$SESSION_ID/reply.md"`: with per-spawn
   // TMPDIR={workspace}/tmp and SESSION_ID={session}, the expansion lands on
   // the canonical staging root {cwd}/tmp/{sessionId} — accepted, read
   // verbatim, deleted after the successful call.
-  const ws = Deno.makeTempDirSync();
+  const ws = makeTempDirSync();
   try {
     const staging = join(ws, "tmp", "sess_legacy");
-    Deno.mkdirSync(staging, { recursive: true });
+    fs.mkdirSync(staging, { recursive: true });
     const payloadFile = join(staging, "reply.md");
-    Deno.writeTextFileSync(payloadFile, "legacy $PATH verbatim");
+    fs.writeFileSync(payloadFile, "legacy $PATH verbatim");
     const delivered = await deliverOnce({
       args: [
         "--session-id",
@@ -108,19 +108,19 @@ Deno.test("compat - per-spawn legacy shell-EXPANDED token path still resolves, r
     assertEquals(body.parameters.message, "legacy $PATH verbatim");
     assertEquals(exists(payloadFile), false, "payload consumed after success");
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("compat - literal absolute path behaves identically to the expanded legacy path", async () => {
+test("compat - literal absolute path behaves identically to the expanded legacy path", async () => {
   // The instructed literal form resolves/reads/deletes exactly as the legacy
   // expanded token path did (both are {workspace}/tmp/{sessionId}/reply.md).
-  const ws = Deno.makeTempDirSync();
+  const ws = makeTempDirSync();
   try {
     const staging = join(ws, "tmp", "sess_lit");
-    Deno.mkdirSync(staging, { recursive: true });
+    fs.mkdirSync(staging, { recursive: true });
     const payloadFile = join(staging, "reply.md");
-    Deno.writeTextFileSync(payloadFile, "literal form $0");
+    fs.writeFileSync(payloadFile, "literal form $0");
     const delivered = await deliverOnce({
       args: ["--session-id", "sess_lit", "--message-file", payloadFile],
       cwd: ws,
@@ -133,21 +133,21 @@ Deno.test("compat - literal absolute path behaves identically to the expanded le
     assertEquals(body.parameters.message, "literal form $0");
     assertEquals(exists(payloadFile), false);
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("compat - expanded path OUTSIDE the canonical staging root stays rejected (TMPDIR never followed)", () => {
+test("compat - expanded path OUTSIDE the canonical staging root stays rejected (TMPDIR never followed)", () => {
   // A process TMPDIR naming a different directory yields an expanded path
   // outside {cwd}/tmp/{sessionId}: containment still rejects (row-9
   // invariant — resolution never consults $TMPDIR).
-  const ws = Deno.makeTempDirSync();
-  const outside = Deno.makeTempDirSync();
+  const ws = makeTempDirSync();
+  const outside = makeTempDirSync();
   try {
-    Deno.writeTextFileSync(join(outside, "reply.md"), "leak");
-    const payloadUrl = new URL("../../skills/lib/payload.ts", import.meta.url).href;
+    fs.writeFileSync(join(outside, "reply.md"), "leak");
+    const payloadPath = fileURLToPath(new URL("../../skills/lib/payload.ts", import.meta.url));
     const probe = `
-import { resolvePayloadPath } from ${JSON.stringify(payloadUrl)};
+import { resolvePayloadPath } from ${JSON.stringify(payloadPath)};
 try {
   resolvePayloadPath(${JSON.stringify(join(outside, "reply.md"))}, ${
       JSON.stringify(ws)
@@ -158,21 +158,20 @@ try {
 }
 `;
     const probePath = join(ws, "probe.ts");
-    Deno.writeTextFileSync(probePath, probe);
-    const out = new Deno.Command(Deno.execPath(), {
-      args: ["run", "--no-check", "--allow-read", "--allow-env", probePath],
-      env: { PATH: Deno.env.get("PATH") ?? "", TMPDIR: outside },
-      clearEnv: true,
-    }).outputSync();
-    const line = new TextDecoder().decode(out.stdout).trim();
+    fs.writeFileSync(probePath, probe);
+    const out = spawnSync(process.execPath, ["run", probePath], {
+      env: { PATH: process.env["PATH"] ?? "", TMPDIR: outside },
+      encoding: "utf8",
+    });
+    const line = out.stdout.trim();
     assertEquals(JSON.parse(line).code, "SKILL_PAYLOAD_OUT_OF_BOUNDS");
   } finally {
-    Deno.removeSync(ws, { recursive: true });
-    Deno.removeSync(outside, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
+    fs.rmSync(outside, { recursive: true });
   }
 });
 
-Deno.test("compat - ACP-side structured-tool token paths still expand to the canonical staging root", () => {
+test("compat - ACP-side structured-tool token paths still expand to the canonical staging root", () => {
   // Row-2/4 expansion behavior retained with no new code: an older session's
   // edit/write tool naming `$TMPDIR/$SESSION_ID/reply.md` is expanded by the
   // permission gate from ITS per-session context to the canonical staging

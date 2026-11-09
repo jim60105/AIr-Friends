@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
+#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml
 
 // skills/send-email/scripts/send-email.ts
 //
@@ -31,7 +31,7 @@ import {
   SkillSessionUnresolvedError,
 } from "../../lib/client.ts";
 import { EMAIL_COMPOSE_FREE_TEXT_FLAGS, PayloadError, readPayloadArg } from "../../lib/payload.ts";
-import { parse } from "jsr:@std/flags@^0.224.0";
+import { parseArgs } from "node:util";
 
 /** Stable code for a payload read under an identity that is not this invocation's owner. */
 const SKILL_SESSION_MISMATCH = "SKILL_SESSION_MISMATCH";
@@ -108,9 +108,36 @@ function assertRequestOperation(request: Record<string, unknown>): void {
   }
 }
 
+export interface SendEmailArgs {
+  sessionId?: string;
+  apiUrl?: string;
+  grantId?: string;
+}
+
+export function parseSendEmailArgs(argv: string[]): SendEmailArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      "session-id": { type: "string", short: "s" },
+      "api-url": { type: "string", short: "a" },
+      "grant-id": { type: "string", short: "g" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  return {
+    sessionId: typeof values["session-id"] === "string" ? values["session-id"] : undefined,
+    apiUrl: typeof values["api-url"] === "string" ? values["api-url"] : undefined,
+    grantId: typeof values["grant-id"] === "string" ? values["grant-id"] : undefined,
+  };
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
   try {
-    const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
+    const { grantId } = parseSendEmailArgs(argv);
+    const { sessionId, apiUrl } = parseBaseArgs(argv);
 
     // The invocation's identity is the OWNING session (resolved from the process'
     // authoritative source), never the CLI literal: a mismatched literal must not be able
@@ -125,7 +152,7 @@ async function main() {
       );
     }
 
-    const requestText = await readPayloadArg(Deno.args, "request", {
+    const requestText = await readPayloadArg(argv, "request", {
       sessionId: owningSessionId,
       alias: "r",
       fileName: REQUEST_FILE_NAME,
@@ -139,12 +166,6 @@ async function main() {
     const request = parseRequestBody(requestText ?? "");
     assertRequestOperation(request);
 
-    const parsedArgs = parse(Deno.args, {
-      string: ["grant-id"],
-      alias: { g: "grant-id" },
-    });
-    const grantId = parsedArgs["grant-id"];
-
     const result = await callSkillApi(apiUrl, "send-email", owningSessionId, {
       ...(grantId ? { grantId } : {}),
       request,
@@ -153,7 +174,7 @@ async function main() {
     outputResult(result);
 
     if (!result.success) {
-      Deno.exit(1);
+      process.exit(1);
     }
   } catch (error) {
     if (error instanceof PayloadError) {
@@ -167,4 +188,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

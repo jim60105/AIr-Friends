@@ -2,7 +2,7 @@
 // containment, and instructive error codes.
 
 import { assertEquals } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { join, resolve } from "node:path";
 import {
   EMAIL_COMPOSE_FREE_TEXT_FLAGS,
   isWithinDir,
@@ -11,6 +11,11 @@ import {
   readPayloadArg,
   resolvePayloadPath,
 } from "../../skills/lib/payload.ts";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { test } from "bun:test";
+import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 // Literal-first example (mirrors the real send-reply script's example string):
 // the guidance the script emits must never instruct a shell token.
@@ -42,11 +47,11 @@ function opts(
 }
 
 function setupWorkspace(): string {
-  const ws = Deno.makeTempDirSync();
-  Deno.mkdirSync(join(ws, "tmp", "sess_own"), { recursive: true });
-  Deno.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
-  Deno.mkdirSync(join(ws, "tmp", "sess_own-2"), { recursive: true });
-  Deno.mkdirSync(join(ws, "tmp", "sess_own2"), { recursive: true });
+  const ws = makeTempDirSync();
+  fs.mkdirSync(join(ws, "tmp", "sess_own"), { recursive: true });
+  fs.mkdirSync(join(ws, "tmp", "sess_other"), { recursive: true });
+  fs.mkdirSync(join(ws, "tmp", "sess_own-2"), { recursive: true });
+  fs.mkdirSync(join(ws, "tmp", "sess_own2"), { recursive: true });
   return ws;
 }
 
@@ -79,32 +84,33 @@ const RESOLVE_OPTS = {
 // are process-global and shared with test files running in parallel workers
 // (e.g. lib-client.test.ts), so all env-sensitive cases run in an isolated
 // subprocess instead of mutating the global env.
-Deno.test("resolvePayloadBase - fallback, pointer staging, and TMPDIR-ignored (subprocess)", async () => {
-  const jwtDir = Deno.makeTempDirSync();
-  const payloadUrl = new URL("../../skills/lib/payload.ts", import.meta.url).href;
+test("resolvePayloadBase - fallback, pointer staging, and TMPDIR-ignored (subprocess)", async () => {
+  const jwtDir = makeTempDirSync();
+  const payloadPath = fileURLToPath(new URL("../../skills/lib/payload.ts", import.meta.url));
   const script = `
-import { resolvePayloadBase } from ${JSON.stringify(payloadUrl)};
-const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+import fs from "node:fs";
+import { resolvePayloadBase } from ${JSON.stringify(payloadPath)};
+const jwtDir = process.env["SKILL_JWT_DIR"];
 const results = [];
 // 1. Pointer names this session: staging root from the pointer is used.
-Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_1", staging: "/ws/discord/123/tmp" }));
+fs.writeFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_1", staging: "/ws/discord/123/tmp" }));
 results.push(resolvePayloadBase("/agent-cwd", "sess_1"));
 // 2. Pointer names ANOTHER session (stale/foreign): fall back to {cwd}/tmp.
-Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_other", staging: "/ws/discord/999/tmp" }));
+fs.writeFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_other", staging: "/ws/discord/999/tmp" }));
 results.push(resolvePayloadBase("/agent-cwd", "sess_1"));
 // 3. No staging field: fall back too.
-Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_1" }));
+fs.writeFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_1" }));
 results.push(resolvePayloadBase("/agent-cwd", "sess_1"));
 // 4. No pointer file at all: fall back.
-Deno.removeSync(jwtDir + "/active.json");
+fs.rmSync(jwtDir + "/active.json");
 results.push(resolvePayloadBase("/ws", "sess_1"));
 results.push(resolvePayloadBase("/ws", ""));
 console.log(JSON.stringify(results));
 `;
   const scriptPath = `${jwtDir}/probe.ts`;
-  await Deno.writeTextFile(scriptPath, script);
+  await fsp.writeFile(scriptPath, script);
 
-  const baseEnv = Deno.env.toObject();
+  const baseEnv = { ...process.env };
   const env: Record<string, string> = {
     TMPDIR: "/data/channel-tmp/discord:discord/456", // must be IGNORED
     SKILL_JWT_DIR: jwtDir,
@@ -113,13 +119,17 @@ console.log(JSON.stringify(results));
     if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
   }
 
-  const output = await new Deno.Command(Deno.execPath(), {
-    args: ["run", "--no-check", "--allow-read", "--allow-write", "--allow-env", scriptPath],
+  const output = Bun.spawn([process.execPath, "run", scriptPath], {
     env,
-    clearEnv: true,
-  }).output();
-  const stdout = new TextDecoder().decode(output.stdout);
-  assertEquals(output.code, 0, `child failed: ${stdout}${new TextDecoder().decode(output.stderr)}`);
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(output.stdout).text(),
+    new Response(output.stderr).text(),
+    output.exited,
+  ]);
+  assertEquals(code, 0, `child failed: ${stdout}${stderr}`);
   const results = JSON.parse(stdout.trim().split("\n").at(-1)!) as string[];
 
   assertEquals(results[0], resolve("/ws/discord/123/tmp/sess_1"));
@@ -128,7 +138,7 @@ console.log(JSON.stringify(results));
   assertEquals(results[3], resolve("/ws/tmp/sess_1"));
   assertEquals(results[4], resolve("/ws/tmp"));
 
-  await Deno.remove(jwtDir, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
 });
 
 // Shared-process mode (SKILL_SHARED_PROCESS=1): the staging base comes ONLY
@@ -136,21 +146,22 @@ console.log(JSON.stringify(results));
 // missing/unreadable/malformed pointer fails with SKILL_SESSION_UNRESOLVED
 // BEFORE any payload file is read or deleted. Runs in a subprocess so the env
 // marker cannot leak into parallel test files.
-Deno.test("resolvePayloadBase - shared mode: pointer-only base, unresolved pointer fails before touching files (subprocess)", async () => {
-  const jwtDir = Deno.makeTempDirSync();
-  const ws = Deno.makeTempDirSync();
-  const payloadUrl = new URL("../../skills/lib/payload.ts", import.meta.url).href;
+test("resolvePayloadBase - shared mode: pointer-only base, unresolved pointer fails before touching files (subprocess)", async () => {
+  const jwtDir = makeTempDirSync();
+  const ws = makeTempDirSync();
+  const payloadPath = fileURLToPath(new URL("../../skills/lib/payload.ts", import.meta.url));
   const script = `
-import { readPayloadArg, resolvePayloadBase } from ${JSON.stringify(payloadUrl)};
-const jwtDir = Deno.env.get("SKILL_JWT_DIR");
-const ws = Deno.args[0];
+import fs from "node:fs";
+import { readPayloadArg, resolvePayloadBase } from ${JSON.stringify(payloadPath)};
+const jwtDir = process.env["SKILL_JWT_DIR"];
+const ws = process.argv[2];
 const results = [];
 // (a) Valid pointer {sessionId:"sess_B", staging: ws/tmp} + CLI arg sess_A:
 //     the base is the POINTER's session, never the CLI argument's.
-Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_B", staging: ws + "/tmp" }));
+fs.writeFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_B", staging: ws + "/tmp" }));
 results.push(resolvePayloadBase(ws, "sess_A"));
 // (b) No pointer at all: shared mode MUST fail SKILL_SESSION_UNRESOLVED.
-Deno.removeSync(jwtDir + "/active.json");
+fs.rmSync(jwtDir + "/active.json");
 try {
   resolvePayloadBase(ws, "sess_A");
   results.push("NO_ERROR");
@@ -160,8 +171,8 @@ try {
 // (b2) readPayloadArg in shared mode with no pointer: fails with the same
 //      code BEFORE reading or deleting the referenced payload file.
 const staged = ws + "/tmp/sess_other/reply.md";
-Deno.mkdirSync(ws + "/tmp/sess_other", { recursive: true });
-Deno.writeTextFileSync(staged, "sibling session payload");
+fs.mkdirSync(ws + "/tmp/sess_other", { recursive: true });
+fs.writeFileSync(staged, "sibling session payload");
 try {
   await readPayloadArg(
     ["--message-file", staged],
@@ -173,7 +184,7 @@ try {
   results.push(JSON.stringify({ code: err.code }));
 }
 let exists = true;
-try { Deno.statSync(staged); } catch { exists = false; }
+try { fs.statSync(staged); } catch { exists = false; }
 results.push("exists=" + exists);
 // (c) Malformed pointers in shared mode: non-string fields and relative
 //     staging all fail with the SAME stable code (strict schema validation).
@@ -183,7 +194,7 @@ for (const pointer of [
   { sessionId: "sess_B", staging: "relative/tmp" },
   { sessionId: "" , staging: ws + "/tmp" },
 ]) {
-  Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify(pointer));
+  fs.writeFileSync(jwtDir + "/active.json", JSON.stringify(pointer));
   try {
     resolvePayloadBase(ws, "sess_A");
     results.push("NO_ERROR");
@@ -194,9 +205,9 @@ for (const pointer of [
 console.log(JSON.stringify(results));
 `;
   const scriptPath = `${jwtDir}/probe.ts`;
-  await Deno.writeTextFile(scriptPath, script);
+  await fsp.writeFile(scriptPath, script);
 
-  const baseEnv = Deno.env.toObject();
+  const baseEnv = { ...process.env };
   const env: Record<string, string> = {
     SKILL_SHARED_PROCESS: "1",
     SKILL_JWT_DIR: jwtDir,
@@ -205,13 +216,17 @@ console.log(JSON.stringify(results));
     if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
   }
 
-  const output = await new Deno.Command(Deno.execPath(), {
-    args: ["run", "--no-check", "--allow-read", "--allow-write", "--allow-env", scriptPath, ws],
+  const output = Bun.spawn([process.execPath, "run", scriptPath, ws], {
     env,
-    clearEnv: true,
-  }).output();
-  const stdout = new TextDecoder().decode(output.stdout);
-  assertEquals(output.code, 0, `child failed: ${stdout}${new TextDecoder().decode(output.stderr)}`);
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(output.stdout).text(),
+    new Response(output.stderr).text(),
+    output.exited,
+  ]);
+  assertEquals(code, 0, `child failed: ${stdout}${stderr}`);
   const results = JSON.parse(stdout.trim().split("\n").at(-1)!) as string[];
 
   // (a) pointer's session wins over the CLI argument.
@@ -231,11 +246,11 @@ console.log(JSON.stringify(results));
     assertEquals(r.code, "SKILL_SESSION_UNRESOLVED", `malformed pointer case ${i - 4}`);
   }
 
-  await Deno.remove(jwtDir, { recursive: true });
-  await Deno.remove(ws, { recursive: true });
+  await fsp.rm(jwtDir, { recursive: true });
+  await fsp.rm(ws, { recursive: true });
 });
 
-Deno.test("isWithinDir - boundary-safe sibling prefixes rejected", () => {
+test("isWithinDir - boundary-safe sibling prefixes rejected", () => {
   assertEquals(isWithinDir("/ws/tmp/sess_own/x", "/ws/tmp/sess_own"), true);
   assertEquals(isWithinDir("/ws/tmp/sess_own", "/ws/tmp/sess_own"), true);
   assertEquals(isWithinDir("/ws/tmp/sess_own-2/x", "/ws/tmp/sess_own"), false);
@@ -244,26 +259,26 @@ Deno.test("isWithinDir - boundary-safe sibling prefixes rejected", () => {
   assertEquals(isWithinDir("/ws/tmp/x", "/ws/tmp/sess_own"), false);
 });
 
-Deno.test("resolvePayloadPath - own-session staging file accepted", () => {
+test("resolvePayloadPath - own-session staging file accepted", () => {
   const ws = setupWorkspace();
   try {
     const target = join(ws, "tmp", "sess_own", "reply.md");
-    Deno.writeTextFileSync(target, "hello $0 $HOME\nline2");
+    fs.writeFileSync(target, "hello $0 $HOME\nline2");
     const path = resolvePayloadPath(target, ws, "sess_own", {
       flagName: "message",
       example: EXAMPLE,
       fileName: "reply.md",
     });
-    assertEquals(Deno.readTextFileSync(path), "hello $0 $HOME\nline2");
+    assertEquals(fs.readFileSync(path, "utf8"), "hello $0 $HOME\nline2");
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - relative path resolves against cwd", () => {
+test("resolvePayloadPath - relative path resolves against cwd", () => {
   const ws = setupWorkspace();
   try {
-    Deno.writeTextFileSync(join(ws, "tmp", "sess_own", "reply.md"), "relative ok");
+    fs.writeFileSync(join(ws, "tmp", "sess_own", "reply.md"), "relative ok");
     const path = resolvePayloadPath("tmp/sess_own/reply.md", ws, "sess_own", {
       flagName: "message",
       example: EXAMPLE,
@@ -271,14 +286,14 @@ Deno.test("resolvePayloadPath - relative path resolves against cwd", () => {
     });
     assertEquals(path, join(ws, "tmp", "sess_own", "reply.md"));
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - workspace-root file rejected", async () => {
+test("resolvePayloadPath - workspace-root file rejected", async () => {
   const ws = setupWorkspace();
   try {
-    Deno.writeTextFileSync(join(ws, "memory.private.jsonl"), "{}");
+    fs.writeFileSync(join(ws, "memory.private.jsonl"), "{}");
     for (const payload of ["memory.private.jsonl", join(ws, "memory.private.jsonl")]) {
       await expectPayloadError(
         () => resolvePayloadPath(payload, ws, "sess_own", RESOLVE_OPTS),
@@ -288,29 +303,29 @@ Deno.test("resolvePayloadPath - workspace-root file rejected", async () => {
       );
     }
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - sibling session directory rejected", async () => {
+test("resolvePayloadPath - sibling session directory rejected", async () => {
   const ws = setupWorkspace();
   try {
-    Deno.writeTextFileSync(join(ws, "tmp", "sess_other", "reply.md"), "other");
+    fs.writeFileSync(join(ws, "tmp", "sess_other", "reply.md"), "other");
     await expectPayloadError(
       () =>
         resolvePayloadPath(join(ws, "tmp", "sess_other", "reply.md"), ws, "sess_own", RESOLVE_OPTS),
       "SKILL_PAYLOAD_OUT_OF_BOUNDS",
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - prefix-sibling directories rejected", async () => {
+test("resolvePayloadPath - prefix-sibling directories rejected", async () => {
   const ws = setupWorkspace();
   try {
     for (const sibling of ["sess_own-2", "sess_own2"]) {
-      Deno.writeTextFileSync(join(ws, "tmp", sibling, "reply.md"), "sibling");
+      fs.writeFileSync(join(ws, "tmp", sibling, "reply.md"), "sibling");
       await expectPayloadError(
         () =>
           resolvePayloadPath(join(ws, "tmp", sibling, "reply.md"), ws, "sess_own", RESOLVE_OPTS),
@@ -318,11 +333,11 @@ Deno.test("resolvePayloadPath - prefix-sibling directories rejected", async () =
       );
     }
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - home-anchored and absolute paths rejected", async () => {
+test("resolvePayloadPath - home-anchored and absolute paths rejected", async () => {
   const ws = setupWorkspace();
   try {
     for (const payload of ["~/.git-credentials", "$HOME/.env", "/etc/passwd"]) {
@@ -332,44 +347,41 @@ Deno.test("resolvePayloadPath - home-anchored and absolute paths rejected", asyn
       );
     }
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - symlink escape rejected", async () => {
+test("resolvePayloadPath - symlink escape rejected", async () => {
   const ws = setupWorkspace();
   try {
-    Deno.symlinkSync("/etc/passwd", join(ws, "tmp", "sess_own", "leak.md"));
+    fs.symlinkSync("/etc/passwd", join(ws, "tmp", "sess_own", "leak.md"));
     await expectPayloadError(
       () =>
         resolvePayloadPath(join(ws, "tmp", "sess_own", "leak.md"), ws, "sess_own", RESOLVE_OPTS),
       "SKILL_PAYLOAD_OUT_OF_BOUNDS",
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - symlink within staging directory allowed", () => {
+test("resolvePayloadPath - symlink within staging directory allowed", () => {
   const ws = setupWorkspace();
   try {
-    Deno.writeTextFileSync(join(ws, "tmp", "sess_own", "real.md"), "real content");
-    Deno.symlinkSync(
-      join(ws, "tmp", "sess_own", "real.md"),
-      join(ws, "tmp", "sess_own", "link.md"),
-    );
+    fs.writeFileSync(join(ws, "tmp", "sess_own", "real.md"), "real content");
+    fs.symlinkSync(join(ws, "tmp", "sess_own", "real.md"), join(ws, "tmp", "sess_own", "link.md"));
     const path = resolvePayloadPath(join(ws, "tmp", "sess_own", "link.md"), ws, "sess_own", {
       flagName: "message",
       example: EXAMPLE,
       fileName: "reply.md",
     });
-    assertEquals(Deno.readTextFileSync(path), "real content");
+    assertEquals(fs.readFileSync(path, "utf8"), "real content");
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("resolvePayloadPath - missing file raises SKILL_PAYLOAD_NOT_FOUND", async () => {
+test("resolvePayloadPath - missing file raises SKILL_PAYLOAD_NOT_FOUND", async () => {
   const ws = setupWorkspace();
   try {
     await expectPayloadError(
@@ -385,15 +397,15 @@ Deno.test("resolvePayloadPath - missing file raises SKILL_PAYLOAD_NOT_FOUND", as
       "--message-file",
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - reads content verbatim ($, newlines, empty string)", async () => {
+test("readPayloadArg - reads content verbatim ($, newlines, empty string)", async () => {
   const ws = setupWorkspace();
   try {
     const staged = join(ws, "tmp", "sess_own", "reply.md");
-    Deno.writeTextFileSync(staged, "定價 $0.435\n$HOME line");
+    fs.writeFileSync(staged, "定價 $0.435\n$HOME line");
     const content = await readPayloadArg(
       ["--session-id", "sess_own", "--message-file", staged],
       "message",
@@ -403,7 +415,7 @@ Deno.test("readPayloadArg - reads content verbatim ($, newlines, empty string)",
     // Best-effort deletion after successful read.
     let removed = true;
     try {
-      Deno.statSync(staged);
+      fs.statSync(staged);
       removed = false;
     } catch {
       // expected: file gone
@@ -412,7 +424,7 @@ Deno.test("readPayloadArg - reads content verbatim ($, newlines, empty string)",
 
     // Empty file content is preserved verbatim.
     const empty = join(ws, "tmp", "sess_own", "empty.md");
-    Deno.writeTextFileSync(empty, "");
+    fs.writeFileSync(empty, "");
     const emptyContent = await readPayloadArg(
       ["--message-file", empty],
       "message",
@@ -420,30 +432,30 @@ Deno.test("readPayloadArg - reads content verbatim ($, newlines, empty string)",
     );
     assertEquals(emptyContent, "");
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - supports --flag=value and short alias forms", async () => {
+test("readPayloadArg - supports --flag=value and short alias forms", async () => {
   const ws = setupWorkspace();
   try {
     const staged = join(ws, "tmp", "sess_own", "reply.md");
-    Deno.writeTextFileSync(staged, "equals form");
+    fs.writeFileSync(staged, "equals form");
     assertEquals(
       await readPayloadArg([`--message-file=${staged}`], "message", opts(ws)),
       "equals form",
     );
-    Deno.writeTextFileSync(staged, "alias form");
+    fs.writeFileSync(staged, "alias form");
     assertEquals(
       await readPayloadArg(["-m", staged], "message", opts(ws, "sess_own", { alias: "m" })),
       "alias form",
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - legacy flags rejected in both forms", async () => {
+test("readPayloadArg - legacy flags rejected in both forms", async () => {
   const ws = setupWorkspace();
   try {
     const cases: Array<[string[], string]> = [
@@ -471,11 +483,11 @@ Deno.test("readPayloadArg - legacy flags rejected in both forms", async () => {
     assertEquals(LEGACY_FREE_TEXT_FLAG_PATTERN.test("--query-file"), false);
     assertEquals(LEGACY_FREE_TEXT_FLAG_PATTERN.test("--caption-file"), false);
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - missing required flag names it and shows the flow", async () => {
+test("readPayloadArg - missing required flag names it and shows the flow", async () => {
   const ws = setupWorkspace();
   try {
     await expectPayloadError(
@@ -487,11 +499,11 @@ Deno.test("readPayloadArg - missing required flag names it and shows the flow", 
       EXAMPLE,
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - optional payload omitted returns undefined", async () => {
+test("readPayloadArg - optional payload omitted returns undefined", async () => {
   const ws = setupWorkspace();
   try {
     const content = await readPayloadArg(
@@ -501,14 +513,14 @@ Deno.test("readPayloadArg - optional payload omitted returns undefined", async (
     );
     assertEquals(content, undefined);
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - out-of-bounds payload raises SKILL_PAYLOAD_OUT_OF_BOUNDS with guidance", async () => {
+test("readPayloadArg - out-of-bounds payload raises SKILL_PAYLOAD_OUT_OF_BOUNDS with guidance", async () => {
   const ws = setupWorkspace();
   try {
-    Deno.writeTextFileSync(join(ws, "memory.private.jsonl"), "{}");
+    fs.writeFileSync(join(ws, "memory.private.jsonl"), "{}");
     await expectPayloadError(
       () => readPayloadArg(["--message-file", "memory.private.jsonl"], "message", opts(ws)),
       "SKILL_PAYLOAD_OUT_OF_BOUNDS",
@@ -516,11 +528,11 @@ Deno.test("readPayloadArg - out-of-bounds payload raises SKILL_PAYLOAD_OUT_OF_BO
       "--message-file",
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - missing payload file raises SKILL_PAYLOAD_NOT_FOUND", async () => {
+test("readPayloadArg - missing payload file raises SKILL_PAYLOAD_NOT_FOUND", async () => {
   const ws = setupWorkspace();
   try {
     await expectPayloadError(
@@ -534,7 +546,7 @@ Deno.test("readPayloadArg - missing payload file raises SKILL_PAYLOAD_NOT_FOUND"
       "written FIRST",
     );
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
@@ -544,11 +556,11 @@ Deno.test("readPayloadArg - missing payload file raises SKILL_PAYLOAD_NOT_FOUND"
 // that opt in — and every other script's behavior is untouched.
 // ---------------------------------------------------------------------------
 
-Deno.test("readPayloadArg - compose extra free-text flags are rejected in both forms", async () => {
+test("readPayloadArg - compose extra free-text flags are rejected in both forms", async () => {
   const ws = setupWorkspace();
   try {
     const staged = join(ws, "tmp", "sess_own", "compose.json");
-    Deno.writeTextFileSync(staged, '{"to":"a@example.org"}');
+    fs.writeFileSync(staged, '{"to":"a@example.org"}');
     const composeOpts = opts(ws, "sess_own", {
       fileName: "compose.json",
       alias: "r",
@@ -575,17 +587,17 @@ Deno.test("readPayloadArg - compose extra free-text flags are rejected in both f
     }
 
     // The rejection happens before any file is read, so the staged payload survives.
-    assertEquals(Deno.readTextFileSync(staged), '{"to":"a@example.org"}');
+    assertEquals(fs.readFileSync(staged, "utf8"), '{"to":"a@example.org"}');
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
 
-Deno.test("readPayloadArg - compose extra free-text flags apply only where opted in", async () => {
+test("readPayloadArg - compose extra free-text flags apply only where opted in", async () => {
   const ws = setupWorkspace();
   try {
     const staged = join(ws, "tmp", "sess_own", "reply.md");
-    Deno.writeTextFileSync(staged, "body-like payload text");
+    fs.writeFileSync(staged, "body-like payload text");
 
     // Default (no opt-in): a script that never declares these flags is unaffected — the legacy
     // pattern still governs and `--body`/`--to`/`--subject` are ordinary unknown tokens.
@@ -599,7 +611,7 @@ Deno.test("readPayloadArg - compose extra free-text flags apply only where opted
     );
 
     // Bare-string flags such as `--to-file` are not the free-text flags.
-    Deno.writeTextFileSync(staged, "not rejected");
+    fs.writeFileSync(staged, "not rejected");
     assertEquals(
       await readPayloadArg(
         ["--to-file", "ignored", "--message-file", staged],
@@ -614,6 +626,6 @@ Deno.test("readPayloadArg - compose extra free-text flags apply only where opted
     // The opted-in flag list is exactly the compose free-text surface.
     assertEquals([...EMAIL_COMPOSE_FREE_TEXT_FLAGS], ["--to", "--subject", "--body"]);
   } finally {
-    Deno.removeSync(ws, { recursive: true });
+    fs.rmSync(ws, { recursive: true });
   }
 });
