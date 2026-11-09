@@ -1242,7 +1242,7 @@ test.skipIf(!ACCEPTANCE_MODE && !(PINNED_BINARY_READY && CONFINEMENT_READY))(
 
         const perSpawnOutput = spawnSync(perSpawnSpawn.command, perSpawnSpawn.args, {
           cwd: perSpawnSpawn.cwd,
-          env: perSpawnSpawn.env,
+          env: { ...process.env, ...perSpawnSpawn.env },
           encoding: "utf8",
         });
         assert(
@@ -1310,7 +1310,7 @@ test.skipIf(!ACCEPTANCE_MODE && !(PINNED_BINARY_READY && CONFINEMENT_READY))(
         assertEquals(spawn.command, "bwrap");
         const output = spawnSync(spawn.command, spawn.args, {
           cwd: spawn.cwd,
-          env: spawn.env,
+          env: { ...process.env, ...spawn.env },
           encoding: "utf8",
         });
         const stdout = output.stdout;
