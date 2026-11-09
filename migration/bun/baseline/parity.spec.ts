@@ -228,6 +228,17 @@ describe("Baseline name coverage", () => {
     expect(result.stderr).toContain("--junit is required");
   });
 
+  test("exits 2 when a flag is used as the --scope value", () => {
+    const result = runParity([
+      "--junit",
+      ".parity/missing-report.xml",
+      "--scope",
+      "--allow-deferred",
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--scope needs a non-empty file prefix");
+  });
+
   test("matches a nested describe name built by the parser", () => {
     const baseline: BaselineTest[] = [{
       file: NESTED_FILE,

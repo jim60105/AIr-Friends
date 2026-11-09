@@ -514,7 +514,10 @@ function parseArguments(argv: readonly string[]): {
       case "--scope": {
         const value = argv[index + 1];
         index += 1;
-        if (value === undefined || stripDotSlash(value) === "") {
+        if (
+          value === undefined || stripDotSlash(value) === "" ||
+          value.startsWith("--")
+        ) {
           usage("--scope needs a non-empty file prefix");
         }
         scope.push(value);
