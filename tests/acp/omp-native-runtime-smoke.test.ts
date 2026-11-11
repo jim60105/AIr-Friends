@@ -31,7 +31,7 @@
  *   (tool) execution remains the scripted native-dispatch change's evidence.
  * - The OMP launch environment is process-global (`HOME` is read by the
  *   factory), so every test here restores the parent environment in `finally`.
- *   Deno runs one module's tests sequentially, which is the serialization this
+ *   Tests in one module run sequentially, which is the serialization this
  *   relies on.
  */
 

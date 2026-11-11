@@ -319,7 +319,7 @@ function buildBaseAgentConfig(
       if (mode === "restricted") {
         // The generated native-loadable bundle is required: image artifact when
         // installed, otherwise the deterministic development entry. The raw
-        // Deno-only source tree is never a fallback, so a missing generated
+        // source tree is never a fallback, so a missing generated
         // artifact fails here naming the build remedy rather than presenting an
         // unloadable specifier.
         const trustedExtensionPath = resolve(resolveOmpExtensionPath());

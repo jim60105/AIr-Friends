@@ -17,10 +17,10 @@ interface CommandOutput {
 }
 
 /**
- * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`: an absent
- * binary (a string error code such as `ENOENT`) rejects like the original throw, and a
- * non-zero exit resolves with that numeric code. A signal-terminated child (no numeric
- * code) reports `-1`, never `0`, so a terminated command can never read as success.
+ * Run a command through `node:child_process.execFile`: an absent binary (a string error
+ * code such as `ENOENT`) rejects, and a non-zero exit resolves with that numeric code. A
+ * signal-terminated child (no numeric code) reports `-1`, never `0`, so a terminated
+ * command can never read as success.
  */
 function runCommand(command: string, args: string[]): Promise<CommandOutput> {
   const pending = Promise.withResolvers<CommandOutput>();

@@ -13,10 +13,9 @@
 // not installed locally (the container bundles it); the mock agent runs on
 // this test process's own Bun executable.
 //
-// Deno's `sanitizeExit`/`sanitizeOps`/`sanitizeResources` have no Bun
-// equivalent, so every test measures this process's own descriptor table and
-// descendant tree instead (`tests/helpers/leak-check.ts`) and asserts both are
-// back at the pre-test values once its teardown has finished.
+// Every test measures this process's own descriptor table and descendant tree
+// (`tests/helpers/leak-check.ts`) and asserts both are back at the pre-test
+// values once its teardown has finished.
 
 import { assert, assertEquals } from "@std/assert";
 import { join } from "node:path";

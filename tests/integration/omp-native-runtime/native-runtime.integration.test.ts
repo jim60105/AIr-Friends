@@ -60,9 +60,8 @@
  *   operation, the selected permission, and filesystem/delivery outcomes.
  * - The launch environment is process-global (`HOME` is read by the factory), so
  *   the fixture boundary restores the parent environment in `finally`.
- * - Deno's `sanitizeOps`/`sanitizeResources` options have no Bun equivalent, so
- *   every test measures this process's own descriptor table and descendant tree
- *   instead (`tests/helpers/leak-check.ts`) once its teardown has finished.
+ * - Every test measures this process's own descriptor table and descendant tree
+ *   (`tests/helpers/leak-check.ts`) once its teardown has finished.
  */
 
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
@@ -260,8 +259,7 @@ interface SyncProbe {
 /** Run a short synchronous probe without a shell. */
 function runSyncProbe(command: string, args: readonly string[]): SyncProbe {
   // A missing binary is a spawn error (`result.error`), reported as "did not
-  // run" exactly like Deno's rejected `outputSync()`; a nonzero exit is a
-  // successful invocation whose result is unsuccessful.
+  // run"; a nonzero exit is a successful invocation whose result is unsuccessful.
   const output = spawnSync(command, [...args], { encoding: "utf8" });
   if (output.error !== undefined) {
     return {

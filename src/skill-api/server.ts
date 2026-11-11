@@ -284,7 +284,7 @@ export class SkillAPIServer {
     this.server = Bun.serve({
       port: this.config.port,
       hostname: this.config.host,
-      // Deno had no idle timeout; a skill may run past Bun's 10s default.
+      // A skill may run past Bun's 10s default, so disable the idle timeout.
       idleTimeout: 0,
       fetch: (request) => this.handleRequest(request),
     });
@@ -334,7 +334,7 @@ export class SkillAPIServer {
   private async handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // CORS headers (not needed for local Deno scripts, but included for completeness)
+    // CORS headers (included for completeness)
     const headers = {
       "Content-Type": "application/json",
     };

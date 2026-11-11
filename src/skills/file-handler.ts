@@ -124,7 +124,7 @@ export class FileHandler {
         };
       }
 
-      // Symlink-escape check: Deno.stat/readFile follow symlinks, so the REAL
+      // Symlink-escape check: stat/readFile follow symlinks, so the REAL
       // path of the file must also be inside the workspace/agent-workspace
       // boundary — a workspace symlink pointing outside must not be sent.
       this.validateRealPath(fullPath, context);
@@ -297,7 +297,7 @@ export class FileHandler {
   /**
    * Check that the REAL path of a file (after symlink resolution) is inside the
    * workspace or agent-workspace boundary. Lexical prefix checks are not enough:
-   * Deno.stat/readFile follow symlinks, so a workspace symlink pointing outside
+   * stat/readFile follow symlinks, so a workspace symlink pointing outside
    * (e.g. `workspace/leak.pdf -> /etc/passwd`) must be rejected.
    */
   private validateRealPath(fullPath: string, context: SkillContext): void {

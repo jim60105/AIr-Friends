@@ -3,7 +3,7 @@
 //
 // Runs GitBackupService.initialize() with a genuinely RELATIVE data dir inside
 // a child process whose cwd is a temp directory. The contract needs a relative
-// path resolved against a foreign cwd, but doing that with Deno.chdir() in the
+// path resolved against a foreign cwd, but doing that with `process.chdir()` in the
 // test process would mutate the cwd of the entire (single-process, --parallel)
 // test run and race every other file's relative-path resolution
 // (observed as 13 ENOENT prompt-render failures in CI run 35964700812).

@@ -179,7 +179,7 @@ console.log(JSON.stringify({ owned, jwt }));
       SKILL_JWT_DIR: jwtDir,
       SESSION_ID: "sess_stale_env", // must be ignored: the pointer is authoritative
     };
-    for (const k of ["PATH", "HOME", "DENO_DIR", "XDG_CACHE_HOME", "DENO_INSTALL_ROOT"]) {
+    for (const k of ["PATH", "HOME", "XDG_CACHE_HOME"]) {
       if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
     }
 

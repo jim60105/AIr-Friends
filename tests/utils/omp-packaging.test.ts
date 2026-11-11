@@ -67,9 +67,9 @@ test("omp-paths resolvers - image-first when the installed tree exists", () => {
 
 test("omp-paths resolvers - dev fallback selects the generated bundle when absent", () => {
   const exists = (_path: string) => false;
-  // The dev face is the deterministic GENERATED entry, never the raw
-  // Deno-only source tree (OMP_TRUSTED_EXTENSION_PATH stays the canonical
-  // source origin, asserted separately below).
+  // The dev face is the deterministic GENERATED entry, never the raw source
+  // tree (OMP_TRUSTED_EXTENSION_PATH stays the canonical source origin,
+  // asserted separately below).
   assertEquals(resolveOmpExtensionPath({ exists }), OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
   assertEquals(OMP_TRUSTED_EXTENSION_BUNDLE_PATH, "build/omp-extension/index.js");
   assertEquals(OMP_TRUSTED_EXTENSION_PATH, "src/acp/omp/extension/index.ts");
@@ -649,9 +649,9 @@ test("extension bundle - load parity: generated entry and dev source load identi
   }
 });
 
-test("extension bundle - loads standalone under node with NO Deno import map", async () => {
+test("extension bundle - loads standalone under node with NO import map", async () => {
   // The bundle is fully self-contained: no bare host facade, no import-map
-  // alias, no Deno global. Node loads the copied artifact from an isolated
+  // alias, no runtime global. Node loads the copied artifact from an isolated
   // tree with no node_modules and no repo config, proving native-loadability
   // without the pinned host's resolution rules. Node availability is
   // environment-dependent; the test SKIP-PASSES with a notice when no node
@@ -664,8 +664,8 @@ test("extension bundle - loads standalone under node with NO Deno import map", a
   const target = await makeTempDir({ prefix: "omp-bundle-" });
   try {
     // The generated bundle is COPIED into the fixture tree and loaded there:
-    // no node_modules, no import map, no Deno — resolution has nowhere to go
-    // but the bundle's own inlined closure.
+    // no node_modules, no import map — resolution has nowhere to go but the
+    // bundle's own inlined closure.
     buildBundle(`${target}/extension`);
     await fsp.mkdir(`${fixture}/ext`, { recursive: true });
     await fsp.copyFile(`${target}/extension/index.js`, `${fixture}/ext/index.js`);
@@ -685,7 +685,7 @@ console.log(r);
     const load = spawnSync("node", ["load.mjs"], { cwd: fixture, encoding: "utf8" });
     const out = load.stdout;
     const err = load.stderr;
-    // The bundle evaluated with no Deno global, no repo import map and no
+    // The bundle evaluated with no runtime global, no repo import map and no
     // download: its default registration callback is live under a plain host.
     assert(
       out.includes("loaded:function"),

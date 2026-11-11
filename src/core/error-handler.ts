@@ -31,8 +31,8 @@ export function setupGlobalErrorHandler(options: ErrorHandlerOptions = {}): void
 
   // Handle uncaught errors
   process.on("uncaughtException", (error) => {
-    // The stack carries the file, line and column that the Deno `error` event
-    // exposed as separate fields; the process hook has no event object.
+    // The stack carries the file, line and column; the process hook has no event
+    // object.
     logger.fatal("Uncaught error", {
       message: error?.message,
       stack: error?.stack,

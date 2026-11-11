@@ -141,8 +141,8 @@ test("buildCrashSignal - does not surface as an unhandled rejection when nothing
   connector["buildCrashSignal"]();
   resolve({ code: 0, signal: null, success: true });
 
-  // Give the microtask/event queue a turn; if the no-op .catch() were missing, Deno
-  // would report an unhandled promise rejection, failing this test.
+  // Give the microtask/event queue a turn; if the no-op .catch() were missing, an
+  // unhandled promise rejection would fail this test.
   await new Promise((r) => setTimeout(r, 20));
 });
 
@@ -342,8 +342,7 @@ test("raceWithConnectTimeout - clears both timers when the operation settles ear
 
   const result = await connector["raceWithConnectTimeout"](Promise.resolve("ok"), logger);
   assertEquals(result, "ok");
-  // Deno's default sanitizers (enabled here, unlike the timeout tests above) fail the
-  // test if the WARN/timeout setTimeout handles were left dangling instead of cleared.
+  // Both timers are cleared, so no WARN/timeout setTimeout handle is left dangling.
 });
 
 // --- Fresh crash signal per connect() cycle — task 4.8 ---

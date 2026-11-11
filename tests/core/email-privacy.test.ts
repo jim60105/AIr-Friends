@@ -971,7 +971,7 @@ async function withEmailEndpoint(
 }
 
 /**
- * The server's listener is bound synchronously by `Deno.serve`, so a bounded
+ * The server's listener is bound synchronously by `Bun.serve`, so a bounded
  * immediate retry is enough — no wall-clock wait.
  */
 async function assertServerReachable(port: number): Promise<void> {

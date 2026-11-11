@@ -184,7 +184,7 @@ test("agent-factory omp - fails closed when the trusted extension artifact is mi
     const workingDir = join(root, "ws");
     fs.mkdirSync(workingDir, { recursive: true });
     // C3: absence of the generated entry fails the preflight with the build
-    // remedy — never a silent fallback to the raw Deno-only source tree (the
+    // remedy — never a silent fallback to the raw source tree (the
     // error text must name the bundling command).
     const artifact = resolveOmpExtensionPath();
     withAssetAbsent(artifact, () => {
@@ -235,7 +235,7 @@ test("agent-factory omp - assembles both modes in per-spawn and pooled shapes", 
     const bundlePath = resolve(resolveOmpExtensionPath());
     // Deployment-face precondition: the resolver yields exactly one of the two
     // contracted artifacts (installed image copy, or generated development
-    // entry) — the raw Deno-only source tree is never a launch face.
+    // entry) — the raw source tree is never a launch face.
     const rawBundlePath = resolveOmpExtensionPath();
     assert(
       rawBundlePath === OMP_TRUSTED_EXTENSION_BUNDLE_PATH ||
@@ -293,7 +293,7 @@ test("agent-factory omp - assembles both modes in per-spawn and pooled shapes", 
 
         // The restricted launch loads the generated capability bundle; the
         // YOLO launch carries no restricted carrier at all, and neither mode
-        // is ever handed the raw Deno-only source tree.
+        // is ever handed the raw source tree.
         if (restricted) {
           assertEquals(countOf(args, "--trusted-extension"), 1, label);
           assertEquals(args[args.indexOf("--trusted-extension") + 1], bundlePath, label);

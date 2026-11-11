@@ -378,7 +378,7 @@ test("declaration - the generated content is no execution authority and out-rank
         "*": "allow",
         "bash": {
           "*": "allow",
-          "deno run *": "allow",
+          "node run *": "allow",
           "*.ts*": "allow"
         },
         "external_directory": {

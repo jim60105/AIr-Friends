@@ -2,7 +2,7 @@
 
 /**
  * SHA-256 hash a string or raw bytes, returning hex digest.
- * Uses Deno's built-in Web Crypto API.
+ * Uses the Web Crypto API.
  */
 export async function sha256Hash(content: string | Uint8Array): Promise<string> {
   const data = typeof content === "string"

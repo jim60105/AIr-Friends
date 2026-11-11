@@ -33,7 +33,7 @@ test("ShutdownHandler - can set context", () => {
 test("ShutdownHandler - shutdown without context", async () => {
   const handler = new ShutdownHandler();
 
-  // Mock Deno.exit to prevent test from exiting
+  // Mock process.exit to prevent the test from exiting
   const originalExit = process.exit;
   let exitCode = -1;
   process.exit = ((code: number) => {

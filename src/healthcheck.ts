@@ -77,7 +77,7 @@ export class HealthCheckServer {
   start(): void {
     this.server = Bun.serve({
       port: this.port,
-      // Deno had no idle timeout; keep readiness probes uncut mid-subprocess.
+      // Disable Bun's idle timeout so readiness probes are not cut mid-subprocess.
       idleTimeout: 0,
       fetch: (request) => this.handleRequest(request),
     });

@@ -16,9 +16,8 @@
 // handler, honors a denial, emits readiness, or suppresses a language server.
 // The scenario names and comments identify the evidence as mock evidence.
 //
-// Deno's `sanitizeOps`/`sanitizeResources` options have no Bun equivalent, so
-// every test measures this process's own descriptor table and descendant tree
-// instead (`tests/helpers/leak-check.ts`) once its teardown has finished.
+// Every test measures this process's own descriptor table and descendant tree
+// (`tests/helpers/leak-check.ts`) once its teardown has finished.
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join } from "node:path";

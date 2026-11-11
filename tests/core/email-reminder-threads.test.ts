@@ -450,7 +450,7 @@ async function seedNewerOutboundRecords(
 }
 
 /**
- * Wait for the in-process Skill API listener to accept requests. `Deno.serve`
+ * Wait for the in-process Skill API listener to accept requests. `Bun.serve`
  * binds synchronously, so retrying on the first connection error needs only a
  * microtask yield — no wall-clock delay and no guessed duration.
  */

@@ -369,8 +369,8 @@ export class EmailSmtpClient implements SmtpTransport {
     // bounds its own DNS, connect, and greeting phases (each settled through the bridged
     // error event), and cancelling a connect that is still resolving can leave a socket it
     // creates afterwards unmanaged.
-    // Deno's own timer type is `number`, but node typings leaking in through npm
-    // dependencies are the reason this is written as the platform's timer type.
+    // Use the platform's timer type rather than `number`: node typings reach this
+    // file through npm dependencies.
     let watchdog: ReturnType<typeof setTimeout> | undefined;
     const armWatchdog = (): void => {
       watchdog = setTimeout(() => {

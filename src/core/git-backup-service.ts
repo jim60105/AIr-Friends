@@ -25,10 +25,9 @@ interface CommandOutput {
 }
 
 /**
- * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`. `env` is
- * the merged environment the caller built; an absent binary (a string error code such as
- * `ENOENT`) rejects like the original throw, and a signal-terminated child reports `-1`
- * rather than reading as success.
+ * Run a command through `node:child_process.execFile`. `env` is the environment the
+ * caller built; an absent binary (a string error code such as `ENOENT`) rejects, and a
+ * signal-terminated child reports `-1` rather than reading as success.
  */
 function runCommand(
   command: string,
@@ -461,7 +460,7 @@ export class GitBackupService {
     expectedExitCodes: number[] = [0],
   ): Promise<{ success: boolean; output: string; errorOutput: string }> {
     // The parent environment stays visible to git (credentials, proxy, operator git config)
-    // with the listed values overriding it, exactly as the Deno spawn without a clearing flag.
+    // with the listed values overriding it.
     const { code, stdout, stderr } = await runCommand(
       "git",
       [...BYTE_PRESERVING_GIT_ARGS, ...args],

@@ -56,16 +56,8 @@ test("buildBwrapConfinement - shared OpenCode data dir is NOT bound writable (se
   assertEquals(joined.includes("/home/air/.local/share/opencode"), false);
 });
 
-test("DEFAULT_CONFINEMENT_READONLY_PATHS - binds the Bun skill config and no Deno runtime path", () => {
+test("DEFAULT_CONFINEMENT_READONLY_PATHS - binds the Bun skill config", () => {
   assertEquals(DEFAULT_CONFINEMENT_READONLY_PATHS.includes("/opt/air/skill-bunfig.toml"), true);
-  for (const path of DEFAULT_CONFINEMENT_READONLY_PATHS) {
-    const segments = path.split("/");
-    assertEquals(
-      segments.includes("deno") || segments.includes("deno-dir"),
-      false,
-      path,
-    );
-  }
 });
 
 test("DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS - every entry lives under /home/air", () => {

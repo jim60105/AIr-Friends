@@ -21,11 +21,10 @@
 // waiting is bounded polling of explicitly observable facts. Guarded on
 // dumb-init like the existing integration suite; no network, real
 // agent, official `omp` executable, container/bwrap, or provider credential
-// is used. The agent process is the `bun run` mock, not a `deno run` one.
+// is used. The agent process is the `bun run` mock.
 //
-// Deno's `sanitizeOps`/`sanitizeResources` options have no Bun equivalent, so
-// every test measures this process's own descriptor table and descendant tree
-// instead (`tests/helpers/leak-check.ts`) once its teardown has finished.
+// Every test measures this process's own descriptor table and descendant tree
+// (`tests/helpers/leak-check.ts`) once its teardown has finished.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { join, resolve } from "node:path";

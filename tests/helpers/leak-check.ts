@@ -1,11 +1,9 @@
 // tests/helpers/leak-check.ts
 //
 // Real file-descriptor and descendant-process measurement for the agent
-// integration suites. Deno's `sanitizeOps`/`sanitizeResources`/`sanitizeExit`
-// options have no Bun equivalent, so these suites measure the kernel directly
-// instead: the test process's own descriptor table and its live descendant
-// tree, read at the start of a test and compared again once that test's
-// teardown has finished.
+// integration suites: the test process's own descriptor table and its live
+// descendant tree, read at the start of a test and compared again once that
+// test's teardown has finished.
 
 import fs from "node:fs";
 import { assert } from "@std/assert";
@@ -78,10 +76,10 @@ export async function assertNoLeak(before: LeakSnapshot, graceMs = LEAK_GRACE_MS
 
 /**
  * Run one test's teardown to completion and THEN the leak check, so shutdown
- * always happens and the measurement always runs — the guarantee Deno's
- * sanitizers gave even when a test threw. The first failure is the one thrown,
- * so a teardown assertion is never replaced by a downstream leak report (and a
- * leak is still reported when teardown itself succeeded).
+ * always happens and the measurement always runs even when a test threw. The
+ * first failure is the one thrown, so a teardown assertion is never replaced by
+ * a downstream leak report (and a leak is still reported when teardown itself
+ * succeeded).
  */
 export async function teardownWithLeakCheck(
   before: LeakSnapshot,

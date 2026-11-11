@@ -194,8 +194,8 @@ export async function runAcpInitialize(options: {
   fs.mkdirSync(options.cwd, { recursive: true });
   fs.mkdirSync(join(options.xdgDataHome, "omp"), { recursive: true });
 
-  // Exact environment only (the Deno port cleared the parent environment): a probe child
-  // never inherits provider credentials from the preparing process.
+  // Exact environment only: a probe child never inherits provider credentials from the
+  // preparing process.
   const child = spawn(options.executable, ["acp"], {
     cwd: options.cwd,
     env: {

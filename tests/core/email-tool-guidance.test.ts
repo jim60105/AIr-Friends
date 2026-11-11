@@ -279,7 +279,7 @@ function fixtureRoot(scriptSkills: string[]): string {
   for (const name of scriptSkills) {
     fs.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
     fs.writeFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
-    fs.writeFileSync(`${root}/${name}/scripts/${name}.ts`, "#!/usr/bin/env deno\n");
+    fs.writeFileSync(`${root}/${name}/scripts/${name}.ts`, "#!/usr/bin/env node\n");
   }
   return root;
 }

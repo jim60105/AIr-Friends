@@ -101,9 +101,8 @@ function normalizeHost(hostname: string): string {
 }
 
 /**
- * Resolve a hostname to its IP addresses through the runtime-compatible Node
- * DNS interface (`node:dns/promises`, available in the pinned native runtime
- * and the Deno daemon alike — package-bun-compatible-omp-extension D4).
+ * Resolve a hostname to its IP addresses through the Node DNS interface
+ * (`node:dns/promises`, available in the pinned native runtime).
  * Literal IPs are returned as-is; all A/AAAA records are collected,
  * normalized, and deduplicated. A no-record response in ONE family never
  * discards the other family's valid answers; an empty answer set (nothing
@@ -212,7 +211,7 @@ export async function validateFetchUrl(url: string): Promise<URL> {
  * second, attacker-controlled resolution could otherwise swap in an internal IP between
  * validation and connection). For plain-HTTP hostnames the authority is rewritten to the
  * pinned IP and the original `Host` is preserved. Literal-IP hosts need no pinning; HTTPS
- * hostnames are left unchanged because Deno `fetch` cannot connect-by-IP while preserving
+ * hostnames are left unchanged because `fetch` cannot connect-by-IP while preserving
  * TLS SNI/certificate validation (documented Open Question) — for those the caller still
  * gets the all-addresses range check, just not connect-time pinning.
  */

@@ -51,7 +51,7 @@ function materializingExecutor(
         await fsp.mkdir(dir, { recursive: true });
         await fsp.writeFile(`${dir}/SKILL.md`, `# ${skill}`);
         await fsp.mkdir(`${dir}/scripts`, { recursive: true });
-        await fsp.writeFile(`${dir}/scripts/${skill}.ts`, "#!/usr/bin/env deno\n");
+        await fsp.writeFile(`${dir}/scripts/${skill}.ts`, "#!/usr/bin/env node\n");
         if (behavior(skill) === "linked") {
           // A hostile materialization: a link inside the published tree.
           await fsp.writeFile(`${home}/escape-target`, "escaped");

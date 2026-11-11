@@ -115,7 +115,7 @@ console.log(JSON.stringify(results));
     TMPDIR: "/data/channel-tmp/discord:discord/456", // must be IGNORED
     SKILL_JWT_DIR: jwtDir,
   };
-  for (const k of ["PATH", "HOME", "DENO_DIR", "XDG_CACHE_HOME", "DENO_INSTALL_ROOT"]) {
+  for (const k of ["PATH", "HOME", "XDG_CACHE_HOME"]) {
     if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
   }
 
@@ -212,7 +212,7 @@ console.log(JSON.stringify(results));
     SKILL_SHARED_PROCESS: "1",
     SKILL_JWT_DIR: jwtDir,
   };
-  for (const k of ["PATH", "HOME", "DENO_DIR", "XDG_CACHE_HOME", "DENO_INSTALL_ROOT"]) {
+  for (const k of ["PATH", "HOME", "XDG_CACHE_HOME"]) {
     if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
   }
 

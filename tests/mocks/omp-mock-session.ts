@@ -322,8 +322,7 @@ export function processAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // Node maps ESRCH and EPERM to those `code`s directly (Deno reported them
-    // as NotFound and PermissionDenied).
+    // Node maps ESRCH and EPERM to those `code`s directly.
     const code = error !== null && typeof error === "object" && "code" in error
       ? error.code
       : undefined;

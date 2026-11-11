@@ -13,7 +13,7 @@ interface CommandResult {
   stderr: string;
 }
 
-/** Run one command synchronously, keeping `Deno.Command.output()`'s result shape. */
+/** Run one command synchronously, keeping the captured-output result shape. */
 function runCommand(
   command: string,
   args: string[],

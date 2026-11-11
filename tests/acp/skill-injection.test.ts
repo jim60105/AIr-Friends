@@ -504,7 +504,7 @@ const DENIED: readonly Scenario[] = [
   })),
   { name: "bunx", command: `bunx ${SKILL_PATH}` },
   { name: "bun x", command: `bun x ${SKILL_PATH}` },
-  { name: "deno run", command: `deno run ${SKILL_PATH}` },
+  { name: "node run", command: `node ${SKILL_PATH}` },
   { name: "a script that is not granted", command: "src/acp/command-syntax.ts" },
   {
     name: "a slashless script in the literal form",

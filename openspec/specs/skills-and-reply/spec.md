@@ -81,7 +81,7 @@ Skills SHALL be implemented as TypeScript scripts run by Bun in `skills/{skill-n
 - **WHEN** the script starts
 - **THEN** it SHALL snapshot the owning session id and the JWT file content ONCE at script start, so a backgrounded or late-running skill subprocess cannot observe a later session's pointer or JWT file
 
-#### Scenario: Skill scripts run with scoped Deno permissions
+#### Scenario: Skill scripts run with scoped Bun permissions
 - **GIVEN** a skill script is executed directly
 - **WHEN** it is run
 - **THEN** it SHALL use the shebang `#!/usr/bin/env -S bun run --no-env-file --no-install --config=/opt/air/skill-bunfig.toml`

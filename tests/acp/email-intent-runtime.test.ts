@@ -348,7 +348,7 @@ async function withRuntime(
     PATH: process.env["PATH"] ?? "/usr/bin",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
-    USER: "deno",
+    USER: "air",
     OPENROUTER_API_KEY: "fixture-provider-key",
   };
   const logs: CapturedLog[] = [];
@@ -550,7 +550,7 @@ test.skipIf(SUBPROCESS_SKIP)(
       HOME: DAEMON_HOME,
       PATH: process.env["PATH"] ?? "/usr/bin",
       LANG: "C.UTF-8",
-      USER: "deno",
+      USER: "air",
       OPENROUTER_API_KEY: "fixture-provider-key",
     };
     const logs: CapturedLog[] = [];
@@ -614,7 +614,7 @@ test.skipIf(SUBPROCESS_SKIP)(
     const env: Record<string, string> = {
       HOME: DAEMON_HOME,
       PATH: process.env["PATH"] ?? "/usr/bin",
-      USER: "deno",
+      USER: "air",
       OPENROUTER_API_KEY: "fixture-provider-key",
     };
     const logs: CapturedLog[] = [];
@@ -925,7 +925,7 @@ test("runtime - an unconfirmed producer termination retains the private roots", 
       profileOptions: intentProfileOptions(workspace, "opencode", {
         HOME: DAEMON_HOME,
         PATH: process.env["PATH"] ?? "/usr/bin",
-        USER: "deno",
+        USER: "air",
         OPENROUTER_API_KEY: "fixture-provider-key",
       }),
       connectorFactory: () => ({
@@ -1157,7 +1157,7 @@ test.skipIf(SUBPROCESS_SKIP)(
     const env: Record<string, string> = {
       HOME: DAEMON_HOME,
       PATH: process.env["PATH"] ?? "/usr/bin",
-      USER: "deno",
+      USER: "air",
       OPENROUTER_API_KEY: "fixture-provider-key",
     };
     try {

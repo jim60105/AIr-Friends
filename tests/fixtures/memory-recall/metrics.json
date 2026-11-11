@@ -27,6 +27,6 @@
     "recallAt2": 1,
     "falsePositiveRate": 0.03571428571428571,
     "falsePositiveQueryCount": 2,
-    "averageInjectedTokens": 20.964285714285715
+    "averageInjectedTokens": 20.946428571428573
   }
 }

@@ -125,7 +125,7 @@ function profileEnv(values: Record<string, string> = {}): (name: string) => stri
     PATH: "/usr/bin",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
-    USER: "deno",
+    USER: "air",
     OPENROUTER_API_KEY: "key-openrouter",
     GEMINI_API_KEY: "key-gemini",
     ...values,
@@ -404,7 +404,6 @@ test("profile - launches the authored deny-all document with its private roots",
     // staging directory exist on this path.
     assertEquals(env["XDG_CONFIG_HOME"], undefined);
     assertEquals(env["SKILL_JWT_DIR"], undefined);
-    assertEquals(env["DENO_DIR"], undefined);
     assertEquals(config.skillsRoot, undefined);
 
     // The private roots and the native layout really exist, and the reserved

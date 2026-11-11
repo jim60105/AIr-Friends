@@ -27,7 +27,7 @@ function unwrap<T>(result: RootPathResult<T>): T {
   return result.value;
 }
 
-/** Minimal `Stats` seam fixture: Deno exposed these as properties, Node as methods. */
+/** Minimal `Stats` seam fixture. */
 function fakeStats(flags: { file?: boolean; dir?: boolean; symlink?: boolean }): Stats {
   return {
     isFile: () => flags.file === true,
@@ -132,7 +132,7 @@ test("Task 3.1: Token expansion handles legacy braced and unbraced tokens", () =
   assertEquals(resSharedBraced.normalizedPath, "/data/agent-workspace/shared-notes.md");
   assertEquals(resSharedUnbraced.normalizedPath, "/data/agent-workspace/shared-notes.md");
 
-  // Relative path anchors to sessionCwd, NOT Deno.cwd()
+  // Relative path anchors to sessionCwd, NOT process.cwd()
   const relNotes = unwrap(resolveSessionPath("notes.md", context));
   assertEquals(relNotes.normalizedPath, "/data/users/alice/notes.md");
   assertNotEquals(relNotes.normalizedPath, resolve(process.cwd(), "notes.md"));

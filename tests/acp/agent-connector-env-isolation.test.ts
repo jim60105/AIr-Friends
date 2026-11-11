@@ -194,7 +194,6 @@ test("F1 - OpenCode production env reaches the child exactly", async () => {
   const parentOverrides: Record<string, string> = {
     DISCORD_TOKEN: "discord-parent-secret",
     SKILL_API_SECRET: "skill-api-parent-secret",
-    DENO_DIR: "/tmp/parent-deno-dir",
     OPENCODE_API_KEY: "parent-opencode-key",
     OPENROUTER_API_KEY: "parent-openrouter-key",
     GEMINI_API_KEY: "parent-gemini-key",
@@ -221,7 +220,6 @@ test("F1 - OpenCode production env reaches the child exactly", async () => {
     assertEquals(childEnv["GOOGLE_GENERATIVE_AI_API_KEY"], "gm-configured");
     assertEquals(childEnv["DISCORD_TOKEN"], undefined);
     assertEquals(childEnv["SKILL_API_SECRET"], undefined);
-    assertEquals(childEnv["DENO_DIR"], undefined);
   } finally {
     for (const key of Object.keys(parentOverrides)) {
       if (restore[key] === undefined) delete process.env[key];
@@ -238,7 +236,6 @@ test("F1 - OMP production env reaches the child exactly", async () => {
   const parentOverrides: Record<string, string> = {
     DISCORD_TOKEN: "discord-parent-secret",
     SKILL_API_SECRET: "skill-api-parent-secret",
-    DENO_DIR: "/tmp/parent-deno-dir",
     GEMINI_API_KEY: "parent-gemini-key",
     OPENROUTER_API_KEY: "parent-openrouter-key",
     LANG: process.env["LANG"] ?? "C.UTF-8",
@@ -271,7 +268,6 @@ test("F1 - OMP production env reaches the child exactly", async () => {
     assertEquals(childEnv["OPENROUTER_API_KEY"], "or-configured");
     assertEquals(childEnv["DISCORD_TOKEN"], undefined);
     assertEquals(childEnv["SKILL_API_SECRET"], undefined);
-    assertEquals(childEnv["DENO_DIR"], undefined);
   } finally {
     for (const key of Object.keys(parentOverrides)) {
       if (restore[key] === undefined) delete process.env[key];

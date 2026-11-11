@@ -36,7 +36,7 @@ const logger = createLogger("DashboardServer");
 
 /**
  * The connection facts the dashboard needs, in the shape the rate limiter and
- * login throttling already read (`Deno.ServeHandlerInfo`'s `remoteAddr`).
+ * login throttling already read (`remoteAddr` of the server's socket info).
  */
 export interface ClientInfo {
   remoteAddr?: { hostname: string; port: number };
@@ -138,8 +138,7 @@ export class DashboardServer {
     this.server = Bun.serve({
       port,
       hostname,
-      // Deno had no idle timeout; disabling Bun's 10s default keeps the SSE
-      // stream and slow requests alive exactly as before.
+      // Disabling Bun's 10s default keeps the SSE stream and slow requests alive.
       idleTimeout: 0,
       fetch: (req, server) => this.handleRequest(req, toClientInfo(req, server)),
     });

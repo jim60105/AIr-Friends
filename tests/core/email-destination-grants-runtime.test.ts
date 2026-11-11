@@ -200,7 +200,7 @@ async function withRuntimeCase(
     PATH: process.env["PATH"] ?? "/usr/bin",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
-    USER: "deno",
+    USER: "air",
     OPENROUTER_API_KEY: "fixture-provider-key",
   };
   const stub = stubFactory(turn);

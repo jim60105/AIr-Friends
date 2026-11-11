@@ -44,7 +44,7 @@ export function emittedExternals(text: string): string[] {
 
 /**
  * Runtime `require(...)` edges: literal `require("spec")` calls plus the
- * aliases `deno bundle` emits when source binds `globalThis.require` to a
+ * aliases the bundler emits when source binds `globalThis.require` to a
  * local (`const req = globalThis.require; req("node:fs")`). These load at
  * runtime exactly like static edges, so the every-edge contract covers them;
  * only documented native builtins may arrive through this door — the host

@@ -1,7 +1,7 @@
 # runtime-portability Specification
 
 ## Purpose
-Keeps platform names, filesystem error classes and filesystem helper behavior identical to what the application relied on under Deno, so code moved to `node:*` APIs keeps the same decisions on every supported architecture.
+Keeps platform names, filesystem error classes and filesystem helper behavior identical to what the pre-migration runtime provided, so code using `node:*` APIs keeps the same decisions on every supported architecture.
 
 ## Requirements
 

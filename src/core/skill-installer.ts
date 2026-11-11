@@ -25,10 +25,9 @@ const logger = createLogger("SkillInstaller");
 const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 /**
- * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`. A supplied
- * `env` REPLACES the parent environment (`clearEnv: true` in the Deno call); without one the
- * child inherits it. An absent binary rejects like the original throw, and a signal-terminated
- * child reports `-1` rather than reading as success.
+ * Run a command through `node:child_process.execFile`. A supplied `env` REPLACES the
+ * parent environment; without one the child inherits it. An absent binary rejects, and a
+ * signal-terminated child reports `-1` rather than reading as success.
  */
 function runCommand(
   command: string,

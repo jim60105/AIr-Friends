@@ -149,7 +149,7 @@ test("getMinimumOmpVersion - honors env override; blank ignored", () => {
 
 test("detectOmpVersion - returns null when binary missing (non-fatal)", async () => {
   // Spawn a binary name that cannot exist. NEVER override the global PATH here:
-  // tests run with `--parallel` and Deno.env is process-global, so mutating PATH
+  // tests run with `--parallel` and `process.env` is process-global, so mutating PATH
   // would break sibling test files (e.g. git-backup-service spawning `git`).
   const detected = await detectOmpVersion(1000, "definitely-not-a-real-binary-xyz");
   assertEquals(detected, null);

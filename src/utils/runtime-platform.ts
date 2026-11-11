@@ -3,7 +3,7 @@
 import os from "node:os";
 
 /**
- * Maps a runtime machine name onto the `Deno.build.arch` vocabulary.
+ * Maps a runtime machine name onto the canonical architecture vocabulary.
  *
  * Bun reports `x86_64` on x86-64 but `arm64` on arm64, while `process.arch`
  * reports `x64`/`arm64`; application code and the OMP native cache key on
@@ -23,7 +23,7 @@ export function runtimeArch(machine: string = os.machine()): string {
   }
 }
 
-/** Maps a Node platform name onto the `Deno.build.os` vocabulary. */
+/** Maps a Node platform name onto the canonical OS vocabulary. */
 export function runtimeOs(platform: string = process.platform): string {
   return platform === "win32" ? "windows" : platform;
 }

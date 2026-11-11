@@ -120,9 +120,9 @@ const logger = createLogger("SessionOrchestrator");
 const MAX_CONVERTER_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 /**
- * `Deno.Command(...).output()` semantics on top of `node:child_process.execFile`: an absent
- * converter (a string error code such as `ENOENT`) rejects like the original throw, and a
- * signal-terminated child reports `-1` rather than reading as success.
+ * Run a converter through `node:child_process.execFile`: an absent converter (a string
+ * error code such as `ENOENT`) rejects, and a signal-terminated child reports `-1`
+ * rather than reading as success.
  */
 function runConverter(args: string[]): Promise<{ code: number; success: boolean }> {
   const pending = Promise.withResolvers<{ code: number; success: boolean }>();

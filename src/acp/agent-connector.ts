@@ -447,7 +447,7 @@ export class AgentConnector {
    * fails connect() explicitly with ZERO processes spawned, and no
    * observation between spawn and the initialization try/catch can orphan a
    * child. The connector NEVER re-discovers a root (no HOME, no
-   * `Deno.cwd()/skills`, no alternate observation).
+   * `process.cwd()/skills`, no alternate observation).
    */
   private buildOrdinaryInventory(
     clientConfig: AgentConnectorOptions["clientConfig"],

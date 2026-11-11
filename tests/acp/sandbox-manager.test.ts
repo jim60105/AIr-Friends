@@ -916,8 +916,8 @@ test.skipIf(!canConfineFilesystem() || confinementHostUnsupported())(
 
       const ownMarker = join(nativeDataDir, "agent-marker");
       const forbiddenInSkillRoot = join(skillRoot, "forbidden.md");
-      // Deno-generated absolute paths never contain a single quote, so single-quoting them
-      // keeps the script free of any shell expansion.
+      // The fixture's absolute paths never contain a single quote, so single-quoting
+      // them keeps the script free of any shell expansion.
       const script = [
         `cat '${modelsFile}'`,
         // Every status lands on its OWN line: a probe's output (the payload fixture

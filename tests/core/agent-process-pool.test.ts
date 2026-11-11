@@ -124,8 +124,8 @@ function makeWorkspace(key: string): WorkspaceInfo {
 
 /**
  * Wait (bounded) for the pool's post-session release path (pointer clear, JWT
- * delete, child-process drain) to fully finish, then stop the pool. Keeps Deno's
- * leak detector quiet: no pending timers or file operations at test end.
+ * delete, child-process drain) to fully finish, then stop the pool. Leaves no
+ * pending timers or file operations at test end.
  */
 async function stopPool(pool: AgentProcessPool): Promise<void> {
   const deadline = Date.now() + 2000;
@@ -386,8 +386,7 @@ test("pool - queue deadline cancels still-queued sessions", async () => {
   const registry = new SessionRegistry(1000);
   const config = makeConfig();
   // Short reclaim idle time so the pool's reclaim timer FIRES (completes) during
-  // the test, keeping Deno's leak detector quiet (a cleared timer counts as
-  // "never completed").
+  // the test.
   config.agent.sharedProcess = {
     enabled: true,
     jwtDir: "data/skill-jwt",

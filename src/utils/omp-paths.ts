@@ -21,7 +21,7 @@ import fs from "node:fs";
  * installation actually consume is the generated native-loadable bundle —
  * `OMP_TRUSTED_EXTENSION_BUNDLE_PATH` in development,
  * `<OMP_IMAGE_EXTENSION_ROOT>/index.js` in the image. Nothing launches this raw
- * Deno-only source tree any more.
+ * source tree.
  */
 export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
 
@@ -31,7 +31,7 @@ export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
  * source plus locked dependencies (frozen lock; `bun run bundle:omp-extension`
  * builds it). Development launch and the image consume the SAME artifact contract;
  * a missing generated development entry fails the launch preflight with the build
- * remedy — the resolver NEVER falls back to the raw Deno-only source tree.
+ * remedy — the resolver NEVER falls back to the raw source tree.
  */
 export const OMP_TRUSTED_EXTENSION_BUNDLE_DIR = "build/omp-extension";
 
@@ -98,7 +98,7 @@ export function resolveOmpConfigPath(
  * launch: the installed image artifact when present, otherwise the
  * deterministic generated development entry. A missing artifact is reported by
  * the caller with the build remedy — this resolver never falls back to the raw
- * Deno-only source tree.
+ * source tree.
  */
 export function resolveOmpExtensionPath(options: {
   /** Injectable existence probe; defaults to the real filesystem. */

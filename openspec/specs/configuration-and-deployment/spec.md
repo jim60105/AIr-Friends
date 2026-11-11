@@ -21,7 +21,7 @@ The system SHALL load configuration from YAML files with a defined merge order: 
 - **GIVEN** `ENV` is set to `"production"`
 - **WHEN** the config is loaded
 - **THEN** the system SHALL load `config.yaml` first, then deep-merge `config.production.yaml` on top if it exists
-- **AND** the environment SHALL default to `"development"` when `ENV` is not set, and `DENO_ENV` SHALL be ignored
+- **AND** the environment SHALL default to `"development"` when `ENV` is not set, and no other environment-selector variable SHALL be consulted
 
 #### Scenario: Environment Variable Syntax in Config Values
 

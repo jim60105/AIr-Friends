@@ -232,8 +232,8 @@ export class WorkspaceManager {
     _workspacePath: string,
     _isDm: boolean,
   ): void {
-    // Memory files are created lazily on first write (Deno.writeTextFile with append:true
-    // auto-creates the file). No eager file creation needed.
+    // Memory files are created lazily on first write (append creates the file when it is
+    // missing). No eager file creation needed.
   }
 
   /**
@@ -267,8 +267,8 @@ export class WorkspaceManager {
 
     try {
       const content = await fsp.readFile(absolutePath, "utf8");
-      // `Deno.readTextFile` strips a leading byte-order mark; `readFile` keeps
-      // it, so drop it to preserve the delivered text exactly.
+      // `readFile` keeps a leading byte-order mark, so drop it to preserve the
+      // delivered text exactly.
       return content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content;
     } catch (error) {
       if (isNotFoundError(error)) {
@@ -930,7 +930,7 @@ This is your personal workspace for long-term knowledge and notes.
     // budget is reached: materialising a whole directory (or walking a long
     // run of failing entries) would reintroduce the unbounded work the node
     // bound exists to prevent (design D4). `opendirSync`/`readSync` keeps the
-    // enumeration incremental, as `Deno.readDirSync` did.
+    // enumeration incremental.
     let dirHandle: Dir | undefined;
     try {
       dirHandle = fs.opendirSync(dir);

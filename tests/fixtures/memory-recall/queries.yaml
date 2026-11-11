@@ -229,9 +229,9 @@
 - id: qn02
   case: note-natural
   context: dm
-  current: Deno 的原生模組要怎麼載入？
+  current: Bun 的原生模組要怎麼載入？
   expected: []
-  expectedNotes: [notes/deno-ffi-binding-notes.md]
+  expectedNotes: [notes/bun-ffi-binding-notes.md]
 - id: qn03
   case: note-natural
   context: dm

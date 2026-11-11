@@ -18,25 +18,25 @@ function errorCode(error: unknown): unknown {
   return error.code;
 }
 
-/** `Deno.errors.NotFound` semantics. */
+/** True when the thrown value reports `ENOENT`. */
 export function isNotFoundError(error: unknown): boolean {
   return errorCode(error) === "ENOENT";
 }
 
-/** `Deno.errors.AlreadyExists` semantics. */
+/** True when the thrown value reports `EEXIST`. */
 export function isAlreadyExistsError(error: unknown): boolean {
   return errorCode(error) === "EEXIST";
 }
 
-/** `Deno.errors.PermissionDenied` semantics. */
+/** True when the thrown value reports `EACCES` or `EPERM`. */
 export function isPermissionDeniedError(error: unknown): boolean {
   const code = errorCode(error);
   return code === "EACCES" || code === "EPERM";
 }
 
 /**
- * `Deno.remove` semantics: removes a file, a symbolic link without following it,
- * or an empty directory. A non-empty directory and a missing path reject.
+ * Remove a file, a symbolic link without following it, or an empty directory.
+ * A non-empty directory and a missing path reject.
  */
 export async function removePath(path: string): Promise<void> {
   const info = await fsp.lstat(path);
@@ -68,7 +68,7 @@ function tempFileName(options: TempOptions): string {
   return join(options.dir ?? os.tmpdir(), `${prefix}${randomUUID()}${suffix}`);
 }
 
-/** `Deno.makeTempDir` semantics; the directory is created with mode `0o700`. */
+/** Create a temporary directory with mode `0o700`. */
 export async function makeTempDir(options: TempOptions = {}): Promise<string> {
   const created = await fsp.mkdtemp(tempDirTemplate(options));
   const suffix = options.suffix ?? "";
@@ -87,7 +87,7 @@ export function makeTempDirSync(options: TempOptions = {}): string {
   return renamed;
 }
 
-/** `Deno.makeTempFile` semantics; the empty file is created with mode `0o600`. */
+/** Create an empty temporary file with mode `0o600`. */
 export async function makeTempFile(options: TempOptions = {}): Promise<string> {
   const path = tempFileName(options);
   const handle = await fsp.open(path, "wx", 0o600);

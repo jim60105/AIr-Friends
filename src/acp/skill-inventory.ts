@@ -11,8 +11,9 @@
 //   full identity tuple (dev, ino, ctime, size) and the root observation they
 //   were enumerated under. ext4 reuses freed inode numbers, so (dev, ino) alone
 //   cannot detect a delete+recreate replant (proven on CI runners: identical
-//   dev/ino before/after replacement). Deno reports `ctime` at whole-second
-//   granularity, so it can only witness a change that is at least a second old;
+//   dev/ino before/after replacement). `ctime` is compared at whole-second
+//   granularity (see `statTuple`), so it can only witness a change that is at
+//   least a second old;
 //   `size` is the clock-independent discriminator; a same-second, same-length
 //   rewrite is observationally indistinguishable to this mechanism. A suffix
 //   spelling is never authority:

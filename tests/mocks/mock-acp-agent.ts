@@ -812,10 +812,10 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
 }
 
 /**
- * Spawn a Bun child and collect its exit like `Deno.Command.output()`: every
- * stdout/stderr byte, the awaited exit, and no inherited environment (`env`
- * replaces the whole environment, Deno's `clearEnv: true`). Async on purpose so
- * the mock's stdin loop keeps consuming ACP lines while a script runs.
+ * Spawn a Bun child and collect its exit: every stdout/stderr byte, the awaited
+ * exit, and no inherited environment (`env` replaces the whole environment).
+ * Async on purpose so the mock's stdin loop keeps consuming ACP lines while a
+ * script runs.
  */
 async function runScript(
   command: string,

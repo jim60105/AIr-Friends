@@ -165,7 +165,6 @@ test("HealthCheckServer - workspace write permission check with temp dir", async
     // bun should always be available in test environment
     const bunCheck = result.checks.find((c) => c.name === "binary:bun");
     assertEquals(bunCheck?.ready, true);
-    assertEquals(result.checks.find((c) => c.name === "binary:deno"), undefined);
   } finally {
     await fsp.rm(tmpDir, { recursive: true });
   }

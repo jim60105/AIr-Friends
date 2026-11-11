@@ -70,9 +70,9 @@ test("renderFastRecallSection - user memories render under the Relevant Memory h
   assertEquals(
     renderFastRecallSection([
       makeMemory({ content: "喜歡無糖綠茶" }),
-      makeMemory({ content: "用 Deno 開發" }),
+      makeMemory({ content: "用 Bun 開發" }),
     ]),
-    `${RELEVANT_MEMORY_HEADING}\n\n- 喜歡無糖綠茶\n- 用 Deno 開發\n`,
+    `${RELEVANT_MEMORY_HEADING}\n\n- 喜歡無糖綠茶\n- 用 Bun 開發\n`,
   );
 });
 
