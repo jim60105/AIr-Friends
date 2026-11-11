@@ -229,7 +229,9 @@ jobs:
         run: bun run --no-env-file scripts/coverage-floor.ts coverage/lcov.info 75
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        # v6+ moved its internal actions/github-script step to v8 (Node 24);
+        # v5 still ships v7.0.1 and triggers the Node.js 20 deprecation warning.
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage/lcov.info
         env:
