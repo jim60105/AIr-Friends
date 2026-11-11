@@ -20,6 +20,7 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -85,6 +86,7 @@ jobs:
     name: Merge Manifests
     runs-on: ubuntu-26.04
     needs: build
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6

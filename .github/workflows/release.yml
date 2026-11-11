@@ -16,6 +16,8 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-26.04
+    # Backstop for the `bun test --isolate` hang in Bun 1.4.2 (oven-sh/bun#47257).
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -24,7 +26,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Cache Bun dependencies
         uses: actions/cache@v5
@@ -64,6 +66,7 @@ jobs:
     name: Create Release
     runs-on: ubuntu-26.04
     needs: test
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -118,6 +121,7 @@ jobs:
     name: Build Docker Image (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     needs: test
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -189,6 +193,7 @@ jobs:
     name: Merge Docker Manifests
     runs-on: ubuntu-26.04
     needs: docker-build
+    timeout-minutes: 15
 
     steps:
       - name: Checkout

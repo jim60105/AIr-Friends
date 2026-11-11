@@ -6,7 +6,7 @@
 
 ## 本機開發環境設定
 
-1. **安裝 Bun**：確認本機安裝 Bun 1.4.2（版本固定於 `package.json` 的 `packageManager`）。
+1. **安裝 Bun**：確認本機安裝 Bun 1.4.4（版本固定於 `package.json` 的 `packageManager`）。
 2. **複製專案庫**。
 
    ```bash

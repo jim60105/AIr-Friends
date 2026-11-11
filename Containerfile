@@ -7,9 +7,12 @@ ARG RELEASE=0
 
 ########################################
 # Base stage
-# Official Bun Debian image, pinned by digest; the application runtime base.
+# Official Bun Debian image (`oven/bun:1.4.4-debian`), pinned by digest; the
+# application runtime base. 1.4.2 is not usable: a GC during `spawnSync` drops
+# the child-exit event (oven-sh/bun#47257), which hangs `bun test --isolate` in
+# the image smoke run. Never pin the base below 1.4.4.
 ########################################
-FROM docker.io/oven/bun@sha256:4f6e31d1a54d6a3dd312daef655fc998101b5043d52e12592ac293ef04b9bc73 AS base
+FROM docker.io/oven/bun@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS base
 
 # The base image already ships a `bun` account at UID 1000 (gid 1000) and runs
 # as root until switched, so no `useradd` runs anywhere in this file. `USER

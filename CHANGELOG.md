@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Relocated current time timestamp closer to instructions in system reply prompt
 
+### Fixed
+
+- Continuous integration no longer stalls for hours. The runtime, the CI toolchain and the digest-pinned image base move to Bun 1.4.4. In Bun 1.4.2 a garbage collection that ran while `spawnSync` waited dropped the child-exit event (oven-sh/bun#47257), so `bun test --isolate` could hang forever while its own `--timeout` never fired; the cancelled run on 2026-11-09 shows the stall beginning inside `tests/acp/agent-factory-omp.test.ts`. Every CI and release job now also carries a `timeout-minutes` bound, so a hang fails fast instead of waiting out the six-hour job limit.
+
 ## [0.37.0] - 2026-11-10
 
 ### Changed

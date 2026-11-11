@@ -18,7 +18,7 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 
 | Component       | Technology               | Version       |
 | --------------- | ------------------------ | ------------- |
-| Runtime         | Bun                      | 1.4.2         |
+| Runtime         | Bun                      | 1.4.4         |
 | Language        | TypeScript               | (Bun native)  |
 | ACP SDK         | @agentclientprotocol/sdk | 0.14.1        |
 | Discord Library | discord.js               | ^14.0.0       |

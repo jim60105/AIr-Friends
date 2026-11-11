@@ -548,7 +548,7 @@ test("matcher - .. spellings crossing a symlinked directory deny (B1)", () => {
   // Session cwd W: a symlink `jump` INTO the grant's skill directory, plus a
   // planted regular file at the cwd-relative lexical landing point. Bun's
   // loader lexicalizes `jump/../memory-save/scripts/...` to the PLANTED file
-  // (observed on the pinned 1.4.2), while the kernel physically traverses the
+  // (observed on Bun 1.4.2), while the kernel physically traverses the
   // link to the real grant — so the old physical-only matcher approved while
   // the wrong module executed.
   const cwd = fs.realpathSync(makeTempDirSync({ prefix: "air-cwd-" }));

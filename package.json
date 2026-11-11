@@ -3,9 +3,9 @@
   "version": "0.37.0",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.4",
   "engines": {
-    "bun": "1.4.2"
+    "bun": "1.4.4"
   },
   "scripts": {
     "start": "bun run --no-env-file --config=./bunfig.toml src/main.ts",
@@ -39,7 +39,7 @@
   "devDependencies": {
     "@std/assert": "npm:@jsr/std__assert@1.0.19",
     "@std/testing": "npm:@jsr/std__testing@1.0.18",
-    "@types/bun": "1.4.2",
+    "@types/bun": "1.4.4",
     "dprint": "0.64.3",
     "oxlint": "1.92.0",
     "typescript": "5.9.3"

@@ -61,9 +61,9 @@ check_help() {
 check_tools() {
   podman_run "$final_image" sh -c '
     set -eu
-    test "$(bun --version)" = "1.4.2"
+    test "$(bun --version)" = "1.4.4"
     case "$(bun --revision)" in
-      1.4.2+744846f84*) ;;
+      1.4.4+38afee6c8*) ;;
       *) echo "bun --revision: $(bun --revision)" >&2; exit 1 ;;
     esac
     test "$(opencode --version)" = "1.18.21"

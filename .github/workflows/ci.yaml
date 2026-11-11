@@ -17,6 +17,7 @@ jobs:
   check:
     name: Code Quality
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -25,7 +26,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Cache Bun dependencies
         uses: actions/cache@v5
@@ -50,6 +51,11 @@ jobs:
   test:
     name: Run Tests (${{ matrix.runner }}, userns ${{ matrix.userns }})
     needs: check
+    # Bun is pinned to 1.4.4 on purpose: in 1.4.2 a garbage collection during
+    # `spawnSync` drops the child-exit event (oven-sh/bun#47257, fixed in 1.4.4),
+    # which makes `bun test --isolate` hang forever while its own --timeout never
+    # fires. This job-level timeout is the backstop if that ever regresses.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +75,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Cache Bun dependencies
         uses: actions/cache@v5
@@ -167,6 +173,7 @@ jobs:
     name: Test Coverage
     needs: check
     runs-on: ubuntu-26.04
+    timeout-minutes: 25
 
     steps:
       - name: Checkout code
@@ -175,7 +182,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Cache Bun dependencies
         uses: actions/cache@v5
@@ -231,6 +238,7 @@ jobs:
   image:
     name: Image Smoke (${{ matrix.runner }})
     needs: test
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -246,7 +254,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Cache Bun dependencies
         uses: actions/cache@v5
