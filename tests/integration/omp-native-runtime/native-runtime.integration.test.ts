@@ -168,6 +168,20 @@ const WRITE_CONTENT = "parity-smoke";
 const EXTERNAL_SENTINEL = "parity-external-read-sentinel";
 const EXTERNAL_FILE_CONTENT = `# external-directory read fixture\n\n${EXTERNAL_SENTINEL}\n`;
 
+/**
+ * Fixture-specific markers of this file's own fixtures. A live search backend
+ * legitimately echoes the query token (`parity smoke`) in result titles and
+ * URLs, so these markers detect recognizable fixture content without treating
+ * a query echo as a leak.
+ */
+const FIXTURE_CONTENT_MARKERS = [
+  FIXTURE_MD_MARKER,
+  "parity-smoke line for grep",
+  EDIT_TARGET_FIRST_LINE,
+  URL_BYTES_MARKER,
+  EXTERNAL_SENTINEL,
+] as const;
+
 /** The loopback URL read (`read { path: <url> }`) served by this test. */
 const FIXTURE_URL = `http://${LOOPBACK_HOST}:${LOOPBACK_PORT}${URL_BYTES_PATH}`;
 
@@ -1425,12 +1439,18 @@ async function assertRestrictedLeg(
   // without one it reports its own absence outcome. The native context reducer
   // may additionally elide the (large) search result before the model reads it.
   // Either way this leg records the ACTUAL model-facing text and only asserts it
-  // never fabricates fixture content.
+  // never returns this test's own fixture content (a real result may echo the
+  // query token itself).
   const webSearch = toolResult(evidence, 10);
   assert(webSearch.length > 0, "web_search produced a native result");
-  assert(
-    !webSearch.includes("parity-smoke"),
-    `web_search fabricated no fixture content — observed: ${boundedText(webSearch)}`,
+  const leakedFixtureContent = FIXTURE_CONTENT_MARKERS.filter((marker) =>
+    webSearch.includes(marker)
+  );
+  assertEquals(
+    leakedFixtureContent,
+    [],
+    `${evidence.label}: web_search returned no fixture content — observed: ` +
+      boundedText(webSearch),
   );
   // An unavailable/unadmitted tool (unregistered name, capability or approval
   // block) would satisfy "a result exists" vacuously, so it fails the leg here.
