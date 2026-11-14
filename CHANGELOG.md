@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The container's headless browser is no longer the Playwright download. The image now resolves the latest `@sparticuz/chromium` release at build time, verifies the asset against the digest that release publishes, inflates it to `/usr/local/bin/chromium`, and fails the build unless it starts headless and exposes a DevTools endpoint. Browser freshness is intentional: a rebuild may ship a newer browser, and the resolved version is printed in the build log. Because no browser version is pinned, a local rebuild must change `RELEASE` (or bypass the layer cache) to pick up a newer release. The version tracks that packager's releases, which can lag Chrome stable — the bundled `agent-browser` reports the gap when it detects one.
+- The Playwright dependency surface is gone: no `npx playwright` step, no browser cache, no Playwright-resolved apt layer. The browser's OS libraries and font set are installed explicitly, and the Playwright ffmpeg symlink step was removed (system `ffmpeg` already serves `agent-browser record`).
+- Browser resolution is now `agent-browser`'s own (install cache, then `PATH`); the daemon no longer scans Playwright caches. `AGENT_BROWSER_EXECUTABLE_PATH` remains the operator override and stays in the sandbox environment allowlist. Developer machines that only have a Playwright cache should set that variable or run `agent-browser install`.
+
 ## [0.37.0] - 2026-11-11
 
 ### Changed

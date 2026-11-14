@@ -39,6 +39,12 @@ Kubernetes 另有前置條件。節點須允許未授權使用者命名空間（
 
 ACP 回呼保護主要約束透過 ACP 協定請求的檔案操作。外部代理人二進位檔若透過底層原生 Shell 或內建工具存取未掛載隔離的本機檔案，仍受作業系統行程權限規範。
 
+### 無頭瀏覽器（Headless Browser）
+
+映像檔在建置時解析 `@sparticuz/chromium` 的最新 release（瀏覽器新鮮度是刻意設計：每次重建都會取得新版），並以該 release 為 asset 公布的 SHA-256 digest 驗證下載內容後才解壓安裝，因此「不釘版」不等於「不驗證」。安裝位置固定為 `/usr/local/bin/chromium`，這是 `agent-browser` 自身解析順序（安裝快取，其次 `PATH`）會找到的名稱；它同時位於 bwrap 唯讀綁定清單內，被沙盒化的代理人無法替換。維運人員仍可用 `AGENT_BROWSER_EXECUTABLE_PATH` 覆寫路徑，守護程式只做原樣傳遞，不自行掃描任何瀏覽器快取。
+
+建置階段會實際啟動一次無頭瀏覽器（`--headless=new`、`--remote-debugging-port=0`，等待 `DevToolsActivePort`），啟動失敗即中止建置。`--dump-dom` 對這個 serverless build 不會完成，請勿以它作為驗收指令；`agent-browser doctor --offline --quick` 會跳過真實啟動檢查，只適合快速檢視安裝狀態，完整診斷請用 `agent-browser doctor --offline`。
+
 ### 輸出代理限制（Egress Proxy Limitations）
 
 `agent.sandbox.egressProxy` 預設啟用，在輸出端套用 SSRF 規則，阻擋回送位址、私有網段、連結本地與雲端中介資料位址。它不解析或過濾允許目標的封包內容，也不等同於完整的防火牆。

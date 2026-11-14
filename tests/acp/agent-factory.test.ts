@@ -9,7 +9,6 @@ import {
 } from "@std/assert";
 import {
   createAgentConfig,
-  detectPlaywrightBinarySync,
   formatPermissionRejections,
   getDefaultAgentType,
   getRetryPromptStrategy,
@@ -666,66 +665,6 @@ test("createAgentConfig - relative config values export absolute pool paths", ()
   assertEquals(agentConfig.cwd, resolve(join("./data", "channel-cwd", "discord:123")));
 });
 
-test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {
-  const tempDir = makeTempDirSync();
-  const originalHome = process.env["HOME"];
-  process.env["HOME"] = tempDir;
-
-  try {
-    const playwrightDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium_headless_shell-1208",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(playwrightDir, { recursive: true });
-    const binaryPath = join(playwrightDir, "chrome-headless-shell");
-    fs.writeFileSync(binaryPath, "dummy binary content");
-
-    const detected = detectPlaywrightBinarySync();
-    assertEquals(detected, binaryPath);
-  } finally {
-    if (originalHome) {
-      process.env["HOME"] = originalHome;
-    } else {
-      delete process.env["HOME"];
-    }
-    try {
-      fs.rmSync(tempDir, { recursive: true });
-    } catch {
-      // Ignore cleanup error
-    }
-  }
-});
-
-test("detectPlaywrightBinarySync - detects standard chromium", () => {
-  const tempDir = makeTempDirSync();
-  const originalHome = process.env["HOME"];
-  process.env["HOME"] = tempDir;
-
-  try {
-    const playwrightDir = join(tempDir, ".cache", "ms-playwright", "chromium-1097", "chrome-linux");
-    fs.mkdirSync(playwrightDir, { recursive: true });
-    const binaryPath = join(playwrightDir, "chrome");
-    fs.writeFileSync(binaryPath, "dummy binary content");
-
-    const detected = detectPlaywrightBinarySync();
-    assertEquals(detected, binaryPath);
-  } finally {
-    if (originalHome) {
-      process.env["HOME"] = originalHome;
-    } else {
-      delete process.env["HOME"];
-    }
-    try {
-      fs.rmSync(tempDir, { recursive: true });
-    } catch {
-      // Ignore cleanup error
-    }
-  }
-});
-
 test("createAgentConfig - sets AGENT_BROWSER_EXECUTABLE_PATH and respects env override", () => {
   const config = createTestConfig();
   const originalEnvVar = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
@@ -745,169 +684,19 @@ test("createAgentConfig - sets AGENT_BROWSER_EXECUTABLE_PATH and respects env ov
   }
 });
 
-test("detectPlaywrightBinarySync - sorts by revision descending", () => {
-  const tempDir = makeTempDirSync();
-  const originalHome = process.env["HOME"];
-  process.env["HOME"] = tempDir;
+test("createAgentConfig - injects no browser path when the override is unset", () => {
+  const config = createTestConfig();
+  const originalEnvVar = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
+  delete process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
 
   try {
-    // Create an older version (1100)
-    const oldPlaywrightDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium_headless_shell-1100",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(oldPlaywrightDir, { recursive: true });
-    const oldBinaryPath = join(oldPlaywrightDir, "chrome-headless-shell");
-    fs.writeFileSync(oldBinaryPath, "old binary content");
-
-    // Create a newer version (1208)
-    const newPlaywrightDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium_headless_shell-1208",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(newPlaywrightDir, { recursive: true });
-    const newBinaryPath = join(newPlaywrightDir, "chrome-headless-shell");
-    fs.writeFileSync(newBinaryPath, "new binary content");
-
-    const detected = detectPlaywrightBinarySync();
-    assertEquals(detected, newBinaryPath); // Must be the newer revision
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(agentConfig.env?.["AGENT_BROWSER_EXECUTABLE_PATH"], undefined);
   } finally {
-    if (originalHome) {
-      process.env["HOME"] = originalHome;
+    if (originalEnvVar) {
+      process.env["AGENT_BROWSER_EXECUTABLE_PATH"] = originalEnvVar;
     } else {
-      delete process.env["HOME"];
-    }
-    try {
-      fs.rmSync(tempDir, { recursive: true });
-    } catch {
-      // Ignore
-    }
-  }
-});
-
-test("detectPlaywrightBinarySync - ignores temporary download folders", () => {
-  const tempDir = makeTempDirSync();
-  const originalHome = process.env["HOME"];
-  process.env["HOME"] = tempDir;
-
-  try {
-    // Create a temp folder (chromium_headless_shell-1208-temp)
-    const tempPlaywrightDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium_headless_shell-1208-temp",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(tempPlaywrightDir, { recursive: true });
-    const tempBinaryPath = join(tempPlaywrightDir, "chrome-headless-shell");
-    fs.writeFileSync(tempBinaryPath, "temp binary content");
-
-    // Create a valid folder with older version (1100)
-    const validPlaywrightDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium_headless_shell-1100",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(validPlaywrightDir, { recursive: true });
-    const validBinaryPath = join(validPlaywrightDir, "chrome-headless-shell");
-    fs.writeFileSync(validBinaryPath, "valid binary content");
-
-    const detected = detectPlaywrightBinarySync();
-    assertEquals(detected, validBinaryPath); // Must ignore the temp folder and pick the valid older folder
-  } finally {
-    if (originalHome) {
-      process.env["HOME"] = originalHome;
-    } else {
-      delete process.env["HOME"];
-    }
-    try {
-      fs.rmSync(tempDir, { recursive: true });
-    } catch {
-      // Ignore
-    }
-  }
-});
-
-test("detectPlaywrightBinarySync - prioritizes headless_shell over chromium when revisions match", () => {
-  const tempDir = makeTempDirSync();
-  const originalHome = process.env["HOME"];
-  process.env["HOME"] = tempDir;
-
-  try {
-    const chromiumDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium-1200",
-      "chrome-linux",
-    );
-    fs.mkdirSync(chromiumDir, { recursive: true });
-    const chromiumBinary = join(chromiumDir, "chrome");
-    fs.writeFileSync(chromiumBinary, "chromium binary content");
-
-    const shellDir = join(
-      tempDir,
-      ".cache",
-      "ms-playwright",
-      "chromium_headless_shell-1200",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(shellDir, { recursive: true });
-    const shellBinary = join(shellDir, "chrome-headless-shell");
-    fs.writeFileSync(shellBinary, "shell binary content");
-
-    const detected = detectPlaywrightBinarySync();
-    assertEquals(detected, shellBinary);
-  } finally {
-    if (originalHome) {
-      process.env["HOME"] = originalHome;
-    } else {
-      delete process.env["HOME"];
-    }
-    try {
-      fs.rmSync(tempDir, { recursive: true });
-    } catch {
-      // Ignore
-    }
-  }
-});
-
-test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set", () => {
-  const tempDir = makeTempDirSync();
-  const originalBrowsersPath = process.env["PLAYWRIGHT_BROWSERS_PATH"];
-  process.env["PLAYWRIGHT_BROWSERS_PATH"] = tempDir;
-
-  try {
-    const shellDir = join(
-      tempDir,
-      "chromium_headless_shell-1300",
-      "chrome-headless-shell-linux64",
-    );
-    fs.mkdirSync(shellDir, { recursive: true });
-    const shellBinary = join(shellDir, "chrome-headless-shell");
-    fs.writeFileSync(shellBinary, "custom path binary content");
-
-    const detected = detectPlaywrightBinarySync();
-    assertEquals(detected, shellBinary);
-  } finally {
-    if (originalBrowsersPath) {
-      process.env["PLAYWRIGHT_BROWSERS_PATH"] = originalBrowsersPath;
-    } else {
-      delete process.env["PLAYWRIGHT_BROWSERS_PATH"];
-    }
-    try {
-      fs.rmSync(tempDir, { recursive: true });
-    } catch {
-      // Ignore
+      delete process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
     }
   }
 });
@@ -916,11 +705,9 @@ test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set", () =
 
 import { ensureEgressProxy, stopEgressProxy } from "@utils/egress-proxy.ts";
 import type { SandboxConfig } from "../../src/types/config.ts";
-import fs from "node:fs";
 import { execFile, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { test } from "bun:test";
-import { makeTempDirSync } from "../../src/utils/fs-compat.ts";
 
 const createSandbox = (overrides: Partial<SandboxConfig> = {}): SandboxConfig => ({
   filterEnv: true,

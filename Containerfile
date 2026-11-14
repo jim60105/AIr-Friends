@@ -38,8 +38,8 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
 
 # Node.js runtime for the two `npx`/`npm` consumers in this image: the daemon's
 # external-skill installer (`src/core/skill-installer.ts`, External Skill
-# Auto-Installation) and the build-time `npm install -g agent-browser` /
-# `npx playwright install-*` steps below.
+# Auto-Installation) and the build-time `npm install -g agent-browser` step
+# below.
 #
 # Installed from the OFFICIAL Node.js tarball with per-arch SHA-256 verification
 # instead of the base distribution's `nodejs`/`npm` packages. On Debian 13 those
@@ -71,6 +71,36 @@ RUN case "${TARGETARCH}" in \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner && \
     rm -f /tmp/node.tar.xz && \
     node --version && npm --version
+
+########################################
+# Headless browser unpack stage
+########################################
+# The browser that `agent-browser` drives is resolved from the LATEST
+# `@sparticuz/chromium` release on every build: browser freshness is
+# intentional, so nothing here is version-pinned. The release pack embeds its
+# version in the asset name, so the tag is resolved first; the pack is then
+# verified against the digest the release publishes before it is unpacked.
+FROM base AS chromium-unpacker
+
+ARG TARGETARCH
+ARG VERSION
+ARG RELEASE
+
+# Content pin for the packaged MIT license: the browser floats, the license
+# text does not.
+ARG CHROMIUM_LICENSE_SHA256=3569040c1b042820ece7d85760a7f12b4ce8e66fa5b10f44252a923a46af5e2b
+
+COPY --link --chown=0:0 --chmod=0755 scripts/browser/ /scripts/browser/
+
+# `--build-identity` invalidates this layer for every real image build (CI
+# varies `RELEASE`), so the release is re-resolved instead of reusing an older
+# browser layer. A local rebuild that wants a newer browser must pass a
+# changing `RELEASE` or bypass the cache for this stage.
+RUN /scripts/browser/unpack-chromium.sh \
+      --arch "${TARGETARCH}" \
+      --license-sha256 "${CHROMIUM_LICENSE_SHA256}" \
+      --build-identity "${VERSION:-EDGE}-${RELEASE:-0}" \
+      --output /chromium
 
 ########################################
 # Opencode unpack stage
@@ -290,10 +320,23 @@ COPY --link --chown=$UID:0 --chmod=775 --from=deps /app/node_modules /app/node_m
 RUN npm install -g agent-browser && \
     npm cache clean --force
 
-# Install Playwright dependencies for headless Chromium
+# Headless browser OS dependencies. Explicit and minimal: the packaged binary
+# links `libnss3`/`libnspr4`/`libexpat1` directly and needs fontconfig plus
+# freetype for text rendering, while the font packages preserve the coverage
+# the previous browser-testing framework's resolved layer supplied (including
+# the CJK family used by screenshots). No framework resolves this list.
 RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/cache/apt \
     --mount=type=cache,id=aptlists-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/lib/apt/lists \
-    npx playwright install-deps chromium-headless-shell
+    apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 libnspr4 libexpat1 libfontconfig1 libfreetype6 \
+    fonts-liberation fonts-unifont fonts-noto-color-emoji \
+    fonts-wqy-zenhei fonts-ipafont-gothic fonts-tlwg-loma-otf fonts-freefont-ttf
+
+# Install the packaged headless browser. `agent-browser` resolves it through
+# its own discovery order (install cache, then system PATH), which is why the
+# contracted name is `chromium` in the already read-only `/usr/local/bin`.
+COPY --link --chown=$UID:0 --chmod=775 --from=chromium-unpacker /chromium/chromium /usr/local/bin/chromium
+COPY --link --chown=$UID:0 --chmod=775 --from=chromium-unpacker /chromium/LICENSE /licenses/chromium/LICENSE
 
 # Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
@@ -411,6 +454,7 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /app/data && \
     install -d -m 775 -o $UID -g 0 /licenses && \
     install -d -m 775 -o $UID -g 0 /licenses/omp && \
+    install -d -m 775 -o $UID -g 0 /licenses/chromium && \
     install -d -m 775 -o $UID -g 0 /home/air/ && \
     # Native OMP config HOME (`~/.omp/agent`): holds the authored models.yml
     # installed above and the native auth/session side files.
@@ -454,13 +498,6 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 755 -o 0 -g 0 /opt /opt/air && \
     install -m 444 -o 0 -g 0 /dev/null /opt/air/skill-bunfig.toml
 
-WORKDIR /app
-
-# Volume for persistent data (workspaces and memory)
-VOLUME ["/app/data"]
-# Volume for custom prompts (optional, defaults to bundled prompts)
-VOLUME ["/app/prompts"]
-
 # Set HOME environment variable for agent skills discovery
 ENV HOME=/home/air
 
@@ -473,20 +510,26 @@ ENV AGENT_SKILLS_DIR=/home/air/.agents/skills
 
 ENV PATH="/home/air/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# Switch to non-privileged user
-USER $UID
+WORKDIR /app
 
-# Install Playwright browsers
-RUN npx playwright install chromium-headless-shell
-
-# Replace Playwright's bundled ffmpeg with system ffmpeg
-RUN for dir in /home/air/.cache/ms-playwright/ffmpeg-*; do \
-    rm -f "$dir/ffmpeg-linux" && \
-    ln -s /usr/bin/ffmpeg "$dir/ffmpeg-linux"; \
-    done
+# Volume for persistent data (workspaces and memory)
+VOLUME ["/app/data"]
+# Volume for custom prompts (optional, defaults to bundled prompts)
+VOLUME ["/app/prompts"]
 
 # Expose dashboard port
 EXPOSE 8090
+
+# Switch to non-privileged user
+USER $UID
+
+# Fail-closed browser acceptance: with the image's own OS dependency set the
+# installed browser must start headless and serve DevTools, the path
+# `agent-browser` drives. The check script is bind-mounted from the unpacker
+# stage so it is never installed into the runtime image. This is the one RUN
+# that intentionally follows `USER` so the check runs as the runtime user.
+RUN --mount=type=bind,from=chromium-unpacker,src=/scripts/browser,target=/browser-scripts,readonly \
+    /browser-scripts/verify-chromium.sh /usr/local/bin/chromium
 
 # Signal handling
 STOPSIGNAL SIGTERM

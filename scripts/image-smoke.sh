@@ -9,6 +9,8 @@
 #   help            the daemon prints its help and exits 0
 #   tools           bun, opencode, omp, node, agent-browser, dumb-init, rg, git,
 #                   bwrap and unshare run at their pinned versions
+#   browser         /usr/local/bin/chromium reports its version and starts a
+#                   headless session exposing a DevTools endpoint
 #   skill-config    /opt/air/skill-bunfig.toml is root:root 0444 size 0 inside a
 #                   root-owned 0755 /opt/air, and cannot be removed/replaced
 #   skill-run       a built-in skill starts through its shebang, its trusted
@@ -83,6 +85,17 @@ check_tools() {
     unshare --version >/dev/null
   ' || fail tools "a pinned tool is missing or reports the wrong version"
   echo "ok tools"
+}
+
+check_browser() {
+  podman_run -v "$repo_root/scripts/browser:/browser-scripts:ro,Z" \
+    "$final_image" sh -c '
+    set -eu
+    test -x /usr/local/bin/chromium
+    test -s /licenses/chromium/LICENSE
+    /browser-scripts/verify-chromium.sh /usr/local/bin/chromium
+  ' || fail browser "the packaged headless browser is missing or cannot start"
+  echo "ok browser"
 }
 
 check_skill_config() {
@@ -223,6 +236,7 @@ dispatch() {
   case "$1" in
     help) check_help ;;
     tools) check_tools ;;
+    browser) check_browser ;;
     skill-config) check_skill_config ;;
     skill-run) check_skill_run ;;
     in-image-tests) check_in_image_tests ;;
@@ -232,12 +246,12 @@ dispatch() {
 }
 
 if [ -n "$only" ]; then
-  case " help tools skill-config skill-run in-image-tests seccomp-enosys " in
+  case " help tools browser skill-config skill-run in-image-tests seccomp-enosys " in
     *" $only "*) dispatch "$only" ;;
     *) echo "unknown check: $only" >&2; usage ;;
   esac
 else
-  for check in help tools skill-config skill-run in-image-tests seccomp-enosys; do
+  for check in help tools browser skill-config skill-run in-image-tests seccomp-enosys; do
     dispatch "$check"
   done
 fi

@@ -50,7 +50,6 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import fs from "node:fs";
 import type { Stats } from "node:fs";
-import { runtimeOs } from "@utils/runtime-platform.ts";
 
 /**
  * Contracted authored native OMP settings documents (development-tree paths;
@@ -198,11 +197,10 @@ function buildBaseAgentConfig(
         env["XDG_DATA_HOME"] = sessionXdgDataHome(workingDir, sessionId);
       }
 
-      // Automatically detect and set AGENT_BROWSER_EXECUTABLE_PATH if not already set
-      let browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
-      if (browserPath === undefined) {
-        browserPath = detectPlaywrightBinarySync();
-      }
+      // Browser executable: an operator override only. Resolution is otherwise
+      // delegated to `agent-browser`'s own discovery order (its install cache,
+      // then PATH) — the daemon never scans a browser cache on its behalf.
+      const browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
       if (browserPath !== undefined) {
         env["AGENT_BROWSER_EXECUTABLE_PATH"] = browserPath;
       }
@@ -386,11 +384,8 @@ function buildBaseAgentConfig(
         readOnlyMounts.push(resolve(join(inheritedHome, ".omp", "agent", "models.yml")));
       }
 
-      // Browser binary
-      let browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
-      if (browserPath === undefined) {
-        browserPath = detectPlaywrightBinarySync();
-      }
+      // Browser executable: operator override only (see the OpenCode branch above).
+      const browserPath = process.env["AGENT_BROWSER_EXECUTABLE_PATH"];
       if (browserPath !== undefined) {
         env["AGENT_BROWSER_EXECUTABLE_PATH"] = browserPath;
       }
@@ -709,155 +704,6 @@ export function getRetryPromptStrategy(
     default:
       throw new Error(`Unknown agent type: ${type}`);
   }
-}
-
-/**
- * Traverses Playwright's default cache paths synchronously to find
- * either chromium-headless-shell or standard chromium executable.
- */
-export function detectPlaywrightBinarySync(): string | undefined {
-  const searchDirs: string[] = [];
-  const customBrowsersPath = process.env["PLAYWRIGHT_BROWSERS_PATH"];
-  if (customBrowsersPath && customBrowsersPath !== "0") {
-    searchDirs.push(customBrowsersPath);
-  }
-
-  const home = process.env["HOME"] || process.env["USERPROFILE"];
-  if (home) {
-    if (runtimeOs() === "darwin") {
-      searchDirs.push(join(home, "Library", "Caches", "ms-playwright"));
-    } else if (runtimeOs() === "windows") {
-      searchDirs.push(join(home, "AppData", "Local", "ms-playwright"));
-    } else {
-      searchDirs.push(join(home, ".cache", "ms-playwright"));
-    }
-  }
-  const defaultPath = "/home/air/.cache/ms-playwright";
-  if (!searchDirs.includes(defaultPath)) {
-    searchDirs.push(defaultPath);
-  }
-
-  for (const cacheDir of searchDirs) {
-    try {
-      const stat = fs.statSync(cacheDir);
-      if (!stat.isDirectory()) continue;
-
-      const found = findBinaryInDirSync(cacheDir);
-      if (found) {
-        return found;
-      }
-    } catch {
-      // Ignore errors when directory does not exist or is not readable
-    }
-  }
-  return undefined;
-}
-
-interface PlaywrightDirEntry {
-  name: string;
-  revision: number;
-  type: "headless_shell" | "chromium";
-}
-
-function findBinaryInDirSync(dirPath: string): string | undefined {
-  const isWindows = runtimeOs() === "windows";
-  const shellBinaryName = isWindows ? "chrome-headless-shell.exe" : "chrome-headless-shell";
-  const chromeBinaryName = isWindows ? "chrome.exe" : "chrome";
-
-  const headlessShellRegex = /^chromium_headless_shell-(\d+)$/;
-  const chromiumRegex = /^chromium-(\d+)$/;
-
-  const candidates: PlaywrightDirEntry[] = [];
-
-  try {
-    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
-      let isDir = entry.isDirectory();
-      if (!isDir && entry.isSymbolicLink()) {
-        try {
-          isDir = fs.statSync(join(dirPath, entry.name)).isDirectory();
-        } catch {
-          isDir = false;
-        }
-      }
-      if (!isDir) continue;
-
-      let match = entry.name.match(headlessShellRegex);
-      if (match) {
-        const revision = parseInt(match[1], 10);
-        candidates.push({ name: entry.name, revision, type: "headless_shell" });
-        continue;
-      }
-
-      match = entry.name.match(chromiumRegex);
-      if (match) {
-        const revision = parseInt(match[1], 10);
-        candidates.push({ name: entry.name, revision, type: "chromium" });
-      }
-    }
-  } catch {
-    return undefined;
-  }
-
-  // Sort candidates by revision descending, tie-breaking to prioritize headless_shell
-  candidates.sort((a, b) => {
-    if (b.revision !== a.revision) {
-      return b.revision - a.revision;
-    }
-    return a.type === "headless_shell" ? -1 : 1;
-  });
-
-  for (const candidate of candidates) {
-    const subDir = join(dirPath, candidate.name);
-    const fileName = candidate.type === "headless_shell" ? shellBinaryName : chromeBinaryName;
-    const binary = findFileRecursiveSync(subDir, fileName, 0, 4);
-    if (binary) {
-      return binary;
-    }
-  }
-
-  return undefined;
-}
-
-function findFileRecursiveSync(
-  dirPath: string,
-  fileName: string,
-  currentDepth: number,
-  maxDepth: number,
-): string | undefined {
-  if (currentDepth > maxDepth) return undefined;
-
-  try {
-    const subdirs: string[] = [];
-    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
-      const fullPath = join(dirPath, entry.name);
-      let isFile = entry.isFile();
-      let isDir = entry.isDirectory();
-      if (entry.isSymbolicLink()) {
-        try {
-          const stat = fs.statSync(fullPath);
-          isFile = stat.isFile();
-          isDir = stat.isDirectory();
-        } catch {
-          continue;
-        }
-      }
-
-      if (isFile && entry.name === fileName) {
-        return fullPath;
-      }
-      if (isDir) {
-        subdirs.push(fullPath);
-      }
-    }
-
-    for (const subDir of subdirs) {
-      const found = findFileRecursiveSync(subDir, fileName, currentDepth + 1, maxDepth);
-      if (found) return found;
-    }
-  } catch {
-    // Ignore
-  }
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------
