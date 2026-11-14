@@ -116,6 +116,11 @@ test("installExternalSkills - publishes each skill into the EXPLICIT destination
       assert(call.env !== undefined, "installation must run with a supplied env");
       assert(call.env!.HOME !== ambientHome, "private staging HOME must replace ambient HOME");
       assert(call.env!.HOME.startsWith("/"), "staging HOME is absolute");
+      // No submodule is activated: `skills` >= 1.8.1 would otherwise recurse into every
+      // submodule of the source repository and block startup on unrelated content.
+      assertEquals(call.env!.GIT_CONFIG_COUNT, "1");
+      assertEquals(call.env!.GIT_CONFIG_KEY_0, "submodule.active");
+      assertEquals(call.env!.GIT_CONFIG_VALUE_0, ":(exclude)*");
     }
     // Both skills land in the explicit destination, physically.
     await fsp.stat(`${destination}/skill-a/SKILL.md`);

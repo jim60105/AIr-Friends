@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Playwright dependency surface is gone: no `npx playwright` step, no browser cache, no Playwright-resolved apt layer. The browser's OS libraries and font set are installed explicitly, and the Playwright ffmpeg symlink step was removed (system `ffmpeg` already serves `agent-browser record`).
 - Browser resolution is now `agent-browser`'s own (install cache, then `PATH`); the daemon no longer scans Playwright caches. `AGENT_BROWSER_EXECUTABLE_PATH` remains the operator override and stays in the sandbox environment allowlist. Developer machines that only have a Playwright cache should set that variable or run `agent-browser install`.
 
+### Fixed
+
+- Startup no longer hangs while installing an external skill whose source repository has a large Git submodule. `skills` 1.8.1 began initializing every submodule recursively after each clone, with no opt-out, so a repository such as `jim60105/blog` pulled its ~600 MB content submodule before the daemon could finish booting. The installer now runs with a Git configuration that activates no submodule, so only the listed repository is fetched. A skill stored inside a submodule can no longer be installed this way.
+
 ## [0.37.0] - 2026-11-11
 
 ### Changed

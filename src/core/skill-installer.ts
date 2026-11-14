@@ -100,6 +100,28 @@ export function buildSkillInstallCommand(
   };
 }
 
+/**
+ * Build the EXACT environment for one installer run: the private staging HOME, the
+ * daemon's PATH, and a Git configuration override that activates no submodule.
+ *
+ * `skills` >= 1.8.1 runs `git submodule update --init --recursive` after every clone and
+ * offers no opt-out. A source repository whose submodule is large (hundreds of megabytes of
+ * unrelated content) then blocks daemon startup for as long as that download takes. An
+ * exclude-only `submodule.active` pathspec matches no submodule, so the CLI's submodule
+ * step becomes a no-op and only the source repository itself is fetched. A skill that
+ * lives inside a submodule is therefore not installable, which also keeps the installer
+ * from fetching repositories the operator never listed.
+ */
+export function buildSkillInstallEnv(stagingHome: string): Record<string, string> {
+  return {
+    HOME: stagingHome,
+    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "submodule.active",
+    GIT_CONFIG_VALUE_0: ":(exclude)*",
+  };
+}
+
 /** Minimal subprocess abstraction so tests can inject a mock without spawning npx. */
 export interface SkillInstallExecutor {
   run(
@@ -360,7 +382,7 @@ export async function installExternalSkills(
       stagingHome = await makeTempDir({ prefix: "air-skill-stage-" });
       const { cmd, args } = buildSkillInstallCommand(skill);
       const { code, stdout, stderr } = await executor.run(cmd, args, {
-        env: { HOME: stagingHome, PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+        env: buildSkillInstallEnv(stagingHome),
       });
       const stdoutText = new TextDecoder().decode(stdout);
       const stderrText = new TextDecoder().decode(stderr);
